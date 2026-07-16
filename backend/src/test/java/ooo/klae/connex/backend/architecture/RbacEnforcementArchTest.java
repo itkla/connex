@@ -44,7 +44,7 @@ class RbacEnforcementArchTest {
         "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
         "IntroductionService", "ReportService", "GoalService", "ScheduleService",
-        "BusinessCardService");
+        "BusinessCardService", "CampaignService", "ConsentService", "SuppressionService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(

@@ -61,6 +61,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "UserDashboardMapper",
         MAPPERS + "SegmentMapper",
         MAPPERS + "RuleMapper",
+        MAPPERS + "CampaignMapper",
+        MAPPERS + "ConsentMapper",
+        MAPPERS + "SuppressionMapper",
         MAPPERS + "ActivityMapper",
         MAPPERS + "NoteMapper",
         MAPPERS + "ObjectDeletionQueueMapper",
@@ -172,6 +175,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",
         MAPPERS + "TaskMapper.unassignAnywhere",
         MAPPERS + "AttachmentMapper.clearUploaderAnywhere",
+        MAPPERS + "CampaignMapper.clearCampaignUserReferencesAnywhere",
+        MAPPERS + "CampaignMapper.clearSnapshotCreatorsAnywhere",
+        MAPPERS + "ConsentMapper.clearEventCreatorsAnywhere",
         MAPPERS + "RuleMapper.clearRunAsAnywhere",
         MAPPERS + "RuleMapper.clearCreatedByAnywhere",
         MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
@@ -181,6 +187,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",
         MAPPERS + "ReportMapper.clearDefinitionCreatorsAnywhere",
         MAPPERS + "ReportMapper.clearSnapshotGeneratorsAnywhere",
+        MAPPERS + "SuppressionMapper.clearCreatorsAnywhere",
         MAPPERS + "NotificationMapper.bumpStateVersions"
     );
 

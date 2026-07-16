@@ -23,6 +23,9 @@ public interface SegmentMapper {
     /** Ids of all people owned by the workspace, used as the negate universe for person conditions. */
     List<Integer> personIdsInWorkspace(int workspaceId);
 
+    /** Ids of all people owned by the workspace, including processing-restricted contacts. */
+    List<Integer> personIdsInWorkspaceIncludingRestricted(int workspaceId);
+
     /** Ids of all deals owned by the workspace, used as the negate universe for deal conditions. */
     List<Integer> dealIdsInWorkspace(int workspaceId);
 
@@ -48,6 +51,9 @@ public interface SegmentMapper {
 
     /** Ids of people matching one field condition; see {@link #companyIdsMatching}. */
     List<Integer> personIdsMatching(Map<String, Object> params);
+
+    /** Ids of people matching one field condition, including processing-restricted contacts. */
+    List<Integer> personIdsMatchingIncludingRestricted(Map<String, Object> params);
 
     /** Ids of deals matching one field condition; see {@link #companyIdsMatching}. */
     List<Integer> dealIdsMatching(Map<String, Object> params);

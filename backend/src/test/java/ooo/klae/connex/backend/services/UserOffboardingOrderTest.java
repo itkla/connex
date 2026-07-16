@@ -17,6 +17,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -25,6 +27,7 @@ import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -41,8 +44,11 @@ class UserOffboardingOrderTest {
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
     @Mock private AttachmentMapper attachmentMapper;
+    @Mock private CampaignMapper campaignMapper;
+    @Mock private ConsentMapper consentMapper;
     @Mock private RuleMapper ruleMapper;
     @Mock private ShareMapper shareMapper;
+    @Mock private SuppressionMapper suppressionMapper;
     @Mock private SavedViewMapper savedViewMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
@@ -54,10 +60,11 @@ class UserOffboardingOrderTest {
     void removeAndLeaveDetachmentLocksMembershipBeforeNotificationDeletion() {
         service.detachMemberContent(7, 9);
 
-        InOrder order = inOrder(notificationMapper, taskMapper, dealMapper);
+        InOrder order = inOrder(notificationMapper, taskMapper, dealMapper, campaignMapper);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
         order.verify(dealMapper).clearMemberDealOwnership(7, 9);
+        order.verify(campaignMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         verifyNoInteractions(stateVersionService);

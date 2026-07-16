@@ -107,6 +107,22 @@ public class SegmentService {
      * user are supplied explicitly rather than resolved from the security/tenant context.
      */
     public List<Integer> evaluate(int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return evaluate(workspaceId, userId, recordType, definition, false);
+    }
+
+    /**
+     * Session-free campaign evaluation that includes processing-restricted people in the candidate
+     * set so the caller can classify them explicitly. Normal smart-segment and rule evaluation
+     * continues to exclude suspended people through {@link #evaluate(int, int, String, SegmentDefinition)}.
+     */
+    public List<Integer> evaluateIncludingRestrictedPeople(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return evaluate(workspaceId, userId, recordType, definition, true);
+    }
+
+    private List<Integer> evaluate(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition,
+            boolean includeRestrictedPeople) {
         String type = requireSupported(recordType);
         if (definition == null) {
             return List.of();
@@ -115,7 +131,7 @@ public class SegmentService {
         if (total > MAX_CONDITIONS) {
             throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
         }
-        EvalContext ctx = new EvalContext(workspaceId, userId, type);
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
         return new ArrayList<>(result);
     }
@@ -321,6 +337,7 @@ public class SegmentService {
         params.put("workspaceId", ctx.workspaceId());
         params.put("field", field);
         params.put("op", op);
+        params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
         bindValue(kind, op, condition, params);
         return new HashSet<>(runFieldQuery(ctx.recordType(), params));
     }
@@ -328,7 +345,9 @@ public class SegmentService {
     private List<Integer> runFieldQuery(String recordType, Map<String, Object> params) {
         return switch (recordType) {
             case "company" -> segmentMapper.companyIdsMatching(params);
-            case "person" -> segmentMapper.personIdsMatching(params);
+            case "person" -> Boolean.TRUE.equals(params.get("includeRestrictedPeople"))
+                    ? segmentMapper.personIdsMatchingIncludingRestricted(params)
+                    : segmentMapper.personIdsMatching(params);
             case "deal" -> segmentMapper.dealIdsMatching(params);
             default -> throw new BadRequestException("Fields are not available for record type: " + recordType);
         };
@@ -507,12 +526,14 @@ public class SegmentService {
         private final int workspaceId;
         private final int userId;
         private final String recordType;
+        private final boolean includeRestrictedPeople;
         private Set<Integer> universe;
 
-        private EvalContext(int workspaceId, int userId, String recordType) {
+        private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople) {
             this.workspaceId = workspaceId;
             this.userId = userId;
             this.recordType = recordType;
+            this.includeRestrictedPeople = includeRestrictedPeople;
         }
 
         private int workspaceId() {
@@ -527,11 +548,17 @@ public class SegmentService {
             return recordType;
         }
 
+        private boolean includeRestrictedPeople() {
+            return includeRestrictedPeople;
+        }
+
         private Set<Integer> universe(SegmentMapper mapper) {
             if (universe == null) {
                 universe = new HashSet<>(switch (recordType) {
                     case "company" -> mapper.companyIdsInWorkspace(workspaceId);
-                    case "person" -> mapper.personIdsInWorkspace(workspaceId);
+                    case "person" -> includeRestrictedPeople
+                            ? mapper.personIdsInWorkspaceIncludingRestricted(workspaceId)
+                            : mapper.personIdsInWorkspace(workspaceId);
                     case "deal" -> mapper.dealIdsInWorkspace(workspaceId);
                     default -> List.<Integer>of();
                 });

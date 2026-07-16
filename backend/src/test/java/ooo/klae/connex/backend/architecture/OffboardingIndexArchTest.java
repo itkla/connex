@@ -43,6 +43,11 @@ class OffboardingIndexArchTest {
         new String[] {"user_dashboard", "user_id"},
         new String[] {"report_definition", "created_by"},
         new String[] {"report_snapshot", "generated_by"},
+        new String[] {"campaign", "owner_user_id"},
+        new String[] {"campaign", "created_by_id"},
+        new String[] {"campaign_audience_snapshot", "created_by_id"},
+        new String[] {"contact_channel_consent_event", "created_by_id"},
+        new String[] {"suppression_entry", "created_by_id"},
         new String[] {"company_share", "granted_by"},
         new String[] {"person_share", "granted_by"},
         new String[] {"pipeline_share", "granted_by"});

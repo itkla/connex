@@ -10,23 +10,33 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.Campaign;
+import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.ContactChannelConsent;
+import ooo.klae.connex.backend.beans.ContactChannelConsentEvent;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.SuppressionEntry;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
+import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 
 /**
@@ -44,6 +54,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private UserDashboardMapper userDashboardMapper;
     @Autowired private ReportMapper reportMapper;
     @Autowired private RuleMapper ruleMapper;
+    @Autowired private CampaignMapper campaignMapper;
+    @Autowired private ConsentMapper consentMapper;
+    @Autowired private SuppressionMapper suppressionMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
     void authoredNoteRefusesDeletion() {
@@ -82,6 +96,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         Rule rule = ruleFor(target);
         ReportDefinition reportDefinition = reportDefinitionFor(target);
         ReportSnapshot reportSnapshot = reportSnapshotFor(reportDefinition, target);
+        Campaign campaign = campaignFor(target);
+        CampaignAudienceSnapshot campaignSnapshot = campaignSnapshotFor(campaign, target);
+        ContactChannelConsentEvent consentEvent = consentEventFor(newPerson(company), target);
+        SuppressionEntry suppression = suppressionFor(target);
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
@@ -97,6 +115,15 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(reportMapper.getDefinition(workspace.getId(), reportDefinition.getId()).getCreatedBy());
         assertNull(reportMapper.getSnapshot(
             workspace.getId(), reportDefinition.getId(), reportSnapshot.getId()).getGeneratedBy());
+        Campaign clearedCampaign = campaignMapper.getCampaign(workspace.getId(), campaign.getId());
+        assertNull(clearedCampaign.getOwnerUserId());
+        assertNull(clearedCampaign.getCreatedById());
+        assertNull(campaignMapper.getSnapshot(
+            workspace.getId(), campaign.getId(), campaignSnapshot.getVersion()).getCreatedById());
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT created_by_id FROM contact_channel_consent_event WHERE id = ?",
+            Integer.class, consentEvent.getId()));
+        assertNull(suppressionMapper.getById(workspace.getId(), suppression.getId()).getCreatedById());
         assertEquals(target.getDisplayName(), userMapper.getUserById(target.getId()).getDisplayName());
     }
 
@@ -108,12 +135,14 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         dealMapper.insertCollaborators(workspace.getId(), deal.getId(), List.of(member.getId()));
         newNotification(workspace.getId(), member.getId());
         Task task = newTask(member, null, null);
+        Campaign campaign = campaignFor(member);
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
+        assertNull(campaignMapper.getCampaign(workspace.getId(), campaign.getId()).getOwnerUserId());
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
     }
 
@@ -174,5 +203,63 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         snapshot.setGeneratedBy(user.getId());
         reportMapper.insertSnapshot(snapshot);
         return snapshot;
+    }
+
+    private Campaign campaignFor(User user) {
+        Campaign campaign = new Campaign();
+        campaign.setWorkspaceId(workspace.getId());
+        campaign.setName("Campaign " + unique());
+        campaign.setType("email");
+        campaign.setStatus("draft");
+        campaign.setOwnerUserId(user.getId());
+        campaign.setCreatedById(user.getId());
+        campaignMapper.insertCampaign(campaign);
+        return campaign;
+    }
+
+    private CampaignAudienceSnapshot campaignSnapshotFor(Campaign campaign, User user) {
+        CampaignAudienceSnapshot snapshot = new CampaignAudienceSnapshot();
+        snapshot.setWorkspaceId(workspace.getId());
+        snapshot.setCampaignId(campaign.getId());
+        snapshot.setVersion(1);
+        snapshot.setRecordType("company");
+        snapshot.setDefinitionJson("{\"match\":\"all\",\"conditions\":[]}");
+        snapshot.setCreatedById(user.getId());
+        campaignMapper.insertSnapshot(snapshot);
+        return snapshot;
+    }
+
+    private ContactChannelConsentEvent consentEventFor(Person person, User user) {
+        ContactChannelConsent consent = new ContactChannelConsent();
+        consent.setWorkspaceId(workspace.getId());
+        consent.setPersonId(person.getId());
+        consent.setChannel("email");
+        consent.setPurpose("marketing");
+        consent.setStatus("granted");
+        consent.setSource("test");
+        consentMapper.upsert(consent);
+        ContactChannelConsentEvent event = new ContactChannelConsentEvent();
+        event.setWorkspaceId(workspace.getId());
+        event.setConsentId(consent.getId());
+        event.setPersonId(person.getId());
+        event.setChannel("email");
+        event.setPurpose("marketing");
+        event.setStatus("granted");
+        event.setSource("test");
+        event.setCreatedById(user.getId());
+        consentMapper.insertEvent(event);
+        return event;
+    }
+
+    private SuppressionEntry suppressionFor(User user) {
+        SuppressionEntry entry = new SuppressionEntry();
+        entry.setWorkspaceId(workspace.getId());
+        entry.setScope("workspace");
+        entry.setChannel("email");
+        entry.setAddress(unique() + "@example.com");
+        entry.setReason("manual");
+        entry.setCreatedById(user.getId());
+        suppressionMapper.insert(entry);
+        return entry;
     }
 }
