@@ -70,17 +70,17 @@ class FlywayUpgradeIntegrationTest {
     void migratesPopulatedV73MediaAndImportStateToLatest() throws SQLException {
         migrateTo("73");
         seedV73Data();
-        migrateTo("78");
-        seedV78Data();
-        migrateTo("81");
-        seedV81Reservation();
+        migrateTo("80");
+        seedV80Data();
+        migrateTo("83");
+        seedV83Reservation();
 
         Flyway latest = flyway(null);
         latest.migrate();
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
-        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("84")) >= 0);
+        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("86")) >= 0);
         try (Connection connection = connection()) {
             assertEquals(6, scalar(connection, """
                 SELECT COUNT(*)
@@ -187,7 +187,7 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
-    private static void seedV78Data() throws SQLException {
+    private static void seedV80Data() throws SQLException {
         try (Connection connection = connection()) {
             execute(connection, """
                 INSERT INTO object_deletion_queue (
@@ -209,7 +209,7 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
-    private static void seedV81Reservation() throws SQLException {
+    private static void seedV83Reservation() throws SQLException {
         try (Connection connection = connection()) {
             execute(connection, """
                 INSERT INTO business_card_import_request (
