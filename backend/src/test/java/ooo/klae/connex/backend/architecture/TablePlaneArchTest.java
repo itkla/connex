@@ -34,6 +34,12 @@ class TablePlaneArchTest {
     @Autowired private DataSource dataSource;
 
     @Test
+    void objectStorageIdentityIsControlPlaneState() {
+        assertTrue(TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(
+            "object_storage_backend_identity"));
+    }
+
+    @Test
     void everyBaseTableIsClassifiedInExactlyOnePlane() throws Exception {
         List<String> unclassified = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();

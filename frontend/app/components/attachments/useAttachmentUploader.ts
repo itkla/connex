@@ -3,15 +3,14 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { useTranslations } from 'next-intl';
 
-import { createAttachment } from '@/app/lib/api';
+import { uploadAttachment } from '@/app/lib/api';
 import { type Attachment } from '@/app/lib/types';
-import { uploadFile } from '@/app/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { emitAttachmentsAdded } from '@/app/components/attachments/attachmentEvents';
 
 /**
  * Shared attachment-upload behavior for the entity action menus. Wires a hidden
- * <input type="file"> to the existing upload pipeline (uploadFile + createAttachment),
+ * <input type="file"> to the authenticated backend upload endpoint,
  * then emits an event so the sibling <Attachments> panel picks up the new files
  * without re-running the whole page's server data fetch.
  * 
@@ -37,15 +36,7 @@ export function useAttachmentUploader(entityType: string, entityId: number) {
         await Promise.all(
             files.map(async (file) => {
                 try {
-                    const uploaded = await uploadFile(entityType, entityId, file);
-                    const attachment = await createAttachment({
-                        entityType,
-                        entityId,
-                        fileName: uploaded.fileName,
-                        url: uploaded.url,
-                        contentType: uploaded.contentType,
-                        size: uploaded.size,
-                    });
+                    const attachment = await uploadAttachment(entityType, entityId, file);
                     created.push(attachment);
                 } catch {
                     toastError(t('uploadFailed', { name: file.name }));

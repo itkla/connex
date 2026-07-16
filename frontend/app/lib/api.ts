@@ -42,6 +42,12 @@ function workspaceIdFromCookieHeader(cookie: string): number | null {
         : null;
 }
 
+function clientRecoveryWorkspaceId(): string | null {
+    if (typeof document === "undefined") return null;
+    const workspaceId = workspaceIdFromCookieHeader(document.cookie);
+    return workspaceId == null ? null : String(workspaceId);
+}
+
 // CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
 // The frontend and backend can be different origins, so the token is delivered via this endpoint
 // rather than a cookie the JS would otherwise be unable to read cross-origin.
@@ -54,6 +60,10 @@ type CsrfBootstrap = {
 type InFlightAiMutation = {
     controller: AbortController;
     request: Promise<unknown>;
+};
+
+type ResolvedClientRequestIdentity = {
+    request: string;
 };
 
 const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
@@ -151,7 +161,7 @@ function signalClientRequestIdentityTransition(refreshTabs: boolean) {
     broadcastClientRequestIdentityTransition(refreshTabs);
 }
 
-async function currentClientRequestIdentity(): Promise<string | null> {
+async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
     const workspaceId = clientWorkspaceId();
     const currentCsrf = await fetchCsrfToken();
     if (workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
@@ -171,15 +181,93 @@ async function currentClientRequestIdentity(): Promise<string | null> {
     }
     csrfTokenCache = currentCsrf;
     const locale = localeFromCookieHeader(document.cookie);
-    return [
-        clientRequestIdentityEpoch,
+    return {
+        request: [
+            clientRequestIdentityEpoch,
+            workspaceId,
+            locale,
+            currentCsrf.requestIdentity,
+            currentCsrf.headerName,
+            currentCsrf.token,
+        ].join("\u0000"),
+    };
+}
+
+async function currentClientRequestIdentity(): Promise<string | null> {
+    return (await resolveClientRequestIdentity())?.request ?? null;
+}
+
+/** Returns a non-reversible browser-storage context for the active user and workspace. */
+export async function clientRecoveryContext(
+    init: RequestInit = {},
+): Promise<Types.BusinessCardRecoveryContext | null> {
+    const workspaceId = clientRecoveryWorkspaceId();
+    if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", workspaceId);
+    let body: unknown;
+    try {
+        body = await withBusinessCardRequestTimeout(
+            10_000,
+            init.signal,
+            async (signal) => {
+                const response = await fetch(`${API_BASE}/api/auth/me`, {
+                    ...init,
+                    credentials: "include",
+                    cache: "no-store",
+                    headers,
+                    signal,
+                });
+                if (!response.ok) return null;
+                const responseBody: unknown = await response.json().catch(() => null);
+                return responseBody;
+            },
+        );
+    } catch (error) {
+        if (init.signal?.aborted || error instanceof ApiError) throw error;
+        return null;
+    }
+    if (typeof body !== "object" || body === null || !("id" in body)) return null;
+    if (clientRecoveryWorkspaceId() !== workspaceId) return null;
+    const userId = body.id;
+    if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) return null;
+    const digest = await window.crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode([workspaceId, userId].join("\u0000")),
+    );
+    if (clientRecoveryWorkspaceId() !== workspaceId) return null;
+    return {
+        scope: Array.from(
+            new Uint8Array(digest),
+            (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
         workspaceId,
-        locale,
-        currentCsrf.requestIdentity,
-        currentCsrf.headerName,
-        currentCsrf.token,
-    ]
-        .join("\u0000");
+    };
+}
+
+async function requireBusinessCardRecoveryContext(
+    expected: Types.BusinessCardRecoveryContext,
+    signal?: AbortSignal | null,
+): Promise<void> {
+    const current = await clientRecoveryContext({ signal });
+    if (!current
+        || current.scope !== expected.scope
+        || current.workspaceId !== expected.workspaceId) {
+        throw new ApiError(
+            "Business-card request context changed",
+            409,
+            "BUSINESS_CARD_CONTEXT_CHANGED",
+        );
+    }
+}
+
+function businessCardRequestInit(
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit,
+): RequestInit {
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", context.workspaceId);
+    return { ...init, headers };
 }
 
 async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
@@ -234,19 +322,22 @@ async function requestJson<T>(
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
     const stepUpGeneration = passkeyStepUpGeneration;
+    const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
 
-    const send = (csrf: Record<string, string>) =>
-        fetch(`${API_BASE}${path}`, {
+    const send = (csrf: Record<string, string>) => {
+        const headers = new Headers({
+            ...(init.body && !hasMultipartBody ? { "Content-Type": "application/json" } : {}),
+            "Accept-Language": locale,
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
-            headers: {
-                ...(init.body ? { "Content-Type": "application/json" } : {}),
-                "Accept-Language": locale,
-                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-                ...csrf,
-                ...init.headers,
-            },
+            headers,
         });
+    };
 
     const sendWithCsrfRetry = async () => {
         let response = await send(mutating ? await csrfHeader() : {});
@@ -275,6 +366,45 @@ async function requestJson<T>(
     }
 
     return JSON.parse(text) as T;
+}
+
+async function requestMultipart<T>(
+    path: string,
+    method: "POST" | "PUT",
+    body: FormData,
+): Promise<T> {
+    const locale = requestLocale({});
+    const workspaceId = clientWorkspaceId();
+    const stepUpGeneration = passkeyStepUpGeneration;
+    const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
+        method,
+        body,
+        credentials: "include",
+        headers: {
+            "Accept-Language": locale,
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+            ...csrf,
+        },
+    });
+    const sendWithCsrfRetry = async () => {
+        let response = await send(await csrfHeader());
+        if (await shouldRetryWithFreshCsrf(path, response, true)) {
+            response = await send(await csrfHeader(true));
+        }
+        return response;
+    };
+    let response = await sendWithCsrfRetry();
+    if (await shouldRetryAfterPasskeyStepUp(path, response, true)) {
+        if (stepUpGeneration === passkeyStepUpGeneration) {
+            await performPasskeyStepUp();
+        }
+        response = await sendWithCsrfRetry();
+    }
+    if (!response.ok) {
+        throw await getApiError(response);
+    }
+    const text = await response.text();
+    return text ? JSON.parse(text) as T : undefined as T;
 }
 
 async function shouldRetryAfterPasskeyStepUp(path: string, res: Response, mutating: boolean): Promise<boolean> {
@@ -368,6 +498,14 @@ async function postJson<T>(path: string, body: unknown = {}, init: RequestInit =
         ...init,
         method: "POST",
         body: JSON.stringify(body),
+    });
+}
+
+async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, {
+        ...init,
+        method: "POST",
+        body,
     });
 }
 
@@ -573,6 +711,74 @@ export function isFieldError(err: unknown): err is ApiError & { fieldErrors: Api
     return err instanceof ApiError && !!err.fieldErrors && Object.keys(err.fieldErrors).length > 0;
 }
 
+/** Classifies card scan/import failures into stable UI states without exposing backend messages. */
+export function businessCardRequestErrorKind(error: unknown): Types.BusinessCardRequestErrorKind {
+    if (error instanceof Error && error.name === "AbortError") return "aborted";
+    if (error instanceof Error && error.name === "TimeoutError") return "timeout";
+    if (!(error instanceof ApiError)) return "failed";
+
+    const code = error.code?.toUpperCase() ?? "";
+    if (code.includes("TIMEOUT")) return "timeout";
+    if (code.includes("UNAVAILABLE")) return "unavailable";
+
+    switch (error.status) {
+        case 401:
+            return "unauthorized";
+        case 403:
+            return "forbidden";
+        case 408:
+        case 504:
+            return "timeout";
+        case 409:
+            return "conflict";
+        case 410:
+            return "gone";
+        case 413:
+            return "tooLarge";
+        case 415:
+            return "unsupportedType";
+        case 422:
+            return "unreadable";
+        case 429:
+            return "busy";
+        case 502:
+        case 503:
+            return "unavailable";
+        default:
+            return error.status > 0 && error.status < 500 ? "rejected" : "failed";
+    }
+}
+
+async function withBusinessCardRequestTimeout<T>(
+    timeoutMilliseconds: number,
+    parentSignal: AbortSignal | null | undefined,
+    request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortFromParent = () => controller.abort();
+    if (parentSignal?.aborted) {
+        abortFromParent();
+    } else {
+        parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+    const timer = globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMilliseconds);
+    try {
+        return await request(controller.signal);
+    } catch (error) {
+        if (timedOut) {
+            throw new ApiError("Business-card request timed out", 408, "CLIENT_TIMEOUT");
+        }
+        throw error;
+    } finally {
+        globalThis.clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", abortFromParent);
+    }
+}
+
 function isStringRecord(value: unknown): value is Record<string, string> {
     return (
         typeof value === "object" &&
@@ -655,57 +861,6 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
     } catch {
         return null;
     }
-}
-
-// The attachment entity types (see the <Attachments> usages) mapped to their
-// workspace-scoped backend GET, used to authorize a blob write against the caller's
-// tenant. Types absent here are denied (fail closed).
-const ATTACHMENT_ENTITY_ENDPOINTS: Record<string, string> = {
-    company: "/api/companies",
-    person: "/api/persons",
-    deal: "/api/deals",
-    user: "/api/users",
-};
-
-/**
- * Server-side (route-handler) probe: performs a workspace-scoped backend GET with the
- * caller's forwarded cookie and reports whether it resolves (HTTP 2xx). Used by the
- * upload blob routes to authorize the target before writing/deleting a file, so a valid
- * session alone cannot touch another tenant's entity.
- * @param cookie the forwarded request cookie header (session + workspace)
- * @param path the backend path to probe (e.g. `/api/companies/12`)
- * @returns true when the backend resolves the resource for the caller's workspace
- */
-export async function backendResolves(cookie: string | null, path: string): Promise<boolean> {
-    if (!cookie) {
-        return false;
-    }
-    try {
-        const res = await fetch(`${API_BASE}${path}`, { headers: { cookie }, cache: "no-store" });
-        return res.ok;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Whether the caller's active workspace may access the given attachment entity,
- * checked against the backend. Unknown entity types or non-integer ids are denied.
- * @param cookie the forwarded request cookie header
- * @param entityType the owning entity type (company/person/deal/user)
- * @param entityId the owning entity id
- * @returns true when the caller's workspace owns the entity
- */
-export async function workspaceCanAccessEntity(
-    cookie: string | null,
-    entityType: string,
-    entityId: number,
-): Promise<boolean> {
-    const base = ATTACHMENT_ENTITY_ENDPOINTS[entityType.trim().toLowerCase()];
-    if (!base || !Number.isInteger(entityId)) {
-        return false;
-    }
-    return backendResolves(cookie, `${base}/${entityId}`);
 }
 
 export function logout() {
@@ -828,7 +983,8 @@ export function deletePasskey(credentialId: string) {
 
 /**
  * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
- * login, and instance-managed mail. Consolidates the former per-feature `/enabled` endpoints.
+ * login, instance-managed mail, business-card scanning, and source-image import. Consolidates the
+ * former per-feature `/enabled` endpoints.
  * @param init optional fetch overrides
  * @returns the resolved instance capabilities
  */
@@ -844,6 +1000,8 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
     mailManaged: false,
+    businessCardScanning: false,
+    businessCardImport: false,
 };
 
 export function discoverSso(email: string, init: RequestInit = {}) {
@@ -912,6 +1070,16 @@ export function updateMyTimezone(timezone: string) {
 
 export function updateMyLocale(locale: Types.User["locale"]) {
     return patchJson<Types.User>("/api/users/me/locale", { locale });
+}
+
+export async function uploadCurrentUserProfilePicture(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const user = await requestMultipart<Types.User>("/api/users/me/profile-picture", "PUT", formData);
+    if (!user.profilePictureUrl) {
+        throw new ApiError("Profile picture upload returned no URL", 502);
+    }
+    return user.profilePictureUrl;
 }
 
 export function createUser(payload: Types.RegisterPayload) {
@@ -1165,6 +1333,13 @@ export function createCompany(payload: Types.CreateCompanyPayload) {
 
 export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
     return putJson<Types.Company>(`/api/companies/${id}`, payload);
+}
+
+export async function uploadCompanyLogo(companyId: number, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData);
+    return company.logoUrl;
 }
 
 export function deleteCompany(id: number, init: RequestInit = {}) {
@@ -1511,12 +1686,104 @@ export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }
 
+/** Reads contact candidates from one business-card image without mutating workspace data. */
+export function scanBusinessCard(
+    image: File,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
+    const body = new FormData();
+    body.append("image", image, image.name);
+    return postFormData<Types.BusinessCardScanResult>(
+        "/api/business-cards/scan",
+        body,
+        businessCardRequestInit(context, init),
+    );
+}
+
+/** Reserves an opaque import key before private multipart content is submitted. */
+export function reserveBusinessCardImport(
+    requestId: string,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
+    const boundInit = businessCardRequestInit(context, init);
+    const headers = new Headers(boundInit.headers);
+    headers.set("Idempotency-Key", requestId);
+    return withBusinessCardRequestTimeout(
+        10_000,
+        init.signal,
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(context, signal);
+            return postJson<Types.BusinessCardImportReservation>(
+                "/api/business-cards/import/reservation",
+                {},
+                { ...boundInit, headers, signal },
+            );
+        },
+    );
+}
+
+/** Creates the reviewed contact and stores its source card in one backend transaction. */
+export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: RequestInit = {}) {
+    const body = new FormData();
+    body.append("image", draft.image, draft.image.name);
+    body.append("contact", new Blob([JSON.stringify(draft.contact)], { type: "application/json" }));
+    body.append("companyAction", new Blob([JSON.stringify(draft.companyAction)], { type: "application/json" }));
+    const boundInit = businessCardRequestInit(draft.recoveryContext, init);
+    const headers = new Headers(boundInit.headers);
+    headers.set("Idempotency-Key", draft.requestId);
+    return withBusinessCardRequestTimeout(
+        30_000,
+        init.signal,
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(draft.recoveryContext, signal);
+            return postFormData<Types.BusinessCardImportResult>(
+                "/api/business-cards/import",
+                body,
+                { ...boundInit, headers, signal },
+            );
+        },
+    );
+}
+
+/** Reconciles a completed import without resubmitting private card or contact content. */
+export function getBusinessCardImportStatus(
+    requestId: string,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
+    const boundInit = businessCardRequestInit(context, init);
+    const headers = new Headers(boundInit.headers);
+    headers.set("Idempotency-Key", requestId);
+    return withBusinessCardRequestTimeout(
+        10_000,
+        init.signal,
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(context, signal);
+            return getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
+                ...boundInit,
+                cache: "no-store",
+                headers,
+                signal,
+            });
+        },
+    );
+}
+
 export function deleteContact(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/persons/${id}`, init);
 }
 
 export function updateContact(id: number, payload: Types.UpdateContactPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}`, payload);
+}
+
+export async function uploadContactPicture(contactId: number, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData);
+    return contact.imageUrl;
 }
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
@@ -2184,11 +2451,19 @@ export function getAttachmentFacets(init: RequestInit = {}) {
 }
 
 /**
- * Records an attachment after its binary has been stored via the Next.js upload route.
+ * Records legacy or externally hosted attachment metadata.
  * @param payload - The attachment metadata (entity, url, file name, etc.)
  */
 export function createAttachment(payload: Types.CreateAttachmentPayload) {
     return postJson<Types.Attachment>(`/api/attachments`, payload);
+}
+
+export function uploadAttachment(entityType: string, entityId: number, file: File) {
+    const formData = new FormData();
+    formData.append("entityType", entityType);
+    formData.append("entityId", String(entityId));
+    formData.append("file", file);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
 export function getAttachment(id: number, init: RequestInit = {}) {

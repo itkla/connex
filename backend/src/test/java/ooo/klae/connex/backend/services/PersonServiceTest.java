@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.services;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 import java.util.List;
+
+import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,6 +44,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 class PersonServiceTest extends AbstractServiceTest {
 
@@ -110,6 +115,34 @@ class PersonServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> personService.updateProcessingRestrictions(person.getId(), true, false));
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+    }
+
+    @Test
+    void createRejectsClientSuppliedImageUrl() {
+        Person person = personDraft(null);
+        person.setImageUrl("https://attacker.example/image.png");
+
+        Person created = personService.create(person);
+
+        assertNull(created.getImageUrl());
+        assertNull(personMapper.getPersonById(workspace.getId(), created.getId()).getImageUrl());
+    }
+
+    @Test
+    void genericUpdatePreservesAndReturnsCurrentManagedImage() {
+        Person person = newPerson(newCompany());
+        String managed = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, managed));
+        Person update = personDraft(person.getCompany());
+        update.setImageUrl("https://attacker.example/image.png");
+
+        Person updated = personService.update(person.getId(), update);
+
+        assertEquals(managed, updated.getImageUrl());
+        assertEquals(managed,
+            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
     }
 
     @Test
@@ -231,6 +264,20 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void profilePictureUploadPreservesCompanyAssociation() throws Exception {
+        Company company = newCompany();
+        Person person = newPerson(company);
+
+        Person updated = personService.updateProfilePicture(
+            person.getId(),
+            UploadSource.from("portrait.png", "image/png", png(10, 20)));
+
+        assertEquals(company.getId(), updated.getCompany().getId());
+        assertTrue(updated.getImageUrl().startsWith(
+            "/api/persons/" + person.getId() + "/profile-picture/"));
+    }
+
+    @Test
     void distinctCompanies_doesNotRevealUnsharedForeignCompanyName() {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company ownerCompany = companyInWorkspace(ownerWorkspace);
@@ -278,7 +325,8 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(EmploymentService.class),
             mock(CustomFieldValueService.class),
             mock(ReferenceService.class),
-            mock(RuleTriggerPublisher.class)
+            mock(RuleTriggerPublisher.class),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(7, "Security", null, null, false)).thenReturn(1001L);
@@ -435,5 +483,14 @@ class PersonServiceTest extends AbstractServiceTest {
         tag.setColor("#abcdef");
         tagMapper.insert(tag);
         return tag;
+    }
+
+    private static byte[] png(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "png", output)) {
+            throw new IllegalStateException("PNG writer is unavailable");
+        }
+        return output.toByteArray();
     }
 }

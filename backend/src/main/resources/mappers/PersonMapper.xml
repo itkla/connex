@@ -382,9 +382,20 @@
       <if test="phone != null">phone = #{phone},</if>
       <if test="title != null">title = #{title},</if>
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
-      <if test="imageUrl != null">image_url = #{imageUrl},</if>
     </set>
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM person
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <update id="updateImageUrlIfCurrent">
+    UPDATE person SET image_url = #{imageUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND image_url &lt;=&gt; #{currentImageUrl}
   </update>
 
   <update id="updateEvaluationExclusions">

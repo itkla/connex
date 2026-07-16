@@ -95,6 +95,23 @@ class UserMapperTest extends AbstractMapperTest {
         assertEquals(user.getEmail(), found.getEmail());
     }
 
+    @Test
+    void genericUpdateCannotReplaceManagedImageAndCasRejectsStaleReplacement() {
+        User user = newUser();
+        String first = "/api/users/" + user.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        String second = "/api/users/" + user.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440001.png";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), null, first));
+
+        user.setProfilePictureUrl("https://attacker.example/image.png");
+        userMapper.update(user);
+
+        assertEquals(first, userMapper.getUserById(user.getId()).getProfilePictureUrl());
+        assertEquals(0, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), null, second));
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), first, second));
+    }
+
     /**
      * Deletes a user and checks if the user is removed.
      */

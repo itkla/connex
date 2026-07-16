@@ -10,11 +10,12 @@
   "AccountProfile": {
     "title": "Profile",
     "subtitle": "Your personal details. This is how you appear to teammates across every workspace.",
-    "photoHint": "A square PNG, JPG, or GIF looks best.",
+    "photoHint": "A square JPEG, PNG, or WebP image works best.",
     "changePhoto": "Change photo",
     "photoAlt": "Your profile photo",
     "changePhotoAria": "Change your profile photo",
     "photoUploadFailed": "Couldn't upload that photo. Please try again.",
+    "photoUnsupported": "Choose a JPEG, PNG, or WebP image.",
     "displayNameLabel": "Display name",
     "usernameLabel": "Username",
     "emailLabel": "Email",
@@ -35,7 +36,8 @@
     "saving": "Saving",
     "discard": "Discard",
     "saved": "Profile updated",
-    "saveFailed": "Couldn't save your profile. Please try again."
+    "saveFailed": "Couldn't save your profile. Please try again.",
+    "partiallySaved": "Some profile changes were saved, but another change failed. Review the current values and try again."
   },
   "AccountSecurity": {
     "title": "Passkeys",

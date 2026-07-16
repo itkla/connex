@@ -13,6 +13,7 @@ class JacksonRequestBodySizeConfigurationTest {
         RequestBodySizeProperties properties = new RequestBodySizeProperties();
         properties.setMaxBodyBytes(8);
         properties.setImportMaxBodyBytes(64);
+        properties.setBusinessCardMaxBodyBytes(32);
         properties.setWebauthnMaxBodyBytes(4);
         JacksonRequestBodySizeConfiguration configuration = new JacksonRequestBodySizeConfiguration();
         var customizer = configuration.requestBodyStreamReadConstraints(properties);
@@ -28,6 +29,7 @@ class JacksonRequestBodySizeConfigurationTest {
         RequestBodySizeProperties properties = new RequestBodySizeProperties();
         properties.setMaxBodyBytes(128);
         properties.setImportMaxBodyBytes(64);
+        properties.setBusinessCardMaxBodyBytes(32);
         properties.setWebauthnMaxBodyBytes(4);
         JacksonRequestBodySizeConfiguration configuration = new JacksonRequestBodySizeConfiguration();
         var customizer = configuration.requestBodyStreamReadConstraints(properties);

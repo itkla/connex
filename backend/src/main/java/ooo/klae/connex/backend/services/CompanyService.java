@@ -26,11 +26,18 @@ import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
+import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -40,6 +47,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -69,11 +77,13 @@ public class CompanyService {
     private final SegmentService segmentService;
     private final ReferenceService referenceService;
     private final Clock clock;
+    private final ManagedObjectService managedObjectService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
 
     private static final int MAX_MATCHING_IDS = 1000;
+    private static final int COMPANY_NAME_CANDIDATE_LIMIT = 16;
     private static final int ENGAGEMENT_PREVIEW_SIZE = 5;
     private static final int ENGAGEMENT_WEEKS = 12;
     private static final long WEEK_MILLIS = 7L * 24 * 60 * 60 * 1000;
@@ -85,6 +95,42 @@ public class CompanyService {
      */
     public List<Company> getAllCompanies() {
         return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /**
+     * Returns visible companies whose names exactly match after Unicode NFKC, whitespace, and
+     * case normalization. More than one result is intentionally preserved so callers never bind
+     * an ambiguous OCR candidate automatically.
+     */
+    public NormalizedCompanyMatches findVisibleByNormalizedName(String name) {
+        String key = BusinessCardTextNormalizer.companyKey(name);
+        if (key.isBlank()) {
+            return new NormalizedCompanyMatches(List.of(), false);
+        }
+        String pattern = java.util.Arrays.stream(key.split(" "))
+                .map(LikePattern::escape)
+                .collect(Collectors.joining("%", "", "%"));
+        List<Company> candidates = companyMapper.findVisibleNameCandidates(
+                workspaceService.getCurrentWorkspaceId(), pattern, key,
+                COMPANY_NAME_CANDIDATE_LIMIT + 1);
+        boolean truncated = candidates.size() > COMPANY_NAME_CANDIDATE_LIMIT;
+        List<Company> matches = candidates.stream()
+                .limit(COMPANY_NAME_CANDIDATE_LIMIT)
+                .filter(company -> key.equals(BusinessCardTextNormalizer.companyKey(company.getName())))
+                .toList();
+        return new NormalizedCompanyMatches(matches, truncated);
+    }
+
+    /**
+     * Exact normalized company-name matches plus whether the broad candidate query was truncated.
+     *
+     * @param companies exact normalized visible matches
+     * @param truncated whether additional broad candidates were omitted
+     */
+    public record NormalizedCompanyMatches(List<Company> companies, boolean truncated) {
+        public NormalizedCompanyMatches {
+            companies = List.copyOf(companies);
+        }
     }
 
     public CompanyEngagementDto getCompanyEngagement(int companyId) {
@@ -285,6 +331,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        company.setLogoUrl(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
         auditService.record("company.create", "company", company.getId(), company.getName(),
@@ -323,21 +370,51 @@ public class CompanyService {
     /**
      * Updates an existing {@code Company} in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = requireOwnedCompany(workspaceId, id);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
+        company.setLogoUrl(before.getLogoUrl());
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
-        auditService.record("company.update", "company", id, company.getName(),
-            "Updated company " + company.getName(),
-            auditService.diff(before, company, AUDIT_FIELDS));
+        Company after = requireOwnedCompany(workspaceId, id);
+        auditService.record("company.update", "company", id, after.getName(),
+            "Updated company " + after.getName(),
+            auditService.diff(before, after, AUDIT_FIELDS));
         if (updated > 0) {
             ruleTriggers.publish(workspaceId, "company", id, "company.updated");
         }
-        return company;
+        return after;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateLogo(int id, UploadSource source) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company before = requireOwnedCompany(workspaceId, id);
+        StoredImage stored = managedObjectService.storeCompanyImage(workspaceId, id, source);
+        int updated = companyMapper.updateLogoUrlIfCurrent(
+            workspaceId, id, before.getLogoUrl(), stored.url());
+        if (updated != 1) {
+            throw new ConflictException("Company logo changed while the image was uploading; retry");
+        }
+        managedObjectService.deleteCompanyImageAfterCommit(
+            before.getWorkspaceId(), id, before.getLogoUrl());
+        Company after = requireOwnedCompany(workspaceId, id);
+        auditService.record("company.updateLogo", "company", id, before.getName(),
+            "Updated logo for " + before.getName(),
+            auditService.singleChange("logoUrl", before.getLogoUrl(), after.getLogoUrl()));
+        ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        return after;
+    }
+
+    public ManagedContent getLogoContent(int id, String token) {
+        Company company = requireCompany(id);
+        return managedObjectService.openCompanyImage(
+            company.getWorkspaceId(), id, company.getLogoUrl(), token);
     }
 
     /**
@@ -347,7 +424,12 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (companyMapper.lockById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
         Company before = requireOwnedCompany(workspaceId, id);
+        managedObjectService.deleteCompanyImageAfterCommit(
+            before.getWorkspaceId(), id, before.getLogoUrl());
         customFieldValueService.deleteByEntity("company", id);
         companyMapper.delete(workspaceId, id);
         auditService.record("company.delete", "company", id, before.getName(),

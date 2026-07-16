@@ -8,9 +8,8 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { getCompanyById, updateCompany } from '@/app/lib/api';
+import { getCompanyById, updateCompany, uploadCompanyLogo } from '@/app/lib/api';
 import { type Company, type UpdateCompanyPayload } from '@/app/lib/types';
-import { uploadCompanyLogo } from '@/app/lib/utils';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -75,38 +74,42 @@ export default function EditCompanySheet({
         }
 
         setIsSaving(true);
+        let committedChanges = false;
         try {
-            let logoUrl: string | undefined;
-            if (logoChanged && logoFile) {
-                logoUrl = await uploadCompanyLogo(company.id, logoFile);
-            }
-
-            if (textChanged || logoChanged) {
+            if (textChanged) {
                 const payload: UpdateCompanyPayload = {
                     name: draft.name.trim(),
                     website: draft.website.trim() || undefined,
                     industry: draft.industry.trim() || undefined,
                     phone: draft.phone.trim() || undefined,
                     address: draft.address.trim() || undefined,
-                    logoUrl: logoUrl ?? company.logoUrl ?? undefined,
                 };
                 await updateCompany(company.id, payload);
+                committedChanges = true;
             }
 
-            await cfRef.current?.save();
+            if (customChanged) {
+                await cfRef.current?.save();
+                committedChanges = true;
+            }
+
+            if (logoChanged && logoFile) {
+                await uploadCompanyLogo(company.id, logoFile);
+            }
 
             toastSuccess(t('toastCompanyUpdated'));
-            handleOpenChange(false);
-
-            const updatedCompany = await getCompanyById(company.id);
-            if (updatedCompany) {
-                setDraft(toDraft(updatedCompany));
-                setLogoFile(null);
-            }
-
+            setLogoFile(null);
+            onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+            if (committedChanges) {
+                const updatedCompany = await getCompanyById(company.id).catch(() => null);
+                if (updatedCompany) setDraft(toDraft(updatedCompany));
+                toastError(t('toastPartiallySaved'));
+                router.refresh();
+            } else {
+                toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+            }
         } finally {
             setIsSaving(false);
         }

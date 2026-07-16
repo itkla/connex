@@ -1,5 +1,36 @@
 version: 2
 updates:
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: docker
+    directory: /ocr
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: pip
+    directory: /ocr
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
   - package-ecosystem: gradle
     directory: /backend
     schedule:

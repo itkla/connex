@@ -36,10 +36,10 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
-import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 const NO_ITEMS: Contact[] = [];
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
@@ -160,6 +160,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         loadFacets();
     }, [clearSelection, reload, loadFacets]);
 
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'contact') refresh();
+    }), [refresh]);
+
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!personFacets) return [];
         const out: ColumnFilterFacet[] = [];
@@ -230,7 +234,21 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(EMPTY_CONTACT_DRAFT);
     const [imageFile, setImageFile] = useState<File | null>(null);
+    const newContactCloseTimerRef = useRef<number | null>(null);
+    const newContactGenerationRef = useRef(0);
+    const invalidateNewContactClose = useCallback(() => {
+        newContactGenerationRef.current += 1;
+        if (newContactCloseTimerRef.current == null) return;
+        window.clearTimeout(newContactCloseTimerRef.current);
+        newContactCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewContactClose(), [invalidateNewContactClose]);
+    const openNewContactDialog = () => {
+        invalidateNewContactClose();
+        setNewContactDialogOpen(true);
+    };
     const closeNewContactDialog = (open: boolean) => {
+        invalidateNewContactClose();
         setNewContactDialogOpen(open);
         if (!open) {
             setNewContactPayload(EMPTY_CONTACT_DRAFT);
@@ -239,29 +257,54 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         }
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidateNewContactClose();
+        const operationGeneration = newContactGenerationRef.current;
+        const isCurrent = () => newContactGenerationRef.current === operationGeneration;
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const newContact = await createContact(newContactPayload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(newContactPayload);
+            if (!isCurrent()) return;
+            let avatarUploadFailed = false;
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch {
+                    avatarUploadFailed = true;
+                }
+                if (!isCurrent()) return;
             }
-            toastSuccess(t('toastContactCreated'));
-            setIsCreating(false);
-            setCreationSucceeded(true);
-            setTimeout(() => {
-                closeNewContactDialog(false);
-                refresh();
-            }, 900);
+            if (isCurrent()) setIsCreating(false);
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized || !isCurrent()) return;
+                    finalized = true;
+                    toastSuccess(t('toastContactCreated'));
+                    setCreationSucceeded(true);
+                    invalidateNewContactClose();
+                    const closeGeneration = newContactGenerationRef.current;
+                    newContactCloseTimerRef.current = window.setTimeout(() => {
+                        if (newContactGenerationRef.current !== closeGeneration) return;
+                        newContactCloseTimerRef.current = null;
+                        closeNewContactDialog(false);
+                        refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
-            if (isFieldError(err)) {
+            if (!isCurrent()) return;
+            if (isFieldError(err) || businessCard) {
                 throw err;
             }
             toastError(t('toastFailedCreate'));
         } finally {
-            setIsCreating(false);
+            if (isCurrent()) setIsCreating(false);
         }
     };
 
@@ -305,7 +348,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         phone: d.phone.trim() || undefined,
                         title: d.title.trim() || undefined,
                         companyId: c.companyId ?? c.company?.id ?? null,
-                        imageUrl: c.imageUrl || undefined,
                     };
                     return updateContact(c.id, payload);
                 }),
@@ -335,7 +377,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 title: c.title || undefined,
-                imageUrl: c.imageUrl || undefined,
                 companyId: null,
             })));
             toastSuccess(
@@ -528,7 +569,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         <div className="flex items-center gap-2">
                             <RecordsActions
                                 entity="persons"
-                                onNew={() => setNewContactDialogOpen(true)}
+                                onNew={openNewContactDialog}
                                 newLabel={t('new')}
                                 newAriaLabel={t('newAria')}
                                 onImported={refresh}
@@ -679,6 +720,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     createNewContact={createNewContact}
+                    onRecoveredImport={refresh}
                 />
 
                 <DeleteRecordDialog

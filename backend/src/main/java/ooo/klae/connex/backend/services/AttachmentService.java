@@ -7,11 +7,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AttachmentFacets;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -27,11 +35,17 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AttachmentService {
+    private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
+
     private final AttachmentMapper attachmentMapper;
     private final TagMapper tagMapper;
+    private final CompanyMapper companyMapper;
+    private final PersonMapper personMapper;
+    private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
+    private final ManagedObjectService managedObjectService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
@@ -166,6 +180,16 @@ public class AttachmentService {
         return attachment;
     }
 
+    public ManagedContent getManagedContent(String token) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String url = "/api/attachments/content/" + token;
+        Attachment attachment = attachmentMapper.getByUrl(workspaceId, url);
+        if (attachment == null) {
+            throw new ResourceNotFoundException("Attachment not found for managed content");
+        }
+        return managedObjectService.openAttachment(workspaceId, attachment);
+    }
+
     /**
      * Resolves the attachment record for a blob URL within the caller's workspace.
      * Backs the upload route's delete-authorization check so a session alone cannot
@@ -190,19 +214,74 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment create(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (attachment.getUrl() != null && attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+            throw new BadRequestException("Managed attachment references cannot be submitted directly");
+        }
+        return persist(workspaceId, attachment, false);
+    }
+
+    /**
+     * Persists an internally generated managed attachment reference.
+     *
+     * @param attachment trusted managed attachment metadata
+     * @return persisted workspace-scoped attachment
+     */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
+    public Attachment createManaged(Attachment attachment) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (attachment.getUrl() == null || !attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+            throw new BadRequestException("Managed attachment reference is invalid");
+        }
+        return persist(workspaceId, attachment, true);
+    }
+
+    @Transactional
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
+    public Attachment upload(String entityType, int entityId, UploadSource source, User uploader) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String normalizedType = normalizeType(entityType);
+        requireVisibleTarget(workspaceId, normalizedType, entityId);
+        StoredBinary stored = managedObjectService.storeAttachment(workspaceId, source);
+
+        Attachment attachment = new Attachment();
+        attachment.setEntityType(normalizedType);
+        attachment.setEntityId(entityId);
+        attachment.setFileName(stored.fileName());
+        attachment.setUrl(stored.url());
+        attachment.setContentType(stored.contentType());
+        attachment.setSize(stored.size());
+        attachment.setUploadedBy(uploader);
+        return persist(workspaceId, attachment, true);
+    }
+
+    private Attachment persist(int workspaceId, Attachment attachment, boolean managed) {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
         validateUrl(attachment.getUrl());
-        if (attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
+        if (managed && attachmentMapper.countUrl(workspaceId, attachment.getUrl()) > 0) {
+            throw new BadRequestException("That managed attachment reference is already in use");
+        }
+        if (!managed && attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
             throw new BadRequestException("That attachment url is already in use");
         }
         attachmentMapper.insert(attachment);
-        // Audit from the inserted bean (id populated by the key generator) so a failed
-        // re-fetch can never NPE and break the create it is only meant to observe.
         auditService.record("attachment.create", "attachment", attachment.getId(), attachment.getFileName(),
             "Uploaded attachment " + attachment.getFileName(),
             auditService.diff(null, attachment, AUDIT_FIELDS));
         return attachmentMapper.getById(workspaceId, attachment.getId());
+    }
+
+    private void requireVisibleTarget(int workspaceId, String entityType, int entityId) {
+        boolean exists = switch (entityType) {
+            case "company" -> companyMapper.exists(workspaceId, entityId);
+            case "person" -> personMapper.exists(workspaceId, entityId);
+            case "deal" -> dealMapper.exists(workspaceId, entityId);
+            case "user" -> workspaceService.isMember(workspaceId, entityId);
+            default -> throw new BadRequestException("Unsupported attachment entity type");
+        };
+        if (!exists) {
+            throw new ResourceNotFoundException("Attachment target was not found");
+        }
     }
 
     /**
@@ -210,10 +289,18 @@ public class AttachmentService {
      * @param id
      */
     @RequirePermission(Permission.ATTACHMENT_DELETE)
+    @Transactional
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
+        if (!referenceIds.contains(id)) {
+            throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        }
+        if (referenceIds.size() == 1) {
+            managedObjectService.deleteAttachmentAfterCommit(workspaceId, before.getUrl());
+        }
         attachmentMapper.delete(workspaceId, id);
         referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_FILE, id);
         auditService.record("attachment.delete", "attachment", id, before.getFileName(),

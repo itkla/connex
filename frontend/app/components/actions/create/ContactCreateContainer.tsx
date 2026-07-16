@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
-import { createContact, isFieldError, updateContact } from '@/app/lib/api';
+import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { uploadContactPicture } from '@/app/lib/utils';
-import type { CreateContactPayload } from '@/app/lib/types';
+import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
 
 const EMPTY_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
@@ -24,6 +24,7 @@ export default function ContactCreateContainer({
     defaults,
     embedded = false,
     onCancel,
+    onDismissLockChange,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -32,6 +33,7 @@ export default function ContactCreateContainer({
     embedded?: boolean;
     /** Cancel handler for embedded mode — steps back to the launcher selector. */
     onCancel?: () => void;
+    onDismissLockChange?: (locked: boolean) => void;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -40,41 +42,117 @@ export default function ContactCreateContainer({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const creatingRef = useRef(false);
+    const importRetryRequiredRef = useRef(false);
+    const submissionPendingRef = useRef(false);
+    const closeTimerRef = useRef<number | null>(null);
+    const closeGenerationRef = useRef(0);
+
+    const invalidatePendingClose = useCallback(() => {
+        closeGenerationRef.current += 1;
+        if (closeTimerRef.current == null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
+
+    const emitDismissLock = useCallback(() => {
+        onDismissLockChange?.(
+            creatingRef.current
+            || importRetryRequiredRef.current
+            || submissionPendingRef.current,
+        );
+    }, [onDismissLockChange]);
 
     useEffect(() => {
+        invalidatePendingClose();
         if (!open) return;
         const raf = window.requestAnimationFrame(() => {
             setPayload({ ...EMPTY_DRAFT, companyId: defaults?.companyId });
             setImageFile(null);
             setSucceeded(false);
+            creatingRef.current = false;
+            importRetryRequiredRef.current = false;
+            submissionPendingRef.current = false;
+            onDismissLockChange?.(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open, defaults?.companyId]);
+    }, [open, defaults?.companyId, invalidatePendingClose, onDismissLockChange]);
+
+    useEffect(() => () => invalidatePendingClose(), [invalidatePendingClose]);
 
     const handleOpenChange = (next: boolean) => {
-        if (!next && creating) return;
+        if (!next && (
+            creatingRef.current
+            || importRetryRequiredRef.current
+            || submissionPendingRef.current
+        )) return;
+        invalidatePendingClose();
+        if (!next) onDismissLockChange?.(false);
         onOpenChange(next);
     };
 
-    const createNewContact = async () => {
+    const handleImportRetryRequiredChange = (required: boolean) => {
+        importRetryRequiredRef.current = required;
+        emitDismissLock();
+    };
+
+    const handleSubmissionPendingChange = (pending: boolean) => {
+        submissionPendingRef.current = pending;
+        emitDismissLock();
+    };
+
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidatePendingClose();
+        const operationGeneration = closeGenerationRef.current;
+        const isCurrent = () => closeGenerationRef.current === operationGeneration;
         setSucceeded(false);
+        creatingRef.current = true;
         setCreating(true);
+        emitDismissLock();
         try {
-            const newContact = await createContact(payload);
+            const imported = businessCard ? await importBusinessCard(businessCard) : null;
+            if (!isCurrent()) return;
+            const newContact = imported?.contact ?? await createContact(payload);
+            if (!isCurrent()) return;
+            let avatarUploadFailed = false;
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...payload, imageUrl });
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch {
+                    avatarUploadFailed = true;
+                }
+                if (!isCurrent()) return;
             }
-            toastSuccess(t('feedback.personCreated'));
+            creatingRef.current = false;
             setCreating(false);
-            setSucceeded(true);
-            setTimeout(() => {
-                onOpenChange(false);
-                router.refresh();
-            }, 900);
+            emitDismissLock();
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized || !isCurrent()) return;
+                    finalized = true;
+                    toastSuccess(t('feedback.personCreated'));
+                    publishRecordMutation('contact');
+                    if (imported?.company) publishRecordMutation('company');
+                    setSucceeded(true);
+                    invalidatePendingClose();
+                    const closeGeneration = closeGenerationRef.current;
+                    closeTimerRef.current = window.setTimeout(() => {
+                        if (closeGenerationRef.current !== closeGeneration) return;
+                        closeTimerRef.current = null;
+                        onOpenChange(false);
+                        router.refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
+            if (!isCurrent()) return;
+            creatingRef.current = false;
             setCreating(false);
-            if (isFieldError(err)) throw err;
+            emitDismissLock();
+            if (isFieldError(err) || businessCard) throw err;
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };
@@ -83,7 +161,11 @@ export default function ContactCreateContainer({
         return (
             <NewContactForm
                 active
-                onCancel={onCancel ?? (() => onOpenChange(false))}
+                onCancel={() => {
+                    invalidatePendingClose();
+                    if (onCancel) onCancel();
+                    else onOpenChange(false);
+                }}
                 newContactPayload={payload}
                 setNewContactPayload={setPayload}
                 imageFile={imageFile}
@@ -91,6 +173,13 @@ export default function ContactCreateContainer({
                 isCreating={creating}
                 isSuccess={succeeded}
                 createNewContact={createNewContact}
+                onRecoveredImport={(result) => {
+                    publishRecordMutation('contact');
+                    if (result.company) publishRecordMutation('company');
+                    router.refresh();
+                }}
+                onImportRetryRequiredChange={handleImportRetryRequiredChange}
+                onSubmissionPendingChange={handleSubmissionPendingChange}
             />
         );
     }
@@ -106,6 +195,13 @@ export default function ContactCreateContainer({
             isCreating={creating}
             isSuccess={succeeded}
             createNewContact={createNewContact}
+            onRecoveredImport={(result) => {
+                publishRecordMutation('contact');
+                if (result.company) publishRecordMutation('company');
+                router.refresh();
+            }}
+            onImportRetryRequiredChange={handleImportRetryRequiredChange}
+            onSubmissionPendingChange={handleSubmissionPendingChange}
         />
     );
 }

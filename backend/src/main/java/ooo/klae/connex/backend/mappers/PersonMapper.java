@@ -39,6 +39,7 @@ public interface PersonMapper {
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** True only when the workspace OWNS the contact (excludes records merely shared in); for write scoping. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
     List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
@@ -66,6 +67,11 @@ public interface PersonMapper {
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);
     int update(Person person);
+    int updateImageUrlIfCurrent(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("currentImageUrl") String currentImageUrl,
+        @Param("imageUrl") String imageUrl);
     /** Targeted update of the engine-evaluation opt-outs; a {@code null} flag is left unchanged. */
     int updateEvaluationExclusions(
         @Param("workspaceId") int workspaceId,

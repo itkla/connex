@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.LegacyTenantUploadMigrationMapper">
+
+  <select id="findAttachments" resultType="ooo.klae.connex.backend.storage.LegacyUploadRecord">
+    SELECT id, workspace_id AS workspaceId, entity_type AS entityType,
+           entity_id AS entityId, file_name AS fileName, content_type AS contentType, url
+    FROM attachment
+    WHERE workspace_id = #{workspaceId}
+      AND id &gt; #{afterId}
+      AND url LIKE '/attachments/%'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findPersonImages" resultType="ooo.klae.connex.backend.storage.LegacyUploadRecord">
+    SELECT id, workspace_id AS workspaceId, image_url AS url
+    FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND id &gt; #{afterId}
+      AND image_url LIKE '/contact-pictures/%'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findCompanyImages" resultType="ooo.klae.connex.backend.storage.LegacyUploadRecord">
+    SELECT id, workspace_id AS workspaceId, logo_url AS url
+    FROM company
+    WHERE workspace_id = #{workspaceId}
+      AND id &gt; #{afterId}
+      AND logo_url LIKE '/company-logos/%'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <update id="updateAttachment">
+    UPDATE attachment
+    SET url = #{newUrl}, file_name = #{fileName}, content_type = #{contentType}, size = #{size}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND url &lt;=&gt; #{currentUrl}
+  </update>
+
+  <update id="updatePersonImage">
+    UPDATE person
+    SET image_url = #{newUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND image_url &lt;=&gt; #{currentUrl}
+  </update>
+
+  <update id="updateCompanyImage">
+    UPDATE company
+    SET logo_url = #{newUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND logo_url &lt;=&gt; #{currentUrl}
+  </update>
+
+  <select id="countReferences" resultType="int">
+    SELECT
+      (SELECT COUNT(*) FROM attachment
+       WHERE workspace_id = #{workspaceId} AND url LIKE '/attachments/%')
+      + (SELECT COUNT(*) FROM person
+         WHERE workspace_id = #{workspaceId} AND image_url LIKE '/contact-pictures/%')
+      + (SELECT COUNT(*) FROM company
+         WHERE workspace_id = #{workspaceId} AND logo_url LIKE '/company-logos/%')
+  </select>
+
+</mapper>

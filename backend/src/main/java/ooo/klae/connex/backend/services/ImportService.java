@@ -76,8 +76,8 @@ public class ImportService {
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
 
-    private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company", "imageUrl");
-    private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address", "logoUrl");
+    private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company");
+    private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address");
     private static final Set<String> DEAL_FIELDS =
         Set.of("name", "value", "currency", "pipeline", "stage", "company", "expectedCloseDate", "people");
     private static final Set<String> AUTO_CUSTOM_TYPES = Set.of("text", "textarea", "number", "date", "boolean", "url");
@@ -163,7 +163,6 @@ public class ImportService {
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));
             bean.setTitle(row.std.get("title"));
-            bean.setImageUrl(row.std.get("imageUrl"));
             Integer companyId = companyByName.get(normName(row.companyName));
             if (companyId != null) {
                 Company stub = new Company();
@@ -236,7 +235,6 @@ public class ImportService {
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setTitle(merge(action, existing.getTitle(), row.std.get("title")));
-        existing.setImageUrl(merge(action, existing.getImageUrl(), row.std.get("imageUrl")));
         Integer companyId = companyByName.get(normName(row.companyName));
         if (companyId != null && (OVERWRITE.equals(action) || existing.getCompany() == null)) {
             Company stub = new Company();
@@ -300,7 +298,6 @@ public class ImportService {
             bean.setIndustry(row.std.get("industry"));
             bean.setPhone(row.std.get("phone"));
             bean.setAddress(row.std.get("address"));
-            bean.setLogoUrl(row.std.get("logoUrl"));
             beans.add(bean);
             toCreate.add(row);
         }
@@ -364,7 +361,6 @@ public class ImportService {
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
-        existing.setLogoUrl(merge(action, existing.getLogoUrl(), row.std.get("logoUrl")));
         companyMapper.update(existing);
         attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);

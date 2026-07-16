@@ -12,6 +12,7 @@ Connex is a multi-tenant relationship-intelligence CRM. Monorepo:
 
 - **`frontend/`** — Next.js 16 (App Router, RSC), React 19, TypeScript (strict), Tailwind v4, shadcn/ui on Base UI + Radix, `motion`, `recharts`/`d3`/`@xyflow/react`, `next-intl` (i18n), `next-themes`.
 - **`backend/`** — Spring Boot 4 on **Java 26**, MyBatis, Flyway + MySQL, Spring Security (WebAuthn), Lombok. Tenant-scoped, RBAC-enforced.
+- **`ocr/`** — private, CPU-only PaddleOCR sidecar for English/Japanese business-card recognition. It is built and run through Docker with pre-fetched, read-only models; see `ocr/AGENTS.md`.
 
 The product centers on relationship signals — temperature/warmth scoring, decay prediction, warm-intro paths, employment history. Treat tenant isolation and RBAC as load-bearing, not incidental.
 
@@ -20,8 +21,9 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 The verify loops require a running stack. **Prerequisites:** Node 20+, Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
 1. **Database** — from `backend/`: create `backend/.env` from `backend/.env.example`, fill local-only database passwords, then run `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`).
-2. **Backend** — from `backend/`: load the same `CONNEX_DB_*` values into your shell, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start. The `dev` profile disables the session and workspace cookie `Secure` flags so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret; production runs without it (fail-closed `Secure=true`) and must set `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with verified MySQL TLS. The systemd-controlled local staging checkout at `/opt/connex-staging/backend` is the only non-dev exception: it gets `localhost:3001` HTTP auth defaults and may use an explicit loopback MySQL URL with `sslMode=DISABLED`.
-3. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
+2. **OCR (when testing card scanning)** — set a unique local `CONNEX_OCR_SERVICE_TOKEN` of at least 32 characters in `backend/.env`, then from `backend/` run `docker compose --profile ocr up -d ocr` (private service exposed to the host on `127.0.0.1:8090`). The image build pre-fetches its models; runtime model downloads are forbidden.
+3. **Backend** — from `backend/`: load the same `CONNEX_DB_*` values into your shell, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). To enable card scanning locally, also export `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true`, `CONNEX_OCR_BASE_URL=http://127.0.0.1:8090`, and the same OCR token. Flyway runs migrations on start. The `dev` profile disables the session and workspace cookie `Secure` flags so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret; production runs without it (fail-closed `Secure=true`) and must set `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with verified MySQL TLS. The systemd-controlled local staging checkout at `/opt/connex-staging/backend` is the only non-dev exception: it gets `localhost:3001` HTTP auth defaults and may use an explicit loopback MySQL URL with `sslMode=DISABLED`.
+4. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
 
 Auth is cookie/session based; workspace selection drives tenant context. See `frontend/proxy.ts` for the route-protection rules.
 

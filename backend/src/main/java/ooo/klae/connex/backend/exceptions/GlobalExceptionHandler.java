@@ -13,9 +13,11 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
@@ -29,9 +31,27 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
     }
 
+    @ExceptionHandler(BusinessCardImportResultGoneException.class)
+    public ResponseEntity<Map<String, String>> businessCardImportResultGone(
+            BusinessCardImportResultGoneException ex) {
+        return ResponseEntity.status(HttpStatus.GONE)
+            .body(Map.of("code", "BUSINESS_CARD_IMPORT_RESULT_GONE", "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<String> badRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(UnsupportedBusinessCardMediaTypeException.class)
+    public ResponseEntity<String> unsupportedBusinessCardMediaType(
+            UnsupportedBusinessCardMediaTypeException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(UnprocessableBusinessCardException.class)
+    public ResponseEntity<String> unprocessableBusinessCard(UnprocessableBusinessCardException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ex.getMessage());
     }
 
     @ExceptionHandler(PasskeyEnrollmentRequiredException.class)
@@ -121,6 +141,12 @@ public class GlobalExceptionHandler {
                 .body("Missing required parameter: " + ex.getParameterName());
     }
 
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<String> missingPart(MissingServletRequestPartException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body("Missing required multipart part: " + ex.getRequestPartName());
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(ex.getStatusCode())
@@ -131,6 +157,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RequestBodyTooLargeException.class)
     public ResponseEntity<String> requestBodyTooLarge(RequestBodyTooLargeException ex) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<String> uploadTooLarge(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
+    }
+
+    @ExceptionHandler(UnsupportedUploadMediaTypeException.class)
+    public ResponseEntity<String> unsupportedUploadMediaType(UnsupportedUploadMediaTypeException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ex.getMessage());
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

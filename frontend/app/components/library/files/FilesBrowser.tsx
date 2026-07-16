@@ -50,7 +50,7 @@ import {
 } from '@/app/lib/api';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { deleteUploadedFile, formatDate, formatFileSize } from '@/app/lib/utils';
+import { formatDate, formatFileSize } from '@/app/lib/utils';
 import type { Attachment, AttachmentFacets, AttachmentsPageParams, PageParams, Tag } from '@/app/lib/types';
 import {
     classifyKind,
@@ -260,7 +260,6 @@ export default function FilesBrowser() {
         if (!deleting) return;
         setBusy(true);
         try {
-            await deleteUploadedFile(deleting.url);
             await deleteAttachment(deleting.id);
             toastSuccess(t('toastDeleted'));
             setDeleting(null);
@@ -293,7 +292,7 @@ export default function FilesBrowser() {
         setBulkBusy(true);
         try {
             await Promise.all(
-                selectedAttachments.map((a) => deleteUploadedFile(a.url).then(() => deleteAttachment(a.id))),
+                selectedAttachments.map((a) => deleteAttachment(a.id)),
             );
             toastSuccess(t('toastDeletedCount', { count: selectedAttachments.length }));
             setBulkDeleting(false);

@@ -40,6 +40,16 @@
     ORDER BY c.name, c.id
   </select>
 
+  <select id="findVisibleNameCandidates" resultType="Company">
+    SELECT c.id, c.workspace_id, c.name
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.name LIKE #{pattern}
+    ORDER BY CASE WHEN LOWER(c.name) = #{normalizedName} THEN 0 ELSE 1 END,
+      CHAR_LENGTH(c.name), c.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getRelationshipScoreAggregates"
           resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
     SELECT c.id,
@@ -461,9 +471,20 @@
         website = #{website},
         industry = #{industry},
         phone = #{phone},
-        address = #{address},
-        logo_url = #{logoUrl}
+        address = #{address}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM company
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <update id="updateLogoUrlIfCurrent">
+    UPDATE company SET logo_url = #{logoUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND logo_url &lt;=&gt; #{currentLogoUrl}
   </update>
 
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>

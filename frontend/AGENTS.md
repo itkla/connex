@@ -61,7 +61,7 @@ When in doubt, open a reference page and mirror it.
 
 ## API contract & integration
 
-- **The backend is reached at `/api/*`.** `next.config.ts` rewrites `/api/:path*` → `http://localhost:8080/api/:path*`, so the backend must be running (`./gradlew bootRun`) for the app to work. A few Next route handlers under `app/api/*` (uploads, logo/avatar) proxy specific flows — extend those patterns rather than inventing new ones.
+- **The backend is reached at `/api/*`.** `next.config.ts` rewrites `/api/:path*` → `http://localhost:8080/api/:path*`, so the backend must be running (`./gradlew bootRun`) for the app to work. Uploads, logos, avatars, and business-card images go directly to authenticated backend multipart endpoints through the shared API client; never store them in Next.js `public/` or add a frontend filesystem upload route.
 - **Use the shared API client** in `app/lib/api.ts`; types in `app/lib/types.ts` must match backend DTOs. Don't scatter raw `fetch` calls.
 - **Auth/session is cookie-based** (`JSESSIONID` + `connex_workspace`), enforced in `proxy.ts` (route protection, login/onboarding/invite redirects). When adding protected routes, update the prefixes there.
 - **Slow AI request de-duplication is identity-bound.** The shared client keys in-flight AI mutations by the opaque server-issued authenticated-session generation from `/api/auth/csrf`, workspace, and locale; auth/workspace transitions must invalidate locally and notify other tabs without persisting user or session identifiers.

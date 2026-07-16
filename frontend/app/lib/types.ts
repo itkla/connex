@@ -471,6 +471,68 @@ export type CreateContactPayload = {
     companyId?: number;
 };
 
+export type BusinessCardDetectedField = {
+    value?: string | null;
+    confidence?: number | null;
+};
+
+export type BusinessCardScanResult = {
+    fields: {
+        name: BusinessCardDetectedField;
+        email: BusinessCardDetectedField;
+        phone: BusinessCardDetectedField;
+        title: BusinessCardDetectedField;
+    };
+    company: BusinessCardDetectedField & {
+        matchedCompanyId?: number | null;
+    };
+    warnings: string[];
+};
+
+export type BusinessCardCompanyAction =
+    | { type: 'existing'; companyId: number }
+    | { type: 'create'; companyName: string }
+    | { type: 'none' };
+
+export type BusinessCardRecoveryContext = {
+    scope: string;
+    workspaceId: string;
+};
+
+export type BusinessCardImportDraft = {
+    requestId: string;
+    recoveryContext: BusinessCardRecoveryContext;
+    image: File;
+    contact: CreateContactPayload;
+    companyAction: BusinessCardCompanyAction;
+};
+
+export type BusinessCardImportReservation = {
+    expiresAt: string;
+};
+
+export type BusinessCardImportResult = {
+    contact: Pick<Contact, 'id' | 'name'> & Partial<Pick<Contact, 'email' | 'phone' | 'title' | 'imageUrl'>>;
+    attachment: Pick<Attachment, 'id' | 'fileName' | 'url' | 'size'> & Partial<Pick<Attachment, 'contentType'>>;
+    company?: (Pick<Company, 'id' | 'name'> & Partial<Pick<Company, 'website' | 'industry' | 'phone' | 'address' | 'logoUrl'>>) | null;
+};
+
+export type BusinessCardRequestErrorKind =
+    | 'aborted'
+    | 'unauthorized'
+    | 'forbidden'
+    | 'tooLarge'
+    | 'unsupportedType'
+    | 'unreadable'
+    | 'busy'
+    | 'conflict'
+    | 'gone'
+    | 'timeout'
+    | 'unavailable'
+    | 'recoveryStorage'
+    | 'rejected'
+    | 'failed';
+
 export type CreateTaskPayload = {
     description: string;
     completed?: boolean;
@@ -671,7 +733,6 @@ export type UpdateCompanyPayload = {
     industry?: string;
     phone?: string;
     address?: string;
-    logoUrl?: string;
 };
 
 export type Contact = {
@@ -1277,7 +1338,6 @@ export type UpdateContactPayload = {
     phone?: string;
     title?: string;
     companyId?: number | null;
-    imageUrl?: string;
 };
 
 export type ContactFilters = {
@@ -1616,13 +1676,6 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
-export type UploadedFile = {
-    url: string;
-    fileName: string;
-    contentType: string;
-    size: number;
-};
-
 export type SearchResults = {
     companies: Company[];
     people: Contact[];
@@ -1884,6 +1937,8 @@ export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
+    businessCardScanning: boolean;
+    businessCardImport: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";

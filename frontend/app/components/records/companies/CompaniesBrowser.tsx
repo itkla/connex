@@ -35,12 +35,12 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, updateContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { uploadCompanyLogo, uploadContactPicture } from '@/app/lib/utils';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -249,6 +249,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         loadFacets();
     }, [clearSelection, resetMetrics, reload, loadFacets]);
 
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'company') refresh();
+    }), [refresh]);
+
     const selectAllMatching = useCallback(async () => {
         const requestId = selectAllRequestRef.current + 1;
         selectAllRequestRef.current = requestId;
@@ -287,6 +291,15 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(EMPTY_COMPANY_DRAFT);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
+    const newCompanyCloseTimerRef = useRef<number | null>(null);
+    const newCompanyGenerationRef = useRef(0);
+    const invalidateNewCompanyClose = useCallback(() => {
+        newCompanyGenerationRef.current += 1;
+        if (newCompanyCloseTimerRef.current == null) return;
+        window.clearTimeout(newCompanyCloseTimerRef.current);
+        newCompanyCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewCompanyClose(), [invalidateNewCompanyClose]);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
@@ -304,8 +317,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         };
         const newContact = await createContact(payload);
         if (c.imageFile) {
-            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
-            if (imageUrl) await updateContact(newContact.id, { ...payload, imageUrl }).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
         }
         return newContact;
     };
@@ -356,6 +368,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     }, [metricsStatusByCompanyId, t]);
 
     const openNewDialog = () => {
+        invalidateNewCompanyClose();
         setNewPayload(EMPTY_COMPANY_DRAFT);
         setLogoFile(null);
         setPendingContacts([]);
@@ -364,6 +377,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     };
 
     const closeNewDialog = (open: boolean) => {
+        invalidateNewCompanyClose();
         setNewDialogOpen(open);
     };
 
@@ -373,9 +387,13 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         try {
             const companyPayload = cleanCompanyPayload(newPayload);
             const created = await createCompany(companyPayload);
+            let logoUploadFailed = false;
             if (logoFile) {
-                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...companyPayload, logoUrl });
+                try {
+                    await uploadCompanyLogo(created.id, logoFile);
+                } catch {
+                    logoUploadFailed = true;
+                }
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
@@ -387,9 +405,14 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                 }
             }
             toastSuccess(t('toastCompanyCreated'));
+            if (logoUploadFailed) toastError(t('toastLogoUploadFailed'));
             setIsCreating(false);
             setCreationSucceeded(true);
-            setTimeout(() => {
+            invalidateNewCompanyClose();
+            const closeGeneration = newCompanyGenerationRef.current;
+            newCompanyCloseTimerRef.current = window.setTimeout(() => {
+                if (newCompanyGenerationRef.current !== closeGeneration) return;
+                newCompanyCloseTimerRef.current = null;
                 closeNewDialog(false);
                 refresh();
             }, 850);
@@ -443,7 +466,6 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         industry: d.industry.trim() || undefined,
                         phone: d.phone.trim() || undefined,
                         address: d.address.trim() || undefined,
-                        logoUrl: c.logoUrl || undefined,
                     };
                     return updateCompany(c.id, payload);
                 }),

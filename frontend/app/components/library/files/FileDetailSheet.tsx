@@ -230,7 +230,7 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 /**
- * Preview component for the file detail sheet. Basically a wrapped iframe
+ * Preview component for the file detail sheet. Renders images inline and a fallback for other files.
  * @param attachment - The attachment to display.
  * @param kind - The kind of the attachment.
  * @param noPreview - The text to display if there is no preview.
@@ -254,15 +254,6 @@ function Preview({
                 src={attachment.url}
                 alt={attachment.fileName}
                 className="max-h-72 w-full rounded-xl bg-muted object-contain ring-1 ring-border"
-            />
-        );
-    }
-    if (kind === 'pdf') {
-        return (
-            <iframe
-                src={attachment.url}
-                title={attachment.fileName}
-                className="h-80 w-full rounded-xl bg-muted ring-1 ring-border"
             />
         );
     }

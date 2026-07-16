@@ -1,6 +1,6 @@
 // transplanted from /me 
 
-import { type DealRiskSeverity, type TemperatureBand, type UploadedFile } from '@/app/lib/types';
+import { type DealRiskSeverity, type TemperatureBand } from '@/app/lib/types';
 import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
 
 export function formatShortDate(value: string | undefined, locale: string) {
@@ -247,83 +247,6 @@ export function copyToClipboard(value: string, label: string) {
     } catch {
         console.error(`Failed to copy ${label.toLowerCase()}`);
         return false;
-    }
-}
-
-/**
- * uploads a contact picture to the public directory and returns the public url
- * @param contactId - the id of the contact to upload the picture for
- * @param file 
- * @returns the public url of the uploaded picture
- */
-export async function uploadContactPicture(contactId: number, file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('contactPicture', file);
-    const res = await fetch(`/api/contacts/profile-picture?contactId=${contactId}`, {
-        method: 'PUT',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload contact picture');
-    }
-    const data = (await res.json()) as { imageUrl: string };
-    return data.imageUrl;
-}
-
-/**
- * uploads a company logo to the public directory and returns the public url
- * @param companyId - the id of the company to upload the logo for
- * @param file 
- * @returns the public url of the uploaded logo
- */
-export async function uploadCompanyLogo(companyId: number, file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('companyLogo', file);
-    const res = await fetch(`/api/companies/logo?companyId=${companyId}`, {
-        method: 'PUT',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload company logo');
-    }
-    const data = (await res.json()) as { logoUrl: string };
-    return data.logoUrl;
-}
-
-/**
- * uploads a file for any entity to the public directory and returns its metadata.
- * mirrors the profile-picture flow: the binary is written to disk here, then the
- * caller records it against the backend via createAttachment().
- * @param entityType - the owning entity type (e.g. "company", "person", "deal", "user")
- * @param entityId - the owning entity id
- * @param file - the file to upload
- * @returns the stored file's public url and metadata
- */
-export async function uploadFile(entityType: string, entityId: number, file: File): Promise<UploadedFile> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('entityType', entityType);
-    formData.append('entityId', String(entityId));
-    const res = await fetch('/api/uploads', {
-        method: 'POST',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload file');
-    }
-    return (await res.json()) as UploadedFile;
-}
-
-/**
- * removes a previously uploaded file from disk. best-effort; failures are swallowed
- * so a missing file never blocks deleting the attachment record.
- * @param url - the public url returned by uploadFile()
- */
-export async function deleteUploadedFile(url: string): Promise<void> {
-    try {
-        await fetch(`/api/uploads?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
-    } catch {
-        // best-effort cleanup
     }
 }
 

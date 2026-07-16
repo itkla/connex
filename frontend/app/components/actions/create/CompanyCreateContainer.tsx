@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -11,11 +11,10 @@ import {
     createContact,
     getCompanies,
     isFieldError,
-    updateCompany,
-    updateContact,
+    uploadCompanyLogo,
+    uploadContactPicture,
 } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { uploadCompanyLogo, uploadContactPicture } from '@/app/lib/utils';
 import type { Company, CreateCompanyPayload } from '@/app/lib/types';
 
 const EMPTY_DRAFT: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
@@ -59,6 +58,15 @@ export default function CompanyCreateContainer({
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const closeTimerRef = useRef<number | null>(null);
+    const closeGenerationRef = useRef(0);
+
+    const invalidatePendingClose = useCallback(() => {
+        closeGenerationRef.current += 1;
+        if (closeTimerRef.current == null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
@@ -77,8 +85,7 @@ export default function CompanyCreateContainer({
         };
         const newContact = await createContact(contactPayload);
         if (c.imageFile) {
-            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
-            if (imageUrl) await updateContact(newContact.id, { ...contactPayload, imageUrl }).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
         }
         return newContact;
     };
@@ -103,6 +110,7 @@ export default function CompanyCreateContainer({
     }, [open, loaded]);
 
     useEffect(() => {
+        invalidatePendingClose();
         if (!open) return;
         const raf = window.requestAnimationFrame(() => {
             setPayload(EMPTY_DRAFT);
@@ -111,10 +119,13 @@ export default function CompanyCreateContainer({
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open]);
+    }, [open, invalidatePendingClose]);
+
+    useEffect(() => () => invalidatePendingClose(), [invalidatePendingClose]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;
+        invalidatePendingClose();
         onOpenChange(next);
     };
 
@@ -124,9 +135,13 @@ export default function CompanyCreateContainer({
         try {
             const companyPayload = cleanCompanyPayload(payload);
             const created = await createCompany(companyPayload);
+            let logoUploadFailed = false;
             if (logoFile) {
-                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...companyPayload, logoUrl });
+                try {
+                    await uploadCompanyLogo(created.id, logoFile);
+                } catch {
+                    logoUploadFailed = true;
+                }
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
@@ -143,9 +158,14 @@ export default function CompanyCreateContainer({
                 }
             }
             toastSuccess(t('feedback.companyCreated'));
+            if (logoUploadFailed) toastError(t('feedback.companyLogoUploadFailed'));
             setCreating(false);
             setSucceeded(true);
-            setTimeout(() => {
+            invalidatePendingClose();
+            const closeGeneration = closeGenerationRef.current;
+            closeTimerRef.current = window.setTimeout(() => {
+                if (closeGenerationRef.current !== closeGeneration) return;
+                closeTimerRef.current = null;
                 onOpenChange(false);
                 router.refresh();
             }, 900);
@@ -159,7 +179,12 @@ export default function CompanyCreateContainer({
     if (embedded) {
         return (
             <NewCompanyForm
-                onCancel={onCancel ?? (() => onOpenChange(false))}
+                active={open}
+                onCancel={() => {
+                    invalidatePendingClose();
+                    if (onCancel) onCancel();
+                    else onOpenChange(false);
+                }}
                 payload={payload}
                 setPayload={setPayload}
                 logoFile={logoFile}

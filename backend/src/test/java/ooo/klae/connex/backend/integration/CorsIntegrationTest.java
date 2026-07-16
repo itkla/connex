@@ -47,7 +47,7 @@ class CorsIntegrationTest {
         MvcResult result = mockMvc.perform(options("/api/companies")
                 .header("Origin", "http://localhost:3000")
                 .header("Access-Control-Request-Method", "POST")
-                .header("Access-Control-Request-Headers", "content-type,x-csrf-token,x-workspace-id,accept-language"))
+                .header("Access-Control-Request-Headers", "content-type,idempotency-key,x-csrf-token,x-workspace-id,accept-language"))
             .andExpect(status().isOk())
             .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"))
             .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
@@ -58,6 +58,7 @@ class CorsIntegrationTest {
         assertThat(allowHeaders, notNullValue());
         assertThat(allowHeaders.toLowerCase(Locale.ROOT), allOf(
             containsString("content-type"),
+            containsString("idempotency-key"),
             containsString("x-csrf-token"),
             containsString("x-workspace-id"),
             containsString("accept-language")

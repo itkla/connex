@@ -98,7 +98,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(goalBody(null, "125000.00", "USD"))
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.ownerId").doesNotExist())
             .andExpect(jsonPath("$.ownerLabel").doesNotExist())
@@ -107,7 +107,7 @@ class GoalIntegrationTest {
         mockMvc.perform(delete("/api/goals/{id}", goalId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/goals/{id}", goalId)
@@ -150,7 +150,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(goalBody(reader.getId(), "1000.00", "USD"))
                 .session(readerSession)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
     }
 
@@ -167,7 +167,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(goalBody(null, "2000.00", "USD"))
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isConflict());
 
         Workspace other = newWorkspace();
@@ -177,7 +177,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(goalBody(outsider.getId(), "1000.00", "USD"))
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isBadRequest());
 
         mockMvc.perform(get("/api/goals")
@@ -246,7 +246,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(goalBody(null, "1000.00", "USD"))
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andReturn()
             .getResponse()
             .getStatus();
@@ -258,7 +258,7 @@ class GoalIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asInt();

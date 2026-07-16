@@ -14,5 +14,11 @@ public enum Capability {
     SOCIAL_LOGIN_MICROSOFT,
 
     /** Instance-managed mail transport. */
-    MANAGED_MAIL
+    MANAGED_MAIL,
+
+    /** Local business-card OCR with durable private card retention. */
+    BUSINESS_CARD_SCANNING,
+
+    /** Reviewed business-card import with durable private card retention. */
+    BUSINESS_CARD_IMPORT
 }

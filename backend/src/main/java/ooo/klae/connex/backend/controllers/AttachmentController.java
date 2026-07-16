@@ -8,7 +8,12 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AttachmentDto;
@@ -18,6 +23,7 @@ import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.services.AttachmentService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
 
@@ -98,9 +104,15 @@ public class AttachmentController {
     }
 
     /**
-     * GET endpoint that resolves an attachment by its blob URL within the caller's
-     * workspace (404 when the workspace owns no attachment at that URL). The upload
-     * route calls this to authorize a blob deletion before unlinking the file.
+     * Streams managed attachment content after resolving its tenant-scoped metadata row.
+     */
+    @GetMapping("/content/{token:.+}")
+    public ResponseEntity<StreamingResponseBody> getAttachmentContent(@PathVariable String token) {
+        return ManagedContentResponse.attachment(attachmentService.getManagedContent(token));
+    }
+
+    /**
+     * Resolves an attachment by URL within the caller's workspace.
      */
     @GetMapping("/by-url")
     public AttachmentDto getAttachmentByUrl(@RequestParam String url) {
@@ -108,14 +120,29 @@ public class AttachmentController {
     }
 
     /**
-     * POST endpoint to record a new attachment. The binary is uploaded to the
-     * Next.js filesystem first; this only persists the resulting URL + metadata.
+     * Records metadata for an existing app-relative or HTTP(S) attachment reference.
      */
     @PostMapping
     public AttachmentDto createAttachment(@Valid @RequestBody AttachmentDto dto) {
         Attachment attachment = dto.toBean();
         attachment.setUploadedBy(authService.getCurrentUser());
         return AttachmentDto.from(attachmentService.create(attachment));
+    }
+
+    /**
+     * Stores and records a private attachment in one bounded multipart mutation.
+     */
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AttachmentDto uploadAttachment(
+            @RequestParam String entityType,
+            @RequestParam int entityId,
+            @RequestPart("file") MultipartFile file) {
+        return AttachmentDto.from(attachmentService.upload(
+            entityType,
+            entityId,
+            UploadSource.from(file),
+            authService.getCurrentUser()
+        ));
     }
 
     /**

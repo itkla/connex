@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -45,6 +46,35 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Autowired CompanyService companyService;
     @Autowired ShareMapper shareMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void createRejectsClientSuppliedLogoUrl() {
+        Company company = new Company();
+        company.setName("No remote logo");
+        company.setLogoUrl("https://attacker.example/logo.png");
+
+        Company created = companyService.createCompany(company);
+
+        assertNull(created.getLogoUrl());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), created.getId()).getLogoUrl());
+    }
+
+    @Test
+    void genericUpdatePreservesAndReturnsCurrentManagedLogo() {
+        Company company = newCompany();
+        String managed = "/api/companies/" + company.getId()
+            + "/logo/550e8400-e29b-41d4-a716-446655440000.png";
+        assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
+            workspace.getId(), company.getId(), null, managed));
+        company.setName("Renamed company");
+        company.setLogoUrl("https://attacker.example/logo.png");
+
+        Company updated = companyService.updateCompany(company.getId(), company);
+
+        assertEquals(managed, updated.getLogoUrl());
+        assertEquals(managed,
+            companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+    }
 
     @Test
     void coreMutationsRejectSharedInCompanyBeforeSideEffects() {
@@ -121,6 +151,30 @@ class CompanyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void normalizedNameMatchUsesBoundedVisibleCandidateQuery() {
+        CompanyMapper mapper = mock(CompanyMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        Company exact = new Company();
+        exact.setId(11);
+        exact.setName("ANALYTICAL   LABS");
+        Company prefixOnly = new Company();
+        prefixOnly.setId(12);
+        prefixOnly.setName("Analytical Labs Group");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(mapper.findVisibleNameCandidates(
+                7, "analytical%labs%", "analytical labs", 17))
+            .thenReturn(List.of(exact, prefixOnly));
+        CompanyService service = companyService(mapper, workspaceService);
+
+        assertEquals(List.of(exact),
+            service.findVisibleByNormalizedName("  Ａnalytical　Labs  ").companies());
+
+        verify(mapper).findVisibleNameCandidates(
+            7, "analytical%labs%", "analytical labs", 17);
+        verify(mapper, never()).getAllCompanies(7);
+    }
+
+    @Test
     void getMatchingCompanyIdsForwardsEveryFilterWithinTheCurrentWorkspace() {
         CompanyMapper mapper = mock(CompanyMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
@@ -176,7 +230,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(AuditService.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), mock(ReferenceService.class),
-            Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -213,7 +268,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mapper, mock(TagMapper.class), personMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, mock(AuditService.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
-            mock(SegmentService.class), referenceService, Clock.systemUTC());
+            mock(SegmentService.class), referenceService, Clock.systemUTC(),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -241,7 +297,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(CustomFieldValueService.class),
             mock(SegmentService.class),
             mock(ReferenceService.class),
-            Clock.systemUTC()
+            Clock.systemUTC(),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
         );
     }
 

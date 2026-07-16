@@ -88,7 +88,7 @@ class OrgIsolationIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"workspaceId\":" + wsB.getId() + ",\"canEdit\":false}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/companies/" + companyA.getId())
@@ -114,7 +114,7 @@ class OrgIsolationIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"workspaceId\":" + wsA2.getId() + ",\"canEdit\":false}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/companies/" + company.getId())

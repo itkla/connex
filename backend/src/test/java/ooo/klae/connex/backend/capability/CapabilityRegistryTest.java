@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
+import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 
@@ -27,6 +28,7 @@ class CapabilityRegistryTest {
     @Mock private SsoConnectionService ssoConnectionService;
     @Mock private SocialLoginClientRegistrations socialLoginClientRegistrations;
     @Mock private MailProperties mailProperties;
+    @Mock private BusinessCardService businessCardService;
     @Mock private DeploymentProperties deploymentProperties;
 
     private CapabilityRegistry capabilityRegistry;
@@ -34,7 +36,8 @@ class CapabilityRegistryTest {
     @BeforeEach
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
-                socialLoginClientRegistrations, mailProperties, deploymentProperties, capability -> true);
+                socialLoginClientRegistrations, mailProperties, businessCardService,
+                deploymentProperties, capability -> true);
     }
 
     @Test
@@ -42,16 +45,22 @@ class CapabilityRegistryTest {
         when(deploymentProperties.isConfigured()).thenReturn(false);
         when(socialLoginClientRegistrations.isGoogleEnabled()).thenReturn(true);
         when(mailProperties.isManaged()).thenReturn(true);
+        when(businessCardService.isAvailable()).thenReturn(true);
+        when(businessCardService.isImportAvailable()).thenReturn(true);
 
         assertFalse(capabilityRegistry.isAvailable(Capability.SSO));
         assertTrue(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_GOOGLE));
         assertFalse(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT));
         assertTrue(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
+        assertTrue(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING));
+        assertTrue(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT));
 
         verify(ssoConnectionService).isInstanceEnabled();
         verify(socialLoginClientRegistrations).isGoogleEnabled();
         verify(socialLoginClientRegistrations).isMicrosoftEnabled();
         verify(mailProperties).isManaged();
+        verify(businessCardService).isAvailable();
+        verify(businessCardService).isImportAvailable();
     }
 
     @Test
@@ -69,6 +78,7 @@ class CapabilityRegistryTest {
                 ssoConnectionService,
                 socialLoginClientRegistrations,
                 mailProperties,
+                businessCardService,
                 deploymentProperties,
                 capability -> true,
                 Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
@@ -88,6 +98,7 @@ class CapabilityRegistryTest {
                 ssoConnectionService,
                 socialLoginClientRegistrations,
                 managedMailProperties,
+                businessCardService,
                 new DeploymentProperties(),
                 capability -> capability != Capability.MANAGED_MAIL);
 

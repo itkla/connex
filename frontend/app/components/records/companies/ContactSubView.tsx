@@ -10,6 +10,7 @@ import { QuickEditMediaUpload } from '@/app/components/records/quick-edit/QuickE
 import { ArrowLeftIcon, BriefcaseIcon, EnvelopeIcon, PhoneIcon, UserIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import type { PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import { toastError } from '@/app/lib/toast';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -36,6 +37,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
     const [phone, setPhone] = useState(initial.phone);
     const [imageFile, setImageFile] = useState<File | null>(initial.imageFile);
     const [errors, setErrors] = useState<FieldErrors>({});
+    const [imageSelectionPending, setImageSelectionPending] = useState(false);
     const nameRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -44,6 +46,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
     }, []);
 
     const submit = () => {
+        if (disabled || imageSelectionPending) return;
         const next: FieldErrors = {};
         if (!name.trim()) next.name = t('contactNameRequired');
         else if (email.trim() && !EMAIL_PATTERN.test(email.trim())) next.email = t('contactEmailInvalid');
@@ -60,7 +63,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
             submit();
         } else if (event.key === 'Escape') {
             event.preventDefault();
-            onBack();
+            if (!imageSelectionPending) onBack();
         }
     };
 
@@ -72,7 +75,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 <button
                     type="button"
                     onClick={onBack}
-                    disabled={disabled}
+                    disabled={disabled || imageSelectionPending}
                     aria-label={t('contactBack')}
                     className="-ml-1.5 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                 >
@@ -99,6 +102,9 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                         )
                     }
                     onSelect={setImageFile}
+                    onInvalidSelect={() => toastError(t('contactPhotoUnsupported'))}
+                    onPendingChange={setImageSelectionPending}
+                    disabled={disabled}
                 />
                 <p className="text-sm text-muted-foreground">{t('contactPhotoHint')}</p>
             </div>
@@ -200,7 +206,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                     type="button"
                     onClick={submit}
                     variant="brand"
-                    disabled={disabled}
+                    disabled={disabled || imageSelectionPending}
                     className="min-w-24 shadow-sm transition hover:shadow-md active:scale-[0.98]"
                 >
                     {t('contactDone')}

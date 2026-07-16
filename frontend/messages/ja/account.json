@@ -10,11 +10,12 @@
   "AccountProfile": {
     "title": "プロフィール",
     "subtitle": "あなたの個人情報です。すべてのワークスペースで、チームメンバーにこの情報が表示されます。",
-    "photoHint": "正方形の PNG・JPG・GIF がおすすめです。",
+    "photoHint": "正方形のJPEG・PNG・WebP画像がおすすめです。",
     "changePhoto": "写真を変更",
     "photoAlt": "あなたのプロフィール写真",
     "changePhotoAria": "プロフィール写真を変更",
     "photoUploadFailed": "写真をアップロードできませんでした。もう一度お試しください。",
+    "photoUnsupported": "JPEG、PNG、またはWebP画像を選択してください。",
     "displayNameLabel": "表示名",
     "usernameLabel": "ユーザー名",
     "emailLabel": "メールアドレス",
@@ -35,7 +36,8 @@
     "saving": "保存中",
     "discard": "破棄",
     "saved": "プロフィールを更新しました",
-    "saveFailed": "プロフィールを保存できませんでした。もう一度お試しください。"
+    "saveFailed": "プロフィールを保存できませんでした。もう一度お試しください。",
+    "partiallySaved": "一部のプロフィール変更は保存されましたが、別の変更に失敗しました。現在の内容を確認して、もう一度お試しください。"
   },
   "AccountSecurity": {
     "title": "パスキー",

@@ -57,7 +57,6 @@
       display_name = #{displayName},
       email = #{email},
       timezone = COALESCE(#{timezone}, timezone),
-      profile_picture_url = #{profilePictureUrl},
       <if test="passwordHash != null">password_hash = #{passwordHash},</if>
     </set>
     WHERE id = #{id}
@@ -87,10 +86,10 @@
     WHERE id = #{id}
   </update>
 
-  <update id="updateProfilePictureUrl">
+  <update id="updateProfilePictureUrlIfCurrent">
     UPDATE app_user
     SET profile_picture_url = #{profilePictureUrl}
-    WHERE id = #{id}
+    WHERE id = #{id} AND profile_picture_url &lt;=&gt; #{currentProfilePictureUrl}
   </update>
 
   <update id="updateTimezone">

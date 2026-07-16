@@ -59,6 +59,7 @@
       "allNotificationsRead": "すべての通知を既読にしました",
       "runFailed": "問題が発生しました。もう一度お試しください。",
       "companyCreated": "会社を作成しました",
+      "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
       "personCreated": "連絡先を作成しました",
       "dealCreated": "取引を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",

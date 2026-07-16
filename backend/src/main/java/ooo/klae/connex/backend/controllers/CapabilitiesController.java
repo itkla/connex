@@ -30,7 +30,9 @@ public class CapabilitiesController {
                 new SocialLogin(
                         capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_GOOGLE),
                         capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT)),
-                capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
+                capabilityRegistry.isAvailable(Capability.MANAGED_MAIL),
+                capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
+                capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT));
     }
 
     /**
@@ -39,8 +41,15 @@ public class CapabilitiesController {
      * @param sso whether organization SSO is available
      * @param socialLogin available social-login providers
      * @param mailManaged whether instance-managed mail is enabled
+     * @param businessCardScanning whether local OCR and durable card retention are ready
+     * @param businessCardImport whether reviewed source-image import and retention are ready
      */
-    public record CapabilitiesResponse(boolean sso, SocialLogin socialLogin, boolean mailManaged) {
+    public record CapabilitiesResponse(
+            boolean sso,
+            SocialLogin socialLogin,
+            boolean mailManaged,
+            boolean businessCardScanning,
+            boolean businessCardImport) {
     }
 
     /**

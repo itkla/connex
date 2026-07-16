@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { UserIcon } from '@heroicons/react/24/outline';
 
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { type Contact } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
+import { toastError } from '@/app/lib/toast';
 import {
     QuickEditField,
     QuickEditMediaUpload,
@@ -50,17 +51,34 @@ export default function QuickEditSheet({
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
     const total = selectedContacts.length;
+    const [pendingMediaIds, setPendingMediaIds] = useState<Set<number>>(new Set());
+    const mediaPending = pendingMediaIds.size > 0;
+
+    const setMediaPending = (id: number, pending: boolean) => {
+        setPendingMediaIds((current) => {
+            const next = new Set(current);
+            if (pending) next.add(id);
+            else next.delete(id);
+            return next;
+        });
+    };
 
     return (
         <QuickEditSheetShell
             open={editSheetOpen}
-            onOpenChange={setEditSheetOpen}
+            onOpenChange={(next) => {
+                if (!next && mediaPending) return;
+                setEditSheetOpen(next);
+            }}
             icon={<UserIcon />}
             title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
             count={total}
             isSaving={isSaving}
-            onSave={saveEdits}
+            interactionPending={mediaPending}
+            onSave={() => {
+                if (!mediaPending) saveEdits();
+            }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
         >
@@ -81,6 +99,10 @@ export default function QuickEditSheet({
                             </div>
                         }
                         onSelect={(file) => updateImageFile(c.id, file)}
+                        onInvalidSelect={() => toastError(t('unsupportedImage'))}
+                        onPendingChange={(pending) => setMediaPending(c.id, pending)}
+                        active={editSheetOpen}
+                        disabled={isSaving}
                     />
                 ) : (
                     <ContactAvatar contact={c} type="large" />

@@ -17,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * The data-integrity handler must not echo which unique column collided (#81): a duplicate email or
@@ -154,6 +155,15 @@ class GlobalExceptionHandlerTest {
     void unreadableMessage_onRequestBodyLimit_mapsTo413() {
         ResponseEntity<String> response = handler.unreadableMessage(
             new HttpMessageNotReadableException("too large", new RequestBodyTooLargeException(8), null));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertEquals("Request body is too large", response.getBody());
+    }
+
+    @Test
+    void oversizedMultipartUpload_mapsTo413() {
+        ResponseEntity<String> response = handler.uploadTooLarge(
+                new MaxUploadSizeExceededException(64L * 1024L * 1024L));
 
         assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
         assertEquals("Request body is too large", response.getBody());

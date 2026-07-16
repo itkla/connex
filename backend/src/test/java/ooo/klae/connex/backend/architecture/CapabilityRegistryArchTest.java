@@ -22,7 +22,8 @@ class CapabilityRegistryArchTest {
 
     private static final Pattern OPERATOR_CAPABILITY_GETTER = Pattern.compile(
             "\\.\\s*(?:isInstanceEnabled|isGoogleEnabled|isMicrosoftEnabled)\\s*\\("
-                    + "|\\bmailProperties\\s*\\.\\s*isManaged\\s*\\(");
+                    + "|\\bmailProperties\\s*\\.\\s*isManaged\\s*\\("
+                    + "|\\bbusinessCardService\\s*\\.\\s*(?:isAvailable|isImportAvailable)\\s*\\(");
 
     /**
      * The registry is the canonical aggregation boundary. The three legacy controllers remain

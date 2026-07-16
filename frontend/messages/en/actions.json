@@ -59,6 +59,7 @@
       "allNotificationsRead": "All notifications marked as read",
       "runFailed": "Something went wrong. Please try again.",
       "companyCreated": "Company created",
+      "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
       "personCreated": "Contact created",
       "dealCreated": "Deal created",
       "createFailed": "Couldn't create. Please try again.",

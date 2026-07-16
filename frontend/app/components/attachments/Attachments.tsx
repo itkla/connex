@@ -12,9 +12,9 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import { createAttachment, deleteAttachment, getAttachments } from '@/app/lib/api';
+import { deleteAttachment, getAttachments, uploadAttachment } from '@/app/lib/api';
 import { type Attachment } from '@/app/lib/types';
-import { deleteUploadedFile, formatDate, formatFileSize, safeHref, uploadFile } from '@/app/lib/utils';
+import { formatDate, formatFileSize, safeHref } from '@/app/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { onAttachmentsAdded } from '@/app/components/attachments/attachmentEvents';
 
@@ -81,15 +81,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
         await Promise.all(
             files.map(async (file, index) => {
                 try {
-                    const uploaded = await uploadFile(entityType, entityId, file);
-                    const created = await createAttachment({
-                        entityType,
-                        entityId,
-                        fileName: uploaded.fileName,
-                        url: uploaded.url,
-                        contentType: uploaded.contentType,
-                        size: uploaded.size,
-                    });
+                    const created = await uploadAttachment(entityType, entityId, file);
                     setItems((prev) => [created, ...prev]);
                     successes++;
                 } catch {
@@ -109,7 +101,6 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
     async function handleDelete(attachment: Attachment) {
         setBusyId(attachment.id);
         try {
-            await deleteUploadedFile(attachment.url);
             await deleteAttachment(attachment.id);
             setItems((prev) => prev.filter((a) => a.id !== attachment.id));
             toastSuccess(t('deleted'));

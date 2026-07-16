@@ -25,7 +25,10 @@ public interface UserMapper {
     int update(User user);
     int delete(int id);
     int updateLastLoginAt(int id);
-    int updateProfilePictureUrl(@Param("id") int id, @Param("profilePictureUrl") String profilePictureUrl);
+    int updateProfilePictureUrlIfCurrent(
+        @Param("id") int id,
+        @Param("currentProfilePictureUrl") String currentProfilePictureUrl,
+        @Param("profilePictureUrl") String profilePictureUrl);
     int updateDisplayName(@Param("id") int id, @Param("displayName") String displayName);
     int updateEmail(@Param("id") int id, @Param("email") String email);
     int markEmailVerified(int id);

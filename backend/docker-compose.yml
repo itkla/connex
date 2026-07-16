@@ -1,6 +1,39 @@
 services:
+  ocr:
+    build:
+      context: ../ocr
+    profiles: ["ocr"]
+    restart: unless-stopped
+    environment:
+      CONNEX_OCR_SERVICE_TOKEN: ${CONNEX_OCR_SERVICE_TOKEN:-}
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "1"
+      CONNEX_OCR_REQUEST_TIMEOUT_SECONDS: ${CONNEX_OCR_REQUEST_TIMEOUT_SECONDS:-12}
+      CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-180}
+      CONNEX_OCR_MAX_REQUEST_HANDLERS: ${CONNEX_OCR_MAX_REQUEST_HANDLERS:-8}
+      CONNEX_OCR_MAX_IMAGE_BYTES: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:-8388608}
+      CONNEX_OCR_MAX_WIDTH: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:-8192}
+      CONNEX_OCR_MAX_HEIGHT: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT:-8192}
+      CONNEX_OCR_MAX_PIXELS: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS:-24000000}
+    ports:
+      - "127.0.0.1:8090:8090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 128
+    dns:
+      - 127.0.0.1
+    networks:
+      - ocr_internal
+
   db:
-    image: mysql:latest
+    image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
     restart: always
     command: --log-bin-trust-function-creators=1
     environment:
@@ -14,7 +47,14 @@ services:
       - 33060:33060
 
   adminer:
-    image: adminer:latest
+    image: adminer:5.4.2@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
     restart: always
     ports:
       - 9001:8080
+
+networks:
+  ocr_internal:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

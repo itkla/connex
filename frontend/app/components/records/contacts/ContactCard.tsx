@@ -19,8 +19,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 // import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
-import { updateContact } from '@/app/lib/api';
-import { uploadContactPicture } from '@/app/lib/utils';
+import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
@@ -115,6 +114,7 @@ export default function ContactCard({
             return;
         }
         setIsSaving(true);
+        let detailsSaved = false;
         try {
             const payload: UpdateContactPayload = {
                 name: trimmedName,
@@ -122,18 +122,17 @@ export default function ContactCard({
                 phone: draft.phone.trim() || undefined,
                 title: draft.title.trim() || undefined,
                 companyId: companyId ?? null,
-                imageUrl: imageUrl || undefined,
             };
-            if (imageFile) {
-                payload.imageUrl = await uploadContactPicture(id, imageFile);
-            }
             await updateContact(id, payload);
+            detailsSaved = true;
+            if (imageFile) await uploadContactPicture(id, imageFile);
             toastSuccess(t('toastContactUpdated'));
             setEditSheetOpen(false);
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            toastError(detailsSaved && imageFile ? t('toastPartiallySaved') : err instanceof Error ? err.message : t('toastFailedSave'));
+            if (detailsSaved) router.refresh();
         } finally {
             setIsSaving(false);
         }

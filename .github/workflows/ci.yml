@@ -13,34 +13,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ocr:
+    name: OCR — contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install lightweight image test dependencies
+        run: python -m pip install Pillow==12.3.0 numpy==2.3.5
+      - name: Install pinned OCR lock compiler
+        run: python -m pip install pip-tools==7.5.3
+      - name: Regenerate the deployable OCR lock
+        working-directory: ocr
+        run: |
+          pip-compile \
+            --generate-hashes \
+            --strip-extras \
+            --allow-unsafe \
+            --output-file=requirements.lock \
+            requirements.txt
+          git diff --exit-code -- requirements.lock
+      - name: Test service protocol and benchmark manifest
+        working-directory: ocr
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -v
+      - name: Build deployable OCR image
+        run: docker build --tag connex-ocr-ci ocr
+      - name: Smoke-test deployable OCR service
+        run: bash ocr/ci/smoke_image.sh connex-ocr-ci
+
   migrations:
     name: Migrations — forward-only guard
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
       - name: Forbid modifying or deleting shipped migrations
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          CHANGED=$(git diff --diff-filter=MD --name-only "$BASE_SHA"...HEAD -- 'backend/src/main/resources/db/migration' || true)
-          if [ -n "$CHANGED" ]; then
-            echo "::error::Shipped Flyway migrations are immutable. Modified or deleted:"
-            echo "$CHANGED"
-            echo "Forward-only: add a NEW migration instead of editing an applied one (see docs/UPGRADING.md)."
-            exit 1
-          fi
-          echo "No shipped migrations modified or deleted."
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/check-migration-immutability.sh "$BASE_SHA" HEAD
+      - name: Regression-test migration immutability guard
+        run: bash .github/scripts/test-migration-immutability.sh
 
   backend:
     name: Backend — build & test
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:9.7
+        image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
         env:
           MYSQL_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}-root
           MYSQL_DATABASE: connexdb
@@ -56,9 +81,9 @@ jobs:
       CONNEX_DB_USERNAME: root
       CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}-root
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Set up JDK 26
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
         with:
           distribution: temurin
           java-version: '26'
@@ -73,15 +98,15 @@ jobs:
     name: Frontend — typecheck & lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
           package_json_file: frontend/package.json
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '22'
           cache: pnpm
@@ -111,4 +136,5 @@ jobs:
           fi
           echo "Linting changed files:"
           echo "$CHANGED"
-          node_modules/.bin/eslint $CHANGED
+          mapfile -t FILES <<< "$CHANGED"
+          node_modules/.bin/eslint "${FILES[@]}"

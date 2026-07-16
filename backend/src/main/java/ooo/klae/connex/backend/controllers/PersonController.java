@@ -8,7 +8,12 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -40,6 +45,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
 import java.util.Map;
@@ -178,6 +184,26 @@ public class PersonController {
     @GetMapping("/{id:\\d+}")
     public PersonDetailDto getPersonById(@PathVariable int id) {
         return PersonDetailDto.from(personService.getPersonById(id));
+    }
+
+    /**
+     * Stores and assigns a private contact picture.
+     */
+    @PutMapping(value = "/{id}/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public PersonDto updateProfilePicture(
+            @PathVariable int id,
+            @RequestPart("file") MultipartFile file) {
+        return PersonDto.from(personService.updateProfilePicture(id, UploadSource.from(file)));
+    }
+
+    /**
+     * Streams the currently assigned contact picture after tenant authorization.
+     */
+    @GetMapping("/{id}/profile-picture/{token:.+}")
+    public ResponseEntity<StreamingResponseBody> getProfilePicture(
+            @PathVariable int id,
+            @PathVariable String token) {
+        return ManagedContentResponse.inline(personService.getProfilePictureContent(id, token));
     }
 
     /**
