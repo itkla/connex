@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -50,6 +51,7 @@ class PersonServiceTest extends AbstractServiceTest {
 
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
+    @Autowired AiOutputCacheMapper aiOutputCacheMapper;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
@@ -100,6 +102,59 @@ class PersonServiceTest extends AbstractServiceTest {
         assertNotNull(changes);
         assertTrue(changes.contains("revokedShares"));
         assertTrue(changes.contains("provisionCeasedAt"));
+    }
+
+    @Test
+    void suspendingPurgesPersonKeyedAiOutputsAndKeepsUnrelatedRows() {
+        Company company = newCompany();
+        Person subject = newPerson(company);
+        Person other = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal subjectDeal = newDeal(pipeline, stage, company);
+        Deal otherDeal = newDeal(pipeline, stage, company);
+        dealMapper.addPerson(workspace.getId(), subjectDeal.getId(), subject.getId(), null);
+        dealMapper.addPerson(workspace.getId(), otherDeal.getId(), other.getId(), null);
+
+        Workspace grantee = newWorkspaceInSameOrg();
+
+        int lo = Math.min(subject.getId(), other.getId());
+        int hi = Math.max(subject.getId(), other.getId());
+        seedCache(workspace.getId(), "intro.rationale:en", lo, hi);
+        seedCache(grantee.getId(), "intro.rationale:ja", lo, hi);
+        seedCache(workspace.getId(), "deal.brief:en", subjectDeal.getId(), 0);
+        seedCache(workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0);
+        seedCache(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0);
+        seedCache(workspace.getId(), "report.narrative:v2:en", 4242, 0);
+
+        personService.updateProcessingRestrictions(subject.getId(), true, false);
+
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "intro.rationale:en", lo, hi));
+        assertNull(aiOutputCacheMapper.getBySubject(grantee.getId(), "intro.rationale:ja", lo, hi));
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", subjectDeal.getId(), 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
+
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.restrictions' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), subject.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("purgedAiOutputs"));
+    }
+
+    private void seedCache(int workspaceId, String feature, int subjectAId, int subjectBId) {
+        ooo.klae.connex.backend.beans.AiOutputCache row = new ooo.klae.connex.backend.beans.AiOutputCache();
+        row.setWorkspaceId(workspaceId);
+        row.setFeature(feature);
+        row.setSubjectAId(subjectAId);
+        row.setSubjectBId(subjectBId);
+        row.setContentHash(String.format("%064d", subjectAId));
+        row.setPayload("{\"rationale\":\"x\"}");
+        row.setGeneratedAt("2026-07-16T00:00:00Z");
+        aiOutputCacheMapper.upsert(row);
     }
 
     @Test
@@ -314,6 +369,7 @@ class PersonServiceTest extends AbstractServiceTest {
         PersonService service = new PersonService(
             mapper,
             mock(ShareMapper.class),
+            mock(AiOutputCacheMapper.class),
             mock(CompanyMapper.class),
             mock(TagMapper.class),
             mock(DealMapper.class),

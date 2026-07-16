@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -47,6 +48,7 @@ import lombok.RequiredArgsConstructor;
 public class PersonService {
     private final PersonMapper personMapper;
     private final ShareMapper shareMapper;
+    private final AiOutputCacheMapper aiOutputCacheMapper;
     private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
     private final DealMapper dealMapper;
@@ -271,15 +273,21 @@ public class PersonService {
         Person before = requireOwnedPerson(workspaceId, id);
         personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
+        int purgedAiOutputs = suspended || provisionCeased
+            ? aiOutputCacheMapper.deleteForPerson(workspaceId, id)
+            : 0;
         Person after = requireOwnedPerson(workspaceId, id);
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
-        if (diff != null || revokedShares > 0) {
+        if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {
             Map<String, Object> changes = new LinkedHashMap<>();
             if (diff != null) {
                 changes.putAll(diff);
             }
             if (revokedShares > 0) {
                 changes.put("revokedShares", revokedShares);
+            }
+            if (purgedAiOutputs > 0) {
+                changes.put("purgedAiOutputs", purgedAiOutputs);
             }
             auditService.record("person.restrictions", "person", id, before.getName(),
                 "Updated processing restrictions for " + before.getName(), changes);
