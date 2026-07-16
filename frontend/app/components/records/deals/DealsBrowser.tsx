@@ -193,7 +193,7 @@ function normalizeDealFilters(filters: FilterState): FilterState {
     return normalized;
 }
 
-export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, timezone }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; timezone: string }) {
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; timezone: string; currentUserId: number }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -1140,6 +1140,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             query={deferredQuery}
                             currency={activeCurrency ?? undefined}
                             filters={serverFilters}
+                            currentUserId={currentUserId}
                             revision={dataRevision}
                             reduce={reduce}
                         />

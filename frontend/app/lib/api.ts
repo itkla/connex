@@ -1863,8 +1863,8 @@ export function getDealsPage(params: Types.DealsPageParams = {}, init: RequestIn
 }
 
 /** Returns one complete, server-bounded pipeline board for absolute Kanban ordering. */
-export function getDealBoard(pipelineId: number, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Deal[]>(`/api/deals/board${buildQuery({ pipelineId, ...scope })}`, init);
+export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/deals/board${buildQuery({ pipelineId })}`, init);
 }
 
 export function getDealsFromCookie(cookie: string | null) {
