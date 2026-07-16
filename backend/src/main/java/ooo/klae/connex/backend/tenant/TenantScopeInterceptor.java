@@ -136,11 +136,12 @@ public class TenantScopeInterceptor implements Interceptor {
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
-     * recipient-scoped notification delete backs invitation decline and the
-     * fresh-membership ghost clean (invites, invite links, SSO JIT
-     * provisioning — see {@code UserOffboardingService.prepareFreshMembership}),
-     * all of which a user with no active workspace may reach; it anchors
-     * {@code workspace_id} and {@code recipient_id} in SQL. The recipient
+     * recipient-scoped notification delete and the deal-collaborator ghost clean
+     * back invitation decline and the fresh-membership ghost clean (registration,
+     * invites, invite links, SSO JIT provisioning — see
+     * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
+     * with no active workspace may reach; both anchor {@code workspace_id} and
+     * the user id in SQL. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
      * offboarding flows.
@@ -161,6 +162,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.clearActorAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
+        MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",
         MAPPERS + "TaskMapper.unassignAnywhere",
         MAPPERS + "AttachmentMapper.clearUploaderAnywhere",
         MAPPERS + "RuleMapper.clearRunAsAnywhere",
