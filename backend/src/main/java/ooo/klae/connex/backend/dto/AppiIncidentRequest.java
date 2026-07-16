@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
+import ooo.klae.connex.backend.util.DateTimes;
 
 @Data
 public class AppiIncidentRequest {
@@ -49,6 +50,6 @@ public class AppiIncidentRequest {
     }
 
     private static boolean supported(LocalDateTime value) {
-        return value == null || value.getYear() >= 1000 && value.getYear() <= 9999;
+        return DateTimes.fitsMysqlDateTimeRange(value);
     }
 }

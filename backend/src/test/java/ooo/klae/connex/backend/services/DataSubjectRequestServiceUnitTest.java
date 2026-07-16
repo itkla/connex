@@ -103,7 +103,6 @@ class DataSubjectRequestServiceUnitTest {
     void updateAllowsTypeCorrectionAndWritesMetadataOnlyAudit() {
         DataSubjectRequest stored = storedRequest();
         when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(stored);
-        when(dataSubjectRequestMapper.update(stored)).thenReturn(1);
         DataSubjectRequestUpsertRequest update = request("cease_use");
         update.setStatus("closed");
 
@@ -212,25 +211,28 @@ class DataSubjectRequestServiceUnitTest {
     }
 
     @Test
-    void updateReplacesOmittedOptionalFieldsAndAuditsTheFieldDiff() {
+    void updatePreservesOmittedFieldsClearsBlankTextAndAuditsTheFieldDiff() {
         DataSubjectRequest stored = storedVerifiedRequest();
         stored.setSubjectWorkspaceId(4);
         stored.setSubjectPersonId(5);
         stored.setDueAt(LocalDateTime.of(2026, 2, 1, 0, 0));
         stored.setSummary("Original summary");
         when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(stored);
-        when(dataSubjectRequestMapper.update(stored)).thenReturn(1);
+        when(dataSubjectRequestMapper.subjectPersonInOrg(3, 4, 5)).thenReturn(true);
         when(auditService.diff(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.anySet())).thenReturn(Map.of("dueAt", Map.of()));
+        DataSubjectRequestUpsertRequest update = request("disclosure");
+        update.setResolution("   ");
 
-        DataSubjectRequestDto updated = service.update(3, 9, 7, request("disclosure"));
+        DataSubjectRequestDto updated = service.update(3, 9, 7, update);
 
         assertEquals("received", updated.getStatus());
-        assertNull(updated.getSubjectWorkspaceId());
-        assertNull(updated.getSubjectPersonId());
-        assertNull(updated.getIdentityVerifiedAt());
-        assertNull(updated.getDueAt());
-        assertNull(updated.getSummary());
+        assertEquals(4, updated.getSubjectWorkspaceId());
+        assertEquals(5, updated.getSubjectPersonId());
+        assertNotNull(updated.getIdentityVerifiedAt());
+        assertEquals(LocalDateTime.of(2026, 2, 1, 0, 0), updated.getDueAt());
+        assertEquals("Original summary", updated.getSummary());
+        assertNull(updated.getResolution());
         assertNotNull(updated.getReceivedAt());
         verify(auditService).record(eq("appi.subject_request.update"), eq("organization"), eq(3),
             eq("Subject request 9"), eq("APPI data-subject request updated"),

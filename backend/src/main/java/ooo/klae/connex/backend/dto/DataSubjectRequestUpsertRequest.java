@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -11,6 +10,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
+import ooo.klae.connex.backend.util.DateTimes;
 
 @Data
 public class DataSubjectRequestUpsertRequest {
@@ -68,12 +68,6 @@ public class DataSubjectRequestUpsertRequest {
     }
 
     private static boolean supported(LocalDateTime value) {
-        if (value == null) {
-            return true;
-        }
-        LocalDateTime stored = value.getNano() >= 500_000_000
-            ? value.truncatedTo(ChronoUnit.SECONDS).plusSeconds(1)
-            : value;
-        return stored.getYear() >= 1000 && stored.getYear() <= 9999;
+        return DateTimes.fitsMysqlDateTimeRange(value);
     }
 }
