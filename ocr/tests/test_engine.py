@@ -1,5 +1,9 @@
 import io
+import sys
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from ocr_service.config import ServiceConfig
 from ocr_service.engine import ImageRejected, PaddleEngine, _extract_lines
@@ -19,6 +23,39 @@ class ArrayLike:
 
 
 class EngineResultTest(unittest.TestCase):
+    def test_disables_incompatible_mkldnn_inference_path(self) -> None:
+        constructor = Mock()
+        paths = {
+            "doc_orientation_classify_model_dir": Path("/models/doc-orientation"),
+            "textline_orientation_model_dir": Path("/models/textline-orientation"),
+            "text_detection_model_dir": Path("/models/text-detection"),
+            "text_recognition_model_dir": Path("/models/text-recognition"),
+        }
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=8090,
+            service_token="test-service-token-0000000000000000",
+            max_image_bytes=1024,
+            max_width=25,
+            max_height=50,
+            max_pixels=2_000,
+            request_timeout_seconds=2,
+        )
+
+        with (
+            patch.dict(sys.modules, {"paddleocr": SimpleNamespace(PaddleOCR=constructor)}),
+            patch("ocr_service.engine.require_supported_cpu"),
+            patch("ocr_service.engine.model_paths", return_value=paths),
+            patch("ocr_service.engine.models_ready", return_value=True),
+        ):
+            PaddleEngine(config)
+
+        arguments = constructor.call_args.kwargs
+        self.assertFalse(arguments["enable_mkldnn"])
+        self.assertEqual(2, arguments["cpu_threads"])
+        for argument, path in paths.items():
+            self.assertEqual(str(path), arguments[argument])
+
     def test_extracts_bounded_lines_from_paddle_result(self) -> None:
         results = [Result({"res": {
             "rec_texts": [" Ada   Lovelace ", "ada@example.test"],
