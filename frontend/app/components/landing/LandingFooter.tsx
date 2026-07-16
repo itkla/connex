@@ -44,6 +44,12 @@ export default async function LandingFooter() {
                             <Link href="/disclosure" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navDisclosure")}
                             </Link>
+                            <Link href="/legal" className="text-muted-foreground transition-colors hover:text-foreground">
+                                {t("navTerms")}
+                            </Link>
+                            <Link href="/tokushoho" className="text-muted-foreground transition-colors hover:text-foreground">
+                                {t("navTokushoho")}
+                            </Link>
                         </nav>
                         <LanguageSwitcher align="start" />
                     </div>
