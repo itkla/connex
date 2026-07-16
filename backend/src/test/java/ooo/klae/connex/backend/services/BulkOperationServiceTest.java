@@ -124,6 +124,50 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void assignOwnerToCompanies_assignsOwnerToEveryCompany() {
+        Company c1 = newCompany();
+        Company c2 = newCompany();
+        User newOwner = newUser();
+
+        BulkOperationResult result = bulkOperationService.assignOwnerToCompanies(
+            List.of(c1.getId(), c2.getId()), newOwner.getId());
+
+        assertEquals(2, result.getSucceeded());
+        assertEquals(newOwner.getId(),
+            companyMapper.getCompanyById(workspace.getId(), c1.getId()).getOwnerId());
+    }
+
+    @Test
+    void assignOwnerToCompanies_failsFastWhenOwnerNotAMember() {
+        Company company = newCompany();
+
+        assertThrows(ForbiddenException.class,
+            () -> bulkOperationService.assignOwnerToCompanies(List.of(company.getId()), 999_999));
+    }
+
+    @Test
+    void assignOwnerToPersons_assignsOwnerToEveryPerson() {
+        Person p1 = newPerson(newCompany());
+        Person p2 = newPerson(newCompany());
+        User newOwner = newUser();
+
+        BulkOperationResult result = bulkOperationService.assignOwnerToPersons(
+            List.of(p1.getId(), p2.getId()), newOwner.getId());
+
+        assertEquals(2, result.getSucceeded());
+        assertEquals(newOwner.getId(),
+            personMapper.getPersonById(workspace.getId(), p1.getId()).getOwnerId());
+    }
+
+    @Test
+    void assignOwnerToPersons_failsFastWhenOwnerNotAMember() {
+        Person person = newPerson(newCompany());
+
+        assertThrows(ForbiddenException.class,
+            () -> bulkOperationService.assignOwnerToPersons(List.of(person.getId()), 999_999));
+    }
+
+    @Test
     void assignOwnerToDeals_assignsOwnerToEveryDeal() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);

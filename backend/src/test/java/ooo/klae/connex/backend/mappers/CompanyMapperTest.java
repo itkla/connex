@@ -274,6 +274,20 @@ class CompanyMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void genericUpdateCannotReplaceOwner() {
+        Company company = newCompany();
+        User owner = newUser();
+        User replacement = newUser();
+        companyMapper.updateOwner(workspace.getId(), company.getId(), owner.getId());
+
+        company.setOwnerId(replacement.getId());
+        companyMapper.update(company);
+
+        assertEquals(owner.getId(),
+            companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+    }
+
+    @Test
     void genericUpdateCannotReplaceManagedLogoAndCasRejectsStaleReplacement() {
         Company company = newCompany();
         String first = "/api/companies/" + company.getId() + "/logo/550e8400-e29b-41d4-a716-446655440000.png";
@@ -366,6 +380,20 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertEquals(0, affected, "cross-workspace addTag must affect no rows");
         List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
+    }
+
+    @Test
+    void updateOwner_fromAnotherWorkspace_doesNotMutate() {
+        Company company = newCompany();
+        User owner = newUser();
+        companyMapper.updateOwner(workspace.getId(), company.getId(), owner.getId());
+        Workspace other = newWorkspace();
+
+        int affected = companyMapper.updateOwner(other.getId(), company.getId(), null);
+
+        assertEquals(0, affected);
+        assertEquals(owner.getId(),
+            companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
     }
 
     /**

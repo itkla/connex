@@ -17,10 +17,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
@@ -38,6 +40,8 @@ class UserOffboardingOrderTest {
     @Mock private IntroductionMapper introductionMapper;
     @Mock private NotificationMapper notificationMapper;
     @Mock private DealMapper dealMapper;
+    @Mock private CompanyMapper companyMapper;
+    @Mock private PersonMapper personMapper;
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
     @Mock private AttachmentMapper attachmentMapper;
@@ -54,10 +58,12 @@ class UserOffboardingOrderTest {
     void removeAndLeaveDetachmentLocksMembershipBeforeNotificationDeletion() {
         service.detachMemberContent(7, 9);
 
-        InOrder order = inOrder(notificationMapper, taskMapper, dealMapper);
+        InOrder order = inOrder(notificationMapper, taskMapper, dealMapper, companyMapper, personMapper);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
         order.verify(dealMapper).clearMemberDealOwnership(7, 9);
+        order.verify(companyMapper).clearMemberOwnership(7, 9);
+        order.verify(personMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         verifyNoInteractions(stateVersionService);

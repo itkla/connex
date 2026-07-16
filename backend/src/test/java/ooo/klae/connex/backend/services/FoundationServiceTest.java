@@ -13,6 +13,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -24,6 +26,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 class FoundationServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
+    @Autowired CompanyService companyService;
+    @Autowired PersonService personService;
     @Autowired TaskService taskService;
     @Autowired UserService userService;
     @Autowired WorkspaceService workspaceService;
@@ -47,6 +51,28 @@ class FoundationServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void createCompanyDefaultsWorkspaceAndOwner() {
+        Company company = new Company();
+        company.setName("Owned company");
+
+        Company created = companyService.createCompany(company);
+
+        assertEquals(workspace.getId(), created.getWorkspaceId());
+        assertEquals(currentUser.getId(), created.getOwnerId());
+    }
+
+    @Test
+    void createPersonDefaultsWorkspaceAndOwner() {
+        Person person = new Person();
+        person.setName("Owned contact");
+
+        Person created = personService.create(person);
+
+        assertEquals(workspace.getId(), created.getWorkspaceId());
+        assertEquals(currentUser.getId(), created.getOwnerId());
+    }
+
+    @Test
     void ownerAndCollaboratorsRejectUsersOutsideWorkspace() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -58,6 +84,18 @@ class FoundationServiceTest extends AbstractServiceTest {
             ForbiddenException.class,
             () -> dealService.replaceCollaborators(deal.getId(), List.of(outsider.getId()))
         );
+    }
+
+    @Test
+    void companyAndPersonOwnersRejectUsersOutsideWorkspace() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        User outsider = newUserInAnotherWorkspace();
+
+        assertThrows(ForbiddenException.class,
+            () -> companyService.updateOwner(company.getId(), outsider.getId()));
+        assertThrows(ForbiddenException.class,
+            () -> personService.updateOwner(person.getId(), outsider.getId()));
     }
 
     @Test

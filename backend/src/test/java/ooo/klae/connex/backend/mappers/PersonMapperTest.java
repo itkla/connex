@@ -377,6 +377,20 @@ class PersonMapperTest extends AbstractMapperTest {
                 .noneMatch(x -> x.getId() == person.getId()));
     }
 
+    @Test
+    void genericUpdateCannotReplaceOwner() {
+        Person person = newPerson(newCompany());
+        User owner = newUser();
+        User replacement = newUser();
+        personMapper.updateOwner(workspace.getId(), person.getId(), owner.getId());
+
+        person.setOwnerId(replacement.getId());
+        personMapper.update(person);
+
+        assertEquals(owner.getId(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+    }
+
     /**
      * A tag write issued with another workspace's id must not associate the tag.
      */
@@ -391,6 +405,20 @@ class PersonMapperTest extends AbstractMapperTest {
         assertEquals(0, affected, "cross-workspace addTag must affect no rows");
         assertTrue(personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
                 .noneMatch(x -> x.getId() == person.getId()));
+    }
+
+    @Test
+    void updateOwner_fromAnotherWorkspace_doesNotMutate() {
+        Person person = newPerson(newCompany());
+        User owner = newUser();
+        personMapper.updateOwner(workspace.getId(), person.getId(), owner.getId());
+        Workspace other = newWorkspace();
+
+        int affected = personMapper.updateOwner(other.getId(), person.getId(), null);
+
+        assertEquals(0, affected);
+        assertEquals(owner.getId(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
     }
 
     /**
