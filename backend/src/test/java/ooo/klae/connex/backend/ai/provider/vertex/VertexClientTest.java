@@ -5,6 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.AdditionalMatchers.aryEq;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -13,7 +22,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 
+import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.http.HttpMethod;
@@ -23,6 +34,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
 class VertexClientTest {
@@ -30,6 +44,30 @@ class VertexClientTest {
             + "connex-prod1/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent");
     private static final String ACCESS_TOKEN = "vertex_access_token_secret";
     private static final String REQUEST_BODY = "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Hello?\"}]}]}";
+
+    @Test
+    void complete_productionPathUsesThePinnedFixedProviderTransport() {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        when(providerClient.post(
+                any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
+                any(AiRequestDeadline.class), any()))
+                .thenReturn(new FixedAiProviderClient.Response(
+                        200, "{\"candidates\":[]}".getBytes(StandardCharsets.UTF_8)));
+        VertexClient client = new VertexClient(properties, providerClient);
+
+        String response = client.complete(ENDPOINT, ACCESS_TOKEN, REQUEST_BODY);
+
+        assertEquals("{\"candidates\":[]}", response);
+        verify(providerClient).post(
+                eq(ENDPOINT),
+                eq(java.util.Set.of("us-central1-aiplatform.googleapis.com")),
+                argThat(headers -> ("Bearer " + ACCESS_TOKEN).equals(headers.get("Authorization"))),
+                eq(ContentType.APPLICATION_JSON),
+                aryEq(REQUEST_BODY.getBytes(StandardCharsets.UTF_8)),
+                any(AiRequestDeadline.class),
+                eq("Vertex invocation"));
+    }
 
     @Test
     void complete_sendsBearerTokenAndBodyAfterEgressVetting() {

@@ -2,13 +2,18 @@ package ooo.klae.connex.backend.ai.provider.vertex;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -35,6 +40,7 @@ public class VertexAdapter implements AiProvider {
     private final VertexClient vertexClient;
     private final GoogleAccessTokenClient googleAccessTokenClient;
     private final ObjectMapper objectMapper;
+    private final AiProperties aiProperties;
 
     @Override
     public String providerId() {
@@ -46,6 +52,7 @@ public class VertexAdapter implements AiProvider {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
         }
+        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(aiProperties.getRequestTimeoutMs());
         AiProviderTarget target = request.target();
         if (!PROVIDER_VERTEX.equals(target.provider())) {
             throw new AiProviderException("Unsupported AI provider");
@@ -56,13 +63,17 @@ public class VertexAdapter implements AiProvider {
             String region = requirePattern(target.region(), VERTEX_REGION, "Invalid Vertex region");
             String modelId = requireModelId(target.modelId());
             ModelFamily family = modelFamily(modelId);
+            if (!request.images().isEmpty()
+                    && !AiImageInputSupport.supports(PROVIDER_VERTEX, modelId, region)) {
+                throw new AiProviderException("Vertex model does not support image input in this region");
+            }
             URI endpoint = endpoint(projectId, region, modelId, family);
             String requestBody = switch (family) {
                 case GEMINI -> buildGeminiRequest(request);
                 case CLAUDE -> buildClaudeRequest(request);
             };
-            String accessToken = googleAccessTokenClient.accessToken(request.credentials());
-            String responseBody = vertexClient.complete(endpoint, accessToken, requestBody);
+            String accessToken = googleAccessTokenClient.accessToken(request.credentials(), deadline);
+            String responseBody = vertexClient.complete(endpoint, accessToken, requestBody, deadline);
             return switch (family) {
                 case GEMINI -> parseGeminiResponse(responseBody);
                 case CLAUDE -> parseClaudeResponse(responseBody);
@@ -89,10 +100,23 @@ public class VertexAdapter implements AiProvider {
     private String buildGeminiRequest(AiCompletionRequest request) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode contents = root.putArray("contents");
+        boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode content = contents.addObject();
             content.put("role", geminiRole(message.role()));
-            content.putArray("parts").addObject().put("text", message.content());
+            ArrayNode parts = content.putArray("parts");
+            if (imagesPending && "user".equals(message.role())) {
+                for (AiInputImage image : request.images()) {
+                    ObjectNode inlineData = parts.addObject().putObject("inlineData");
+                    inlineData.put("mimeType", image.contentType());
+                    inlineData.put("data", Base64.getEncoder().encodeToString(image.content()));
+                }
+                imagesPending = false;
+            }
+            parts.addObject().put("text", message.content());
+        }
+        if (imagesPending) {
+            throw new AiProviderException("AI images require a user message");
         }
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
             root.putObject("systemInstruction")
@@ -113,10 +137,28 @@ public class VertexAdapter implements AiProvider {
             root.put("system", request.systemPrompt());
         }
         ArrayNode messages = root.putArray("messages");
+        boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode node = messages.addObject();
             node.put("role", claudeRole(message.role()));
-            node.put("content", message.content());
+            if (imagesPending && "user".equals(message.role())) {
+                ArrayNode content = node.putArray("content");
+                for (AiInputImage image : request.images()) {
+                    ObjectNode source = content.addObject()
+                            .put("type", "image")
+                            .putObject("source");
+                    source.put("type", "base64");
+                    source.put("media_type", image.contentType());
+                    source.put("data", Base64.getEncoder().encodeToString(image.content()));
+                }
+                content.addObject().put("type", "text").put("text", message.content());
+                imagesPending = false;
+            } else {
+                node.put("content", message.content());
+            }
+        }
+        if (imagesPending) {
+            throw new AiProviderException("AI images require a user message");
         }
         root.put("max_tokens", request.maxTokens());
         root.put("temperature", request.temperature());

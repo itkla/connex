@@ -13,7 +13,7 @@
   },
   "OrgAi": {
     "title": "AI provider",
-    "subtitle": "Bring your own AI provider for this organization. Connex masks personal data before every model call, audits all outbound requests, and keeps AI off until you configure and enable a provider here.",
+    "subtitle": "Bring your own AI provider for this organization. Connex masks text identifiers where feasible and audits every outbound request. Image features, including fallback business-card reading, send metadata-free image data whose visible contents cannot be masked. AI stays off until you configure and enable a provider here.",
     "enableTitle": "Enable AI features",
     "enableDescription": "Let members who hold the AI permission use AI features in this organization's workspaces.",
     "enableRequiresAttestation": "Requires the no-training attestation below.",
@@ -45,7 +45,7 @@
     "allowInternalTitle": "Allow private endpoint",
     "allowInternalDescription": "Permit a private-network address over HTTP(S). Available only when the instance operator allows private AI endpoints.",
     "attestLabel": "Our provider agreement disallows training and long-term retention on submitted data",
-    "attestDescription": "Confirm that your contract with the selected provider excludes model training and long-term retention of Connex data. Required before AI can be enabled.",
+    "attestDescription": "Confirm that your contract with the selected provider excludes model training and long-term retention of submitted Connex text and images. Required before AI can be enabled.",
     "credentialConfigured": "•••••••• (unchanged)",
     "credentialKeepHint": "Leave blank to keep the stored credential. Stored encrypted; never shown.",
     "credentialLast4Hint": "Stored credential ends in {last4}.",

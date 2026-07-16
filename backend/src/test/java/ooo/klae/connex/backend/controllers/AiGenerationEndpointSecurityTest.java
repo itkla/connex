@@ -17,6 +17,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -28,8 +29,10 @@ import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.services.BulkOperationService;
+import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.IntroductionService;
@@ -46,7 +49,7 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 @WebMvcTest(
-    controllers = { DealController.class, IntroductionController.class },
+    controllers = { BusinessCardController.class, DealController.class, IntroductionController.class },
     excludeFilters = @ComponentScan.Filter(
         type = FilterType.ASSIGNABLE_TYPE,
         classes = GlobalExceptionHandler.class
@@ -66,6 +69,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private DealRiskService dealRiskService;
     @MockitoBean private DealBriefService dealBriefService;
     @MockitoBean private DealRiskRationaleService dealRiskRationaleService;
+    @MockitoBean private BusinessCardService businessCardService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private MemberScopeResolver memberScopeResolver;
     @MockitoBean private IntroductionService introductionService;
@@ -101,6 +105,24 @@ class AiGenerationEndpointSecurityTest {
 
         verify(dealBriefService).generate(17, true);
         verify(dealRiskRationaleService).generate(17, true);
+    }
+
+    @Test
+    @WithAnonymousUser
+    void businessCardAvailabilityRejectsAnonymousRequests() throws Exception {
+        mockMvc.perform(get("/api/business-cards/availability"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void businessCardAvailabilityIsAReadOnlyAuthenticatedEndpoint() throws Exception {
+        when(businessCardService.availability())
+                .thenReturn(new BusinessCardAvailabilityResponse(true, true));
+
+        mockMvc.perform(get("/api/business-cards/availability"))
+                .andExpect(status().isOk());
+
+        verify(businessCardService).availability();
     }
 
     private void assertPostWithCsrfOnly(String path) throws Exception {

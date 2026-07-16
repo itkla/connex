@@ -2007,6 +2007,11 @@ export type InstanceCapabilities = {
     businessCardImport: boolean;
 };
 
+export type BusinessCardAvailability = {
+    scanning: boolean;
+    importing: boolean;
+};
+
 export type SsoProtocol = "oidc" | "saml";
 
 export type SsoDiscovery = {
