@@ -18,6 +18,10 @@ public interface WorkspaceMapper {
     Workspace getDefaultWorkspace();
     boolean isMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    int countActiveMembers(
+        @Param("workspaceId") int workspaceId,
+        @Param("memberIds") List<Integer> memberIds
+    );
     String getRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<User> getMembers(int workspaceId);
     List<MemberDto> getMembersWithRoles(int workspaceId);

@@ -383,12 +383,10 @@ public class DealService {
         );
     }
 
-    /**
-     * Returns a bounded member-scoped pipeline board.
-     */
+    /** Returns a member-scoped pipeline board with global positions when reordering is bounded. */
     public List<Deal> getDealBoard(int pipelineId, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        long total = dealMapper.countDealBoard(workspaceId, pipelineId, memberScope);
+        long total = dealMapper.countDealsByPipelineId(workspaceId, pipelineId);
         if (total > MAX_BOARD_DEALS) {
             throw new BadRequestException(
                 "This pipeline is too large for Kanban reordering; use the paginated table view");

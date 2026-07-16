@@ -216,11 +216,6 @@ public interface DealMapper {
         @Param("pipelineId") int pipelineId,
         @Param("memberScope") MemberScope memberScope
     );
-    long countDealBoard(
-        @Param("workspaceId") int workspaceId,
-        @Param("pipelineId") int pipelineId,
-        @Param("memberScope") MemberScope memberScope
-    );
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);

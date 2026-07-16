@@ -97,6 +97,13 @@ class DealMemberScopeIntegrationTest {
 
         JsonNode allTeamFacets = json(fixture, "/api/deals/facets");
         assertEquals(1, facetCount(allTeamFacets.path("owners"), "__empty__"));
+
+        JsonNode scopedBoard = json(fixture, "/api/deals/board",
+            "pipelineId", Integer.toString(fixture.pipeline().getId()),
+            "scope", "members",
+            "memberIds", Integer.toString(fixture.firstMember().getId()));
+        assertEquals(1, scopedBoard.path(0).path("position").asInt());
+        assertEquals(2, scopedBoard.path(1).path("position").asInt());
     }
 
     @Test
@@ -220,11 +227,11 @@ class DealMemberScopeIntegrationTest {
 
         Pipeline pipeline = newPipeline(workspace);
         Stage stage = newStage(workspace, pipeline);
-        newDeal(workspace, pipeline, stage, currentUser.getId(), "Mine");
-        newDeal(workspace, pipeline, stage, firstMember.getId(), "First A");
-        newDeal(workspace, pipeline, stage, firstMember.getId(), "First B");
-        newDeal(workspace, pipeline, stage, secondMember.getId(), "Second");
-        newDeal(workspace, pipeline, stage, null, "Unassigned");
+        newDeal(workspace, pipeline, stage, currentUser.getId(), "Mine", 0);
+        newDeal(workspace, pipeline, stage, firstMember.getId(), "First A", 1);
+        newDeal(workspace, pipeline, stage, firstMember.getId(), "First B", 2);
+        newDeal(workspace, pipeline, stage, secondMember.getId(), "Second", 3);
+        newDeal(workspace, pipeline, stage, null, "Unassigned", 4);
 
         return new Fixture(workspace, pipeline, currentUser, firstMember, secondMember,
             emptyMember, pendingMember, foreignMember, nonMember, login(currentUser.getUsername()));
@@ -282,7 +289,7 @@ class DealMemberScopeIntegrationTest {
     }
 
     private Deal newDeal(Workspace workspace, Pipeline pipeline, Stage stage,
-            Integer ownerId, String name) {
+            Integer ownerId, String name, int position) {
         Deal deal = new Deal();
         deal.setWorkspaceId(workspace.getId());
         deal.setOwnerId(ownerId);
@@ -291,6 +298,7 @@ class DealMemberScopeIntegrationTest {
         deal.setCurrency("USD");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
+        deal.setPosition(position);
         dealMapper.insert(deal);
         return deal;
     }

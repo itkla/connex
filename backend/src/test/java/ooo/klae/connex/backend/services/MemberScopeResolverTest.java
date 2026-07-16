@@ -15,7 +15,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 
@@ -45,7 +44,7 @@ class MemberScopeResolverTest {
     @Test
     void membersAreDeduplicatedAndValidatedAsActive() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(11);
-        when(workspaceService.getMembers(11)).thenReturn(List.of(user(3), user(5)));
+        when(workspaceService.areActiveMembers(11, List.of(3, 5))).thenReturn(true);
 
         MemberScope scope = resolver.resolve("members", List.of(3, 5, 3), 7);
 
@@ -56,7 +55,7 @@ class MemberScopeResolverTest {
     @Test
     void membersRejectInactiveOrForeignIds() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(11);
-        when(workspaceService.getMembers(11)).thenReturn(List.of(user(3)));
+        when(workspaceService.areActiveMembers(11, List.of(3, 5))).thenReturn(false);
 
         BadRequestException exception = assertThrows(BadRequestException.class,
             () -> resolver.resolve("members", List.of(3, 5), 7));
@@ -75,11 +74,5 @@ class MemberScopeResolverTest {
             () -> resolver.resolve("members", IntStream.rangeClosed(1, 51).boxed().toList(), 7));
         assertThrows(BadRequestException.class,
             () -> resolver.resolve("everyone", null, 7));
-    }
-
-    private User user(int id) {
-        User user = new User();
-        user.setId(id);
-        return user;
     }
 }

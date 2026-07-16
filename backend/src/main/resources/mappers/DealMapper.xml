@@ -720,14 +720,6 @@
     ORDER BY d.stage_id, d.position, d.id
   </select>
 
-  <select id="countDealBoard" resultType="long">
-    SELECT COUNT(*)
-    FROM deal d
-    WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
-      AND d.pipeline_id = #{pipelineId}
-  </select>
-
   <select id="getDealsByPipelineId" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal

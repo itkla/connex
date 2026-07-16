@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -142,6 +143,28 @@ class DealServiceTest extends AbstractServiceTest {
             multiFilteredPage.items().stream().map(Deal::getId).toList());
         assertEquals(2, multiFilteredMetrics.totalCount());
         assertEquals(3, dealService.getDealBoard(pipeline.getId(), allTeamScope).size());
+    }
+
+    @Test
+    void memberScopedBoardRetainsGlobalReorderingBound() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<Deal> deals = IntStream.rangeClosed(1, 2001)
+            .mapToObj(position -> boardDeal(pipeline, stage, position))
+            .toList();
+        deals.get(0).setOwnerId(currentUser.getId());
+        dealMapper.insertBatch(deals);
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+            () -> dealService.getDealBoard(pipeline.getId(),
+                MemberScope.fromRequest("me", null, currentUser.getId())));
+
+        assertEquals("This pipeline is too large for Kanban reordering; use the paginated table view",
+            exception.getMessage());
     }
 
     @Test
@@ -901,6 +924,18 @@ class DealServiceTest extends AbstractServiceTest {
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
         deal.setCompanyId(company.getId());
+        return deal;
+    }
+
+    private Deal boardDeal(Pipeline pipeline, Stage stage, int position) {
+        Deal deal = new Deal();
+        deal.setWorkspaceId(workspace.getId());
+        deal.setName("Bounded Board " + position);
+        deal.setValue(1);
+        deal.setCurrency("USD");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setPosition(position - 1);
         return deal;
     }
 

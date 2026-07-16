@@ -28,8 +28,7 @@ class DealMapperXmlTest {
         "countsByCompany",
         "countsByOwner",
         "countsByCurrency",
-        "getDealBoard",
-        "countDealBoard"
+        "getDealBoard"
     );
 
     @Test
