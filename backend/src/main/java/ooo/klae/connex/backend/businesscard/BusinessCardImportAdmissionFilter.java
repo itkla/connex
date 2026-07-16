@@ -15,18 +15,25 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 /**
- * Rejects invalid, unentitled, or principal-throttled card import operations before controller dispatch.
+ * Rejects invalid, unentitled, or throttled card operations before controller dispatch.
  */
 @RequiredArgsConstructor
 public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
+    private static final String SCAN_PATH = "/api/business-cards/scan";
     private static final String IMPORT_PATH = "/api/business-cards/import";
     private static final String RESERVATION_PATH = "/api/business-cards/import/reservation";
 
     private final BusinessCardRateLimiter rateLimiter;
     private final CapabilityEntitlement capabilityEntitlement;
+    private final WorkspaceRequestResolver workspaceRequestResolver;
+    private final WorkspaceService workspaceService;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -46,23 +53,41 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        try {
-            BusinessCardIdempotencyKey.canonicalize(request.getHeader("Idempotency-Key"));
-        } catch (BadRequestException exception) {
-            reject(response, HttpServletResponse.SC_BAD_REQUEST);
-            return;
-        }
-        if (!capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_IMPORT)) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN);
-            return;
-        }
         Operation admission = operation(request);
         if (admission == null) {
             chain.doFilter(request, response);
             return;
         }
+        if (admission != Operation.SCAN) {
+            try {
+                BusinessCardIdempotencyKey.canonicalize(request.getHeader("Idempotency-Key"));
+            } catch (BadRequestException exception) {
+                reject(response, HttpServletResponse.SC_BAD_REQUEST);
+                return;
+            }
+        }
+        Capability capability = admission == Operation.SCAN
+            ? Capability.BUSINESS_CARD_SCANNING
+            : Capability.BUSINESS_CARD_IMPORT;
+        if (!capabilityEntitlement.isEntitled(capability)) {
+            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        Integer workspaceId = workspaceRequestResolver.resolve(request, user.getId());
+        if (workspaceId == null) {
+            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        try {
+            workspaceService.requirePermission(workspaceId, user.getId(), Permission.PERSON_CREATE);
+            workspaceService.requirePermission(workspaceId, user.getId(), Permission.ATTACHMENT_CREATE);
+        } catch (ForbiddenException exception) {
+            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         try {
             switch (admission) {
+                case SCAN -> rateLimiter.requireScanAdmissionAllowed(user.getId());
                 case IMPORT -> rateLimiter.requireImportAdmissionAllowed(user.getId());
                 case RESERVATION -> rateLimiter.requireReservationAllowed(user.getId());
                 case STATUS -> rateLimiter.requireStatusAllowed(user.getId());
@@ -86,6 +111,9 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
     private static Operation operation(HttpServletRequest request) {
         String method = request.getMethod();
         String path = apiPath(request);
+        if ("POST".equals(method) && SCAN_PATH.equals(path)) {
+            return Operation.SCAN;
+        }
         if ("POST".equals(method) && IMPORT_PATH.equals(path)) {
             return Operation.IMPORT;
         }
@@ -104,6 +132,7 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
     }
 
     private enum Operation {
+        SCAN,
         IMPORT,
         RESERVATION,
         STATUS

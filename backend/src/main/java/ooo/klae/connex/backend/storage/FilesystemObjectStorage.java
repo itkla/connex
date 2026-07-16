@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.StampedLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +69,8 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
     public void put(String key, UploadSource source, String contentType, byte[] sha256) {
         Path target = resolve(key);
         PathLease lease = retain(target);
-        if (!lease.lock.writeLock().tryLock()) {
+        long writeStamp = lease.lock.tryWriteLock();
+        if (writeStamp == 0L) {
             release(target, lease);
             throw new ObjectStorageException("Managed object is currently being read");
         }
@@ -119,7 +120,7 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
                     log.warn("Filesystem object write left a temporary file for scheduled reconciliation");
                 }
             }
-            lease.lock.writeLock().unlock();
+            lease.lock.unlockWrite(writeStamp);
             release(target, lease);
         }
     }
@@ -128,7 +129,8 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
     public StoredObject get(String key) {
         Path target = resolve(key);
         PathLease lease = retain(target);
-        if (!lease.lock.readLock().tryLock()) {
+        long readStamp = lease.lock.tryReadLock();
+        if (readStamp == 0L) {
             release(target, lease);
             throw new ObjectStorageException("Managed object is currently changing");
         }
@@ -146,18 +148,18 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
             }
             long contentLength = channel.size();
             InputStream stream = new FilesystemReadStream(
-                Channels.newInputStream(channel), target, lease);
+                Channels.newInputStream(channel), target, lease, readStamp);
             return new StoredObject(stream, contentLength);
         } catch (ObjectStorageNotFoundException exception) {
-            lease.lock.readLock().unlock();
+            lease.lock.unlockRead(readStamp);
             release(target, lease);
             throw exception;
         } catch (IOException exception) {
-            lease.lock.readLock().unlock();
+            lease.lock.unlockRead(readStamp);
             release(target, lease);
             throw new ObjectStorageException("Filesystem object read failed", exception);
         } catch (RuntimeException exception) {
-            lease.lock.readLock().unlock();
+            lease.lock.unlockRead(readStamp);
             release(target, lease);
             throw exception;
         }
@@ -167,7 +169,8 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
     public void delete(String key) {
         Path target = resolve(key);
         PathLease lease = retain(target);
-        if (!lease.lock.writeLock().tryLock()) {
+        long writeStamp = lease.lock.tryWriteLock();
+        if (writeStamp == 0L) {
             release(target, lease);
             throw new ObjectStorageException("Managed object is currently being read");
         }
@@ -191,7 +194,7 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
         } catch (IOException exception) {
             throw new ObjectStorageException("Filesystem object deletion failed", exception);
         } finally {
-            lease.lock.writeLock().unlock();
+            lease.lock.unlockWrite(writeStamp);
             release(target, lease);
         }
     }
@@ -449,12 +452,18 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
     private final class FilesystemReadStream extends FilterInputStream {
         private final Path target;
         private final PathLease lease;
+        private final long readStamp;
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        private FilesystemReadStream(InputStream input, Path target, PathLease lease) {
+        private FilesystemReadStream(
+                InputStream input,
+                Path target,
+                PathLease lease,
+                long readStamp) {
             super(input);
             this.target = target;
             this.lease = lease;
+            this.readStamp = readStamp;
         }
 
         @Override
@@ -465,14 +474,14 @@ public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner
             try {
                 super.close();
             } finally {
-                lease.lock.readLock().unlock();
+                lease.lock.unlockRead(readStamp);
                 release(target, lease);
             }
         }
     }
 
     private static final class PathLease {
-        private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+        private final StampedLock lock = new StampedLock();
         private int references;
     }
 

@@ -38,7 +38,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
-import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
 import org.springframework.session.security.SpringSessionBackedSessionRegistry;
@@ -54,7 +54,9 @@ import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 /**
  * Spring Security configuration.
@@ -146,6 +148,8 @@ public class SecurityConfig {
             SessionSecurityService sessionSecurityService,
             BusinessCardRateLimiter businessCardRateLimiter,
             CapabilityEntitlement capabilityEntitlement,
+            WorkspaceRequestResolver workspaceRequestResolver,
+            WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
@@ -153,15 +157,18 @@ public class SecurityConfig {
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.addFilterAfter(
             new BusinessCardImportAdmissionFilter(
-                businessCardRateLimiter, capabilityEntitlement),
-            AbsoluteSessionTimeoutFilter.class);
+                businessCardRateLimiter,
+                capabilityEntitlement,
+                workspaceRequestResolver,
+                workspaceService),
+            CsrfFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
             // cache it. The auth handshake is exempt since there is no session to protect pre-login.
             http.csrf(csrf -> {
-                csrf.csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                     .ignoringRequestMatchers(
                         "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                         "/api/auth/forgot-password", "/api/auth/reset-password",

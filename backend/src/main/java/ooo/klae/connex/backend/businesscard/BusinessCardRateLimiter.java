@@ -25,6 +25,7 @@ public class BusinessCardRateLimiter {
     private final Clock clock;
     private final Map<RateKey, Window> windows = new LinkedHashMap<>(16, 0.75f, true);
     private Window globalScanWindow;
+    private Window globalScanAdmissionWindow;
 
     public synchronized void requireScanAllowed() {
         Identity identity = identity();
@@ -37,6 +38,23 @@ public class BusinessCardRateLimiter {
             throw limitReached();
         }
         globalScanWindow = new Window(minute, global.requests() + 1);
+        windows.put(principalKey, new Window(minute, principal.requests() + 1));
+        trim();
+    }
+
+    public synchronized void requireScanAdmissionAllowed(int userId) {
+        if (userId <= 0) {
+            throw new IllegalStateException("Business-card rate-limit principal is unavailable");
+        }
+        long minute = minute();
+        Window global = current(globalScanAdmissionWindow, minute);
+        RateKey principalKey = new RateKey(0, userId, Operation.SCAN_ADMISSION);
+        Window principal = current(windows.get(principalKey), minute);
+        if (global.requests() >= properties.getMaxGlobalScansPerMinute()
+                || principal.requests() >= properties.getMaxScansPerMinute()) {
+            throw limitReached();
+        }
+        globalScanAdmissionWindow = new Window(minute, global.requests() + 1);
         windows.put(principalKey, new Window(minute, principal.requests() + 1));
         trim();
     }
@@ -123,6 +141,7 @@ public class BusinessCardRateLimiter {
 
     private enum Operation {
         SCAN,
+        SCAN_ADMISSION,
         IMPORT,
         IMPORT_ADMISSION,
         RESERVATION,

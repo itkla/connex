@@ -9,17 +9,31 @@ import org.junit.jupiter.api.Test;
 
 class ObjectStoragePropertiesTest {
     @Test
-    void ambiguousS3CleanupDelayMustExceedTheTotalCallTimeout() {
+    void ambiguousS3CleanupDelayMustExceedVersioningAndWriteCallTimeouts() {
         ObjectStorageProperties properties = new ObjectStorageProperties();
         properties.setProvider(ObjectStorageProperties.Provider.S3);
         properties.getS3().setApiCallTimeout(Duration.ofSeconds(15));
-        properties.setAmbiguousWriteCleanupDelayMs(15_000);
+        properties.setAmbiguousWriteCleanupDelayMs(30_000);
 
         assertFalse(properties.isAmbiguousWriteCleanupDelayValid());
 
-        properties.setAmbiguousWriteCleanupDelayMs(15_001);
+        properties.setAmbiguousWriteCleanupDelayMs(30_001);
 
         assertTrue(properties.isAmbiguousWriteCleanupDelayValid());
+    }
+
+    @Test
+    void s3DeleteRetryDelayMustExceedVersioningAndDeletionCallTimeouts() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        properties.setProvider(ObjectStorageProperties.Provider.S3);
+        properties.getS3().setApiCallTimeout(Duration.ofSeconds(15));
+        properties.setDeleteRetryDelayMs(30_000);
+
+        assertFalse(properties.isDeleteRetryDelayValid());
+
+        properties.setDeleteRetryDelayMs(30_001);
+
+        assertTrue(properties.isDeleteRetryDelayValid());
     }
 
     @Test

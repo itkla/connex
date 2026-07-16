@@ -186,6 +186,32 @@ class FilesystemObjectStorageTest {
     }
 
     @Test
+    void allowsStreamingThreadToCloseReadLeaseAcquiredByRequestThread() throws Exception {
+        byte[] bytes = "cross-thread reader".getBytes(StandardCharsets.UTF_8);
+        String key = "workspaces/17/attachments/streamed.pdf";
+        storage.put(key, source(bytes), "application/pdf", sha256(bytes));
+        StoredObject open = storage.get(key);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        assertThrows(ObjectStorageException.class, () -> storage.delete(key));
+        Thread streamingThread = Thread.startVirtualThread(() -> {
+            try (open) {
+                assertArrayEquals(bytes, open.inputStream().readAllBytes());
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            }
+        });
+        streamingThread.join(TimeUnit.SECONDS.toMillis(5));
+
+        assertFalse(streamingThread.isAlive());
+        if (failure.get() != null) {
+            throw new AssertionError(failure.get());
+        }
+        storage.delete(key);
+        assertThrows(ObjectStorageNotFoundException.class, () -> storage.get(key));
+    }
+
+    @Test
     void prunesEmptyEntityDirectoriesWithoutRemovingTheCategoryRoot() throws Exception {
         byte[] bytes = {1, 2, 3};
         String key = "workspaces/17/person-images/23/photo.png";

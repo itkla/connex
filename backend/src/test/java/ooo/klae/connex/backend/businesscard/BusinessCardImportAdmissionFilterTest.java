@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
@@ -30,7 +31,11 @@ import jakarta.servlet.http.Part;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 @ExtendWith(MockitoExtension.class)
 class BusinessCardImportAdmissionFilterTest {
@@ -39,17 +44,30 @@ class BusinessCardImportAdmissionFilterTest {
 
     @Mock BusinessCardRateLimiter rateLimiter;
     @Mock CapabilityEntitlement capabilityEntitlement;
+    @Mock WorkspaceRequestResolver workspaceRequestResolver;
+    @Mock WorkspaceService workspaceService;
 
     private BusinessCardImportAdmissionFilter filter;
 
     @BeforeEach
     void setUp() {
-        filter = new BusinessCardImportAdmissionFilter(rateLimiter, capabilityEntitlement);
+        filter = new BusinessCardImportAdmissionFilter(
+            rateLimiter,
+            capabilityEntitlement,
+            workspaceRequestResolver,
+            workspaceService);
         org.mockito.Mockito.lenient()
             .when(capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_IMPORT))
             .thenReturn(true);
+        org.mockito.Mockito.lenient()
+            .when(capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_SCANNING))
+            .thenReturn(true);
         User user = new User();
         user.setId(9);
+        org.mockito.Mockito.lenient()
+            .when(workspaceRequestResolver.resolve(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(9)))
+            .thenReturn(7);
         SecurityContextHolder.getContext().setAuthentication(
             new TestingAuthenticationToken(user, null, "ROLE_USER"));
     }
@@ -118,6 +136,93 @@ class BusinessCardImportAdmissionFilterTest {
     }
 
     @Test
+    void scanThrottleRunsBeforeMultipartAccess() throws Exception {
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        doThrow(new TooManyRequestsException("limited"))
+            .when(rateLimiter).requireScanAdmissionAllowed(9);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(429, response.getStatus());
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+    }
+
+    @Test
+    void scanEntitlementDenialReturns403BeforeMultipartAndThrottleAccess() throws Exception {
+        when(capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_SCANNING))
+            .thenReturn(false);
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
+    }
+
+    @Test
+    void scanPermissionDenialReturns403BeforeMultipartAndThrottleAccess() throws Exception {
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        doThrow(new ForbiddenException("denied"))
+            .when(workspaceService).requirePermission(7, 9, Permission.PERSON_CREATE);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
+    }
+
+    @Test
+    void attachmentPermissionDenialReturns403BeforeMultipartAndThrottleAccess() throws Exception {
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        doNothing()
+            .when(workspaceService).requirePermission(7, 9, Permission.PERSON_CREATE);
+        doThrow(new ForbiddenException("denied"))
+            .when(workspaceService).requirePermission(7, 9, Permission.ATTACHMENT_CREATE);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
+    }
+
+    @Test
+    void missingWorkspaceReturns403BeforeMultipartAndThrottleAccess() throws Exception {
+        when(workspaceRequestResolver.resolve(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(9)))
+            .thenReturn(null);
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
+    }
+
+    @Test
     void reservationThrottleRunsBeforeTheControllerAndDatabasePath() throws Exception {
         TrackingMultipartRequest request = request(
             "POST", "/api/business-cards/import/reservation", IDEMPOTENCY_KEY);
@@ -161,7 +266,9 @@ class BusinessCardImportAdmissionFilterTest {
         request.setMethod(method);
         request.setRequestURI(path);
         request.setContentType("multipart/form-data; boundary=x");
-        request.addHeader("Idempotency-Key", idempotencyKey);
+        if (idempotencyKey != null) {
+            request.addHeader("Idempotency-Key", idempotencyKey);
+        }
         return request;
     }
 

@@ -86,7 +86,7 @@ class ObjectDeletionRetryQueueTest {
             "workspaces/7/attachments/object.pdf",
             2,
             java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
-        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any(), any());
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
     }
 
     @Test
@@ -105,7 +105,7 @@ class ObjectDeletionRetryQueueTest {
             "users/9/profile-images/object.png",
             2,
             java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
-        verify(transactionExecutor, never()).processUser(any(), any(), any());
+        verify(transactionExecutor, never()).processUser(any(), any());
     }
 
     @Test
@@ -165,7 +165,7 @@ class ObjectDeletionRetryQueueTest {
         AtomicReference<String> taskCatalog = new AtomicReference<>();
         when(placementRegistry.activeCatalogs()).thenReturn(List.of("tenant_catalog"));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
-        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt())).thenAnswer(invocation -> {
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt(), anyInt())).thenAnswer(invocation -> {
             enumerationCatalog.set(tenantContext.getCatalog());
             return List.of(7);
         });
@@ -175,7 +175,7 @@ class ObjectDeletionRetryQueueTest {
             taskCatalog.set(tenantContext.getCatalog());
             return null;
         }).when(transactionExecutor).retryTenant(
-            org.mockito.ArgumentMatchers.eq(task), any(), any());
+            org.mockito.ArgumentMatchers.eq(task), any());
 
         queue.retryPending();
 
@@ -191,17 +191,66 @@ class ObjectDeletionRetryQueueTest {
             12, 7, "workspaces/7/attachments/second.pdf", 2, 1);
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
-        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt())).thenReturn(List.of(7));
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt(), anyInt())).thenReturn(List.of(7));
         when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
             .thenReturn(List.of(first, second));
         doThrow(new IllegalStateException("database unavailable"))
             .when(transactionExecutor).retryTenant(
-                org.mockito.ArgumentMatchers.eq(first), any(), any());
+                org.mockito.ArgumentMatchers.eq(first), any());
 
         queue.retryPending();
 
         verify(transactionExecutor).retryTenant(
-            org.mockito.ArgumentMatchers.eq(second), any(), any());
+            org.mockito.ArgumentMatchers.eq(second), any());
+    }
+
+    @Test
+    void retrySweepReservesCapacityForEverySelectedWorkspace() {
+        ObjectDeletionTask first = new ObjectDeletionTask(
+            11, 7, "workspaces/7/attachments/first.pdf", 2, 1);
+        ObjectDeletionTask second = new ObjectDeletionTask(
+            12, 8, "workspaces/8/attachments/second.pdf", 2, 1);
+        ObjectDeletionTask third = new ObjectDeletionTask(
+            13, 8, "workspaces/8/attachments/third.pdf", 2, 1);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(
+            any(), org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.eq(3)))
+            .thenReturn(List.of(7, 8));
+        when(tenantQueueMapper.findDue(
+            org.mockito.ArgumentMatchers.eq(7), any(), org.mockito.ArgumentMatchers.eq(1)))
+            .thenReturn(List.of(first));
+        when(tenantQueueMapper.findDue(
+            org.mockito.ArgumentMatchers.eq(8), any(), org.mockito.ArgumentMatchers.eq(2)))
+            .thenReturn(List.of(second, third));
+
+        queue.retryPending();
+
+        verify(transactionExecutor).retryTenant(
+            org.mockito.ArgumentMatchers.eq(first), any());
+        verify(transactionExecutor).retryTenant(
+            org.mockito.ArgumentMatchers.eq(second), any());
+        verify(transactionExecutor).retryTenant(
+            org.mockito.ArgumentMatchers.eq(third), any());
+    }
+
+    @Test
+    void retrySweepContinuesAfterThePreviousWorkspaceCursor() {
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(
+            any(), org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.eq(3)))
+            .thenReturn(List.of(7));
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(
+            any(), org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(3)))
+            .thenReturn(List.of(8));
+        when(tenantQueueMapper.findDue(anyInt(), any(), anyInt())).thenReturn(List.of());
+
+        queue.retryPending();
+        queue.retryPending();
+
+        verify(tenantQueueMapper).workspaceIdsWithDueTasks(
+            any(), org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(3));
     }
 
     @Test
@@ -214,7 +263,7 @@ class ObjectDeletionRetryQueueTest {
 
         queue.enqueueRollbackTombstoneTenant(7, key);
 
-        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any(), any());
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
     }
 
     @Test
@@ -233,10 +282,10 @@ class ObjectDeletionRetryQueueTest {
     void retrySweepAlwaysVisitsDefaultCatalog() {
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
-        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt(), anyInt())).thenReturn(List.of());
 
         queue.retryPending();
 
-        verify(tenantQueueMapper).workspaceIdsWithDueTasks(any(), anyInt());
+        verify(tenantQueueMapper).workspaceIdsWithDueTasks(any(), anyInt(), anyInt());
     }
 }

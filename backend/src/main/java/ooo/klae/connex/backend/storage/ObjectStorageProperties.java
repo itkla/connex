@@ -239,11 +239,24 @@ public class ObjectStorageProperties {
                 && endpoint.getFragment() == null);
     }
 
-    @AssertTrue(message = "ambiguous S3 write cleanup delay must exceed the total API-call timeout")
+    @AssertTrue(message = "ambiguous S3 write cleanup delay must exceed the versioning preflight and write timeouts")
     public boolean isAmbiguousWriteCleanupDelayValid() {
         return provider != Provider.S3
-            || (s3 != null
-                && s3.apiCallTimeout != null
-                && Duration.ofMillis(ambiguousWriteCleanupDelayMs).compareTo(s3.apiCallTimeout) > 0);
+            || exceedsTwoS3ApiCalls(ambiguousWriteCleanupDelayMs);
+    }
+
+    @AssertTrue(message = "S3 delete retry delay must exceed the versioning preflight and deletion timeouts")
+    public boolean isDeleteRetryDelayValid() {
+        return provider != Provider.S3
+            || exceedsTwoS3ApiCalls(deleteRetryDelayMs);
+    }
+
+    private boolean exceedsTwoS3ApiCalls(long delayMs) {
+        if (s3 == null || s3.apiCallTimeout == null) {
+            return false;
+        }
+        Duration delay = Duration.ofMillis(delayMs);
+        return s3.apiCallTimeout.compareTo(delay) < 0
+            && delay.minus(s3.apiCallTimeout).compareTo(s3.apiCallTimeout) > 0;
     }
 }

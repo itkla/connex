@@ -4,12 +4,19 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
@@ -24,6 +31,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @RequiredArgsConstructor
 public class ObjectDeletionRetryQueue {
     private static final Logger log = LoggerFactory.getLogger(ObjectDeletionRetryQueue.class);
+    private static final String DEFAULT_CATALOG_CURSOR = "(default)";
 
     private final ObjectStorageProperties properties;
     private final ObjectDeletionQueueMapper tenantQueueMapper;
@@ -32,6 +40,12 @@ public class ObjectDeletionRetryQueue {
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final Clock clock;
+    private final Map<String, Integer> tenantCatalogCursors = new ConcurrentHashMap<>();
+    private final ExecutorService retryExecutor = Executors.newFixedThreadPool(
+        2,
+        Thread.ofPlatform().daemon().name("object-deletion-retry-", 0).factory());
+    private final AtomicBoolean userRetryRunning = new AtomicBoolean();
+    private final AtomicBoolean tenantRetryRunning = new AtomicBoolean();
 
     public void enqueueTenantInCurrentTransaction(int workspaceId, String key) {
         tenantQueueMapper.enqueue(workspaceId, ObjectStorageKey.requireValid(key), 1, now());
@@ -151,7 +165,7 @@ public class ObjectDeletionRetryQueue {
                 () -> {
                     LocalDateTime current = now();
                     transactionExecutor.processTenant(
-                        workspaceId, validKey, current, retryAt(current));
+                        workspaceId, validKey, current);
                 });
         } catch (RuntimeException exception) {
             log.warn("Deferred tenant object deletion remains queued for workspace {}", workspaceId);
@@ -163,7 +177,7 @@ public class ObjectDeletionRetryQueue {
         try {
             tenantWorkScope.unrouted(() -> {
                 LocalDateTime current = now();
-                transactionExecutor.processUser(validKey, current, retryAt(current));
+                transactionExecutor.processUser(validKey, current);
                 return null;
             });
         } catch (RuntimeException exception) {
@@ -174,12 +188,22 @@ public class ObjectDeletionRetryQueue {
     @Scheduled(
         fixedDelayString = "${connex.object-storage.delete-retry-delay-ms:60000}",
         initialDelayString = "${connex.object-storage.delete-retry-delay-ms:60000}")
+    public void scheduleRetryPending() {
+        submitRetry(userRetryRunning, this::retryUserCatalog);
+        submitRetry(tenantRetryRunning, this::retryTenantCatalogs);
+    }
+
+    /** Runs one synchronous control-plane and tenant-plane retry sweep. */
     public void retryPending() {
         retryUserCatalog();
+        retryTenantCatalogs();
+    }
+
+    private void retryTenantCatalogs() {
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {
                 tenantWorkScope.withCatalog(catalog, () -> {
-                    retryTenantCatalogRaw();
+                    retryTenantCatalogRaw(catalog);
                     return null;
                 });
             } catch (RuntimeException exception) {
@@ -187,6 +211,29 @@ public class ObjectDeletionRetryQueue {
                     catalog == null ? "(default)" : catalog);
             }
         }
+    }
+
+    private void submitRetry(AtomicBoolean running, Runnable retry) {
+        if (!running.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            retryExecutor.execute(() -> {
+                try {
+                    retry.run();
+                } finally {
+                    running.set(false);
+                }
+            });
+        } catch (RejectedExecutionException exception) {
+            running.set(false);
+            log.warn("Private object deletion sweep could not be scheduled");
+        }
+    }
+
+    @PreDestroy
+    void shutdownRetryExecutor() {
+        retryExecutor.shutdownNow();
     }
 
     private void retryUserCatalog() {
@@ -197,7 +244,7 @@ public class ObjectDeletionRetryQueue {
                 for (ObjectDeletionTask task : tasks) {
                     try {
                         LocalDateTime current = now();
-                        transactionExecutor.retryUser(task, current, retryAt(current));
+                        transactionExecutor.retryUser(task, current);
                     } catch (RuntimeException exception) {
                         log.warn("User object deletion task could not be finalized");
                     }
@@ -209,26 +256,33 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
-    private void retryTenantCatalogRaw() {
+    private void retryTenantCatalogRaw(String catalog) {
         LocalDateTime current = now();
         int remaining = properties.getDeleteRetryBatchSize();
-        List<Integer> workspaceIds = tenantQueueMapper.workspaceIdsWithDueTasks(current, remaining);
-        for (int workspaceId : workspaceIds) {
+        String cursorKey = catalog == null ? DEFAULT_CATALOG_CURSOR : catalog;
+        int afterWorkspaceId = tenantCatalogCursors.getOrDefault(cursorKey, 0);
+        List<Integer> workspaceIds = tenantQueueMapper.workspaceIdsWithDueTasks(
+            current, afterWorkspaceId, remaining);
+        for (int index = 0; index < workspaceIds.size(); index += 1) {
             if (remaining <= 0) {
                 return;
             }
+            int workspaceId = workspaceIds.get(index);
+            int workspacesRemaining = workspaceIds.size() - index;
+            int workspaceLimit = Math.max(1, remaining / workspacesRemaining);
             List<ObjectDeletionTask> tasks = tenantQueueMapper.findDue(
-                workspaceId, current, remaining);
+                workspaceId, current, workspaceLimit);
             for (ObjectDeletionTask task : tasks) {
                 try {
                     LocalDateTime attemptAt = now();
-                    transactionExecutor.retryTenant(task, attemptAt, retryAt(attemptAt));
+                    transactionExecutor.retryTenant(task, attemptAt);
                 } catch (RuntimeException exception) {
                     log.warn("Tenant object deletion task could not be finalized for workspace {}",
                         task.workspaceId());
                 }
             }
             remaining -= tasks.size();
+            tenantCatalogCursors.put(cursorKey, workspaceId);
         }
     }
 
@@ -248,10 +302,6 @@ public class ObjectDeletionRetryQueue {
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-    }
-
-    private LocalDateTime retryAt(LocalDateTime current) {
-        return current.plusNanos(properties.getDeleteRetryDelayMs() * 1_000_000L);
     }
 
     private LocalDateTime ambiguousWriteCleanupAt() {

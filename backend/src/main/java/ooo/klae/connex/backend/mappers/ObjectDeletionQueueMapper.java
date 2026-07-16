@@ -23,6 +23,7 @@ public interface ObjectDeletionQueueMapper {
 
     List<Integer> workspaceIdsWithDueTasks(
         @Param("now") LocalDateTime now,
+        @Param("afterWorkspaceId") int afterWorkspaceId,
         @Param("limit") int limit);
 
     List<ObjectDeletionTask> findDue(

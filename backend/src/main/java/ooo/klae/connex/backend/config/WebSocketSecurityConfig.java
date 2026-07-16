@@ -23,7 +23,7 @@ import org.springframework.security.messaging.web.csrf.CsrfChannelInterceptor;
  * <p>The CONNECT frame carries the same session CSRF token the SPA already
  * echoes on mutating HTTP requests. The default {@code XorCsrfChannelInterceptor}
  * expects a masked token, but {@link SecurityConfig} hands the SPA a plain one
- * ({@code CsrfTokenRequestAttributeHandler}), so the plain
+ * ({@code HeaderOnlyCsrfTokenRequestHandler}), so the plain
  * {@link CsrfChannelInterceptor} is installed instead; when CSRF is disabled by
  * configuration the frame-level check is a no-op to match the HTTP posture.
  */

@@ -445,7 +445,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(updated)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.name").value("January Activity Review"));
 
@@ -458,7 +458,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").value(2))
             .andExpect(jsonPath("$.widgets[0].priorTotal").value(1))
@@ -471,7 +471,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.computedResult.widgets[0].total").value(2))
             .andReturn();
@@ -484,7 +484,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").value(3));
 
@@ -497,13 +497,13 @@ class ReportIntegrationTest {
         mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
 
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
     }
 
@@ -615,7 +615,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").value(40.00))
             .andExpect(jsonPath("$.widgets[0].priorTotal").value(150.00))
@@ -662,7 +662,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[1].total").value(75.00))
             .andExpect(jsonPath("$.widgets[1].priorTotal").value(300.00))
@@ -682,7 +682,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").doesNotExist())
             .andExpect(jsonPath("$.widgets[0].priorTotal").doesNotExist())
@@ -697,7 +697,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").value(0.00))
             .andExpect(jsonPath("$.widgets[0].priorTotal").value(0.00))
@@ -711,7 +711,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"start\":\"2026-07-15\",\"end\":\"2026-08-14\"}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isBadRequest());
 
         String filtered = ATTAINMENT_BODY.replace("\"pipelineIds\": null", "\"pipelineIds\": [999]");
@@ -720,7 +720,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(filtered)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isBadRequest());
 
         MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
@@ -728,7 +728,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andReturn();
         int snapshotId = responseId(snapshotResult);
@@ -745,7 +745,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
@@ -819,7 +819,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].points[0].key").value("cooling"))
             .andExpect(jsonPath("$.widgets[0].points[0].value").value(1))
@@ -915,7 +915,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[1].total").value(3))
             .andExpect(jsonPath("$.widgets[1].priorTotal").doesNotExist())
@@ -997,7 +997,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andReturn();
 
@@ -1096,7 +1096,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andReturn();
 
@@ -1143,7 +1143,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andReturn();
 
@@ -1172,7 +1172,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(REPORT_BODY)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
     }
 
@@ -1210,7 +1210,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andReturn();
         int snapshotId = responseId(snapshotResult);
@@ -1231,7 +1231,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/reports/{id}/snapshots", reportId)
@@ -1249,13 +1249,13 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
                 .header("X-Workspace-Id", second.getId())
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
     }
 
@@ -1277,7 +1277,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].points.length()").value(1))
             .andExpect(jsonPath("$.widgets[0].points[0].value").value(1))
@@ -1294,7 +1294,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andReturn();
         return responseId(result);
@@ -1334,7 +1334,7 @@ class ReportIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isCreated())
             .andReturn();
         return responseId(result);

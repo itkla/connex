@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.storage;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -20,6 +22,8 @@ public class ObjectDeletionTransactionExecutor {
     private final ObjectDeletionQueueMapper tenantQueueMapper;
     private final UserObjectDeletionQueueMapper userQueueMapper;
     private final WorkspaceObjectStorageQuotaService quotaService;
+    private final ObjectStorageProperties properties;
+    private final Clock clock;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ObjectDeletionTombstone enqueueTenant(
@@ -53,75 +57,78 @@ public class ObjectDeletionTransactionExecutor {
     public void processTenant(
             int workspaceId,
             String objectKey,
-            LocalDateTime now,
-            LocalDateTime retryAt) {
+            LocalDateTime now) {
         String validKey = ObjectStorageKey.requireValid(objectKey);
         ObjectDeletionTask task = tenantQueueMapper.lockDueByKey(workspaceId, validKey, now);
         if (task != null) {
-            deleteTenant(task, retryAt);
+            deleteTenant(task);
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void processUser(String objectKey, LocalDateTime now, LocalDateTime retryAt) {
+    public void processUser(String objectKey, LocalDateTime now) {
         String validKey = ObjectStorageKey.requireValid(objectKey);
         ObjectDeletionTask task = userQueueMapper.lockDueByKey(validKey, now);
         if (task != null) {
-            deleteUser(task, retryAt);
+            deleteUser(task);
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void retryTenant(
             ObjectDeletionTask selected,
-            LocalDateTime now,
-            LocalDateTime retryAt) {
+            LocalDateTime now) {
         ObjectDeletionTask task = tenantQueueMapper.lockDueByIdentity(
             selected.workspaceId(), selected.id(), selected.objectKey(), now);
         if (task == null) {
             return;
         }
-        deleteTenant(task, retryAt);
+        deleteTenant(task);
     }
 
-    private void deleteTenant(ObjectDeletionTask task, LocalDateTime retryAt) {
+    private void deleteTenant(ObjectDeletionTask task) {
         try {
             objectStorage.delete(task.objectKey());
             if (task.deletePassesRemaining() > 1) {
-                tenantQueueMapper.confirmDeletePass(task.workspaceId(), task.id(), retryAt);
+                tenantQueueMapper.confirmDeletePass(
+                    task.workspaceId(), task.id(), nextAttemptAt());
                 return;
             }
             quotaService.release(task.workspaceId(), task.objectKey());
             tenantQueueMapper.deleteById(task.workspaceId(), task.id());
         } catch (ObjectStorageException exception) {
-            tenantQueueMapper.reschedule(task.workspaceId(), task.id(), retryAt);
+            tenantQueueMapper.reschedule(task.workspaceId(), task.id(), nextAttemptAt());
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void retryUser(
             ObjectDeletionTask selected,
-            LocalDateTime now,
-            LocalDateTime retryAt) {
+            LocalDateTime now) {
         ObjectDeletionTask task = userQueueMapper.lockDueByIdentity(
             selected.id(), selected.objectKey(), now);
         if (task == null) {
             return;
         }
-        deleteUser(task, retryAt);
+        deleteUser(task);
     }
 
-    private void deleteUser(ObjectDeletionTask task, LocalDateTime retryAt) {
+    private void deleteUser(ObjectDeletionTask task) {
         try {
             objectStorage.delete(task.objectKey());
             if (task.deletePassesRemaining() > 1) {
-                userQueueMapper.confirmDeletePass(task.id(), retryAt);
+                userQueueMapper.confirmDeletePass(task.id(), nextAttemptAt());
                 return;
             }
             userQueueMapper.deleteById(task.id());
         } catch (ObjectStorageException exception) {
-            userQueueMapper.reschedule(task.id(), retryAt);
+            userQueueMapper.reschedule(task.id(), nextAttemptAt());
         }
+    }
+
+    private LocalDateTime nextAttemptAt() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
+            .plusNanos(properties.getDeleteRetryDelayMs() * 1_000_000L);
     }
 
     private static ObjectDeletionTombstone tombstone(

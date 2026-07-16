@@ -100,6 +100,20 @@ class BusinessCardRateLimiterTest {
     }
 
     @Test
+    void preMultipartScanAdmissionHasPrincipalAndGlobalBudgets() {
+        BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
+
+        assertDoesNotThrow(() -> limiter.requireScanAdmissionAllowed(9));
+        assertDoesNotThrow(() -> limiter.requireScanAdmissionAllowed(9));
+        assertThrows(TooManyRequestsException.class,
+            () -> limiter.requireScanAdmissionAllowed(9));
+        assertDoesNotThrow(() -> limiter.requireScanAdmissionAllowed(10));
+        assertThrows(TooManyRequestsException.class,
+            () -> limiter.requireScanAdmissionAllowed(11));
+        assertDoesNotThrow(limiter::requireScanAllowed);
+    }
+
+    @Test
     void reservationAndStatusAdmissionUseTheProvidedPrincipalWithoutServices() {
         BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
 

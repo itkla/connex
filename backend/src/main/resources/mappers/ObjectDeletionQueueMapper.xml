@@ -36,7 +36,8 @@
     FROM object_deletion_queue
     WHERE next_attempt_at &lt;= #{now}
     GROUP BY workspace_id
-    ORDER BY MIN(next_attempt_at), workspace_id
+    ORDER BY CASE WHEN workspace_id &gt; #{afterWorkspaceId} THEN 0 ELSE 1 END,
+             workspace_id
     LIMIT #{limit}
   </select>
 

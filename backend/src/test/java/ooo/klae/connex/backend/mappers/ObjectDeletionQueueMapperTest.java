@@ -39,7 +39,7 @@ class ObjectDeletionQueueMapperTest extends AbstractMapperTest {
             sibling.getId(), mine.getFirst().id()));
         assertEquals(1, objectDeletionQueueMapper.countPending(workspace.getId()));
         assertTrue(objectDeletionQueueMapper.workspaceIdsWithDueTasks(
-            now.plusSeconds(1), 10).containsAll(List.of(workspace.getId(), sibling.getId())));
+            now.plusSeconds(1), 0, 10).containsAll(List.of(workspace.getId(), sibling.getId())));
     }
 
     @Test
