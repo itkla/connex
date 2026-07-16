@@ -356,15 +356,12 @@ class RecordListControllerTest {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
-        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
-        when(workspaceService.getCurrentUserId()).thenReturn(7);
-        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
-        when(dealService.getDealBoard(4, memberScope)).thenReturn(List.of());
+        when(dealService.getDealBoard(4)).thenReturn(List.of());
 
-        assertTrue(controller.getDealBoard(4, null, null).isEmpty());
-        assertThrows(BadRequestException.class, () -> controller.getDealBoard(0, null, null));
+        assertTrue(controller.getDealBoard(4).isEmpty());
+        assertThrows(BadRequestException.class, () -> controller.getDealBoard(0));
 
-        verify(dealService).getDealBoard(4, memberScope);
+        verify(dealService).getDealBoard(4);
     }
 
     @Test

@@ -369,29 +369,33 @@ public class DealService {
         return matches.stream().sorted().toList();
     }
 
-    public DealFacets getDealFacets(MemberScope memberScope) {
+    /**
+     * Assembles the workspace-wide filter facet vocabulary. Facet counts deliberately ignore
+     * the active member scope so filter options never vanish while a scope is applied.
+     */
+    public DealFacets getDealFacets() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<FacetCount> status = dealMapper.countsByStatus(workspaceId, memberScope);
+        List<FacetCount> status = dealMapper.countsByStatus(workspaceId);
         return new DealFacets(
             status,
-            dealMapper.countsByStage(workspaceId, memberScope),
-            dealMapper.countsByPipeline(workspaceId, memberScope),
-            dealMapper.countsByCompany(workspaceId, memberScope),
+            dealMapper.countsByStage(workspaceId),
+            dealMapper.countsByPipeline(workspaceId),
+            dealMapper.countsByCompany(workspaceId),
             dealMapper.countsByOwner(workspaceId),
-            dealMapper.countsByCurrency(workspaceId, memberScope),
+            dealMapper.countsByCurrency(workspaceId),
             List.of()
         );
     }
 
-    /** Returns a member-scoped pipeline board with global positions when reordering is bounded. */
-    public List<Deal> getDealBoard(int pipelineId, MemberScope memberScope) {
+    /** Returns the full pipeline board with global positions when reordering is bounded. */
+    public List<Deal> getDealBoard(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = dealMapper.countDealsByPipelineId(workspaceId, pipelineId);
         if (total > MAX_BOARD_DEALS) {
             throw new BadRequestException(
                 "This pipeline is too large for Kanban reordering; use the paginated table view");
         }
-        return dealMapper.getDealBoard(workspaceId, pipelineId, memberScope);
+        return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
     public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {

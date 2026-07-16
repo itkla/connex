@@ -96,16 +96,15 @@ class DealMemberScopeIntegrationTest {
         assertEquals(2, facetCount(facets.path("owners"), fixture.firstMember().getId()));
         assertEquals(1, facetCount(facets.path("owners"), fixture.secondMember().getId()));
         assertEquals(1, facetCount(facets.path("owners"), "__empty__"));
+        assertEquals(json(fixture, "/api/deals/facets"), facets);
 
-        JsonNode allTeamFacets = json(fixture, "/api/deals/facets");
-        assertEquals(1, facetCount(allTeamFacets.path("owners"), "__empty__"));
-
-        JsonNode scopedBoard = json(fixture, "/api/deals/board",
+        JsonNode board = json(fixture, "/api/deals/board",
             "pipelineId", Integer.toString(fixture.pipeline().getId()),
             "scope", "members",
             "memberIds", Integer.toString(fixture.firstMember().getId()));
-        assertEquals(1, scopedBoard.path(0).path("position").asInt());
-        assertEquals(2, scopedBoard.path(1).path("position").asInt());
+        assertEquals(json(fixture, "/api/deals/board",
+            "pipelineId", Integer.toString(fixture.pipeline().getId())), board);
+        assertEquals(0, board.path(0).path("position").asInt());
     }
 
     @Test
@@ -157,7 +156,7 @@ class DealMemberScopeIntegrationTest {
         List<String> boardParameters = new ArrayList<>(parameters);
         boardParameters.add("pipelineId");
         boardParameters.add(Integer.toString(fixture.pipeline().getId()));
-        assertEquals(expected,
+        assertEquals(WORKSPACE_DEAL_TOTAL,
             json(fixture, "/api/deals/board", boardParameters.toArray(String[]::new)).size());
     }
 

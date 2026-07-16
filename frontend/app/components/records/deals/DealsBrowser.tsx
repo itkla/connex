@@ -1111,7 +1111,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onChange={changeOwnerScope}
                             members={activeMembers}
                             counts={ownerCounts}
-                            unassignedCount={ownerCounts.get(FILTER_EMPTY)}
                         />
                         <RecordsFilterPills<Deal>
                             facets={facets}

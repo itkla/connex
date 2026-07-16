@@ -183,33 +183,29 @@ public class DealController {
     }
 
     /**
-     * Returns every matching deal in one bounded member-scoped pipeline board. Scoped rows keep
-     * their global {@code position} values: a scoped board is a read-only subset, and clients
-     * that reorder deals must fetch the board unscoped (filtering client-side) so move ordinals
-     * are computed against the full stage — deriving ordinals from a scoped subset silently
-     * reorders hidden deals.
+     * Returns every deal in one bounded pipeline board, always unscoped: board rows carry the
+     * global {@code position} values that reordering clients anchor move ordinals against, so
+     * member scoping is applied client-side over the full board rather than here — a scoped
+     * subset would let a reorder silently move hidden deals.
      */
     @GetMapping("/board")
-    public List<DealDto> getDealBoard(
-            @RequestParam int pipelineId,
-            @RequestParam(required = false) String scope,
-            @RequestParam(required = false) List<Integer> memberIds) {
+    public List<DealDto> getDealBoard(@RequestParam int pipelineId) {
         if (pipelineId < 1) {
             throw new BadRequestException("pipelineId must be a positive integer");
         }
-        return dealService.getDealBoard(pipelineId, resolveMemberScope(scope, memberIds)).stream()
+        return dealService.getDealBoard(pipelineId).stream()
             .map(DealDto::from)
             .toList();
     }
 
     /**
-     * GET endpoint for member-scoped deal filter facets.
+     * GET endpoint for the workspace-wide deal filter facet vocabulary. Facet counts are
+     * deliberately never member-scoped (matching every other filter): options must not vanish
+     * while a scope is active, so the owner picker keeps stable all-team counts.
      */
     @GetMapping("/facets")
-    public DealFacets getDealFacets(
-            @RequestParam(required = false) String scope,
-            @RequestParam(required = false) List<Integer> memberIds) {
-        return dealService.getDealFacets(resolveMemberScope(scope, memberIds));
+    public DealFacets getDealFacets() {
+        return dealService.getDealFacets();
     }
 
     /** Returns the first visible contact for each requested deal without per-deal fan-out. */

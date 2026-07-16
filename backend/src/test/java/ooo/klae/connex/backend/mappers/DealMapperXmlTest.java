@@ -21,13 +21,7 @@ class DealMapperXmlTest {
         "getDealsPageFiltered",
         "countDealsFiltered",
         "dealMetricsFiltered",
-        "getFilteredDealIds",
-        "countsByStatus",
-        "countsByStage",
-        "countsByPipeline",
-        "countsByCompany",
-        "countsByCurrency",
-        "getDealBoard"
+        "getFilteredDealIds"
     );
 
     @Test

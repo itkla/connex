@@ -657,7 +657,6 @@
            COUNT(*) AS count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
     GROUP BY `key`
   </select>
 
@@ -665,7 +664,6 @@
     SELECT d.stage_id AS `key`, COUNT(*) AS count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
     GROUP BY d.stage_id
   </select>
 
@@ -673,7 +671,6 @@
     SELECT d.pipeline_id AS `key`, COUNT(*) AS count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
     GROUP BY d.pipeline_id
   </select>
 
@@ -682,14 +679,12 @@
     FROM deal d
     JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
       AND d.company_id IS NOT NULL
     GROUP BY d.company_id, c.name
     UNION ALL
     SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
       AND d.company_id IS NULL
     HAVING COUNT(*) &gt; 0
   </select>
@@ -706,7 +701,6 @@
     SELECT d.currency AS `key`, COUNT(*) AS count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
     GROUP BY d.currency
   </select>
 
@@ -714,7 +708,6 @@
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
       AND d.pipeline_id = #{pipelineId}
     ORDER BY d.stage_id, d.position, d.id
   </select>

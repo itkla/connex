@@ -92,7 +92,7 @@ class DealServiceTest extends AbstractServiceTest {
 
         MemberScope allTeamScope = MemberScope.fromRequest(null, null, currentUser.getId());
         DealMetricsDto metrics = dealService.getDealMetrics(null, null, null, null, null, null);
-        DealFacets facets = dealService.getDealFacets(allTeamScope);
+        DealFacets facets = dealService.getDealFacets();
         List<Deal> page = dealService.getDealsPage(
             null, null, null, null, null, null, null, null, 25, 0);
         long count = dealService.countDeals(null, null, null, null, null, null);
@@ -142,11 +142,11 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(localWon.getId(), localWonLower.getId()),
             multiFilteredPage.items().stream().map(Deal::getId).toList());
         assertEquals(2, multiFilteredMetrics.totalCount());
-        assertEquals(3, dealService.getDealBoard(pipeline.getId(), allTeamScope).size());
+        assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
     }
 
     @Test
-    void memberScopedBoardRetainsGlobalReorderingBound() {
+    void oversizedBoardRejectsKanbanReordering() {
         Workspace activeWorkspace = newWorkspace();
         workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
         workspace = activeWorkspace;
@@ -160,8 +160,7 @@ class DealServiceTest extends AbstractServiceTest {
         dealMapper.insertBatch(deals);
 
         BadRequestException exception = assertThrows(BadRequestException.class,
-            () -> dealService.getDealBoard(pipeline.getId(),
-                MemberScope.fromRequest("me", null, currentUser.getId())));
+            () -> dealService.getDealBoard(pipeline.getId()));
 
         assertEquals("This pipeline is too large for Kanban reordering; use the paginated table view",
             exception.getMessage());

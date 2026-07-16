@@ -735,19 +735,19 @@ class DealMapperTest extends AbstractMapperTest {
         dealMapper.update(withoutCompany);
 
         assertEquals(Map.of("open", 1L, "won", 2L, "lost", 1L),
-            facetCounts(dealMapper.countsByStatus(workspace.getId(), allTeamScope())));
+            facetCounts(dealMapper.countsByStatus(workspace.getId())));
         assertEquals(Map.of(
             Integer.toString(firstStage.getId()), 3L,
             Integer.toString(secondStage.getId()), 1L
-        ), facetCounts(dealMapper.countsByStage(workspace.getId(), allTeamScope())));
+        ), facetCounts(dealMapper.countsByStage(workspace.getId())));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 4L),
-            facetCounts(dealMapper.countsByPipeline(workspace.getId(), allTeamScope())));
+            facetCounts(dealMapper.countsByPipeline(workspace.getId())));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L, "__empty__", 1L),
-            facetCounts(dealMapper.countsByCompany(workspace.getId(), allTeamScope())));
+            facetCounts(dealMapper.countsByCompany(workspace.getId())));
         assertEquals(Map.of("__empty__", 4L),
-            facetCounts(dealMapper.countsByOwner(workspace.getId(), allTeamScope())));
+            facetCounts(dealMapper.countsByOwner(workspace.getId())));
         assertEquals(Map.of("JPY", 3L, "USD", 1L),
-            facetCounts(dealMapper.countsByCurrency(workspace.getId(), allTeamScope())));
+            facetCounts(dealMapper.countsByCurrency(workspace.getId())));
     }
 
     @Test

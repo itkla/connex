@@ -78,12 +78,13 @@ public record MemberScope(Mode mode, Integer userId, List<Integer> memberIds) {
         if (memberIds == null || memberIds.isEmpty()) {
             throw new BadRequestException("memberIds are required when scope=members");
         }
-        if (memberIds.size() > MAX_MEMBER_IDS) {
-            throw new BadRequestException("memberIds accepts at most 50 values");
-        }
         if (memberIds.stream().anyMatch(id -> id == null || id < 1)) {
             throw new BadRequestException("memberIds values must be positive integers");
         }
-        return new MemberScope(Mode.MEMBERS, null, List.copyOf(new LinkedHashSet<>(memberIds)));
+        List<Integer> distinctIds = List.copyOf(new LinkedHashSet<>(memberIds));
+        if (distinctIds.size() > MAX_MEMBER_IDS) {
+            throw new BadRequestException("memberIds accepts at most 50 values");
+        }
+        return new MemberScope(Mode.MEMBERS, null, distinctIds);
     }
 }

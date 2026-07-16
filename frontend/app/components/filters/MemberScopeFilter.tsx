@@ -19,7 +19,11 @@ import { pillClass } from "./FilterPill";
 
 /** Sentinel value meaning "scoped to the current user"; resolved server-side, never a raw id. */
 export const MEMBER_SCOPE_ME = "me";
-/** Sentinel value meaning "records with no owner". */
+/**
+ * Sentinel value meaning "records with no owner". The literal is the shared empty-bucket key:
+ * it must stay equal to {@code FILTER_EMPTY} in {@code app/components/records/types.ts} and to
+ * the {@code '__empty__'} facet key the backend emits (see {@code DealMapper.countsByOwner}).
+ */
 export const MEMBER_SCOPE_UNASSIGNED = "__empty__";
 /** Maximum selectable members, mirroring the server-side memberIds cap. */
 export const MEMBER_SCOPE_MAX_MEMBERS = 50;
@@ -69,15 +73,14 @@ export default function MemberScopeFilter({
     onChange,
     members,
     counts,
-    unassignedCount,
 }: {
     values: string[] | undefined;
     onChange: (values: string[]) => void;
     members: WorkspaceMember[];
     counts?: Map<string, number>;
-    unassignedCount?: number;
 }) {
     const t = useTranslations("MemberScope");
+    const unassignedCount = counts?.get(MEMBER_SCOPE_UNASSIGNED);
     const { mode, memberIds } = interpretMemberScope(values);
     const active = mode !== "all";
     const memberById = new Map(members.map((member) => [member.id, member]));

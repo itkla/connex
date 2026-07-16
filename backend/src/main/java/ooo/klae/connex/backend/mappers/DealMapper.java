@@ -187,36 +187,19 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );
-    List<FacetCount> countsByStatus(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
-    List<FacetCount> countsByStage(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
-    List<FacetCount> countsByPipeline(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
-    List<FacetCount> countsByCompany(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
+    List<FacetCount> countsByStatus(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByStage(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByPipeline(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByCompany(@Param("workspaceId") int workspaceId);
     /**
-     * Owner facet counts over the whole workspace, deliberately ignoring the active member
-     * scope: the owner picker must keep showing every owner option (with stable counts) while
-     * one owner is selected, mirroring standard multi-select facet self-exclusion.
+     * Owner facet counts over the whole workspace: like every facet, the owner picker keeps
+     * showing all options (with stable counts) while a member scope is applied.
      */
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
-    List<FacetCount> countsByCurrency(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
+    List<FacetCount> countsByCurrency(@Param("workspaceId") int workspaceId);
     List<Deal> getDealBoard(
         @Param("workspaceId") int workspaceId,
-        @Param("pipelineId") int pipelineId,
-        @Param("memberScope") MemberScope memberScope
+        @Param("pipelineId") int pipelineId
     );
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
