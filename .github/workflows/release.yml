@@ -5,106 +5,504 @@ on:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  images:
-    name: Build & publish ${{ matrix.component }} image
+  metadata:
+    name: Resolve release metadata
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      candidate_tag: ${{ steps.metadata.outputs.candidate_tag }}
+      build_epoch: ${{ steps.metadata.outputs.build_epoch }}
+      build_time: ${{ steps.metadata.outputs.build_time }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+
+      - name: Validate release ref
+        id: metadata
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Release tags must use strict vMAJOR.MINOR.PATCH SemVer."
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "candidate_tag=candidate-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "build_epoch=$BUILD_EPOCH" >> "$GITHUB_OUTPUT"
+          echo "build_time=$BUILD_TIME" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful checks for the release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          required=(
+            'OCR — contract tests'
+            'Backend — build & test'
+            'Frontend — typecheck & lint'
+            'Secret scan (gitleaks)'
+            'Frontend dependency audit'
+            'OCR dependency audit'
+            'Submit Gradle dependency graph'
+          )
+          for attempt in $(seq 1 80); do
+            checks="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100")"
+            waiting=false
+            for name in "${required[@]}"; do
+              conclusion="$(jq -r --arg name "$name" \
+                '[.check_runs[] | select(.name == $name)][0].conclusion // ""' <<<"$checks")"
+              if [ "$conclusion" = success ]; then
+                continue
+              fi
+              if [[ "$conclusion" =~ ^(action_required|cancelled|failure|stale|timed_out)$ ]]; then
+                echo "::error::Required check failed: ${name} (${conclusion})"
+                exit 1
+              fi
+              waiting=true
+            done
+            if [ "$waiting" = false ]; then
+              exit 0
+            fi
+            if [ "$attempt" = 80 ]; then
+              echo "::error::Required release checks did not complete successfully."
+              exit 1
+            fi
+            sleep 15
+          done
+
+  candidate-images:
+    name: Build and verify ${{ matrix.component }} candidate
+    needs: metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
         component: [backend, frontend, ocr]
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Derive product version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Reuse this run's immutable candidate
+        id: existing
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          CANDIDATE_TAG: ${{ needs.metadata.outputs.candidate_tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          reference="${IMAGE}:${CANDIDATE_TAG}"
+          if manifest="$(docker buildx imagetools inspect "$reference" --format '{{json .Manifest}}' 2>&1)"; then
+            digest="$(jq -er '.digest' <<<"$manifest")"
+            image="$(docker buildx imagetools inspect "${IMAGE}@${digest}" --format '{{json .Image}}')"
+            test "$(jq -r '.config.Labels["org.opencontainers.image.revision"] // ""' <<<"$image")" = "$GITHUB_SHA"
+            test "$(jq -r '.config.Labels["org.opencontainers.image.version"] // ""' <<<"$image")" = "$VERSION"
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if grep -Eqi 'manifest unknown|not found' <<<"$manifest"; then
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$manifest" >&2
+          exit 1
+
+      - name: Build and push candidate
         id: build
-        uses: docker/build-push-action@v6
+        if: steps.existing.outputs.reuse != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.build_epoch }}
         with:
           context: ./${{ matrix.component }}
           platforms: linux/amd64
           push: true
           provenance: false
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.metadata.outputs.version }}
+            BUILD_TIME=${{ needs.metadata.outputs.build_time }}
+            SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.build_epoch }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}:${{ needs.metadata.outputs.candidate_tag }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+
+      - name: Resolve candidate digest
+        id: digest
+        env:
+          REUSED_DIGEST: ${{ steps.existing.outputs.digest }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          digest="${REUSED_DIGEST:-${BUILT_DIGEST:-}}"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke exact OCR candidate
+        if: matrix.component == 'ocr'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-ocr
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: bash ocr/ci/smoke_image.sh "${IMAGE}@${DIGEST}"
+
+      - name: Scan exact candidate for high-severity vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
 
-      - name: Sign image (keyless)
+      - name: Sign candidate digest
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
-          image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.build.outputs.digest }}
+          image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
           format: spdx-json
           output-file: sbom-${{ matrix.component }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
 
-      - name: Attest SBOM to image
+      - name: Attest SBOM to candidate digest
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
         run: cosign attest --yes --predicate "sbom-${{ matrix.component }}.spdx.json" --type spdxjson "${IMAGE}@${DIGEST}"
 
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+      - name: Write image descriptor
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          CANDIDATE_TAG: ${{ needs.metadata.outputs.candidate_tag }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          jq -n \
+            --arg component "$COMPONENT" \
+            --arg image "$IMAGE" \
+            --arg candidate "$CANDIDATE_TAG" \
+            --arg digest "$DIGEST" \
+            --arg version "$VERSION" \
+            --arg sourceSha "$GITHUB_SHA" \
+            '{component:$component,image:$image,candidate:$candidate,digest:$digest,version:$version,sourceSha:$sourceSha}' \
+            > "release-${COMPONENT}.json"
+
+      - name: Upload verified candidate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: sbom-${{ matrix.component }}
-          path: sbom-${{ matrix.component }}.spdx.json
+          name: release-${{ matrix.component }}
+          path: |
+            release-${{ matrix.component }}.json
+            sbom-${{ matrix.component }}.spdx.json
+
+  release-set-smoke:
+    name: Smoke exact release set
+    needs: [metadata, candidate-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare exact-digest Compose release set
+        working-directory: deploy
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          for component in backend frontend ocr; do
+            descriptor="../release-${component}.json"
+            test "$(jq -r '.component' "$descriptor")" = "$component"
+            test "$(jq -r '.version' "$descriptor")" = "$VERSION"
+            test "$(jq -r '.sourceSha' "$descriptor")" = "$GITHUB_SHA"
+          done
+          BACKEND_IMAGE="$(jq -r '.image + "@" + .digest' ../release-backend.json)"
+          FRONTEND_IMAGE="$(jq -r '.image + "@" + .digest' ../release-frontend.json)"
+          OCR_IMAGE="$(jq -r '.image + "@" + .digest' ../release-ocr.json)"
+          jq -n \
+            --arg backend "$BACKEND_IMAGE" \
+            --arg frontend "$FRONTEND_IMAGE" \
+            --arg ocr "$OCR_IMAGE" \
+            '{services:{backend:{image:$backend},frontend:{image:$frontend},ocr:{image:$ocr}}}' \
+            > /tmp/release-images.json
+          cp eval.env.example .env
+          TOKEN="$(openssl rand -hex 32)"
+          sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18088/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_SCANNING_ENABLED=.*/CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true/' .env
+          sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
+          printf '\nCOMPOSE_PROFILES=ocr\n' >> .env
+
+      - name: Boot and verify exact release set
+        working-directory: deploy
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          compose() {
+            docker compose -f docker-compose.yml -f /tmp/release-images.json "$@"
+          }
+          compose config --format json | jq -e '
+            .networks.ocr_internal.internal == true
+            and .networks.ocr_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+            and .networks.ocr_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv6"] == "isolated"
+            and .services.backend.networks.default.gw_priority == 1
+            and .services.backend.environment.CONNEX_DB_ROOT_PASSWORD == ""
+          '
+          compose pull
+          compose up -d
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:18088/api/version \
+                | jq -e --arg version "$VERSION" '.version == $version' >/dev/null \
+              && curl -fsS http://127.0.0.1:18088/api/capabilities \
+                | jq -e '.businessCardScanning == true and .businessCardImport == true' >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 120 ]; then
+              compose logs --no-color
+              exit 1
+            fi
+            sleep 2
+          done
+          for component in backend frontend ocr; do
+            container="$(compose ps -q "$component")"
+            expected="$(jq -r '.image + "@" + .digest' "../release-${component}.json")"
+            test "$(docker inspect "$container" --format '{{.Config.Image}}')" = "$expected"
+          done
+          OCR_CONTAINER="$(compose ps -q ocr)"
+          docker inspect "$OCR_CONTAINER" | jq -e '.[0] |
+            .HostConfig.Memory == 2147483648
+            and .HostConfig.MemorySwap == 2147483648
+            and .HostConfig.NanoCpus == 2000000000
+            and .HostConfig.PidsLimit == 128
+            and .HostConfig.ReadonlyRootfs == true
+            and (.HostConfig.CapDrop | index("ALL") != null)
+            and ([.NetworkSettings.Ports[]? | select(. != null)] | length == 0)
+          '
+
+      - name: Verify isolated maintenance invocation exits
+        working-directory: deploy
+        run: |
+          compose() {
+            docker compose -f docker-compose.yml -f /tmp/release-images.json "$@"
+          }
+          compose stop caddy frontend backend ocr
+          test "$(compose ps --services --status running)" = "db"
+          LEGACY_VOLUME="connex_legacy_uploads_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          docker volume create "$LEGACY_VOLUME"
+          timeout 180 docker compose -f docker-compose.yml -f /tmp/release-images.json \
+            run --rm --no-deps \
+            -e SPRING_MAIN_WEB_APPLICATION_TYPE=none \
+            -e CONNEX_MAINTENANCE_MODE=legacy-upload-migration \
+            -e CONNEX_OBJECT_STORAGE_LEGACY_MIGRATION_MODE=DRY_RUN \
+            -e CONNEX_OBJECT_STORAGE_LEGACY_UPLOADS_ROOT=/legacy \
+            -v "$LEGACY_VOLUME:/legacy:ro" \
+            backend 2>&1 | tee /tmp/maintenance.log
+          grep -F 'Legacy upload migration DRY_RUN: discovered=0, migrated=0, valid=0, failed=0, remaining=0' /tmp/maintenance.log
+          docker volume rm "$LEGACY_VOLUME"
+
+      - name: Show logs after failure
+        if: failure()
+        working-directory: deploy
+        run: docker compose -f docker-compose.yml -f /tmp/release-images.json logs --no-color || true
+
+      - name: Clean up release set
+        if: always()
+        working-directory: deploy
+        run: docker compose -f docker-compose.yml -f /tmp/release-images.json down -v --remove-orphans || true
+
+  promote:
+    name: Promote immutable release tags
+    needs: [metadata, candidate-images, release-set-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Preflight every destination tag
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          remote_digest() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null \
+              | jq -er '.digest'
+          }
+          optional_remote_digest() {
+            local output
+            if output="$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>&1)"; then
+              jq -er '.digest' <<<"$output"
+              return
+            fi
+            if grep -Eqi 'manifest unknown|not found' <<<"$output"; then
+              return 3
+            fi
+            printf '%s\n' "$output" >&2
+            return 1
+          }
+          for component in backend frontend ocr; do
+            descriptor="release-${component}.json"
+            image="$(jq -r '.image' "$descriptor")"
+            digest="$(jq -r '.digest' "$descriptor")"
+            test "$(jq -r '.version' "$descriptor")" = "$VERSION"
+            test "$(jq -r '.sourceSha' "$descriptor")" = "$GITHUB_SHA"
+            test "$(remote_digest "${image}@${digest}")" = "$digest"
+            for tag in "$VERSION" "sha-${GITHUB_SHA}"; do
+              if existing="$(optional_remote_digest "${image}:${tag}")"; then
+                test "$existing" = "$digest"
+              else
+                status="$?"
+                test "$status" = 3
+              fi
+            done
+          done
+
+      - name: Promote and verify final tags
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          remote_digest() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' \
+              | jq -er '.digest'
+          }
+          IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+          for component in backend frontend ocr; do
+            descriptor="release-${component}.json"
+            image="$(jq -r '.image' "$descriptor")"
+            digest="$(jq -r '.digest' "$descriptor")"
+            docker buildx imagetools create --prefer-index=false \
+              --tag "${image}:${VERSION}" \
+              --tag "${image}:sha-${GITHUB_SHA}" \
+              "${image}@${digest}"
+            test "$(remote_digest "${image}:${VERSION}")" = "$digest"
+            test "$(remote_digest "${image}:sha-${GITHUB_SHA}")" = "$digest"
+            cosign verify \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${image}@${digest}" >/dev/null
+            cosign verify-attestation --type spdxjson \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${image}@${digest}" >/dev/null
+          done
+          jq -s \
+            --arg version "$VERSION" \
+            --arg sourceSha "$GITHUB_SHA" \
+            '{version:$version,sourceSha:$sourceSha,images:(map({key:.component,value:{image:.image,digest:.digest}})|from_entries)}' \
+            release-backend.json release-frontend.json release-ocr.json \
+            > release-manifest.json
+          jq '{services:{backend:{image:(.images.backend.image + "@" + .images.backend.digest)},frontend:{image:(.images.frontend.image + "@" + .images.frontend.digest)},ocr:{image:(.images.ocr.image + "@" + .images.ocr.digest)}}}' \
+            release-manifest.json > release-compose-images.json
+
+      - name: Sign release descriptors
+        run: |
+          cosign sign-blob --yes --bundle release-manifest.bundle.json release-manifest.json
+          cosign sign-blob --yes --bundle release-compose-images.bundle.json release-compose-images.json
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-manifest
+          path: |
+            release-manifest.json
+            release-manifest.bundle.json
+            release-compose-images.json
+            release-compose-images.bundle.json
 
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: images
+    needs: [metadata, promote]
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: sbom-*
+          pattern: release-*
           merge-multiple: true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           generate_release_notes: true
-          files: sbom-*.spdx.json
+          files: |
+            sbom-*.spdx.json
+            release-manifest.json
+            release-manifest.bundle.json
+            release-compose-images.json
+            release-compose-images.bundle.json
           body: |
-            Connex ${{ needs.images.outputs.version }} — version-locked frontend, backend, and OCR images.
+            Connex ${{ needs.metadata.outputs.version }} — one verified frontend, backend, and OCR image set.
 
             Images (immutable, cosign-signed, SBOM-attested):
-            - `ghcr.io/${{ github.repository_owner }}/connex-backend:${{ needs.images.outputs.version }}`
-            - `ghcr.io/${{ github.repository_owner }}/connex-frontend:${{ needs.images.outputs.version }}`
-            - `ghcr.io/${{ github.repository_owner }}/connex-ocr:${{ needs.images.outputs.version }}`
+            - `ghcr.io/${{ github.repository_owner }}/connex-backend:${{ needs.metadata.outputs.version }}`
+            - `ghcr.io/${{ github.repository_owner }}/connex-frontend:${{ needs.metadata.outputs.version }}`
+            - `ghcr.io/${{ github.repository_owner }}/connex-ocr:${{ needs.metadata.outputs.version }}`

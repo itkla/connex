@@ -33,7 +33,7 @@ class ObjectDeletionTransactionExecutorTest {
     @Test
     void successfulTenantDeletionReleasesExactQuotaAndRemovesTask() {
         ObjectDeletionTask task = new ObjectDeletionTask(
-            11, 7, "workspaces/7/attachments/object.pdf", 2);
+            11, 7, "workspaces/7/attachments/object.pdf", 2, 1);
 
         executor.retryTenant(task, LocalDateTime.of(2026, 7, 14, 12, 1));
 
@@ -45,7 +45,7 @@ class ObjectDeletionTransactionExecutorTest {
     @Test
     void failedPhysicalDeletionRemainsQueuedAndCharged() {
         ObjectDeletionTask task = new ObjectDeletionTask(
-            11, 7, "workspaces/7/attachments/object.pdf", 2);
+            11, 7, "workspaces/7/attachments/object.pdf", 2, 1);
         LocalDateTime retryAt = LocalDateTime.of(2026, 7, 14, 12, 1);
         org.mockito.Mockito.doThrow(new ObjectStorageException("unavailable"))
             .when(objectStorage).delete(task.objectKey());
@@ -65,5 +65,32 @@ class ObjectDeletionTransactionExecutorTest {
 
         verify(quotaService).release(7, key);
         verify(tenantQueueMapper).deleteByKey(7, key);
+    }
+
+    @Test
+    void ambiguousWriteTombstoneRequiresASecondSuccessfulDeletePass() {
+        ObjectDeletionTask task = new ObjectDeletionTask(
+            11, 7, "workspaces/7/attachments/object.pdf", 1, 2);
+        LocalDateTime retryAt = LocalDateTime.of(2026, 7, 14, 12, 1);
+
+        executor.retryTenant(task, retryAt);
+
+        verify(objectStorage).delete(task.objectKey());
+        verify(tenantQueueMapper).confirmDeletePass(7, 11, retryAt);
+        verifyNoInteractions(quotaService);
+        verify(tenantQueueMapper, never()).deleteById(7, 11);
+    }
+
+    @Test
+    void ambiguousUserWriteTombstoneRequiresASecondSuccessfulDeletePass() {
+        ObjectDeletionTask task = new ObjectDeletionTask(
+            12, 0, "users/9/profile-images/object.png", 1, 2);
+        LocalDateTime retryAt = LocalDateTime.of(2026, 7, 14, 12, 1);
+
+        executor.retryUser(task, retryAt);
+
+        verify(objectStorage).delete(task.objectKey());
+        verify(userQueueMapper).confirmDeletePass(12, retryAt);
+        verify(userQueueMapper, never()).deleteById(12);
     }
 }

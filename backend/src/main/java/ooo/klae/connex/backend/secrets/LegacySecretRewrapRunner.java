@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,11 @@ import ooo.klae.connex.backend.sso.SsoSecretCipher;
  * decrypt them.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 @Order(Ordered.LOWEST_PRECEDENCE)
 @RequiredArgsConstructor
 public class LegacySecretRewrapRunner implements ApplicationRunner {

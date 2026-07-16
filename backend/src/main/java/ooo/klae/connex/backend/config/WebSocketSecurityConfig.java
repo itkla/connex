@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
@@ -28,6 +29,11 @@ import org.springframework.security.messaging.web.csrf.CsrfChannelInterceptor;
  */
 @Configuration
 @EnableWebSocketSecurity
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 public class WebSocketSecurityConfig {
 
     @Bean

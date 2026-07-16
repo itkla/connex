@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -52,5 +53,17 @@ public class BusinessCardController {
             @Valid @RequestPart("companyAction") BusinessCardCompanyAction companyAction,
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
         return businessCardService.importCard(image, contact, companyAction, idempotencyKey);
+    }
+
+    /**
+     * Reconciles a previously submitted import after the client lost its response.
+     *
+     * @param idempotencyKey caller-generated UUID retained across retries
+     * @return the completed import result
+     */
+    @GetMapping("/import")
+    public BusinessCardImportResponse importStatus(
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return businessCardService.importStatus(idempotencyKey);
     }
 }

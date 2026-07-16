@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { type Company } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
+import { toastError } from '@/app/lib/toast';
 import {
     QuickEditField,
     QuickEditMediaUpload,
@@ -82,6 +83,7 @@ export default function QuickEditCompanySheet({
                             </div>
                         }
                         onSelect={(file) => updateLogoFile(c.id, file)}
+                        onInvalidSelect={() => toastError(t('unsupportedLogo'))}
                     />
                 ) : (
                     <CompanyAvatar company={c} type="large" />

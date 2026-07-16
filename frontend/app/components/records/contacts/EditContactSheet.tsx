@@ -66,43 +66,42 @@ export default function EditContactSheet({
         }
 
         setIsSaving(true);
+        let committedChanges = false;
         try {
-            let imageUrl: string | undefined;
-            if (pictureChanged && imageFile) {
-                imageUrl = await uploadContactPicture(contact.id, imageFile);
-            }
-
-            if (textChanged || pictureChanged) {
+            if (textChanged) {
                 const payload: UpdateContactPayload = {
                     name: draft.name.trim(),
                     email: draft.email.trim() || undefined,
                     phone: draft.phone.trim() || undefined,
                     title: draft.title.trim() || undefined,
                     companyId: contact.companyId ?? contact.company?.id ?? null,
-                    imageUrl: imageUrl ?? contact.imageUrl ?? undefined,
                 };
                 await updateContact(contact.id, payload);
+                committedChanges = true;
             }
 
-            await cfRef.current?.save();
+            if (customChanged) {
+                await cfRef.current?.save();
+                committedChanges = true;
+            }
+
+            if (pictureChanged && imageFile) {
+                await uploadContactPicture(contact.id, imageFile);
+            }
 
             toastSuccess(t('toastContactUpdated'));
-            handleOpenChange(false);
-
-            // on success, update the form fields to reflect the updated info so that stale info isn't accidentally sent again
-            // setDraft(toDraft(contact));
-            // setImageFile(null);
-
-            // TODO: change this to optimistic ui update. we should rely on previous data to update from instead of querying the backend
-            const updatedContact = await getContactById(contact.id);
-            if (updatedContact) {
-                setDraft(toDraft(updatedContact));
-                setImageFile(null);
-            }
-
+            setImageFile(null);
+            onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            if (committedChanges) {
+                const updatedContact = await getContactById(contact.id).catch(() => null);
+                if (updatedContact) setDraft(toDraft(updatedContact));
+                toastError(t('toastPartiallySaved'));
+                router.refresh();
+            } else {
+                toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            }
         } finally {
             setIsSaving(false);
         }

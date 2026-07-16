@@ -117,7 +117,9 @@ class UserOffboardingOrderTest {
             notificationChanges,
             referenceService,
             offboardingService,
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(UserProfilePictureTransaction.class),
+            mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class)
         );
 
         userService.delete(9);

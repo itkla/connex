@@ -119,7 +119,7 @@ class ModelDownloadTest(unittest.TestCase):
         response = DownloadResponse(content, artifact.url, str(len(content)))
         with tempfile.TemporaryDirectory() as temporary:
             destination = Path(temporary) / "model.tar"
-            with patch("ocr_service.prefetch.urllib.request.urlopen", return_value=response):
+            with patch("ocr_service.prefetch._MODEL_OPENER.open", return_value=response):
                 _download(artifact, destination)
 
             self.assertEqual(content, destination.read_bytes())
@@ -135,7 +135,7 @@ class ModelDownloadTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for index, response in enumerate(cases):
-                with patch("ocr_service.prefetch.urllib.request.urlopen", return_value=response):
+                with patch("ocr_service.prefetch._MODEL_OPENER.open", return_value=response):
                     with self.assertRaises(RuntimeError):
                         _download(artifact, root / f"model-{index}.tar")
 

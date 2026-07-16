@@ -58,6 +58,7 @@ public class PersonDto {
     private String createdAt;
     private String updatedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String imageUrl;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)

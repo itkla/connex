@@ -316,6 +316,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        company.setLogoUrl(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
         auditService.record("company.create", "company", company.getId(), company.getName(),
@@ -380,7 +381,6 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = requireOwnedCompany(workspaceId, id);
         StoredImage stored = managedObjectService.storeCompanyImage(workspaceId, id, source);
-        managedObjectService.compensateCompanyImageOnRollback(workspaceId, id, stored.url());
         int updated = companyMapper.updateLogoUrlIfCurrent(
             workspaceId, id, before.getLogoUrl(), stored.url());
         if (updated != 1) {

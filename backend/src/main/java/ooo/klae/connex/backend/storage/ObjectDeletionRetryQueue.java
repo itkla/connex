@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.services.PlacementRegistry;
@@ -24,7 +25,6 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 public class ObjectDeletionRetryQueue {
     private static final Logger log = LoggerFactory.getLogger(ObjectDeletionRetryQueue.class);
 
-    private final ObjectStorage objectStorage;
     private final ObjectStorageProperties properties;
     private final ObjectDeletionQueueMapper tenantQueueMapper;
     private final UserObjectDeletionQueueMapper userQueueMapper;
@@ -34,49 +34,62 @@ public class ObjectDeletionRetryQueue {
     private final Clock clock;
 
     public void enqueueTenantInCurrentTransaction(int workspaceId, String key) {
-        tenantQueueMapper.enqueue(workspaceId, ObjectStorageKey.requireValid(key), now());
+        tenantQueueMapper.enqueue(workspaceId, ObjectStorageKey.requireValid(key), 1, now());
         warnTenantBacklog(workspaceId);
     }
 
     public void enqueueUserInCurrentTransaction(String key) {
-        userQueueMapper.enqueue(ObjectStorageKey.requireValid(key), now());
+        userQueueMapper.enqueue(ObjectStorageKey.requireValid(key), 1, now());
         warnUserBacklog();
     }
 
-    public void enqueueAndProcessTenant(int workspaceId, String key) {
+    public void cancelTenantInCurrentTransaction(int workspaceId, String key) {
+        tenantQueueMapper.deleteByKey(workspaceId, ObjectStorageKey.requireValid(key));
+    }
+
+    public void cancelUserInCurrentTransaction(String key) {
+        userQueueMapper.deleteByKey(ObjectStorageKey.requireValid(key));
+    }
+
+    public void requireTenantWriteAllowed(int workspaceId) {
+        if (tenantQueueMapper.countPendingAmbiguousWrites(workspaceId)
+                >= properties.getMaxPendingTenantAmbiguousWriteCleanups()) {
+            throw new ServiceUnavailableException(
+                "Private object storage cleanup is degraded; retry after the backlog recovers");
+        }
+    }
+
+    public void enqueueRollbackTombstoneTenant(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.inWorkspace(workspaceId, () -> {
                 try {
-                    transactionExecutor.enqueueTenant(workspaceId, validKey, now());
-                    transactionExecutor.processTenant(workspaceId, validKey, retryAt());
+                    transactionExecutor.enqueueTenant(
+                        workspaceId, validKey, 2, ambiguousWriteCleanupAt());
+                    warnTenantBacklog(workspaceId);
                 } catch (RuntimeException exception) {
-                    log.error("Could not persist a tenant object deletion task; attempting direct cleanup");
-                    deleteTenantWithoutQueue(workspaceId, validKey);
+                    log.error("Could not persist an ambiguous tenant object cleanup tombstone; operator reconciliation is required");
                 }
             });
         } catch (RuntimeException exception) {
-            log.error("Could not route tenant object cleanup; operator reconciliation is required");
-            deleteWithoutQueue(validKey);
+            log.error("Could not route ambiguous tenant object cleanup; operator reconciliation is required");
         }
     }
 
-    public void enqueueAndProcessUser(String key) {
+    public void enqueueRollbackTombstoneUser(String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.unrouted(() -> {
                 try {
-                    transactionExecutor.enqueueUser(validKey, now());
-                    transactionExecutor.processUser(validKey, retryAt());
+                    transactionExecutor.enqueueUser(validKey, 2, ambiguousWriteCleanupAt());
+                    warnUserBacklog();
                 } catch (RuntimeException exception) {
-                    log.error("Could not persist a user object deletion task; attempting direct cleanup");
-                    deleteWithoutQueue(validKey);
+                    log.error("Could not persist an ambiguous user object cleanup tombstone; operator reconciliation is required");
                 }
                 return null;
             });
         } catch (RuntimeException exception) {
-            log.error("Could not route user object cleanup; operator reconciliation is required");
-            deleteWithoutQueue(validKey);
+            log.error("Could not route ambiguous user object cleanup; operator reconciliation is required");
         }
     }
 
@@ -161,28 +174,6 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
-    private void deleteTenantWithoutQueue(int workspaceId, String key) {
-        try {
-            objectStorage.delete(key);
-        } catch (ObjectStorageException exception) {
-            log.error("Direct private object cleanup failed; operator reconciliation is required");
-            return;
-        }
-        try {
-            transactionExecutor.releaseTenantQuota(workspaceId, key);
-        } catch (RuntimeException exception) {
-            log.error("Direct private object cleanup could not release quota; operator reconciliation is required");
-        }
-    }
-
-    private void deleteWithoutQueue(String key) {
-        try {
-            objectStorage.delete(key);
-        } catch (ObjectStorageException exception) {
-            log.error("Direct private object cleanup failed; operator reconciliation is required");
-        }
-    }
-
     private void warnTenantBacklog(int workspaceId) {
         long pending = tenantQueueMapper.countPending(workspaceId);
         if (pending > properties.getDeleteRetryWarningEntries()) {
@@ -203,5 +194,9 @@ public class ObjectDeletionRetryQueue {
 
     private LocalDateTime retryAt() {
         return now().plusNanos(properties.getDeleteRetryDelayMs() * 1_000_000L);
+    }
+
+    private LocalDateTime ambiguousWriteCleanupAt() {
+        return now().plusNanos(properties.getAmbiguousWriteCleanupDelayMs() * 1_000_000L);
     }
 }

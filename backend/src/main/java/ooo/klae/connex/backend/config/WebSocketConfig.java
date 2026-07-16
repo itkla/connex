@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.config;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -48,6 +49,11 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 @Configuration
 @EnableWebSocketMessageBroker
 @RequiredArgsConstructor
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private static final long[] HEARTBEAT_MILLIS = {10_000, 10_000};

@@ -97,7 +97,6 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 title: c.title || undefined,
-                imageUrl: c.imageUrl || undefined,
                 companyId: selected.id,
             })));
             toastSuccess(

@@ -115,6 +115,7 @@
     "toastNoChanges": "No changes to save",
     "toastNameRequired": "Name is required",
     "toastCompanyUpdated": "Company updated",
+    "toastPartiallySaved": "Some company changes were saved, but another change failed. Review the current values and try again.",
     "toastSaveFailed": "Failed to save"
   },
   "CompaniesNewDialog": {
@@ -154,6 +155,8 @@
     "contactDone": "Done",
     "contactPhotoLabel": "Profile photo",
     "contactPhotoHint": "Add a JPEG, PNG, or WebP profile photo (optional)",
+    "contactPhotoUnsupported": "Choose a JPEG, PNG, or WebP profile photo.",
+    "logoUnsupported": "Choose a JPEG, PNG, or WebP logo.",
     "contactAddedAnnounce": "{name} added",
     "contactUpdatedAnnounce": "{name} updated",
     "contactRemovedAnnounce": "{name} removed",
@@ -172,6 +175,7 @@
     "labelPhone": "Phone",
     "labelAddress": "Address",
     "changeLogo": "Change logo",
+    "unsupportedLogo": "Choose a JPEG, PNG, or WebP image.",
     "cancel": "Cancel",
     "save": "Save"
   }

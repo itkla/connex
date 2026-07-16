@@ -116,6 +116,39 @@ class AttachmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void duplicateManagedReferencesDeleteTheObjectWithTheFinalReference() throws Exception {
+        byte[] bytes = "shared private attachment".getBytes(StandardCharsets.UTF_8);
+        Company company = newCompany();
+        Attachment first = attachmentService.upload(
+            "company",
+            company.getId(),
+            UploadSource.from("report.pdf", "application/pdf", bytes),
+            currentUser);
+        Attachment second = new Attachment();
+        second.setWorkspaceId(workspace.getId());
+        second.setEntityType("company");
+        second.setEntityId(company.getId());
+        second.setFileName(first.getFileName());
+        second.setUrl(first.getUrl());
+        second.setContentType(first.getContentType());
+        second.setSize(first.getSize());
+        second.setUploadedBy(currentUser);
+        attachmentMapper.insert(second);
+        String token = first.getUrl().substring(first.getUrl().lastIndexOf('/') + 1);
+
+        attachmentService.delete(first.getId());
+
+        try (ManagedContent content = attachmentService.getManagedContent(token)) {
+            assertArrayEquals(bytes, content.inputStream().readAllBytes());
+        }
+
+        attachmentService.delete(second.getId());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> attachmentService.getManagedContent(token));
+    }
+
+    @Test
     void uploadAcceptsSameOrganizationSharedCompanyAndPersonTargets() {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company company = companyInWorkspace(ownerWorkspace);

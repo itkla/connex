@@ -9,9 +9,9 @@ migration-discipline part of #87 §9 / #102).
 
 ## Versioning
 
-- **SemVer**, one product version per release, stamped as a **version-locked backend + frontend image
-  pair** (see [RELEASE.md](RELEASE.md)). The two are never upgraded independently; the running
-  version is at `GET /api/version`.
+- **SemVer**, one product version per release, stamped as a **version-locked backend + frontend + OCR
+  image set** (see [RELEASE.md](RELEASE.md)). The components are never upgraded independently, even
+  when a deployment leaves optional OCR disabled; the running backend version is at `GET /api/version`.
 - On-prem and air-gapped installs pin an **exact version/digest** — released tags are immutable and
   never moved.
 
@@ -43,13 +43,25 @@ migration-discipline part of #87 §9 / #102).
 
 ## On-prem upgrade runbook
 
-1. **Back up first** — snapshot the database (and object/upload storage). Do not proceed without a
-   verified, restorable backup; there is no automatic rollback of a migration.
-2. **Pin the target version** — set `CONNEX_VERSION` to the exact release tag in `deploy/.env`.
-3. **Pull and apply** — `docker compose pull && docker compose up -d`. Flyway runs the new migrations
-   on backend start.
-4. **Verify** — `curl -s http://<host>/api/version` shows the new version; smoke the app.
-5. **On failure** — stop the stack, **restore the backup**, and pin back to the previous version.
+1. **Preflight legacy media before any recreate** — if the installed version predates private object
+   storage, or any database row still refers to the old public `attachments`, `contact-pictures`,
+   `company-logos`, or `profile-pictures` paths, do not use the generic commands below. First stage
+   the writable-layer files from the still-running old frontend and follow
+   [Migrating legacy public uploads](DEPLOYMENT.md#migrating-legacy-public-uploads). Pulling an image is
+   safe; recreating the old frontend before staging can permanently erase those files.
+2. **Quiesce writers** — stop external ingress plus the frontend, backend, and OCR services. Keep the
+   database running. Confirm no application or maintenance container remains able to create or delete
+   records or objects.
+3. **Back up the quiesced set** — snapshot the database, private object storage, and any staged legacy
+   media as one recovery point. Do not proceed without a verified, restorable backup; there is no
+   automatic rollback of a migration.
+4. **Pin and pull the complete target set** — set `CONNEX_VERSION` to the exact release in a mode-0600
+   `deploy/.env`, then run `docker compose pull`. Require the backend, frontend, and optional OCR image
+   to be locally available before starting the target version.
+5. **Apply** — run `docker compose up -d`. Flyway runs the new migrations on backend start.
+6. **Verify** — `curl -s http://<host>/api/version` shows the new version; smoke the app and private
+   media downloads.
+7. **On failure** — stop the stack, **restore the complete backup**, and pin back to the previous version.
    Never hand-edit `flyway_schema_history` or delete a partially-applied migration; restore instead.
 
 ## CI coverage & follow-ups

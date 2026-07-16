@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { type Contact } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
+import { toastError } from '@/app/lib/toast';
 import {
     QuickEditField,
     QuickEditMediaUpload,
@@ -81,6 +82,7 @@ export default function QuickEditSheet({
                             </div>
                         }
                         onSelect={(file) => updateImageFile(c.id, file)}
+                        onInvalidSelect={() => toastError(t('unsupportedImage'))}
                     />
                 ) : (
                     <ContactAvatar contact={c} type="large" />

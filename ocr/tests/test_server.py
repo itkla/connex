@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -34,6 +35,11 @@ class BlockingEngine(FakeEngine):
         return super().recognize(content, content_type)
 
 
+class FailingEngine(FakeEngine):
+    def recognize(self, content: bytes, content_type: str) -> list[dict[str, object]]:
+        raise RuntimeError("native worker failed")
+
+
 class ServerTest(unittest.TestCase):
     token = "test-service-token-0000000000000000"
 
@@ -62,6 +68,21 @@ class ServerTest(unittest.TestCase):
     def test_health_reports_engine_readiness(self) -> None:
         with urllib.request.urlopen(self.base_url + "/health", timeout=2) as response:
             self.assertEqual(200, response.status)
+            self.assertEqual(
+                {"ready": True, "active": False, "generation": None},
+                json.load(response),
+            )
+
+    def test_ready_requires_the_service_token(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(self.base_url + "/ready", timeout=2)
+        self.assertEqual(401, raised.exception.code)
+        request = urllib.request.Request(
+            self.base_url + "/ready",
+            headers={"Authorization": "Bearer " + self.token},
+        )
+
+        with urllib.request.urlopen(request, timeout=2) as response:
             self.assertEqual({"ready": True}, json.load(response))
 
     def test_ocr_requires_bearer_token(self) -> None:
@@ -177,6 +198,85 @@ class ConcurrencyTest(unittest.TestCase):
 
         self.assertEqual([200], first_status)
 
+    def test_partial_body_does_not_hold_the_inference_slot(self) -> None:
+        token = "test-service-token-0000000000000000"
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token=token,
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=1,
+        )
+        server = create_server(config, FakeEngine())
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        partial = socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
+        partial.sendall(
+            b"POST /v1/ocr HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Authorization: Bearer " + token.encode() + b"\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Content-Length: 5\r\n\r\nx"
+        )
+
+        try:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/ocr",
+                data=b"image",
+                headers={
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "image/jpeg",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=2) as response:
+                self.assertEqual(200, response.status)
+        finally:
+            partial.close()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
+
+
+class HandlerLimitTest(unittest.TestCase):
+    def test_rejects_connections_above_the_handler_limit(self) -> None:
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token="test-service-token-0000000000000000",
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=1,
+            max_request_handlers=2,
+        )
+        server = create_server(config, FakeEngine())
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        blocked = [
+            socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
+            for _ in range(2)
+        ]
+        for connection in blocked:
+            connection.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\nX-Slow:")
+        time.sleep(0.05)
+
+        try:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=1) as overflow:
+                overflow.settimeout(1)
+                overflow.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                self.assertIn(b"503 Service Unavailable", overflow.recv(256))
+        finally:
+            for connection in blocked:
+                connection.close()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
+
 
 class InferenceDeadlineTest(unittest.TestCase):
     def test_marks_unready_and_invokes_fatal_handler_after_deadline(self) -> None:
@@ -219,7 +319,10 @@ class InferenceDeadlineTest(unittest.TestCase):
         try:
             self.assertTrue(fatal_timeout.wait(2))
             with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
-                self.assertEqual({"ready": False}, json.load(response))
+                self.assertEqual(
+                    {"ready": False, "active": True, "generation": 1},
+                    json.load(response),
+                )
         finally:
             engine.release.set()
             request_thread.join(5)
@@ -228,6 +331,50 @@ class InferenceDeadlineTest(unittest.TestCase):
             server_thread.join(2)
 
         self.assertEqual([200], request_status)
+
+
+class InferenceFailureTest(unittest.TestCase):
+    def test_marks_unready_and_invokes_fatal_handler_on_unexpected_failure(self) -> None:
+        token = "test-service-token-0000000000000000"
+        fatal_failure = threading.Event()
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token=token,
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=2,
+        )
+        server = create_server(config, FailingEngine(), fatal_failure.set)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        request = urllib.request.Request(
+            base_url + "/v1/ocr",
+            data=b"image",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "image/jpeg",
+            },
+            method="POST",
+        )
+
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request, timeout=2)
+            self.assertEqual(503, raised.exception.code)
+            self.assertTrue(fatal_failure.wait(2))
+            with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
+                self.assertEqual(
+                    {"ready": False, "active": False, "generation": None},
+                    json.load(response),
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
 
 
 if __name__ == "__main__":

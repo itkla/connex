@@ -1,15 +1,22 @@
 package ooo.klae.connex.backend.storage;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.imageio.ImageIO;
 
@@ -17,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 
@@ -34,11 +42,14 @@ class ImageUploadValidatorTest {
         properties = new ObjectStorageProperties();
         properties.setMaxUploadBytes(1_000_000);
         properties.setMaxImagePixels(1_000_000);
-        validator = new ImageUploadValidator(properties, new UploadPolicy(properties));
+        validator = new ImageUploadValidator(
+            properties,
+            new UploadPolicy(properties),
+            new ImageDecodeAdmissionService(properties));
     }
 
     @Test
-    void fullyDecodesSupportedRasterFormatsAndPreservesBytes() throws IOException {
+    void fullyDecodesSupportedRasterFormatsAndEmitsCanonicalBytes() throws IOException {
         byte[] pngBytes = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
         byte[] jpegBytes = image("jpg", BufferedImage.TYPE_INT_RGB, 10, 20);
 
@@ -48,13 +59,15 @@ class ImageUploadValidatorTest {
 
         assertEquals("image/png", png.contentType());
         assertEquals("png", png.extension());
-        assertArrayEquals(pngBytes, png.content());
         assertEquals("image/jpeg", jpeg.contentType());
         assertEquals("jpg", jpeg.extension());
-        assertArrayEquals(jpegBytes, jpeg.content());
-        assertEquals("image/webp", webp.contentType());
-        assertEquals("webp", webp.extension());
-        assertArrayEquals(VALID_WEBP, webp.content());
+        assertFalse(Arrays.equals(jpegBytes, jpeg.content()));
+        assertTrue(Set.of("image/jpeg", "image/png").contains(webp.contentType()));
+        assertTrue(Set.of("jpg", "png").contains(webp.extension()));
+        assertFalse(Arrays.equals(VALID_WEBP, webp.content()));
+        assertEquals(10, ImageIO.read(new ByteArrayInputStream(png.content())).getWidth());
+        assertEquals(10, ImageIO.read(new ByteArrayInputStream(jpeg.content())).getWidth());
+        assertEquals(1, ImageIO.read(new ByteArrayInputStream(webp.content())).getWidth());
     }
 
     @Test
@@ -84,6 +97,30 @@ class ImageUploadValidatorTest {
     }
 
     @Test
+    void rejectsHighBitDepthBeforeDecode() throws IOException {
+        byte[] highDepth = image("png", BufferedImage.TYPE_USHORT_GRAY, 20, 20);
+
+        assertThrows(
+            BadRequestException.class,
+            () -> validator.validate(source("portrait.png", "image/png", highDepth)));
+    }
+
+    @Test
+    void removesMetadataAndTrailingPayload() throws IOException {
+        byte[] png = image("png", BufferedImage.TYPE_INT_ARGB, 20, 20);
+        byte[] marker = "private-gps-marker".getBytes(StandardCharsets.US_ASCII);
+        byte[] tainted = Arrays.copyOf(png, png.length + marker.length);
+        System.arraycopy(marker, 0, tainted, png.length, marker.length);
+
+        ValidatedImage validated = validator.validate(
+            source("portrait.png", "image/png", tainted));
+
+        assertFalse(contains(validated.content(), marker));
+        assertEquals(20, ImageIO.read(
+            new ByteArrayInputStream(validated.content())).getWidth());
+    }
+
+    @Test
     void returnedBytesAreDefensiveCopies() throws IOException {
         byte[] png = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
         ValidatedImage validated = validator.validate(source("card.png", "image/png", png));
@@ -91,6 +128,55 @@ class ImageUploadValidatorTest {
         validated.content()[0] = 0;
 
         assertTrue(validated.content()[0] != 0);
+    }
+
+    @Test
+    void rejectsExcessWorkBeforeOpeningOrAllocatingTheUpload() throws Exception {
+        byte[] png = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
+        properties.setMaxConcurrentImageDecodes(1);
+        validator = new ImageUploadValidator(
+            properties,
+            new UploadPolicy(properties),
+            new ImageDecodeAdmissionService(properties));
+        CountDownLatch firstOpened = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        UploadSource blocking = new UploadSource("first.png", "image/png", png.length, () -> {
+            firstOpened.countDown();
+            try {
+                if (!releaseFirst.await(5, TimeUnit.SECONDS)) {
+                    throw new IOException("test timeout");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IOException("test interrupted", exception);
+            }
+            return new ByteArrayInputStream(png);
+        });
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        Thread first = Thread.startVirtualThread(() -> {
+            try {
+                validator.validate(blocking);
+            } catch (Throwable exception) {
+                firstFailure.set(exception);
+            }
+        });
+        assertTrue(firstOpened.await(5, TimeUnit.SECONDS));
+        AtomicBoolean secondOpened = new AtomicBoolean();
+        UploadSource second = new UploadSource("second.png", "image/png", png.length, () -> {
+            secondOpened.set(true);
+            return new ByteArrayInputStream(png);
+        });
+
+        try {
+            assertThrows(ServiceUnavailableException.class, () -> validator.validate(second));
+            assertFalse(secondOpened.get());
+        } finally {
+            releaseFirst.countDown();
+            first.join(5_000);
+        }
+
+        assertFalse(first.isAlive());
+        assertTrue(firstFailure.get() == null);
     }
 
     private static UploadSource source(String name, String contentType, byte[] bytes) {
@@ -103,5 +189,21 @@ class ImageUploadValidatorTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         assertTrue(ImageIO.write(image, format, output));
         return output.toByteArray();
+    }
+
+    private static boolean contains(byte[] content, byte[] candidate) {
+        for (int offset = 0; offset <= content.length - candidate.length; offset++) {
+            boolean matches = true;
+            for (int index = 0; index < candidate.length; index++) {
+                if (content[offset + index] != candidate[index]) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return true;
+            }
+        }
+        return false;
     }
 }

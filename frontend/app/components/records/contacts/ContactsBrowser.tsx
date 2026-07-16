@@ -249,8 +249,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             if (imageFile) {
                 try {
                     await uploadContactPicture(newContact.id, imageFile);
-                } catch (error) {
-                    if (!businessCard) throw error;
+                } catch {
                     avatarUploadFailed = true;
                 }
             }
@@ -312,7 +311,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         phone: d.phone.trim() || undefined,
                         title: d.title.trim() || undefined,
                         companyId: c.companyId ?? c.company?.id ?? null,
-                        imageUrl: c.imageUrl || undefined,
                     };
                     return updateContact(c.id, payload);
                 }),
@@ -342,7 +340,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 title: c.title || undefined,
-                imageUrl: c.imageUrl || undefined,
                 companyId: null,
             })));
             toastSuccess(
@@ -686,6 +683,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     createNewContact={createNewContact}
+                    onRecoveredImport={refresh}
                 />
 
                 <DeleteRecordDialog

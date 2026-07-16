@@ -4,19 +4,36 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper">
 
   <insert id="enqueue">
-    INSERT INTO user_object_deletion_queue (object_key, attempts, next_attempt_at)
-    VALUES (#{objectKey}, 1, #{nextAttemptAt})
+    INSERT INTO user_object_deletion_queue (
+      object_key, attempts, delete_passes_remaining, next_attempt_at
+    )
+    VALUES (#{objectKey}, 1, #{deletePassesRemaining}, #{nextAttemptAt})
     ON DUPLICATE KEY UPDATE
       attempts = LEAST(user_object_deletion_queue.attempts + 1, 2147483647),
-      next_attempt_at = LEAST(user_object_deletion_queue.next_attempt_at, VALUES(next_attempt_at))
+      next_attempt_at = IF(
+        VALUES(delete_passes_remaining) &gt; user_object_deletion_queue.delete_passes_remaining,
+        GREATEST(user_object_deletion_queue.next_attempt_at, VALUES(next_attempt_at)),
+        LEAST(user_object_deletion_queue.next_attempt_at, VALUES(next_attempt_at))
+      ),
+      delete_passes_remaining = GREATEST(
+        user_object_deletion_queue.delete_passes_remaining,
+        VALUES(delete_passes_remaining)
+      )
   </insert>
 
   <select id="countPending" resultType="long">
     SELECT COUNT(*) FROM user_object_deletion_queue
   </select>
 
+  <select id="countPendingForPrefix" resultType="long">
+    SELECT COUNT(*)
+    FROM user_object_deletion_queue
+    WHERE object_key LIKE CONCAT(#{objectKeyPrefix}, '%')
+  </select>
+
   <select id="findDue" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
-    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
     FROM user_object_deletion_queue
     WHERE next_attempt_at &lt;= #{now}
     ORDER BY next_attempt_at, id
@@ -41,6 +58,14 @@
     UPDATE user_object_deletion_queue
     SET attempts = LEAST(attempts + 1, 2147483647), next_attempt_at = #{nextAttemptAt}
     WHERE object_key = #{objectKey}
+  </update>
+
+  <update id="confirmDeletePass">
+    UPDATE user_object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647),
+        delete_passes_remaining = delete_passes_remaining - 1,
+        next_attempt_at = #{nextAttemptAt}
+    WHERE id = #{id} AND delete_passes_remaining &gt; 1
   </update>
 
 </mapper>

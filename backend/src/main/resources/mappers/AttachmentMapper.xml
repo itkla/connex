@@ -72,6 +72,13 @@
     WHERE workspace_id = #{workspaceId} AND url = #{url}
   </select>
 
+  <select id="lockIdsByUrl" resultType="int">
+    SELECT id FROM attachment
+    WHERE workspace_id = #{workspaceId} AND url = #{url}
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
   <select id="search" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a

@@ -2,10 +2,12 @@ package ooo.klae.connex.backend.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -33,7 +36,6 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class ObjectDeletionRetryQueueTest {
-    @Mock ObjectStorage objectStorage;
     @Mock ObjectDeletionQueueMapper tenantQueueMapper;
     @Mock UserObjectDeletionQueueMapper userQueueMapper;
     @Mock ObjectDeletionTransactionExecutor transactionExecutor;
@@ -49,10 +51,10 @@ class ObjectDeletionRetryQueueTest {
     void setUp() {
         properties = new ObjectStorageProperties();
         properties.setDeleteRetryBatchSize(3);
+        properties.setAmbiguousWriteCleanupDelayMs(60_000);
         TenantWorkScope tenantWorkScope = new TenantWorkScope(
             tenantContext, tenantCatalogResolver, workspaceMapper);
         queue = new ObjectDeletionRetryQueue(
-            objectStorage,
             properties,
             tenantQueueMapper,
             userQueueMapper,
@@ -68,43 +70,71 @@ class ObjectDeletionRetryQueueTest {
     }
 
     @Test
-    void persistsTenantDeletionInAnIndependentTransactionInTheRequestCatalog() {
+    void persistsDelayedTenantTombstoneInAnIndependentTransactionInTheRequestCatalog() {
         tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
         AtomicReference<String> catalog = new AtomicReference<>();
         doAnswer(invocation -> {
             catalog.set(tenantContext.getCatalog());
             return null;
-        }).when(transactionExecutor).enqueueTenant(anyInt(), any(), any());
+        }).when(transactionExecutor).enqueueTenant(anyInt(), any(), anyInt(), any());
 
-        queue.enqueueAndProcessTenant(7, "workspaces/7/attachments/object.pdf");
+        queue.enqueueRollbackTombstoneTenant(7, "workspaces/7/attachments/object.pdf");
 
         assertEquals("tenant_catalog", catalog.get());
-        verify(transactionExecutor).processTenant(
-            org.mockito.ArgumentMatchers.eq(7),
-            org.mockito.ArgumentMatchers.eq("workspaces/7/attachments/object.pdf"),
-            any());
+        verify(transactionExecutor).enqueueTenant(
+            7,
+            "workspaces/7/attachments/object.pdf",
+            2,
+            java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
     }
 
     @Test
-    void userQueueWritesStayOnControlCatalog() {
+    void delayedUserTombstoneWritesStayOnControlCatalog() {
         tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
         AtomicReference<String> catalog = new AtomicReference<>("unset");
         doAnswer(invocation -> {
             catalog.set(tenantContext.getCatalog());
             return null;
-        }).when(transactionExecutor).enqueueUser(any(), any());
+        }).when(transactionExecutor).enqueueUser(any(), anyInt(), any());
 
-        queue.enqueueAndProcessUser("users/9/profile-images/object.png");
+        queue.enqueueRollbackTombstoneUser("users/9/profile-images/object.png");
 
         assertNull(catalog.get());
-        verify(transactionExecutor).processUser(
-            org.mockito.ArgumentMatchers.eq("users/9/profile-images/object.png"), any());
+        verify(transactionExecutor).enqueueUser(
+            "users/9/profile-images/object.png",
+            2,
+            java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
+        verify(transactionExecutor, never()).processUser(any(), any());
+    }
+
+    @Test
+    void rejectsNewWritesAtTheAmbiguousCleanupCeiling() {
+        properties.setMaxPendingTenantAmbiguousWriteCleanups(2);
+        when(tenantQueueMapper.countPendingAmbiguousWrites(7)).thenReturn(2L);
+
+        assertThrows(ServiceUnavailableException.class,
+            () -> queue.requireTenantWriteAllowed(7));
+    }
+
+    @Test
+    void deterministicTenantAdoptionCancelsTheMatchingTaskInTheCurrentTransaction() {
+        queue.cancelTenantInCurrentTransaction(7, "workspaces/7/attachments/object.pdf");
+
+        verify(tenantQueueMapper).deleteByKey(7, "workspaces/7/attachments/object.pdf");
+    }
+
+    @Test
+    void deterministicUserAdoptionCancelsTheMatchingTaskInTheCurrentTransaction() {
+        queue.cancelUserInCurrentTransaction("users/9/profile-images/object.png");
+
+        verify(userQueueMapper).deleteByKey("users/9/profile-images/object.png");
     }
 
     @Test
     void retrySweepPinsTenantCatalogAndDelegatesEachTask() {
         String key = "workspaces/7/attachments/object.pdf";
-        ObjectDeletionTask task = new ObjectDeletionTask(11, 7, key, 2);
+        ObjectDeletionTask task = new ObjectDeletionTask(11, 7, key, 2, 1);
         AtomicReference<String> enumerationCatalog = new AtomicReference<>();
         AtomicReference<String> taskCatalog = new AtomicReference<>();
         when(placementRegistry.activeCatalogs()).thenReturn(List.of("tenant_catalog"));
@@ -129,9 +159,9 @@ class ObjectDeletionRetryQueueTest {
     @Test
     void oneFailedRetryDoesNotAbortLaterTasks() {
         ObjectDeletionTask first = new ObjectDeletionTask(
-            11, 7, "workspaces/7/attachments/first.pdf", 2);
+            11, 7, "workspaces/7/attachments/first.pdf", 2, 1);
         ObjectDeletionTask second = new ObjectDeletionTask(
-            12, 7, "workspaces/7/attachments/second.pdf", 2);
+            12, 7, "workspaces/7/attachments/second.pdf", 2, 1);
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
         when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt())).thenReturn(List.of(7));
@@ -146,17 +176,16 @@ class ObjectDeletionRetryQueueTest {
     }
 
     @Test
-    void directTenantFallbackReleasesQuotaAfterPhysicalDeletion() {
+    void failedTombstonePersistenceNeverAttemptsAnEarlyDelete() {
         tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
         String key = "workspaces/7/attachments/object.pdf";
         doThrow(new IllegalStateException("database unavailable"))
-            .when(transactionExecutor).enqueueTenant(7, key,
-                java.time.LocalDateTime.of(2026, 7, 14, 12, 0));
+            .when(transactionExecutor).enqueueTenant(7, key, 2,
+                java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
 
-        queue.enqueueAndProcessTenant(7, key);
+        queue.enqueueRollbackTombstoneTenant(7, key);
 
-        verify(objectStorage).delete(key);
-        verify(transactionExecutor).releaseTenantQuota(7, key);
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
     }
 
     @Test

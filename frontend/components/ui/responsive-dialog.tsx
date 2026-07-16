@@ -55,16 +55,36 @@ type ResponsiveDialogProps = {
  * parts so the correct primitive context is provided on each platform.
  */
 function ResponsiveDialog({ open, onOpenChange, children }: ResponsiveDialogProps) {
-  const isMobile = useIsMobile()
+  const viewportIsMobile = useIsMobile()
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
+  const resolvedOpen = open ?? uncontrolledOpen
+  const [presentation, setPresentation] = React.useState({
+    open: resolvedOpen,
+    isMobile: viewportIsMobile,
+  })
+
+  if (resolvedOpen !== presentation.open) {
+    setPresentation({
+      open: resolvedOpen,
+      isMobile: resolvedOpen ? viewportIsMobile : presentation.isMobile,
+    })
+  }
+
+  const isMobile = presentation.isMobile
+
+  const handleOpenChange = (next: boolean) => {
+    if (open === undefined) setUncontrolledOpen(next)
+    onOpenChange?.(next)
+  }
 
   return (
     <ResponsiveDialogContext.Provider value={isMobile}>
       {isMobile ? (
-        <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="down">
+        <Drawer open={resolvedOpen} onOpenChange={handleOpenChange} swipeDirection="down">
           {children}
         </Drawer>
       ) : (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={resolvedOpen} onOpenChange={handleOpenChange}>
           {children}
         </Dialog>
       )}

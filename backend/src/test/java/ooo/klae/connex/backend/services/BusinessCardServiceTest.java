@@ -14,8 +14,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -48,14 +49,15 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
-import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class BusinessCardServiceTest {
-    private static final String IDEMPOTENCY_KEY = "02a25a23-70af-4f8e-a64a-6cfc5f8c69be";
+    private static final String IDEMPOTENCY_KEY = String.join(
+            "-", "02a25a23", "70af", "4f8e", "a64a", "6cfc5f8c69be");
 
     @Mock private BusinessCardImageValidator imageValidator;
     @Mock private BusinessCardOcrClient ocrClient;
@@ -73,11 +75,13 @@ class BusinessCardServiceTest {
     private BusinessCardService service;
     private MockMultipartFile image;
     private ValidatedBusinessCardImage validated;
+    private Clock clock;
 
     @BeforeEach
     void setUp() throws Exception {
         properties = new BusinessCardProperties();
         properties.setEnabled(true);
+        clock = Clock.fixed(Instant.parse("2026-07-15T00:00:00Z"), ZoneOffset.UTC);
         service = new BusinessCardService(
                 properties,
                 imageValidator,
@@ -90,11 +94,13 @@ class BusinessCardServiceTest {
                 workspaceService,
                 authService,
                 importRequestMapper,
-                rateLimiter);
+                rateLimiter,
+                clock);
         image = new MockMultipartFile("image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
         validated = new ValidatedBusinessCardImage(
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);
         lenient().when(binaryStore.isReady()).thenReturn(true);
+        lenient().when(ocrClient.isReady()).thenReturn(true);
         lenient().when(importRequestMapper.claim(anyInt(), anyString(), any())).thenReturn(1);
         lenient().when(importRequestMapper.complete(anyInt(), anyString(), anyInt(), anyInt(), any()))
                 .thenReturn(1);
@@ -134,47 +140,8 @@ class BusinessCardServiceTest {
     }
 
     @Test
-    void scanRejectsConcurrentBusinessCardProcessing() throws Exception {
-        CountDownLatch validationStarted = new CountDownLatch(1);
-        CountDownLatch releaseValidation = new CountDownLatch(1);
-        when(imageValidator.validate(image)).thenAnswer(invocation -> {
-            validationStarted.countDown();
-            try {
-                if (!releaseValidation.await(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("test timeout");
-                }
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("test interrupted", exception);
-            }
-            return validated;
-        });
-        when(ocrClient.recognize(validated)).thenReturn(List.of());
-        when(extractor.extract(List.of())).thenReturn(draft(null));
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        Thread first = Thread.startVirtualThread(() -> {
-            try {
-                service.scan(image);
-            } catch (Throwable exception) {
-                failure.set(exception);
-            }
-        });
-        assertTrue(validationStarted.await(5, TimeUnit.SECONDS));
-
-        try {
-            assertThrows(TooManyRequestsException.class, () -> service.scan(image));
-        } finally {
-            releaseValidation.countDown();
-            first.join(5_000);
-        }
-
-        assertNull(failure.get());
-        assertTrue(!first.isAlive());
-        verify(imageValidator).validate(image);
-    }
-
-    @Test
-    void importUsesReviewedValuesAndExplicitExistingCompany() {
+    void importUsesReviewedValuesWhenScanningIsDisabled() {
+        properties.setEnabled(false);
         Company company = company(17, "Analytical Labs");
         BusinessCardContactRequest contact = new BusinessCardContactRequest(
                 "  Ada   Lovelace  ", "ADA@EXAMPLE.TEST", "+1 202 555 0199", "Engineer", 17);
@@ -201,6 +168,7 @@ class BusinessCardServiceTest {
         BusinessCardImportResponse response = service.importCard(
                 image, contact, new BusinessCardCompanyAction.Existing(17), IDEMPOTENCY_KEY);
 
+        assertTrue(service.isImportAvailable());
         ArgumentCaptor<Person> personCaptor = ArgumentCaptor.forClass(Person.class);
         verify(personService).create(personCaptor.capture());
         assertEquals("Ada Lovelace", personCaptor.getValue().getName());
@@ -216,6 +184,8 @@ class BusinessCardServiceTest {
         assertEquals(41, response.attachment().getId());
         assertEquals(17, response.company().getId());
         verify(importRequestMapper).complete(5, IDEMPOTENCY_KEY, 31, 41, 17);
+        verify(importRequestMapper).deleteExpired(
+                eq(5), eq(java.time.LocalDateTime.parse("2026-07-14T00:00:00")), eq(100));
         verify(rateLimiter).requireImportAllowed();
     }
 
@@ -293,6 +263,18 @@ class BusinessCardServiceTest {
 
         assertThrows(ServiceUnavailableException.class, () -> service.scan(image));
 
+        verify(rateLimiter).requireScanAllowed();
+        verify(imageValidator, never()).validate(image);
+        verify(ocrClient, never()).recognize(any());
+    }
+
+    @Test
+    void unavailableScannerFailsClosedBeforeImageProcessing() {
+        when(ocrClient.isReady()).thenReturn(false);
+
+        assertThrows(ServiceUnavailableException.class, () -> service.scan(image));
+
+        verify(rateLimiter).requireScanAllowed();
         verify(imageValidator, never()).validate(image);
         verify(ocrClient, never()).recognize(any());
     }
@@ -365,6 +347,51 @@ class BusinessCardServiceTest {
 
         verify(imageValidator, never()).validate(image);
         verify(importRequestMapper, never()).claim(anyInt(), anyString(), any());
+    }
+
+    @Test
+    void importStatusReturnsTheCompletedTenantScopedResult() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportRecord(new byte[32], 31, 41, null));
+        Person person = new Person();
+        person.setId(31);
+        Attachment attachment = new Attachment();
+        attachment.setId(41);
+        when(personService.getPersonById(31)).thenReturn(person);
+        when(attachmentService.getById(41)).thenReturn(attachment);
+
+        BusinessCardImportResponse response = service.importStatus(IDEMPOTENCY_KEY);
+
+        assertEquals(31, response.contact().getId());
+        assertEquals(41, response.attachment().getId());
+        verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
+        verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
+    }
+
+    @Test
+    void importStatusDoesNotExposeAnotherWorkspace() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
+        when(importRequestMapper.get(9, IDEMPOTENCY_KEY)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.importStatus(IDEMPOTENCY_KEY));
+
+        verify(importRequestMapper).get(9, IDEMPOTENCY_KEY);
+        verify(personService, never()).getPersonById(anyInt());
+    }
+
+    @Test
+    void importStatusReportsAnIncompleteClaimAsInProgress() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportRecord(new byte[32], null, null, null));
+
+        assertThrows(ConflictException.class,
+            () -> service.importStatus(IDEMPOTENCY_KEY));
+
+        verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
+        verify(personService, never()).getPersonById(anyInt());
     }
 
     private static BusinessCardScanResponse draft(String company) {

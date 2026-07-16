@@ -165,6 +165,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
+        person.setImageUrl(null);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
         auditService.record("person.create", "person", person.getId(), person.getName(),
@@ -206,7 +207,6 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requireOwnedPerson(workspaceId, id);
         StoredImage stored = managedObjectService.storePersonImage(workspaceId, id, source);
-        managedObjectService.compensatePersonImageOnRollback(workspaceId, id, stored.url());
         int updated = personMapper.updateImageUrlIfCurrent(
             workspaceId, id, before.getImageUrl(), stored.url());
         if (updated != 1) {

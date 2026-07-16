@@ -65,6 +65,20 @@ class FilesystemObjectStorageTest {
     }
 
     @Test
+    void atomicallyReplacesAReplaySafeMigrationTarget() throws Exception {
+        String key = "workspaces/17/attachments/replayed.pdf";
+        byte[] original = {1, 2, 3};
+        byte[] replacement = {4, 5, 6, 7};
+
+        storage.put(key, source(original), "application/pdf", sha256(original));
+        storage.put(key, source(replacement), "application/pdf", sha256(replacement));
+
+        try (StoredObject object = storage.get(key); InputStream input = object.inputStream()) {
+            assertArrayEquals(replacement, input.readAllBytes());
+        }
+    }
+
+    @Test
     void rejectsTraversalAndChecksumMismatchWithoutPublishingObject() throws Exception {
         byte[] bytes = { 1, 2, 3 };
         assertThrows(
@@ -124,6 +138,24 @@ class FilesystemObjectStorageTest {
         assertThrows(ObjectStorageNotFoundException.class, () -> storage.get(key));
         assertThrows(ObjectStorageException.class, () -> storage.delete(key));
         assertArrayEquals(new byte[] { 7, 8, 9 }, Files.readAllBytes(outside));
+    }
+
+    @Test
+    void rejectsWritesWhenTheConfiguredFreeSpaceFloorCannotBePreserved() throws Exception {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        properties.setFilesystemRoot(root.toString());
+        properties.setFilesystemMinFreeBytes(Long.MAX_VALUE);
+        storage = new FilesystemObjectStorage(properties);
+        byte[] bytes = { 1, 2, 3 };
+
+        assertThrows(
+            ObjectStorageException.class,
+            () -> storage.put(
+                "workspaces/4/attachments/private.bin",
+                source(bytes),
+                "application/octet-stream",
+                sha256(bytes)));
+        assertFalse(storage.isReady());
     }
 
     private static UploadSource source(byte[] bytes) {

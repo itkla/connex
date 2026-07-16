@@ -18,6 +18,8 @@ public interface AttachmentMapper {
     Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    /** Locks every same-workspace attachment reference for an exact URL. */
+    List<Integer> lockIdsByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Attachment attachment);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

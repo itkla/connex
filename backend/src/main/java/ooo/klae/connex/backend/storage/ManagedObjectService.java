@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.storage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -11,20 +13,25 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
+import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
 
 /**
@@ -44,34 +51,51 @@ public class ManagedObjectService {
     private final ImageUploadValidator imageUploadValidator;
     private final ObjectStorageProperties properties;
     private final WorkspaceObjectStorageQuotaService quotaService;
-    private final Object readinessMonitor = new Object();
+    private final UserImageReplacementAdmissionService userImageAdmissionService;
+    private final ManagedObjectWriteAdmissionService writeAdmissionService;
+    private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
+    private final AtomicLong readinessGeneration = new AtomicLong();
     private volatile ReadinessSnapshot readinessSnapshot;
 
     public boolean isReady() {
         long now = System.nanoTime();
         ReadinessSnapshot snapshot = readinessSnapshot;
         long ttl = TimeUnit.MILLISECONDS.toNanos(properties.getReadinessCacheTtlMs());
-        if (snapshot != null && now - snapshot.checkedAtNanos() < ttl) {
-            return snapshot.ready();
+        if (snapshot == null || now - snapshot.checkedAtNanos() >= ttl) {
+            refreshReadiness();
         }
-        synchronized (readinessMonitor) {
-            snapshot = readinessSnapshot;
-            now = System.nanoTime();
-            if (snapshot != null && now - snapshot.checkedAtNanos() < ttl) {
-                return snapshot.ready();
-            }
+        return snapshot != null && snapshot.ready();
+    }
+
+    @PostConstruct
+    private void warmReadiness() {
+        refreshReadiness();
+    }
+
+    private void refreshReadiness() {
+        if (properties.getLegacyMigration().getMode() != LegacyMigrationMode.OFF
+                || !readinessRefreshInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        long generation = readinessGeneration.get();
+        Thread.startVirtualThread(() -> {
             boolean ready;
             try {
                 ready = objectStorage.isReady();
             } catch (RuntimeException exception) {
                 ready = false;
             }
-            readinessSnapshot = new ReadinessSnapshot(ready, now);
-            return ready;
-        }
+            try {
+                if (readinessGeneration.get() == generation) {
+                    readinessSnapshot = new ReadinessSnapshot(ready, System.nanoTime());
+                }
+            } finally {
+                readinessRefreshInFlight.set(false);
+            }
+        });
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoredBinary storeAttachment(int workspaceId, UploadSource source) {
         return storeAttachmentInternal(workspaceId, source);
     }
@@ -85,7 +109,7 @@ public class ManagedObjectService {
         return new StoredBinary(url, upload.fileName(), upload.contentType(), source.contentLength());
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoredBinary storeAttachment(
             int workspaceId,
             String fileName,
@@ -94,7 +118,7 @@ public class ManagedObjectService {
         return storeAttachmentInternal(workspaceId, UploadSource.from(fileName, contentType, bytes));
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storePersonImage(int workspaceId, int personId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
         byte[] content = image.content();
@@ -106,7 +130,7 @@ public class ManagedObjectService {
         return new StoredImage(url, content.length, image.contentType());
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storeCompanyImage(int workspaceId, int companyId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
         byte[] content = image.content();
@@ -118,15 +142,146 @@ public class ManagedObjectService {
         return new StoredImage(url, content.length, image.contentType());
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storeUserImage(int userId, UploadSource source) {
+        userImageAdmissionService.requireAllowed(userId);
         ValidatedImage image = imageUploadValidator.validate(source);
         byte[] content = image.content();
         UploadSource validatedSource = UploadSource.from(source.fileName(), image.contentType(), content);
         String token = token(image.extension());
         String key = userImageKey(userId, token);
         String url = userImageUrl(userId, token);
-        store(key, validatedSource, image.contentType());
+        storeUser(key, validatedSource, image.contentType());
         return new StoredImage(url, content.length, image.contentType());
+    }
+
+    StoredBinary storeMigratedAttachment(
+            int workspaceId,
+            int attachmentId,
+            String legacyUrl,
+            UploadSource source) {
+        ValidatedUpload upload = uploadPolicy.validateGeneric(source);
+        String objectToken = migrationToken(
+            "attachment", workspaceId, attachmentId, legacyUrl, upload.extension());
+        String key = attachmentKey(workspaceId, objectToken);
+        String url = ATTACHMENT_URL_PREFIX + objectToken;
+        storeTenantDeterministic(workspaceId, key, source, upload.contentType());
+        return new StoredBinary(
+            url, upload.fileName(), upload.contentType(), source.contentLength());
+    }
+
+    StoredMigratedImage storeMigratedPersonImage(
+            int workspaceId,
+            int personId,
+            String legacyUrl,
+            UploadSource source) {
+        ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        String objectToken = migrationToken(
+            "person-image", workspaceId, personId, legacyUrl, image.extension());
+        String key = personImageKey(workspaceId, personId, objectToken);
+        storeTenantDeterministic(
+            workspaceId,
+            key,
+            UploadSource.from(source.fileName(), image.contentType(), content),
+            image.contentType());
+        return new StoredMigratedImage(
+            personImageUrl(personId, objectToken),
+            content.length,
+            image.contentType(),
+            content);
+    }
+
+    StoredMigratedImage storeMigratedCompanyImage(
+            int workspaceId,
+            int companyId,
+            String legacyUrl,
+            UploadSource source) {
+        ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        String objectToken = migrationToken(
+            "company-image", workspaceId, companyId, legacyUrl, image.extension());
+        String key = companyImageKey(workspaceId, companyId, objectToken);
+        storeTenantDeterministic(
+            workspaceId,
+            key,
+            UploadSource.from(source.fileName(), image.contentType(), content),
+            image.contentType());
+        return new StoredMigratedImage(
+            companyImageUrl(companyId, objectToken),
+            content.length,
+            image.contentType(),
+            content);
+    }
+
+    StoredMigratedImage storeMigratedUserImage(
+            int userId,
+            String legacyUrl,
+            UploadSource source) {
+        ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        String objectToken = migrationToken(
+            "user-image", 0, userId, legacyUrl, image.extension());
+        String key = userImageKey(userId, objectToken);
+        writeAdmissionService.admit(() -> {
+            deletionRetryQueue.cancelUserInCurrentTransaction(key);
+            storeDeterministic(
+                key,
+                UploadSource.from(source.fileName(), image.contentType(), content),
+                image.contentType(),
+                () -> deletionRetryQueue.enqueueRollbackTombstoneUser(key));
+            return null;
+        });
+        return new StoredMigratedImage(
+            userImageUrl(userId, objectToken),
+            content.length,
+            image.contentType(),
+            content);
+    }
+
+    void validateMigratedAttachmentTarget(
+            int workspaceId,
+            int attachmentId,
+            String legacyUrl,
+            String extension,
+            byte[] expectedContent) {
+        String objectToken = migrationToken(
+            "attachment", workspaceId, attachmentId, legacyUrl, extension);
+        verifyContentIfPresent(attachmentKey(workspaceId, objectToken), expectedContent);
+    }
+
+    void validateMigratedPersonImageTarget(
+            int workspaceId,
+            int personId,
+            String legacyUrl,
+            String extension,
+            byte[] expectedContent) {
+        String objectToken = migrationToken(
+            "person-image", workspaceId, personId, legacyUrl, extension);
+        verifyContentIfPresent(
+            personImageKey(workspaceId, personId, objectToken), expectedContent);
+    }
+
+    void validateMigratedCompanyImageTarget(
+            int workspaceId,
+            int companyId,
+            String legacyUrl,
+            String extension,
+            byte[] expectedContent) {
+        String objectToken = migrationToken(
+            "company-image", workspaceId, companyId, legacyUrl, extension);
+        verifyContentIfPresent(
+            companyImageKey(workspaceId, companyId, objectToken), expectedContent);
+    }
+
+    void validateMigratedUserImageTarget(
+            int userId,
+            String legacyUrl,
+            String extension,
+            byte[] expectedContent) {
+        String objectToken = migrationToken(
+            "user-image", 0, userId, legacyUrl, extension);
+        verifyContentIfPresent(userImageKey(userId, objectToken), expectedContent);
     }
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
@@ -165,23 +320,28 @@ public class ManagedObjectService {
         return new ManagedContent(object, imageContentType(token), "profile-picture." + extension(token));
     }
 
-    public void compensateAttachmentOnRollback(int workspaceId, String url) {
-        managedAttachmentKey(workspaceId, url)
-            .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
+    void verifyAttachment(int workspaceId, String url, byte[] expectedContent) {
+        String key = managedAttachmentKey(workspaceId, url)
+            .orElseThrow(() -> new IllegalStateException("Migrated attachment reference is invalid"));
+        verifyContent(key, expectedContent);
     }
 
-    public void compensatePersonImageOnRollback(int workspaceId, int personId, String url) {
-        managedPersonImageKey(workspaceId, personId, url)
-            .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
+    void verifyPersonImage(int workspaceId, int personId, String url, byte[] expectedContent) {
+        String key = managedPersonImageKey(workspaceId, personId, url)
+            .orElseThrow(() -> new IllegalStateException("Migrated contact image reference is invalid"));
+        verifyContent(key, expectedContent);
     }
 
-    public void compensateCompanyImageOnRollback(int workspaceId, int companyId, String url) {
-        managedCompanyImageKey(workspaceId, companyId, url)
-            .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
+    void verifyCompanyImage(int workspaceId, int companyId, String url, byte[] expectedContent) {
+        String key = managedCompanyImageKey(workspaceId, companyId, url)
+            .orElseThrow(() -> new IllegalStateException("Migrated company image reference is invalid"));
+        verifyContent(key, expectedContent);
     }
 
-    public void compensateUserImageOnRollback(int userId, String url) {
-        managedUserImageKey(userId, url).ifPresent(this::deleteUserOnRollback);
+    void verifyUserImage(int userId, String url, byte[] expectedContent) {
+        String key = managedUserImageKey(userId, url)
+            .orElseThrow(() -> new IllegalStateException("Migrated user image reference is invalid"));
+        verifyContent(key, expectedContent);
     }
 
     public void deleteAttachmentAfterCommit(int workspaceId, String url) {
@@ -205,20 +365,110 @@ public class ManagedObjectService {
 
     public void deleteAttachment(int workspaceId, String url) {
         managedAttachmentKey(workspaceId, url)
-            .ifPresent(key -> deleteTenantAfterCompletion(workspaceId, key));
+            .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
     }
 
-    private void store(String key, UploadSource source, String contentType) {
+    private void store(
+            String key,
+            UploadSource source,
+            String contentType,
+            Runnable rollbackCleanup) {
+        byte[] checksum = sha256(source);
+        requireTransactionSynchronization();
+        registerRollbackCleanup(rollbackCleanup);
         try {
-            objectStorage.put(key, source, contentType, sha256(source));
+            objectStorage.put(key, source, contentType, checksum);
         } catch (ObjectStorageException exception) {
+            markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
         }
     }
 
     private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
-        quotaService.reserve(workspaceId, key, source.contentLength());
-        store(key, source, contentType);
+        writeAdmissionService.admit(() -> {
+            quotaService.reserve(workspaceId, key, source.contentLength());
+            deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
+            store(
+                key,
+                source,
+                contentType,
+                () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
+            return null;
+        });
+    }
+
+    private void storeUser(String key, UploadSource source, String contentType) {
+        writeAdmissionService.admit(() -> {
+            store(key, source, contentType,
+                () -> deletionRetryQueue.enqueueRollbackTombstoneUser(key));
+            return null;
+        });
+    }
+
+    private void storeTenantDeterministic(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType) {
+        writeAdmissionService.admit(() -> {
+            quotaService.reserve(workspaceId, key, source.contentLength());
+            deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key);
+            deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
+            storeDeterministic(
+                key,
+                source,
+                contentType,
+                () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
+            return null;
+        });
+    }
+
+    private void storeDeterministic(
+            String key,
+            UploadSource source,
+            String contentType,
+            Runnable rollbackCleanup) {
+        byte[] checksum = sha256(source);
+        requireTransactionSynchronization();
+        if (verifyChecksumIfPresent(key, source.contentLength(), checksum)) {
+            return;
+        }
+        registerRollbackCleanup(rollbackCleanup);
+        try {
+            objectStorage.put(key, source, contentType, checksum);
+        } catch (ObjectStorageException exception) {
+            markUnavailable();
+            throw new ServiceUnavailableException("Private object storage is unavailable");
+        }
+    }
+
+    private boolean verifyChecksumIfPresent(String key, long expectedLength, byte[] expectedHash) {
+        try {
+            StoredObject stored = objectStorage.get(key);
+            if (stored == null) {
+                return false;
+            }
+            try (stored;
+                    DigestInputStream input = new DigestInputStream(
+                        stored.inputStream(), sha256Digest())) {
+                MessageDigest actualDigest = input.getMessageDigest();
+                long copied = input.transferTo(OutputStream.nullOutputStream());
+                if (stored.contentLength() != expectedLength
+                        || copied != expectedLength
+                        || !MessageDigest.isEqual(expectedHash, actualDigest.digest())) {
+                    throw new IllegalStateException(
+                        "Existing migration target does not match its legacy source");
+                }
+                return true;
+            }
+        } catch (ObjectStorageNotFoundException exception) {
+            return false;
+        } catch (ObjectStorageException exception) {
+            markUnavailable();
+            throw new ServiceUnavailableException("Migration target could not be checked");
+        } catch (IOException exception) {
+            throw new ServiceUnavailableException("Migration target could not be checked");
+        }
     }
 
     private StoredObject get(String key) {
@@ -227,7 +477,56 @@ public class ManagedObjectService {
         } catch (ObjectStorageNotFoundException exception) {
             throw new ResourceNotFoundException("Stored file was not found");
         } catch (ObjectStorageException exception) {
+            markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
+        }
+    }
+
+    private void markUnavailable() {
+        readinessGeneration.incrementAndGet();
+        readinessSnapshot = new ReadinessSnapshot(false, 0);
+    }
+
+    private void verifyContent(String key, byte[] expectedContent) {
+        byte[] expectedHash = sha256Digest().digest(expectedContent);
+        try (StoredObject stored = objectStorage.get(key);
+                DigestInputStream input = new DigestInputStream(
+                    stored.inputStream(), sha256Digest())) {
+            MessageDigest actualDigest = input.getMessageDigest();
+            long copied = input.transferTo(OutputStream.nullOutputStream());
+            if (stored.contentLength() != expectedContent.length
+                    || copied != expectedContent.length
+                    || !MessageDigest.isEqual(expectedHash, actualDigest.digest())) {
+                throw new IllegalStateException("Migrated object integrity verification failed");
+            }
+        } catch (ObjectStorageException exception) {
+            markUnavailable();
+            throw new ServiceUnavailableException("Migrated object could not be verified");
+        } catch (IOException exception) {
+            throw new ServiceUnavailableException("Migrated object could not be verified");
+        }
+    }
+
+    private void verifyContentIfPresent(String key, byte[] expectedContent) {
+        try (StoredObject stored = objectStorage.get(key);
+                DigestInputStream input = new DigestInputStream(
+                    stored.inputStream(), sha256Digest())) {
+            MessageDigest actualDigest = input.getMessageDigest();
+            long copied = input.transferTo(OutputStream.nullOutputStream());
+            byte[] expectedHash = sha256Digest().digest(expectedContent);
+            if (stored.contentLength() != expectedContent.length
+                    || copied != expectedContent.length
+                    || !MessageDigest.isEqual(expectedHash, actualDigest.digest())) {
+                throw new IllegalStateException(
+                    "Existing migration target does not match its legacy source");
+            }
+        } catch (ObjectStorageNotFoundException exception) {
+            return;
+        } catch (ObjectStorageException exception) {
+            markUnavailable();
+            throw new ServiceUnavailableException("Migration target could not be checked");
+        } catch (IOException exception) {
+            throw new ServiceUnavailableException("Migration target could not be checked");
         }
     }
 
@@ -292,73 +591,65 @@ public class ManagedObjectService {
 
     private void deleteTenantOnRollback(int workspaceId, String key) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deletionRetryQueue.enqueueAndProcessTenant(workspaceId, key);
+            deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                if (status != TransactionSynchronization.STATUS_COMMITTED) {
-                    deletionRetryQueue.enqueueAndProcessTenant(workspaceId, key);
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    runOutsideCompletedTransaction(
+                        () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
                 }
             }
         });
     }
 
-    private void deleteUserOnRollback(String key) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deletionRetryQueue.enqueueAndProcessUser(key);
-            return;
-        }
+    private static void registerRollbackCleanup(Runnable cleanup) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                if (status != TransactionSynchronization.STATUS_COMMITTED) {
-                    deletionRetryQueue.enqueueAndProcessUser(key);
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    runOutsideCompletedTransaction(cleanup);
                 }
             }
         });
+    }
+
+    private static void runOutsideCompletedTransaction(Runnable cleanup) {
+        Thread thread = Thread.startVirtualThread(cleanup);
+        boolean interrupted = false;
+        while (thread.isAlive()) {
+            try {
+                thread.join();
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void requireTransactionSynchronization() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException(
+                "Managed object writes require an active metadata transaction");
+        }
     }
 
     private void deleteTenantAfterCommit(int workspaceId, String key) {
         deletionRetryQueue.enqueueTenantInCurrentTransaction(workspaceId, key);
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             deletionRetryQueue.processTenant(workspaceId, key);
-            return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deletionRetryQueue.processTenant(workspaceId, key);
-            }
-        });
     }
 
     private void deleteUserAfterCommit(String key) {
         deletionRetryQueue.enqueueUserInCurrentTransaction(key);
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             deletionRetryQueue.processUser(key);
-            return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deletionRetryQueue.processUser(key);
-            }
-        });
-    }
-
-    private void deleteTenantAfterCompletion(int workspaceId, String key) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deletionRetryQueue.enqueueAndProcessTenant(workspaceId, key);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                deletionRetryQueue.enqueueAndProcessTenant(workspaceId, key);
-            }
-        });
     }
 
     private static String attachmentKey(int workspaceId, String token) {
@@ -402,7 +693,26 @@ public class ManagedObjectService {
     }
 
     private static String token(String extension) {
-        String id = UUID.randomUUID().toString();
+        return token(UUID.randomUUID().toString(), extension);
+    }
+
+    private static String migrationToken(
+            String type,
+            int workspaceId,
+            int ownerId,
+            String legacyUrl,
+            String extension) {
+        String identity = "connex-legacy-upload-v1\u0000" + type + "\u0000"
+            + workspaceId + "\u0000" + ownerId + "\u0000" + legacyUrl;
+        byte[] digest = sha256Digest().digest(identity.getBytes(StandardCharsets.UTF_8));
+        digest[6] = (byte) ((digest[6] & 0x0f) | 0x40);
+        digest[8] = (byte) ((digest[8] & 0x3f) | 0x80);
+        ByteBuffer buffer = ByteBuffer.wrap(digest);
+        String id = new UUID(buffer.getLong(), buffer.getLong()).toString();
+        return token(id, extension);
+    }
+
+    private static String token(String id, String extension) {
         return extension == null || extension.isBlank()
             ? id
             : id + "." + extension.toLowerCase(Locale.ROOT);
@@ -461,6 +771,17 @@ public class ManagedObjectService {
      * @param contentType detected image media type
      */
     public record StoredImage(String url, long size, String contentType) {}
+
+    record StoredMigratedImage(String url, long size, String contentType, byte[] content) {
+        StoredMigratedImage {
+            content = Objects.requireNonNull(content, "content").clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+    }
 
     /**
      * Authorized managed object response metadata and open stream.

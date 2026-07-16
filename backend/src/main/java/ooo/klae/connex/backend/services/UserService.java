@@ -14,13 +14,12 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
-import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import java.util.List;
 import java.util.Set;
@@ -47,6 +46,8 @@ public class UserService implements UserDetailsService {
     private final ReferenceService referenceService;
     private final UserOffboardingService userOffboardingService;
     private final ManagedObjectService managedObjectService;
+    private final UserProfilePictureTransaction profilePictureTransaction;
+    private final TenantWorkScope tenantWorkScope;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -195,19 +196,12 @@ public class UserService implements UserDetailsService {
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
     }
 
-    @Transactional
     public User updateCurrentProfilePicture(int userId, UploadSource source) {
         workspaceService.requireSelf(userId);
-        User before = getUserById(userId);
-        StoredImage stored = managedObjectService.storeUserImage(userId, source);
-        managedObjectService.compensateUserImageOnRollback(userId, stored.url());
-        int updated = userMapper.updateProfilePictureUrlIfCurrent(
-            userId, before.getProfilePictureUrl(), stored.url());
-        if (updated != 1) {
-            throw new ConflictException("Profile picture changed while the image was uploading; retry");
-        }
-        managedObjectService.deleteUserImageAfterCommit(userId, before.getProfilePictureUrl());
-        User after = userMapper.getUserById(userId);
+        UserProfilePictureTransaction.Result result = tenantWorkScope.unrouted(
+            () -> profilePictureTransaction.update(userId, source));
+        User before = result.before();
+        User after = result.after();
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
             "Updated profile picture for " + before.getUsername(),
             auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), after.getProfilePictureUrl()));

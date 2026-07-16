@@ -14,9 +14,12 @@ public interface ObjectDeletionQueueMapper {
     int enqueue(
         @Param("workspaceId") int workspaceId,
         @Param("objectKey") String objectKey,
+        @Param("deletePassesRemaining") int deletePassesRemaining,
         @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
 
     long countPending(@Param("workspaceId") int workspaceId);
+
+    long countPendingAmbiguousWrites(@Param("workspaceId") int workspaceId);
 
     List<Integer> workspaceIdsWithDueTasks(
         @Param("now") LocalDateTime now,
@@ -43,5 +46,10 @@ public interface ObjectDeletionQueueMapper {
     int rescheduleByKey(
         @Param("workspaceId") int workspaceId,
         @Param("objectKey") String objectKey,
+        @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
+
+    int confirmDeletePass(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
         @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
 }

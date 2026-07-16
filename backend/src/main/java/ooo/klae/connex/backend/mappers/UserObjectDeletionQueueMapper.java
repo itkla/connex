@@ -13,9 +13,12 @@ import ooo.klae.connex.backend.storage.ObjectDeletionTask;
 public interface UserObjectDeletionQueueMapper {
     int enqueue(
         @Param("objectKey") String objectKey,
+        @Param("deletePassesRemaining") int deletePassesRemaining,
         @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
 
     long countPending();
+
+    long countPendingForPrefix(@Param("objectKeyPrefix") String objectKeyPrefix);
 
     List<ObjectDeletionTask> findDue(
         @Param("now") LocalDateTime now,
@@ -31,5 +34,9 @@ public interface UserObjectDeletionQueueMapper {
 
     int rescheduleByKey(
         @Param("objectKey") String objectKey,
+        @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
+
+    int confirmDeletePass(
+        @Param("id") long id,
         @Param("nextAttemptAt") LocalDateTime nextAttemptAt);
 }

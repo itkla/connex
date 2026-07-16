@@ -26,7 +26,6 @@ public class ManagedBusinessCardBinaryStore implements BusinessCardBinaryStore {
             byte[] content) {
         ManagedObjectService.StoredBinary stored = managedObjectService.storeAttachment(
             workspaceId, fileName, contentType, content);
-        managedObjectService.compensateAttachmentOnRollback(workspaceId, stored.url());
         return new StoredBusinessCard(stored.url(), stored.size());
     }
 

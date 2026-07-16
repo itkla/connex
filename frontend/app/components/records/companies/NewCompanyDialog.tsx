@@ -29,6 +29,7 @@ import { ImagePlusIcon, Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
+import { toastError } from '@/app/lib/toast';
 
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
@@ -135,7 +136,11 @@ export default function NewCompanyDialog({
     }, [logoPreview]);
 
     const applyFile = (file: File | undefined | null) => {
-        if (!file || !isManagedImageFile(file)) return;
+        if (!file) return;
+        if (!isManagedImageFile(file)) {
+            toastError(t('logoUnsupported'));
+            return;
+        }
         if (logoPreview) URL.revokeObjectURL(logoPreview);
         setLogoPreview(URL.createObjectURL(file));
         setLogoFile(file);
@@ -640,7 +645,11 @@ export function NewCompanyForm({
     }, [logoPreview]);
 
     const applyFile = (file: File | undefined | null) => {
-        if (!file || !isManagedImageFile(file)) return;
+        if (!file) return;
+        if (!isManagedImageFile(file)) {
+            toastError(t('logoUnsupported'));
+            return;
+        }
         if (logoPreview) URL.revokeObjectURL(logoPreview);
         setLogoPreview(URL.createObjectURL(file));
         setLogoFile(file);

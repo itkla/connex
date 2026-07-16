@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.Arrays;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -43,6 +45,7 @@ public class CompanyDto {
     @Size(max = 512)
     private String address;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String logoUrl;
 
     private int[] personIds;

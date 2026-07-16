@@ -56,6 +56,11 @@ type InFlightAiMutation = {
     request: Promise<unknown>;
 };
 
+type ResolvedClientRequestIdentity = {
+    request: string;
+    recovery: string;
+};
+
 const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
 let csrfTokenCache: CsrfBootstrap | null = null;
 let clientRequestIdentityEpoch = 0;
@@ -151,7 +156,7 @@ function signalClientRequestIdentityTransition(refreshTabs: boolean) {
     broadcastClientRequestIdentityTransition(refreshTabs);
 }
 
-async function currentClientRequestIdentity(): Promise<string | null> {
+async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
     const workspaceId = clientWorkspaceId();
     const currentCsrf = await fetchCsrfToken();
     if (workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
@@ -171,15 +176,32 @@ async function currentClientRequestIdentity(): Promise<string | null> {
     }
     csrfTokenCache = currentCsrf;
     const locale = localeFromCookieHeader(document.cookie);
-    return [
-        clientRequestIdentityEpoch,
-        workspaceId,
-        locale,
-        currentCsrf.requestIdentity,
-        currentCsrf.headerName,
-        currentCsrf.token,
-    ]
-        .join("\u0000");
+    return {
+        request: [
+            clientRequestIdentityEpoch,
+            workspaceId,
+            locale,
+            currentCsrf.requestIdentity,
+            currentCsrf.headerName,
+            currentCsrf.token,
+        ].join("\u0000"),
+        recovery: [workspaceId, currentCsrf.requestIdentity].join("\u0000"),
+    };
+}
+
+async function currentClientRequestIdentity(): Promise<string | null> {
+    return (await resolveClientRequestIdentity())?.request ?? null;
+}
+
+/** Returns a non-reversible browser-storage scope for the active session and workspace. */
+export async function clientRecoveryScope(): Promise<string | null> {
+    const identity = await resolveClientRequestIdentity();
+    if (!identity || typeof window === "undefined" || !window.crypto.subtle) return null;
+    const digest = await window.crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(identity.recovery),
+    );
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
@@ -236,18 +258,20 @@ async function requestJson<T>(
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
 
-    const send = (csrf: Record<string, string>) =>
-        fetch(`${API_BASE}${path}`, {
+    const send = (csrf: Record<string, string>) => {
+        const headers = new Headers({
+            ...(init.body && !hasMultipartBody ? { "Content-Type": "application/json" } : {}),
+            "Accept-Language": locale,
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
-            headers: {
-                ...(init.body && !hasMultipartBody ? { "Content-Type": "application/json" } : {}),
-                "Accept-Language": locale,
-                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-                ...csrf,
-                ...init.headers,
-            },
+            headers,
         });
+    };
 
     const sendWithCsrfRetry = async () => {
         let response = await send(mutating ? await csrfHeader() : {});
@@ -638,6 +662,8 @@ export function businessCardRequestErrorKind(error: unknown): Types.BusinessCard
         case 408:
         case 504:
             return "timeout";
+        case 409:
+            return "conflict";
         case 413:
             return "tooLarge";
         case 415:
@@ -650,7 +676,7 @@ export function businessCardRequestErrorKind(error: unknown): Types.BusinessCard
         case 503:
             return "unavailable";
         default:
-            return "failed";
+            return error.status > 0 && error.status < 500 ? "rejected" : "failed";
     }
 }
 
@@ -1580,6 +1606,17 @@ export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: R
     });
     headers["Idempotency-Key"] = draft.requestId;
     return postFormData<Types.BusinessCardImportResult>("/api/business-cards/import", body, { ...init, headers });
+}
+
+/** Reconciles a completed import without resubmitting private card or contact content. */
+export function getBusinessCardImportStatus(requestId: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers);
+    headers.set("Idempotency-Key", requestId);
+    return getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
+        ...init,
+        cache: "no-store",
+        headers,
+    });
 }
 
 export function deleteContact(id: number, init: RequestInit = {}) {

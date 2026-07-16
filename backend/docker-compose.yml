@@ -6,6 +6,9 @@ services:
     restart: unless-stopped
     environment:
       CONNEX_OCR_SERVICE_TOKEN: ${CONNEX_OCR_SERVICE_TOKEN:-}
+      CONNEX_OCR_REQUEST_TIMEOUT_SECONDS: ${CONNEX_OCR_REQUEST_TIMEOUT_SECONDS:-12}
+      CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-90}
+      CONNEX_OCR_MAX_REQUEST_HANDLERS: ${CONNEX_OCR_MAX_REQUEST_HANDLERS:-8}
     ports:
       - "127.0.0.1:8090:8090"
     read_only: true
@@ -17,6 +20,7 @@ services:
       - ALL
     cpus: 2.0
     mem_limit: 2g
+    memswap_limit: 2g
     pids_limit: 128
     dns:
       - 127.0.0.1
@@ -46,5 +50,6 @@ services:
 networks:
   ocr_internal:
     driver: bridge
+    internal: true
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"

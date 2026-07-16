@@ -15,6 +15,12 @@
     FOR UPDATE
   </select>
 
+  <select id="findQuota" resultType="ooo.klae.connex.backend.storage.WorkspaceObjectStorageQuota">
+    SELECT workspace_id AS workspaceId, used_bytes AS usedBytes, object_count AS objectCount
+    FROM object_storage_quota
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="lockUsageSize" resultType="java.lang.Long">
     SELECT size_bytes
     FROM managed_object_usage

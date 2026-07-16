@@ -115,6 +115,7 @@
     "toastNoChanges": "保存する変更はありません",
     "toastNameRequired": "名前は必須です",
     "toastCompanyUpdated": "企業を更新しました",
+    "toastPartiallySaved": "企業の一部の変更は保存されましたが、別の変更に失敗しました。現在の内容を確認して、もう一度お試しください。",
     "toastSaveFailed": "保存できませんでした"
   },
   "CompaniesNewDialog": {
@@ -154,6 +155,8 @@
     "contactDone": "完了",
     "contactPhotoLabel": "プロフィール写真",
     "contactPhotoHint": "JPEG・PNG・WebPのプロフィール写真を追加（任意）",
+    "contactPhotoUnsupported": "JPEG、PNG、またはWebPのプロフィール写真を選択してください。",
+    "logoUnsupported": "JPEG、PNG、またはWebPのロゴを選択してください。",
     "contactAddedAnnounce": "{name} を追加しました",
     "contactUpdatedAnnounce": "{name} を更新しました",
     "contactRemovedAnnounce": "{name} を削除しました",
@@ -172,6 +175,7 @@
     "labelPhone": "電話",
     "labelAddress": "住所",
     "changeLogo": "ロゴを変更",
+    "unsupportedLogo": "JPEG、PNG、またはWebP画像を選択してください。",
     "cancel": "キャンセル",
     "save": "保存"
   }

@@ -66,7 +66,6 @@ export default function ContactActionsMenu({
                 email: contact.email || undefined,
                 phone: contact.phone || undefined,
                 title: contact.title || undefined,
-                imageUrl: contact.imageUrl || undefined,
                 companyId: null,
             });
             toastSuccess(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }));

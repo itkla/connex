@@ -17,6 +17,14 @@ _MAX_EXTRACTED_BYTES = 128 * 1024 * 1024
 _MAX_ARCHIVE_MEMBERS = 64
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise RuntimeError("Model downloads must not redirect")
+
+
+_MODEL_OPENER = urllib.request.build_opener(_RejectRedirects)
+
+
 @dataclass(frozen=True)
 class ModelArtifact:
     name: str
@@ -86,7 +94,7 @@ def _download(artifact: ModelArtifact, destination: Path) -> None:
     )
     digest = hashlib.sha256()
     received = 0
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with _MODEL_OPENER.open(request, timeout=60) as response:
         final_url = urlparse(response.geturl())
         if final_url.scheme != "https" or final_url.hostname != _MODEL_HOST:
             raise RuntimeError(f"Model download left the trusted host: {artifact.name}")

@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ class ServiceConfig:
     max_height: int
     max_pixels: int
     request_timeout_seconds: float
+    max_request_handlers: int = 8
 
     @classmethod
     def from_environment(cls) -> "ServiceConfig":
@@ -26,7 +28,8 @@ class ServiceConfig:
             max_width=_integer("CONNEX_OCR_MAX_WIDTH", 8_192, 1, 65_535),
             max_height=_integer("CONNEX_OCR_MAX_HEIGHT", 8_192, 1, 65_535),
             max_pixels=_integer("CONNEX_OCR_MAX_PIXELS", 24_000_000, 1, 250_000_000),
-            request_timeout_seconds=_number("CONNEX_OCR_REQUEST_TIMEOUT_SECONDS", 20.0, 1.0, 120.0),
+            request_timeout_seconds=_number("CONNEX_OCR_REQUEST_TIMEOUT_SECONDS", 12.0, 1.0, 120.0),
+            max_request_handlers=_integer("CONNEX_OCR_MAX_REQUEST_HANDLERS", 8, 2, 64),
         )
 
 
@@ -36,7 +39,7 @@ def _integer(name: str, default: int, minimum: int, maximum: int) -> int:
         value = int(raw)
     except ValueError as exception:
         raise ValueError(f"{name} must be an integer") from exception
-    if value < minimum or value > maximum:
+    if not math.isfinite(value) or value < minimum or value > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
 
@@ -47,6 +50,6 @@ def _number(name: str, default: float, minimum: float, maximum: float) -> float:
         value = float(raw)
     except ValueError as exception:
         raise ValueError(f"{name} must be numeric") from exception
-    if value < minimum or value > maximum:
+    if not math.isfinite(value) or value < minimum or value > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value

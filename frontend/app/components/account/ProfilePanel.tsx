@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+    type Dispatch,
+    type FormEvent,
+    useEffect,
+    useMemo,
+    useReducer,
+    useRef,
+    useState,
+} from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
@@ -47,6 +56,19 @@ type ProfileMutationResult =
     | { ok: true; value: ProfileMutationChanges | null }
     | { ok: false; error: unknown };
 
+type ProfileDraft = {
+    displayName: string;
+    username: string;
+    timezone: string;
+    preferredLocale: Locale;
+};
+
+type ProfileDraftAction =
+    | { type: "reset"; value: ProfileDraft }
+    | { type: "sync"; previous: ProfileDraft; value: ProfileDraft }
+    | { type: "setText"; field: "displayName" | "username" | "timezone"; value: string }
+    | { type: "setLocale"; value: Locale };
+
 const comboboxInputClass =
     "rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand";
 const selectTriggerClass =
@@ -61,6 +83,41 @@ function supportedTimeZones(): string[] {
     }
 }
 
+function profileDraft(user: User): ProfileDraft {
+    return {
+        displayName: user.displayName,
+        username: user.username,
+        timezone: user.timezone,
+        preferredLocale: user.locale,
+    };
+}
+
+function profileDraftReducer(state: ProfileDraft, action: ProfileDraftAction): ProfileDraft {
+    switch (action.type) {
+        case "reset":
+            return action.value;
+        case "sync":
+            return {
+                displayName: state.displayName === action.previous.displayName
+                    ? action.value.displayName
+                    : state.displayName,
+                username: state.username === action.previous.username
+                    ? action.value.username
+                    : state.username,
+                timezone: state.timezone === action.previous.timezone
+                    ? action.value.timezone
+                    : state.timezone,
+                preferredLocale: state.preferredLocale === action.previous.preferredLocale
+                    ? action.value.preferredLocale
+                    : state.preferredLocale,
+            };
+        case "setText":
+            return { ...state, [action.field]: action.value };
+        case "setLocale":
+            return { ...state, preferredLocale: action.value };
+    }
+}
+
 async function settleProfileMutation(
     mutation: Promise<ProfileMutationChanges | null>,
 ): Promise<ProfileMutationResult> {
@@ -71,16 +128,293 @@ async function settleProfileMutation(
     }
 }
 
-export default function ProfilePanel({ user }: Props) {
+type ProfilePhotoFieldProps = {
+    previewUrl: string | null;
+    initial: string;
+    disabled: boolean;
+    onSelect: (file: File | null) => void;
+};
+
+function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfilePhotoFieldProps) {
     const t = useTranslations("AccountProfile");
-    const locale = useLocale();
-    const router = useRouter();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const [displayName, setDisplayName] = useState(user.displayName);
-    const [username, setUsername] = useState(user.username);
-    const [timezone, setTimezone] = useState(user.timezone);
-    const [preferredLocale, setPreferredLocale] = useState<Locale>(user.locale);
+    return (
+        <div className="flex items-center gap-4">
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => fileInputRef.current?.click()}
+                aria-label={t("changePhotoAria")}
+                className="group relative size-20 shrink-0 overflow-hidden rounded-full ring-1 ring-border outline-none transition-transform duration-150 ease-out focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+                {previewUrl ? (
+                    <Image
+                        src={previewUrl}
+                        alt={t("photoAlt")}
+                        width={80}
+                        height={80}
+                        unoptimized
+                        className="size-full object-cover"
+                    />
+                ) : (
+                    <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
+                        {initial}
+                    </span>
+                )}
+                <span className="absolute inset-0 grid place-items-center bg-black/50 text-white opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none">
+                    <CameraIcon className="size-5" />
+                </span>
+            </button>
+            <div className="space-y-1.5">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    {t("changePhoto")}
+                </Button>
+                <p className="text-xs text-muted-foreground">{t("photoHint")}</p>
+            </div>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept={MANAGED_IMAGE_ACCEPT}
+                disabled={disabled}
+                tabIndex={-1}
+                aria-hidden
+                className="sr-only"
+                onChange={(event) => {
+                    const file = event.currentTarget.files?.[0] ?? null;
+                    event.currentTarget.value = "";
+                    onSelect(file);
+                }}
+            />
+        </div>
+    );
+}
+
+function ProfileDetails({ user }: Props) {
+    const t = useTranslations("AccountProfile");
+    const locale = useLocale();
+
+    return (
+        <Rise className="space-y-3">
+            <SectionHeader title={t("detailsTitle")} />
+            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                    <dt className="text-sm text-muted-foreground">{t("memberSince")}</dt>
+                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale)}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                    <dt className="text-sm text-muted-foreground">{t("lastLogin")}</dt>
+                    <dd className="text-sm text-foreground">
+                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("lastLoginNever")}
+                    </dd>
+                </div>
+            </dl>
+        </Rise>
+    );
+}
+
+function ProfileFormActions({
+    dirty,
+    submitting,
+    onReset,
+}: {
+    dirty: boolean;
+    submitting: boolean;
+    onReset: () => void;
+}) {
+    const t = useTranslations("AccountProfile");
+
+    return (
+        <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+            {dirty && (
+                <Button type="button" variant="ghost" onClick={onReset} disabled={submitting}>
+                    {t("discard")}
+                </Button>
+            )}
+            <Button
+                type="submit"
+                variant="brand"
+                disabled={!dirty || submitting}
+                aria-busy={submitting}
+            >
+                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : null}
+                {submitting ? t("saving") : t("save")}
+            </Button>
+        </div>
+    );
+}
+
+type ProfileFormProps = {
+    user: User;
+    confirmedUser: User;
+    draft: ProfileDraft;
+    timeZones: string[];
+    fieldErrors: Record<string, string>;
+    previewUrl: string | null;
+    initial: string;
+    dirty: boolean;
+    submitting: boolean;
+    dispatchDraft: Dispatch<ProfileDraftAction>;
+    onSelectPhoto: (file: File | null) => void;
+    onReset: () => void;
+    onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
+
+function ProfileForm({
+    user,
+    confirmedUser,
+    draft,
+    timeZones,
+    fieldErrors,
+    previewUrl,
+    initial,
+    dirty,
+    submitting,
+    dispatchDraft,
+    onSelectPhoto,
+    onReset,
+    onSubmit,
+}: ProfileFormProps) {
+    const t = useTranslations("AccountProfile");
+    const { displayName, username, timezone, preferredLocale } = draft;
+
+    return (
+        <Rise className="space-y-3">
+            <div>
+                <SectionHeader title={t("title")} />
+                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
+            </div>
+
+            <form onSubmit={onSubmit} className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="space-y-6 p-6">
+                    <ProfilePhotoField
+                        previewUrl={previewUrl}
+                        initial={initial}
+                        disabled={submitting}
+                        onSelect={onSelectPhoto}
+                    />
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="account-display-name">{t("displayNameLabel")}</Label>
+                        <Input
+                            id="account-display-name"
+                            value={displayName}
+                            onChange={(event) => dispatchDraft({
+                                type: "setText",
+                                field: "displayName",
+                                value: event.target.value,
+                            })}
+                            maxLength={255}
+                            required
+                            aria-invalid={fieldErrors.displayName ? true : undefined}
+                        />
+                        {fieldErrors.displayName && (
+                            <p className="text-sm text-destructive">{fieldErrors.displayName}</p>
+                        )}
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="account-username">{t("usernameLabel")}</Label>
+                        <Input
+                            id="account-username"
+                            value={username}
+                            onChange={(event) => dispatchDraft({
+                                type: "setText",
+                                field: "username",
+                                value: event.target.value,
+                            })}
+                            maxLength={255}
+                            required
+                            aria-invalid={fieldErrors.username ? true : undefined}
+                        />
+                        {fieldErrors.username && (
+                            <p className="text-sm text-destructive">{fieldErrors.username}</p>
+                        )}
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="account-email">{t("emailLabel")}</Label>
+                        <Input
+                            id="account-email"
+                            type="email"
+                            value={user.email}
+                            readOnly
+                            aria-readonly
+                            className="cursor-not-allowed text-muted-foreground"
+                        />
+                        <p className="text-sm text-muted-foreground">{t("emailReadonlyHint")}</p>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="account-timezone">{t("timezoneLabel")}</Label>
+                        <Combobox
+                            items={timeZones}
+                            value={timezone}
+                            onValueChange={(value) => dispatchDraft({
+                                type: "setText",
+                                field: "timezone",
+                                value: value ?? confirmedUser.timezone,
+                            })}
+                            itemToStringLabel={(tz: string) => tz}
+                        >
+                            <ComboboxInput
+                                id="account-timezone"
+                                placeholder={t("timezonePlaceholder")}
+                                className={comboboxInputClass}
+                            />
+                            <ComboboxContent className="pointer-events-auto">
+                                <ComboboxList>
+                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
+                                    {timeZones.map((tz) => (
+                                        <ComboboxItem key={tz} value={tz}>
+                                            {tz}
+                                        </ComboboxItem>
+                                    ))}
+                                </ComboboxList>
+                            </ComboboxContent>
+                        </Combobox>
+                        <p className="text-sm text-muted-foreground">{t("timezoneHint")}</p>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="account-language">{t("languageLabel")}</Label>
+                        <Select
+                            value={preferredLocale}
+                            onValueChange={(value) => {
+                                if (value === "en" || value === "ja") {
+                                    dispatchDraft({ type: "setLocale", value });
+                                }
+                            }}
+                        >
+                            <SelectTrigger id="account-language" className={selectTriggerClass}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="en">{t("languageEnglish")}</SelectItem>
+                                <SelectItem value="ja">{t("languageJapanese")}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-sm text-muted-foreground">{t("languageHint")}</p>
+                    </div>
+                </div>
+
+                <ProfileFormActions dirty={dirty} submitting={submitting} onReset={onReset} />
+            </form>
+        </Rise>
+    );
+}
+
+export default function ProfilePanel({ user }: Props) {
+    const t = useTranslations("AccountProfile");
+    const router = useRouter();
+
+    const [draft, dispatchDraft] = useReducer(profileDraftReducer, user, profileDraft);
     const [confirmation, setConfirmation] = useState({ source: user, value: user });
     const [photo, setPhoto] = useState<File | null>(null);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -89,12 +423,10 @@ export default function ProfilePanel({ user }: Props) {
     const [submitting, setSubmitting] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const confirmedUser = confirmation.value;
+    const { displayName, username, timezone, preferredLocale } = draft;
 
     if (confirmation.source !== user) {
-        setDisplayName((current) => current === confirmedUser.displayName ? user.displayName : current);
-        setUsername((current) => current === confirmedUser.username ? user.username : current);
-        setTimezone((current) => current === confirmedUser.timezone ? user.timezone : current);
-        setPreferredLocale((current) => current === confirmedUser.locale ? user.locale : current);
+        dispatchDraft({ type: "sync", previous: profileDraft(confirmedUser), value: profileDraft(user) });
         setConfirmation({ source: user, value: user });
     }
 
@@ -120,7 +452,10 @@ export default function ProfilePanel({ user }: Props) {
         photo !== null && uploadedPhotoUrl !== confirmedUser.profilePictureUrl;
 
     const selectPhoto = (file: File | null) => {
-        if (file && !isManagedImageFile(file)) return;
+        if (file && !isManagedImageFile(file)) {
+            toastError(t("photoUnsupported"));
+            return;
+        }
         if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
         const nextPreview = file ? URL.createObjectURL(file) : null;
         previewUrlRef.current = nextPreview;
@@ -130,10 +465,7 @@ export default function ProfilePanel({ user }: Props) {
     };
 
     const reset = () => {
-        setDisplayName(confirmedUser.displayName);
-        setUsername(confirmedUser.username);
-        setTimezone(confirmedUser.timezone);
-        setPreferredLocale(confirmedUser.locale);
+        dispatchDraft({ type: "reset", value: profileDraft(confirmedUser) });
         selectPhoto(null);
         setFieldErrors({});
     };
@@ -142,7 +474,7 @@ export default function ProfilePanel({ user }: Props) {
         setConfirmation((current) => ({ ...current, value: nextUser }));
     };
 
-    const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!dirty || submitting) return;
         setSubmitting(true);
@@ -150,6 +482,8 @@ export default function ProfilePanel({ user }: Props) {
 
         const savedUser = confirmedUser;
         let completedMutation = false;
+        let completedProfilePictureUrl: string | null = null;
+        let photoUploadFailed = false;
         try {
             const localeMutation: Promise<ProfileMutationChanges | null> =
                 preferredLocale !== savedUser.locale
@@ -158,7 +492,13 @@ export default function ProfilePanel({ user }: Props) {
             const profileMutation = (async (): Promise<ProfileMutationChanges | null> => {
                 let profilePictureUrl = savedUser.profilePictureUrl;
                 if (photo) {
-                    profilePictureUrl = uploadedPhotoUrl ?? (await uploadCurrentUserProfilePicture(photo));
+                    try {
+                        profilePictureUrl = uploadedPhotoUrl ?? (await uploadCurrentUserProfilePicture(photo));
+                    } catch (error) {
+                        photoUploadFailed = true;
+                        throw error;
+                    }
+                    completedProfilePictureUrl = profilePictureUrl;
                     if (!uploadedPhotoUrl) setUploadedPhotoUrl(profilePictureUrl);
                 }
 
@@ -199,7 +539,13 @@ export default function ProfilePanel({ user }: Props) {
                 sequentialResults.timezoneResult,
                 localeResult,
             ];
-            let nextUser = savedUser;
+            let nextUser = completedProfilePictureUrl == null
+                ? savedUser
+                : { ...savedUser, profilePictureUrl: completedProfilePictureUrl };
+            if (completedProfilePictureUrl !== null
+                && completedProfilePictureUrl !== savedUser.profilePictureUrl) {
+                completedMutation = true;
+            }
             let mutationFailed = false;
             let mutationError: unknown;
             for (const result of results) {
@@ -221,14 +567,16 @@ export default function ProfilePanel({ user }: Props) {
             if (err instanceof ApiError && err.fieldErrors) {
                 setFieldErrors(err.fieldErrors);
             }
-            const message =
-                err instanceof Error && err.message === "upload-failed"
-                    ? t("photoUploadFailed")
-                    : err instanceof ApiError
-                      ? err.message
-                      : t("saveFailed");
+            const message = completedMutation
+                ? t("partiallySaved")
+                : photoUploadFailed
+                  ? t("photoUploadFailed")
+                  : t("saveFailed");
             toastError(message);
-            if (completedMutation) router.refresh();
+            if (completedMutation) {
+                selectPhoto(null);
+                router.refresh();
+            }
         } finally {
             setSubmitting(false);
         }
@@ -239,180 +587,25 @@ export default function ProfilePanel({ user }: Props) {
 
     return (
         <div className="space-y-10">
-            <Rise className="space-y-3">
-                <div>
-                    <SectionHeader title={t("title")} />
-                    <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-                </div>
+            <ProfileForm
+                user={user}
+                confirmedUser={confirmedUser}
+                draft={draft}
+                timeZones={timeZones}
+                fieldErrors={fieldErrors}
+                previewUrl={previewUrl}
+                initial={initial}
+                dirty={dirty}
+                submitting={submitting}
+                dispatchDraft={dispatchDraft}
+                onSelectPhoto={(file) => {
+                    if (!submitting) selectPhoto(file);
+                }}
+                onReset={reset}
+                onSubmit={handleSubmit}
+            />
 
-                <form onSubmit={handleSubmit} className="overflow-hidden rounded-2xl border border-border bg-card">
-                    <div className="space-y-6 p-6">
-                        <div className="flex items-center gap-4">
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                aria-label={t("changePhotoAria")}
-                                className="group relative size-20 shrink-0 overflow-hidden rounded-full ring-1 ring-border outline-none transition-transform duration-150 ease-out focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97]"
-                            >
-                                {previewUrl ? (
-                                    <img src={previewUrl} alt={t("photoAlt")} className="size-full object-cover" />
-                                ) : (
-                                    <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
-                                        {initial}
-                                    </span>
-                                )}
-                                <span className="absolute inset-0 grid place-items-center bg-black/50 text-white opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none">
-                                    <CameraIcon className="size-5" />
-                                </span>
-                            </button>
-                            <div className="space-y-1.5">
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => fileInputRef.current?.click()}
-                                >
-                                    {t("changePhoto")}
-                                </Button>
-                                <p className="text-xs text-muted-foreground">{t("photoHint")}</p>
-                            </div>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept={MANAGED_IMAGE_ACCEPT}
-                                tabIndex={-1}
-                                aria-hidden
-                                className="sr-only"
-                                onChange={(e) => selectPhoto(e.target.files?.[0] ?? null)}
-                            />
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="account-display-name">{t("displayNameLabel")}</Label>
-                            <Input
-                                id="account-display-name"
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
-                                maxLength={255}
-                                required
-                                aria-invalid={fieldErrors.displayName ? true : undefined}
-                            />
-                            {fieldErrors.displayName && (
-                                <p className="text-sm text-destructive">{fieldErrors.displayName}</p>
-                            )}
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="account-username">{t("usernameLabel")}</Label>
-                            <Input
-                                id="account-username"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                maxLength={255}
-                                required
-                                aria-invalid={fieldErrors.username ? true : undefined}
-                            />
-                            {fieldErrors.username && (
-                                <p className="text-sm text-destructive">{fieldErrors.username}</p>
-                            )}
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="account-email">{t("emailLabel")}</Label>
-                            <Input
-                                id="account-email"
-                                type="email"
-                                value={user.email}
-                                readOnly
-                                aria-readonly
-                                className="cursor-not-allowed text-muted-foreground"
-                            />
-                            <p className="text-sm text-muted-foreground">{t("emailReadonlyHint")}</p>
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="account-timezone">{t("timezoneLabel")}</Label>
-                            <Combobox
-                                items={timeZones}
-                                value={timezone}
-                                onValueChange={(value) => setTimezone((value as string | null) ?? confirmedUser.timezone)}
-                                itemToStringLabel={(tz: string) => tz}
-                            >
-                                <ComboboxInput
-                                    id="account-timezone"
-                                    placeholder={t("timezonePlaceholder")}
-                                    className={comboboxInputClass}
-                                />
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList>
-                                        <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                        {timeZones.map((tz) => (
-                                            <ComboboxItem key={tz} value={tz}>
-                                                {tz}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                            <p className="text-sm text-muted-foreground">{t("timezoneHint")}</p>
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="account-language">{t("languageLabel")}</Label>
-                            <Select
-                                value={preferredLocale}
-                                onValueChange={(value) => {
-                                    if (value === "en" || value === "ja") {
-                                        setPreferredLocale(value);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger id="account-language" className={selectTriggerClass}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="en">{t("languageEnglish")}</SelectItem>
-                                    <SelectItem value="ja">{t("languageJapanese")}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            <p className="text-sm text-muted-foreground">{t("languageHint")}</p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
-                        {dirty && (
-                            <Button type="button" variant="ghost" onClick={reset} disabled={submitting}>
-                                {t("discard")}
-                            </Button>
-                        )}
-                        <Button
-                            type="submit"
-                            variant="brand"
-                            disabled={!dirty || submitting}
-                            aria-busy={submitting}
-                        >
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : null}
-                            {submitting ? t("saving") : t("save")}
-                        </Button>
-                    </div>
-                </form>
-            </Rise>
-
-            <Rise className="space-y-3">
-                <SectionHeader title={t("detailsTitle")} />
-                <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                    <div className="flex items-center justify-between gap-4 px-4 py-3">
-                        <dt className="text-sm text-muted-foreground">{t("memberSince")}</dt>
-                        <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale)}</dd>
-                    </div>
-                    <div className="flex items-center justify-between gap-4 px-4 py-3">
-                        <dt className="text-sm text-muted-foreground">{t("lastLogin")}</dt>
-                        <dd className="text-sm text-foreground">
-                            {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("lastLoginNever")}
-                        </dd>
-                    </div>
-                </dl>
-            </Rise>
+            <ProfileDetails user={user} />
         </div>
     );
 }

@@ -71,6 +71,19 @@ class WorkspaceObjectStorageQuotaServiceTest {
     }
 
     @Test
+    void validatesProjectedMigrationUsageWithoutWritingTheLedger() {
+        when(quotaMapper.findQuota(7)).thenReturn(new WorkspaceObjectStorageQuota(7, 25, 1));
+
+        service.validateProjectedAddition(7, 75, 1);
+
+        assertThrows(BadRequestException.class,
+            () -> service.validateProjectedAddition(7, 76, 1));
+        assertThrows(BadRequestException.class,
+            () -> service.validateProjectedAddition(7, 1, 2));
+        verify(quotaMapper, never()).ensureQuota(7);
+    }
+
+    @Test
     void releasesTheExactLedgerEntryOnlyOnce() {
         when(quotaMapper.lockQuota(7)).thenReturn(new WorkspaceObjectStorageQuota(7, 75, 2));
         when(quotaMapper.lockUsageSize(7, KEY)).thenReturn(50L);

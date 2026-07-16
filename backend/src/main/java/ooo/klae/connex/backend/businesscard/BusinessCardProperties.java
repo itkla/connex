@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 public class BusinessCardProperties {
     private boolean enabled;
     private URI ocrBaseUrl;
+    private String plainHttpPrivateHost = "";
     private String ocrServiceToken = "";
     private Duration connectTimeout = Duration.ofSeconds(2);
     private Duration requestTimeout = Duration.ofSeconds(15);
@@ -26,6 +27,8 @@ public class BusinessCardProperties {
     private int maxScansPerMinute = 12;
     private int maxImportsPerMinute = 12;
     private int rateLimitMaxKeys = 10_000;
+    private Duration idempotencyRetention = Duration.ofHours(24);
+    private int idempotencyCleanupBatchSize = 100;
 
     public boolean isEnabled() {
         return enabled;
@@ -43,6 +46,14 @@ public class BusinessCardProperties {
         this.ocrBaseUrl = ocrBaseUrl;
     }
 
+    public String getPlainHttpPrivateHost() {
+        return plainHttpPrivateHost;
+    }
+
+    public void setPlainHttpPrivateHost(String plainHttpPrivateHost) {
+        this.plainHttpPrivateHost = plainHttpPrivateHost == null ? "" : plainHttpPrivateHost.trim();
+    }
+
     public String getOcrServiceToken() {
         return ocrServiceToken;
     }
@@ -56,7 +67,7 @@ public class BusinessCardProperties {
     }
 
     public void setConnectTimeout(Duration connectTimeout) {
-        this.connectTimeout = connectTimeout;
+        this.connectTimeout = positive(connectTimeout, "connectTimeout");
     }
 
     public Duration getRequestTimeout() {
@@ -64,7 +75,7 @@ public class BusinessCardProperties {
     }
 
     public void setRequestTimeout(Duration requestTimeout) {
-        this.requestTimeout = requestTimeout;
+        this.requestTimeout = positive(requestTimeout, "requestTimeout");
     }
 
     public Duration getReadinessCache() {
@@ -72,7 +83,7 @@ public class BusinessCardProperties {
     }
 
     public void setReadinessCache(Duration readinessCache) {
-        this.readinessCache = readinessCache;
+        this.readinessCache = positive(readinessCache, "readinessCache");
     }
 
     public int getMaxResponseBytes() {
@@ -80,7 +91,7 @@ public class BusinessCardProperties {
     }
 
     public void setMaxResponseBytes(int maxResponseBytes) {
-        this.maxResponseBytes = maxResponseBytes;
+        this.maxResponseBytes = positive(maxResponseBytes, "maxResponseBytes");
     }
 
     public long getMaxImageBytes() {
@@ -88,7 +99,7 @@ public class BusinessCardProperties {
     }
 
     public void setMaxImageBytes(long maxImageBytes) {
-        this.maxImageBytes = maxImageBytes;
+        this.maxImageBytes = positive(maxImageBytes, "maxImageBytes");
     }
 
     public int getMaxWidth() {
@@ -96,7 +107,7 @@ public class BusinessCardProperties {
     }
 
     public void setMaxWidth(int maxWidth) {
-        this.maxWidth = maxWidth;
+        this.maxWidth = positive(maxWidth, "maxWidth");
     }
 
     public int getMaxHeight() {
@@ -104,7 +115,7 @@ public class BusinessCardProperties {
     }
 
     public void setMaxHeight(int maxHeight) {
-        this.maxHeight = maxHeight;
+        this.maxHeight = positive(maxHeight, "maxHeight");
     }
 
     public long getMaxPixels() {
@@ -112,7 +123,7 @@ public class BusinessCardProperties {
     }
 
     public void setMaxPixels(long maxPixels) {
-        this.maxPixels = maxPixels;
+        this.maxPixels = positive(maxPixels, "maxPixels");
     }
 
     public int getMaxScansPerMinute() {
@@ -139,8 +150,39 @@ public class BusinessCardProperties {
         this.rateLimitMaxKeys = positive(rateLimitMaxKeys, "rateLimitMaxKeys");
     }
 
+    public Duration getIdempotencyRetention() {
+        return idempotencyRetention;
+    }
+
+    public void setIdempotencyRetention(Duration idempotencyRetention) {
+        this.idempotencyRetention = positive(idempotencyRetention, "idempotencyRetention");
+    }
+
+    public int getIdempotencyCleanupBatchSize() {
+        return idempotencyCleanupBatchSize;
+    }
+
+    public void setIdempotencyCleanupBatchSize(int idempotencyCleanupBatchSize) {
+        this.idempotencyCleanupBatchSize = positive(
+                idempotencyCleanupBatchSize, "idempotencyCleanupBatchSize");
+    }
+
     private static int positive(int value, String name) {
         if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
+    }
+
+    private static long positive(long value, String name) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
+    }
+
+    private static Duration positive(Duration value, String name) {
+        if (value == null || value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
         }
         return value;

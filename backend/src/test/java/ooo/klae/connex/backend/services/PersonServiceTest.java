@@ -51,6 +51,17 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
+    void createRejectsClientSuppliedImageUrl() {
+        Person person = personDraft(null);
+        person.setImageUrl("https://attacker.example/image.png");
+
+        Person created = personService.create(person);
+
+        assertNull(created.getImageUrl());
+        assertNull(personMapper.getPersonById(workspace.getId(), created.getId()).getImageUrl());
+    }
+
+    @Test
     void genericUpdatePreservesAndReturnsCurrentManagedImage() {
         Person person = newPerson(newCompany());
         String managed = "/api/persons/" + person.getId()

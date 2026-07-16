@@ -11,8 +11,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -40,35 +43,59 @@ public class BusinessCardOcrClient {
     private final BusinessCardProperties properties;
     private final URI scanEndpoint;
     private final URI healthEndpoint;
+    private final boolean readinessEnabled;
     private final Semaphore invocation = new Semaphore(1);
+    private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
+    private final AtomicLong readinessGeneration = new AtomicLong();
 
     private volatile long readinessExpiresAtNanos;
     private volatile boolean cachedReady;
 
     @Autowired
-    public BusinessCardOcrClient(BusinessCardProperties properties, ObjectMapper objectMapper) {
+    public BusinessCardOcrClient(BusinessCardProperties properties, ObjectMapper objectMapper,
+            Environment environment) {
+        BusinessCardOcrTransportStartupValidator.validate(properties, environment);
         this.properties = Objects.requireNonNull(properties, "properties");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(positive(properties.getConnectTimeout(), "OCR connect timeout"))
-                .build();
+        this.readinessEnabled = allowsBackgroundReadiness(environment);
+        HttpClient client = newHttpClient(properties);
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(client);
         requestFactory.setReadTimeout(positive(properties.getRequestTimeout(), "OCR request timeout"));
         this.restClient = RestClient.builder().requestFactory(requestFactory).build();
         URI base = validBase(properties.getOcrBaseUrl());
         this.scanEndpoint = base == null ? null : URI.create(base.toString() + "/v1/ocr");
-        this.healthEndpoint = base == null ? null : URI.create(base.toString() + "/health");
+        this.healthEndpoint = base == null ? null : URI.create(base.toString() + "/ready");
+        refreshReadiness();
+    }
+
+    static HttpClient newHttpClient(BusinessCardProperties properties) {
+        return HttpClient.newBuilder()
+                .proxy(HttpClient.Builder.NO_PROXY)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(positive(properties.getConnectTimeout(), "OCR connect timeout"))
+                .build();
+    }
+
+    static boolean allowsBackgroundReadiness(Environment environment) {
+        return "off".equalsIgnoreCase(
+                environment.getProperty("connex.maintenance.mode", "off").trim());
     }
 
     BusinessCardOcrClient(RestClient restClient, ObjectMapper objectMapper,
             BusinessCardProperties properties, URI base) {
+        this(restClient, objectMapper, properties, base, true);
+    }
+
+    BusinessCardOcrClient(RestClient restClient, ObjectMapper objectMapper,
+            BusinessCardProperties properties, URI base, boolean readinessEnabled) {
         this.restClient = Objects.requireNonNull(restClient, "restClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.properties = Objects.requireNonNull(properties, "properties");
+        this.readinessEnabled = readinessEnabled;
         URI normalized = validBase(base);
         this.scanEndpoint = normalized == null ? null : URI.create(normalized.toString() + "/v1/ocr");
-        this.healthEndpoint = normalized == null ? null : URI.create(normalized.toString() + "/health");
+        this.healthEndpoint = normalized == null ? null : URI.create(normalized.toString() + "/ready");
+        refreshReadiness();
     }
 
     /**
@@ -81,18 +108,10 @@ public class BusinessCardOcrClient {
             return false;
         }
         long now = System.nanoTime();
-        if (now < readinessExpiresAtNanos) {
-            return cachedReady;
+        if (now >= readinessExpiresAtNanos) {
+            refreshReadiness();
         }
-        synchronized (this) {
-            now = System.nanoTime();
-            if (now < readinessExpiresAtNanos) {
-                return cachedReady;
-            }
-            cachedReady = checkHealth();
-            readinessExpiresAtNanos = now + positive(properties.getReadinessCache(), "OCR readiness cache").toNanos();
-            return cachedReady;
-        }
+        return cachedReady;
     }
 
     /**
@@ -103,7 +122,7 @@ public class BusinessCardOcrClient {
      */
     public List<OcrLine> recognize(ValidatedBusinessCardImage image) {
         Objects.requireNonNull(image, "image");
-        if (!isConfigured()) {
+        if (!isReady()) {
             throw unavailable();
         }
         if (!invocation.tryAcquire()) {
@@ -119,10 +138,14 @@ public class BusinessCardOcrClient {
                     .exchange((request, result) -> new OcrResponse(
                             result.getStatusCode().value(), readBounded(result.getBody())));
             return handle(response);
+        } catch (ServiceUnavailableException exception) {
+            markUnavailable();
+            throw exception;
         } catch (TooManyRequestsException | RequestBodyTooLargeException
-                | UnprocessableBusinessCardException | ServiceUnavailableException exception) {
+                | UnprocessableBusinessCardException exception) {
             throw exception;
         } catch (IOException | RuntimeException exception) {
+            markUnavailable();
             throw unavailable();
         } finally {
             invocation.release();
@@ -145,6 +168,7 @@ public class BusinessCardOcrClient {
             OcrResponse response = restClient.get()
                     .uri(healthEndpoint)
                     .accept(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + properties.getOcrServiceToken())
                     .exchange((request, result) -> new OcrResponse(
                             result.getStatusCode().value(), readBounded(result.getBody())));
             if (response.statusCode() != 200) {
@@ -155,6 +179,32 @@ public class BusinessCardOcrClient {
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    private void refreshReadiness() {
+        if (!readinessEnabled || !isConfigured()
+                || !readinessRefreshInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        long generation = readinessGeneration.get();
+        Thread.startVirtualThread(() -> {
+            try {
+                boolean ready = checkHealth();
+                long expiresAt = System.nanoTime() + properties.getReadinessCache().toNanos();
+                if (readinessGeneration.get() == generation) {
+                    cachedReady = ready;
+                    readinessExpiresAtNanos = expiresAt;
+                }
+            } finally {
+                readinessRefreshInFlight.set(false);
+            }
+        });
+    }
+
+    private void markUnavailable() {
+        readinessGeneration.incrementAndGet();
+        cachedReady = false;
+        readinessExpiresAtNanos = 0;
     }
 
     private List<OcrLine> handle(OcrResponse response) throws IOException {
@@ -218,7 +268,7 @@ public class BusinessCardOcrClient {
         if (node == null || !node.isString()) {
             throw unavailable();
         }
-        String text = node.asText();
+        String text = node.stringValue();
         if (text.isBlank() || text.length() > MAX_LINE_CHARACTERS
                 || text.chars().anyMatch(value -> value == 0)) {
             throw unavailable();

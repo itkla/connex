@@ -440,7 +440,6 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         industry: d.industry.trim() || undefined,
                         phone: d.phone.trim() || undefined,
                         address: d.address.trim() || undefined,
-                        logoUrl: c.logoUrl || undefined,
                     };
                     return updateCompany(c.id, payload);
                 }),

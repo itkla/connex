@@ -29,6 +29,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      CONNEX_DB_ROOT_PASSWORD: ""
     volumes:
       - object_data:/var/lib/connex/objects
     expose:
@@ -37,8 +39,9 @@ services:
       db:
         condition: service_healthy
     networks:
-      - default
-      - ocr_internal
+      default:
+        gw_priority: 1
+      ocr_internal: {}
 
   ocr:
     image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
@@ -46,6 +49,9 @@ services:
     restart: unless-stopped
     environment:
       CONNEX_OCR_SERVICE_TOKEN: ${CONNEX_OCR_SERVICE_TOKEN:-}
+      CONNEX_OCR_REQUEST_TIMEOUT_SECONDS: ${CONNEX_OCR_REQUEST_TIMEOUT_SECONDS:-12}
+      CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-90}
+      CONNEX_OCR_MAX_REQUEST_HANDLERS: ${CONNEX_OCR_MAX_REQUEST_HANDLERS:-8}
     expose:
       - "8090"
     read_only: true
@@ -57,6 +63,7 @@ services:
       - ALL
     cpus: 2.0
     mem_limit: 2g
+    memswap_limit: 2g
     pids_limit: 128
     networks:
       - ocr_internal
@@ -92,4 +99,8 @@ volumes:
 
 networks:
   ocr_internal:
+    driver: bridge
     internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated

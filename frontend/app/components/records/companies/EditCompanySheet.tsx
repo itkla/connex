@@ -74,38 +74,42 @@ export default function EditCompanySheet({
         }
 
         setIsSaving(true);
+        let committedChanges = false;
         try {
-            let logoUrl: string | undefined;
-            if (logoChanged && logoFile) {
-                logoUrl = await uploadCompanyLogo(company.id, logoFile);
-            }
-
-            if (textChanged || logoChanged) {
+            if (textChanged) {
                 const payload: UpdateCompanyPayload = {
                     name: draft.name.trim(),
                     website: draft.website.trim() || undefined,
                     industry: draft.industry.trim() || undefined,
                     phone: draft.phone.trim() || undefined,
                     address: draft.address.trim() || undefined,
-                    logoUrl: logoUrl ?? company.logoUrl ?? undefined,
                 };
                 await updateCompany(company.id, payload);
+                committedChanges = true;
             }
 
-            await cfRef.current?.save();
+            if (customChanged) {
+                await cfRef.current?.save();
+                committedChanges = true;
+            }
+
+            if (logoChanged && logoFile) {
+                await uploadCompanyLogo(company.id, logoFile);
+            }
 
             toastSuccess(t('toastCompanyUpdated'));
-            handleOpenChange(false);
-
-            const updatedCompany = await getCompanyById(company.id);
-            if (updatedCompany) {
-                setDraft(toDraft(updatedCompany));
-                setLogoFile(null);
-            }
-
+            setLogoFile(null);
+            onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+            if (committedChanges) {
+                const updatedCompany = await getCompanyById(company.id).catch(() => null);
+                if (updatedCompany) setDraft(toDraft(updatedCompany));
+                toastError(t('toastPartiallySaved'));
+                router.refresh();
+            } else {
+                toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+            }
         } finally {
             setIsSaving(false);
         }

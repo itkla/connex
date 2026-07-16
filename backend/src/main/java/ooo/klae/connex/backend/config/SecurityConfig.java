@@ -78,6 +78,7 @@ public class SecurityConfig {
         "Accept",
         "Accept-Language",
         "Content-Type",
+        "Idempotency-Key",
         "X-CSRF-TOKEN",
         "X-XSRF-TOKEN",
         "X-Workspace-Id"

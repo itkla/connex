@@ -129,6 +129,20 @@ class UserServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void updateProfilePicture_onOwnAccountPersistsManagedReference() throws Exception {
+        User member = newUser();
+        authenticateAs(member);
+
+        User updated = userService.updateCurrentProfilePicture(
+            member.getId(), UploadSource.from("portrait.png", "image/png", png()));
+
+        String expectedPrefix = "/api/users/" + member.getId() + "/profile-picture/";
+        assertTrue(updated.getProfilePictureUrl().startsWith(expectedPrefix));
+        assertEquals(updated.getProfilePictureUrl(),
+            userMapper.getUserById(member.getId()).getProfilePictureUrl());
+    }
+
+    @Test
     void update_onOwnAccount_isAllowed() {
         User member = newUser();
         authenticateAs(member);

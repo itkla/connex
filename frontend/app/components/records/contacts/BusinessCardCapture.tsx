@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
-import { type ChangeEvent, useId, useRef } from 'react';
+import { type ChangeEvent, useId, useRef, useState } from 'react';
 
 import type {
     BusinessCardRequestErrorKind,
@@ -31,7 +31,6 @@ import { cn } from '@/lib/utils';
 type ConfidenceField = 'name' | 'email' | 'phone' | 'title' | 'company';
 
 type BusinessCardCaptureProps = {
-    available: boolean;
     scanAvailable: boolean;
     file: File | null;
     previewUrl: string | null;
@@ -39,11 +38,13 @@ type BusinessCardCaptureProps = {
     status: BusinessCardScanStatus;
     requestError: BusinessCardRequestErrorKind | null;
     importError: BusinessCardRequestErrorKind | null;
+    requiresExactImportRetry: boolean;
     disabled: boolean;
     onFileSelected: (file: File) => void;
     onCancelScan: () => void;
     onRetryScan: () => void;
     onRemove: () => void;
+    onDiscardImage?: () => void;
 };
 
 type BusinessCardCompanyChoiceProps = {
@@ -53,6 +54,7 @@ type BusinessCardCompanyChoiceProps = {
     existingCompanyName: string | null;
     companyName: string;
     validationError: BusinessCardCompanyValidationError;
+    fieldError?: string;
     disabled: boolean;
     onModeChange: (mode: Exclude<BusinessCardCompanyActionMode, null>) => void;
     onCompanyNameChange: (value: string) => void;
@@ -60,6 +62,10 @@ type BusinessCardCompanyChoiceProps = {
 
 function confidencePercent(confidence: number): number {
     return Math.round(Math.max(0, Math.min(1, confidence)) * 100);
+}
+
+function isDefinitiveImageRejection(kind: BusinessCardRequestErrorKind): boolean {
+    return kind === 'tooLarge' || kind === 'unsupportedType' || kind === 'unreadable';
 }
 
 function confidenceItems(result: BusinessCardScanResult): Array<{ field: ConfidenceField; confidence: number }> {
@@ -79,8 +85,98 @@ function confidenceItems(result: BusinessCardScanResult): Array<{ field: Confide
     return items;
 }
 
+function importErrorMessageKey(kind: BusinessCardRequestErrorKind) {
+    switch (kind) {
+        case 'unauthorized':
+            return 'cardImportErrorUnauthorized';
+        case 'forbidden':
+            return 'cardImportErrorForbidden';
+        case 'tooLarge':
+            return 'cardImportErrorTooLarge';
+        case 'unsupportedType':
+        case 'unreadable':
+            return 'cardImportErrorImage';
+        case 'busy':
+            return 'cardImportErrorBusy';
+        case 'conflict':
+            return 'cardImportErrorConflict';
+        case 'timeout':
+        case 'unavailable':
+            return 'cardImportErrorUnavailable';
+        case 'recoveryStorage':
+            return 'cardImportErrorRecoveryStorage';
+        case 'rejected':
+            return 'cardImportErrorRejected';
+        case 'failed':
+        case 'aborted':
+            return 'cardImportErrorFailed';
+    }
+}
+
+function scanErrorMessageKey(kind: BusinessCardRequestErrorKind) {
+    switch (kind) {
+        case 'unauthorized':
+            return 'cardErrorUnauthorized';
+        case 'forbidden':
+            return 'cardErrorForbidden';
+        case 'tooLarge':
+            return 'cardErrorTooLarge';
+        case 'unsupportedType':
+            return 'cardErrorUnsupportedType';
+        case 'unreadable':
+            return 'cardErrorUnreadable';
+        case 'busy':
+            return 'cardErrorBusy';
+        case 'conflict':
+            return 'cardErrorRejected';
+        case 'timeout':
+            return 'cardErrorTimeout';
+        case 'unavailable':
+            return 'cardErrorUnavailable';
+        case 'recoveryStorage':
+            return 'cardErrorUnavailable';
+        case 'rejected':
+            return 'cardErrorRejected';
+        case 'failed':
+            return 'cardErrorFailed';
+        case 'aborted':
+            return 'cardManualFallback';
+    }
+}
+
+function warningMessageKey(warning: string) {
+    const normalizedWarning = warning.trim().toLowerCase().replaceAll('-', '_');
+    if (normalizedWarning.startsWith('low_confidence')) {
+        return 'cardWarningLowConfidence';
+    }
+    switch (normalizedWarning) {
+        case 'partial_result':
+            return 'cardWarningPartial';
+        case 'unsupported_orientation':
+            return 'cardWarningOrientation';
+        case 'no_recognizable_fields':
+            return 'cardWarningNoFields';
+        default:
+            return 'cardWarningReview';
+    }
+}
+
+function confidenceLabelKey(field: ConfidenceField) {
+    switch (field) {
+        case 'name':
+            return 'cardConfidenceName';
+        case 'email':
+            return 'cardConfidenceEmail';
+        case 'phone':
+            return 'cardConfidencePhone';
+        case 'title':
+            return 'cardConfidenceTitle';
+        case 'company':
+            return 'cardConfidenceCompany';
+    }
+}
+
 export function BusinessCardCapture({
-    available,
     scanAvailable,
     file,
     previewUrl,
@@ -88,105 +184,61 @@ export function BusinessCardCapture({
     status,
     requestError,
     importError,
+    requiresExactImportRetry,
     disabled,
     onFileSelected,
     onCancelScan,
     onRetryScan,
     onRemove,
+    onDiscardImage,
 }: BusinessCardCaptureProps) {
     const t = useTranslations('ContactsNewContactDialog');
     const cameraInputId = useId();
     const uploadInputId = useId();
     const cameraInputRef = useRef<HTMLInputElement>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
-
-    if (!available) return null;
+    const [selectionError, setSelectionError] = useState(false);
+    const cardControlsDisabled = disabled || requiresExactImportRetry;
 
     const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
         const selectedFile = event.currentTarget.files?.[0];
         event.currentTarget.value = '';
-        if (selectedFile && isManagedImageFile(selectedFile)) onFileSelected(selectedFile);
+        if (!selectedFile) return;
+        if (!isManagedImageFile(selectedFile)) {
+            setSelectionError(true);
+            return;
+        }
+        setSelectionError(false);
+        onFileSelected(selectedFile);
     };
 
-    const errorMessage = (kind: BusinessCardRequestErrorKind) => {
-        switch (kind) {
-            case 'unauthorized':
-                return t('cardErrorUnauthorized');
-            case 'forbidden':
-                return t('cardErrorForbidden');
-            case 'tooLarge':
-                return t('cardErrorTooLarge');
-            case 'unsupportedType':
-                return t('cardErrorUnsupportedType');
-            case 'unreadable':
-                return t('cardErrorUnreadable');
-            case 'busy':
-                return t('cardErrorBusy');
-            case 'timeout':
-                return t('cardErrorTimeout');
-            case 'unavailable':
-                return t('cardErrorUnavailable');
-            case 'failed':
-                return t('cardErrorFailed');
-            case 'aborted':
-                return t('cardManualFallback');
-        }
-    };
-
-    const warningMessage = (warning: string) => {
-        const normalizedWarning = warning.trim().toLowerCase().replaceAll('-', '_');
-        if (normalizedWarning.startsWith('low_confidence')) {
-            return t('cardWarningLowConfidence');
-        }
-        switch (normalizedWarning) {
-            case 'partial_result':
-                return t('cardWarningPartial');
-            case 'unsupported_orientation':
-                return t('cardWarningOrientation');
-            case 'no_recognizable_fields':
-                return t('cardWarningNoFields');
-            default:
-                return t('cardWarningReview');
-        }
-    };
-
-    const confidenceLabel = (field: ConfidenceField) => {
-        switch (field) {
-            case 'name':
-                return t('cardConfidenceName');
-            case 'email':
-                return t('cardConfidenceEmail');
-            case 'phone':
-                return t('cardConfidencePhone');
-            case 'title':
-                return t('cardConfidenceTitle');
-            case 'company':
-                return t('cardConfidenceCompany');
-        }
+    const handleRemove = () => {
+        setSelectionError(false);
+        onRemove();
     };
 
     const confidences = result ? confidenceItems(result) : [];
     const warnings = result
-        ? [...new Set(result.warnings.map(warningMessage))]
+        ? [...new Set(result.warnings.map(warningMessageKey))]
         : [];
 
     return (
         <section
             className="grid gap-3 rounded-xl border bg-muted/30 p-3"
             aria-labelledby={`${cameraInputId}-title`}
-            aria-busy={status === 'scanning'}
         >
             <div className="grid gap-1">
                 <h3 id={`${cameraInputId}-title`} className="text-sm font-medium">{t('businessCard')}</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">{t('businessCardDescription')}</p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2">
                 <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={disabled}
+                    className="hidden pointer-coarse:inline-flex"
+                    disabled={cardControlsDisabled}
                     onClick={() => cameraInputRef.current?.click()}
                 >
                     <CameraIcon data-icon="inline-start" />
@@ -196,7 +248,7 @@ export function BusinessCardCapture({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={disabled}
+                    disabled={cardControlsDisabled}
                     onClick={() => uploadInputRef.current?.click()}
                 >
                     <ArrowUpTrayIcon data-icon="inline-start" />
@@ -208,6 +260,7 @@ export function BusinessCardCapture({
                     type="file"
                     accept={MANAGED_IMAGE_ACCEPT}
                     capture="environment"
+                    disabled={cardControlsDisabled}
                     onChange={handleFileChange}
                     aria-label={file ? t('scanAnotherCard') : t('scanCard')}
                     className="sr-only"
@@ -218,12 +271,19 @@ export function BusinessCardCapture({
                     id={uploadInputId}
                     type="file"
                     accept={MANAGED_IMAGE_ACCEPT}
+                    disabled={cardControlsDisabled}
                     onChange={handleFileChange}
                     aria-label={file ? t('chooseAnotherCard') : t('uploadCard')}
                     className="sr-only"
                     tabIndex={-1}
                 />
             </div>
+
+            {selectionError && (
+                <p className="text-xs leading-relaxed text-destructive" role="alert">
+                    {t('cardSelectionUnsupported')}
+                </p>
+            )}
 
             {file && (
                 <div className="flex min-w-0 items-start gap-3 rounded-lg bg-background p-2 ring-1 ring-border">
@@ -251,14 +311,14 @@ export function BusinessCardCapture({
                                 {status === 'scanning' && t('cardScanning')}
                                 {status === 'ready' && t('cardScanReady')}
                                 {status === 'manual' && t(scanAvailable ? 'cardManualFallback' : 'cardManualOnly')}
-                                {status === 'error' && requestError && errorMessage(requestError)}
+                                {status === 'error' && requestError && t(scanErrorMessageKey(requestError))}
                             </span>
                         </div>
                         {confidences.length > 0 && (
                             <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label={t('cardConfidenceSummary')}>
                                 {confidences.map(({ field, confidence }) => (
                                     <li key={field}>
-                                        {confidenceLabel(field)} {confidencePercent(confidence)}%
+                                        {t(confidenceLabelKey(field))} {confidencePercent(confidence)}%
                                     </li>
                                 ))}
                             </ul>
@@ -268,8 +328,8 @@ export function BusinessCardCapture({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        disabled={disabled}
-                        onClick={onRemove}
+                        disabled={cardControlsDisabled}
+                        onClick={handleRemove}
                         aria-label={t('removeCard')}
                     >
                         <XMarkIcon />
@@ -283,21 +343,40 @@ export function BusinessCardCapture({
                 </Button>
             )}
 
-            {scanAvailable && (status === 'manual' || status === 'error') && file && (
-                <Button type="button" variant="ghost" size="xs" className="w-fit" disabled={disabled} onClick={onRetryScan}>
+            {(status === 'manual' || status === 'error') && file && (
+                <Button type="button" variant="ghost" size="xs" className="w-fit" disabled={cardControlsDisabled} onClick={onRetryScan}>
                     <ArrowPathIcon data-icon="inline-start" />
-                    {t('retryCardScan')}
+                    {t(scanAvailable ? 'retryCardScan' : 'checkCardScanner')}
                 </Button>
             )}
 
             {warnings.length > 0 && (
                 <ul className="grid gap-1 text-xs text-muted-foreground" aria-label={t('cardWarnings')}>
-                    {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                    {warnings.map((warning) => <li key={warning}>{t(warning)}</li>)}
                 </ul>
             )}
 
             {importError && (
-                <p className="text-xs leading-relaxed text-destructive" role="alert">{errorMessage(importError)}</p>
+                <div className="grid gap-2">
+                    <p className="text-xs leading-relaxed text-destructive" role="alert">
+                        {t(importErrorMessageKey(importError))}
+                    </p>
+                    {onDiscardImage && !requiresExactImportRetry && isDefinitiveImageRejection(importError) && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            className="w-fit"
+                            disabled={disabled}
+                            onClick={() => {
+                                setSelectionError(false);
+                                onDiscardImage();
+                            }}
+                        >
+                            {t('continueWithoutCardImage')}
+                        </Button>
+                    )}
+                </div>
             )}
         </section>
     );
@@ -310,6 +389,7 @@ export function BusinessCardCompanyChoice({
     existingCompanyName,
     companyName,
     validationError,
+    fieldError,
     disabled,
     onModeChange,
     onCompanyNameChange,
@@ -354,15 +434,20 @@ export function BusinessCardCompanyChoice({
                     </label>
                     {mode === 'create' && (
                         <div className="ml-6 grid gap-1.5">
-                            <Label htmlFor={`${groupId}-company-name`}>{t('cardCompanyName')}</Label>
+                            <Label htmlFor="companyName">{t('cardCompanyName')}</Label>
                             <Input
-                                id={`${groupId}-company-name`}
+                                id="companyName"
                                 value={companyName}
                                 disabled={disabled}
+                                maxLength={255}
                                 onChange={(event) => onCompanyNameChange(event.target.value)}
-                                aria-invalid={validationError === 'companyName'}
-                                className={cn(validationError === 'companyName' && 'border-destructive ring-destructive/30')}
+                                aria-invalid={validationError === 'companyName' || Boolean(fieldError)}
+                                aria-describedby={fieldError ? 'companyName-error' : undefined}
+                                className={cn((validationError === 'companyName' || fieldError) && 'border-destructive ring-destructive/30')}
                             />
+                            {fieldError && (
+                                <p id="companyName-error" className="text-xs text-destructive">{fieldError}</p>
+                            )}
                         </div>
                     )}
                 </>

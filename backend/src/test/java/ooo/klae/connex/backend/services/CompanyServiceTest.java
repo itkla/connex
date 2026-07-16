@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -45,6 +46,18 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Autowired CompanyService companyService;
     @Autowired ShareMapper shareMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void createRejectsClientSuppliedLogoUrl() {
+        Company company = new Company();
+        company.setName("No remote logo");
+        company.setLogoUrl("https://attacker.example/logo.png");
+
+        Company created = companyService.createCompany(company);
+
+        assertNull(created.getLogoUrl());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), created.getId()).getLogoUrl());
+    }
 
     @Test
     void genericUpdatePreservesAndReturnsCurrentManagedLogo() {

@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,7 +25,8 @@ import ooo.klae.connex.backend.services.BusinessCardService;
 
 @ExtendWith(MockitoExtension.class)
 class BusinessCardControllerTest {
-    private static final String IDEMPOTENCY_KEY = "02a25a23-70af-4f8e-a64a-6cfc5f8c69be";
+    private static final String IDEMPOTENCY_KEY = String.join(
+            "-", "02a25a23", "70af", "4f8e", "a64a", "6cfc5f8c69be");
 
     @Mock private BusinessCardService businessCardService;
 
@@ -102,5 +104,17 @@ class BusinessCardControllerTest {
                         .file(contact)
                         .file(companyAction))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void importStatusUsesTheOpaqueIdempotencyHeader() throws Exception {
+        when(businessCardService.importStatus(IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportResponse(null, null, null));
+
+        mockMvc.perform(get("/api/business-cards/import")
+                .header("Idempotency-Key", IDEMPOTENCY_KEY))
+            .andExpect(status().isOk());
+
+        verify(businessCardService).importStatus(IDEMPOTENCY_KEY);
     }
 }

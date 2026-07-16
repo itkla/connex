@@ -10,6 +10,7 @@ import { QuickEditMediaUpload } from '@/app/components/records/quick-edit/QuickE
 import { ArrowLeftIcon, BriefcaseIcon, EnvelopeIcon, PhoneIcon, UserIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import type { PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import { toastError } from '@/app/lib/toast';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -99,6 +100,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                         )
                     }
                     onSelect={setImageFile}
+                    onInvalidSelect={() => toastError(t('contactPhotoUnsupported'))}
                 />
                 <p className="text-sm text-muted-foreground">{t('contactPhotoHint')}</p>
             </div>

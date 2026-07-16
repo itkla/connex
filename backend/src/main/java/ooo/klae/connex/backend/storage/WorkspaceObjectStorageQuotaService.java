@@ -18,6 +18,30 @@ public class WorkspaceObjectStorageQuotaService {
     private final ObjectStorageQuotaMapper quotaMapper;
     private final ObjectStorageProperties properties;
 
+    /**
+     * Checks a maintenance migration's projected additions without changing the quota ledger.
+     *
+     * @param workspaceId target workspace
+     * @param additionalBytes bytes that would be added
+     * @param additionalObjects objects that would be added
+     */
+    public void validateProjectedAddition(
+            int workspaceId,
+            long additionalBytes,
+            int additionalObjects) {
+        if (workspaceId <= 0 || additionalBytes < 0 || additionalObjects < 0) {
+            throw new BadRequestException("Managed object quota projection is invalid");
+        }
+        WorkspaceObjectStorageQuota quota = quotaMapper.findQuota(workspaceId);
+        long usedBytes = quota == null ? 0 : quota.usedBytes();
+        int objectCount = quota == null ? 0 : quota.objectCount();
+        if (additionalObjects > properties.getMaxWorkspaceObjects() - objectCount
+                || additionalBytes > properties.getMaxWorkspaceBytes() - usedBytes) {
+            throw new BadRequestException(
+                "The workspace private-storage quota would be exceeded by legacy uploads");
+        }
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public void reserve(int workspaceId, String objectKey, long sizeBytes) {
         String validKey = ObjectStorageKey.requireValid(objectKey);

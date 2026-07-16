@@ -114,6 +114,7 @@ export default function ContactCard({
             return;
         }
         setIsSaving(true);
+        let detailsSaved = false;
         try {
             const payload: UpdateContactPayload = {
                 name: trimmedName,
@@ -121,18 +122,17 @@ export default function ContactCard({
                 phone: draft.phone.trim() || undefined,
                 title: draft.title.trim() || undefined,
                 companyId: companyId ?? null,
-                imageUrl: imageUrl || undefined,
             };
-            if (imageFile) {
-                payload.imageUrl = await uploadContactPicture(id, imageFile);
-            }
             await updateContact(id, payload);
+            detailsSaved = true;
+            if (imageFile) await uploadContactPicture(id, imageFile);
             toastSuccess(t('toastContactUpdated'));
             setEditSheetOpen(false);
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            toastError(detailsSaved && imageFile ? t('toastPartiallySaved') : err instanceof Error ? err.message : t('toastFailedSave'));
+            if (detailsSaved) router.refresh();
         } finally {
             setIsSaving(false);
         }

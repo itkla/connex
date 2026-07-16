@@ -15,10 +15,22 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=Path(__file__).with_name("manifest.json"))
     parser.add_argument("--images", type=Path, default=Path(__file__).with_name("generated"))
     parser.add_argument("--report", type=Path)
+    parser.add_argument(
+        "--requests-per-minute",
+        type=positive_integer,
+        default=positive_integer(os.environ.get("CONNEX_BENCHMARK_REQUESTS_PER_MINUTE", "12")),
+    )
     arguments = parser.parse_args()
     manifest = json.loads(arguments.manifest.read_text(encoding="utf-8"))
     configuration = environment()
-    outcomes = [run_case(case, arguments.images, configuration) for case in manifest["cases"]]
+    outcomes: list[dict[str, object]] = []
+    last_started: float | None = None
+    interval = 60 / arguments.requests_per_minute
+    for case in manifest["cases"]:
+        if last_started is not None:
+            time.sleep(max(0, interval - (time.monotonic() - last_started)))
+        last_started = time.monotonic()
+        outcomes.append(run_case(case, arguments.images, configuration))
     report = summarize(outcomes)
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     print(rendered)
@@ -42,6 +54,13 @@ def environment() -> dict[str, str]:
             raise ValueError(f"{name} is required")
         values[key] = value
     return values
+
+
+def positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
 
 
 def run_case(case: dict[str, object], images: Path, configuration: dict[str, str]) -> dict[str, object]:

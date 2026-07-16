@@ -12,6 +12,8 @@ public interface ObjectStorageQuotaMapper {
 
     WorkspaceObjectStorageQuota lockQuota(@Param("workspaceId") int workspaceId);
 
+    WorkspaceObjectStorageQuota findQuota(@Param("workspaceId") int workspaceId);
+
     Long lockUsageSize(
         @Param("workspaceId") int workspaceId,
         @Param("objectKey") String objectKey);

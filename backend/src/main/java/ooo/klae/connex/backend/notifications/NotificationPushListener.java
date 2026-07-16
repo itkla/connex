@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.notifications;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -16,6 +17,11 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
  * a live view over the durable inbox, and clients fall back to polling.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 @RequiredArgsConstructor
 public class NotificationPushListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationPushListener.class);

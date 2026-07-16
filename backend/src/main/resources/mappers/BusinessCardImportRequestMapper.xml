@@ -32,4 +32,23 @@
       AND attachment_id IS NULL
   </update>
 
+  <delete id="deleteExpired">
+    DELETE FROM business_card_import_request
+    WHERE workspace_id = #{workspaceId}
+      AND completed_at IS NOT NULL
+      AND created_at &lt; #{cutoff}
+    ORDER BY created_at, idempotency_key
+    LIMIT #{limit}
+  </delete>
+
+  <select id="workspaceIdsWithExpired" resultType="int">
+    SELECT workspace_id
+    FROM business_card_import_request
+    WHERE completed_at IS NOT NULL
+      AND created_at &lt; #{cutoff}
+    GROUP BY workspace_id
+    ORDER BY MIN(created_at), workspace_id
+    LIMIT #{limit}
+  </select>
+
 </mapper>

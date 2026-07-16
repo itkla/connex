@@ -22,13 +22,27 @@ public class ObjectDeletionTransactionExecutor {
     private final WorkspaceObjectStorageQuotaService quotaService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void enqueueTenant(int workspaceId, String objectKey, LocalDateTime nextAttemptAt) {
-        tenantQueueMapper.enqueue(workspaceId, ObjectStorageKey.requireValid(objectKey), nextAttemptAt);
+    public void enqueueTenant(
+            int workspaceId,
+            String objectKey,
+            int deletePassesRemaining,
+            LocalDateTime nextAttemptAt) {
+        tenantQueueMapper.enqueue(
+            workspaceId,
+            ObjectStorageKey.requireValid(objectKey),
+            deletePassesRemaining,
+            nextAttemptAt);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void enqueueUser(String objectKey, LocalDateTime nextAttemptAt) {
-        userQueueMapper.enqueue(ObjectStorageKey.requireValid(objectKey), nextAttemptAt);
+    public void enqueueUser(
+            String objectKey,
+            int deletePassesRemaining,
+            LocalDateTime nextAttemptAt) {
+        userQueueMapper.enqueue(
+            ObjectStorageKey.requireValid(objectKey),
+            deletePassesRemaining,
+            nextAttemptAt);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -61,6 +75,10 @@ public class ObjectDeletionTransactionExecutor {
     public void retryTenant(ObjectDeletionTask task, LocalDateTime retryAt) {
         try {
             objectStorage.delete(task.objectKey());
+            if (task.deletePassesRemaining() > 1) {
+                tenantQueueMapper.confirmDeletePass(task.workspaceId(), task.id(), retryAt);
+                return;
+            }
             quotaService.release(task.workspaceId(), task.objectKey());
             tenantQueueMapper.deleteById(task.workspaceId(), task.id());
         } catch (ObjectStorageException exception) {
@@ -72,14 +90,13 @@ public class ObjectDeletionTransactionExecutor {
     public void retryUser(ObjectDeletionTask task, LocalDateTime retryAt) {
         try {
             objectStorage.delete(task.objectKey());
+            if (task.deletePassesRemaining() > 1) {
+                userQueueMapper.confirmDeletePass(task.id(), retryAt);
+                return;
+            }
             userQueueMapper.deleteById(task.id());
         } catch (ObjectStorageException exception) {
             userQueueMapper.reschedule(task.id(), retryAt);
         }
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void releaseTenantQuota(int workspaceId, String objectKey) {
-        quotaService.release(workspaceId, ObjectStorageKey.requireValid(objectKey));
     }
 }

@@ -28,6 +28,29 @@ import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipe
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
+function emptyContactPayload(companyId: number): CreateContactPayload {
+    return {
+        name: '',
+        email: '',
+        phone: '',
+        title: '',
+        companyId,
+    };
+}
+
+function emptyDealPayload(companyId: number): CreateDealPayload {
+    return {
+        name: '',
+        value: 0,
+        actualValue: 0,
+        currency: 'USD',
+        pipeline: 0,
+        stage: 0,
+        company: companyId,
+        expectedCloseDate: undefined,
+    };
+}
+
 export default function CompanyActionsMenu({
     company,
 }: {
@@ -46,30 +69,18 @@ export default function CompanyActionsMenu({
     const [newDealDialogOpen, setNewDealDialogOpen] = useState(false);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
-    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>({
-        name: '',
-        email: '',
-        phone: '',
-        title: '',
-        companyId: company.id,
-    });
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(
+        () => emptyContactPayload(company.id),
+    );
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreatingContact, setIsCreatingContact] = useState(false);
     const [contactCreationSucceeded, setContactCreationSucceeded] = useState(false);
     const [isCreatingDeal, setIsCreatingDeal] = useState(false);
     const [dealCreationSucceeded, setDealCreationSucceeded] = useState(false);
 
-    const emptyDealPayload = (): CreateDealPayload => ({
-        name: '',
-        value: 0,
-        actualValue: 0,
-        currency: 'USD',
-        pipeline: 0,
-        stage: 0,
-        company: company.id,
-        expectedCloseDate: undefined,
-    });
-    const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(emptyDealPayload);
+    const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
+        () => emptyDealPayload(company.id),
+    );
 
     useEffect(() => {
         getPipelines().then(async (ps) => {
@@ -87,19 +98,23 @@ export default function CompanyActionsMenu({
 
     const closeNewContactDialog = (open: boolean) => {
         setNewContactDialogOpen(open);
-        if (!open) setContactCreationSucceeded(false);
+        if (!open) {
+            setNewContactPayload(emptyContactPayload(company.id));
+            setImageFile(null);
+            setContactCreationSucceeded(false);
+        }
     };
 
     const closeNewDealDialog = (open: boolean) => {
         setNewDealDialogOpen(open);
         if (!open) {
-            setNewDealPayload(emptyDealPayload());
+            setNewDealPayload(emptyDealPayload(company.id));
             setDealCreationSucceeded(false);
         }
     };
 
     const showNewDealDialog = () => {
-        setNewDealPayload(emptyDealPayload());
+        setNewDealPayload(emptyDealPayload(company.id));
         setNewDealDialogOpen(true);
     };
 
@@ -127,8 +142,7 @@ export default function CompanyActionsMenu({
             if (imageFile) {
                 try {
                     await uploadContactPicture(newContact.id, imageFile);
-                } catch (error) {
-                    if (!businessCard) throw error;
+                } catch {
                     avatarUploadFailed = true;
                 }
             }
@@ -144,7 +158,6 @@ export default function CompanyActionsMenu({
             if (isFieldError(err) || businessCard) {
                 throw err;
             }
-            console.error(err);
             toastError(t('toastCreateContactFailed'));
         } finally {
             setIsCreatingContact(false);
@@ -224,7 +237,6 @@ export default function CompanyActionsMenu({
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem onSelect={(e) => {
                             e.preventDefault();
-                            // router.push(`/records/contacts/new?companyId=${company.id}`);
                             showNewContactDialog();
                         }}>
                             <UserIcon className="size-4" />
@@ -237,10 +249,6 @@ export default function CompanyActionsMenu({
                             <BriefcaseIcon className="size-4" />
                             {t('newDeal')}
                         </DropdownMenuItem>
-                        {/* <DropdownMenuItem>
-                            <BoltIcon className="size-4" />
-                            {t('newPipeline')}
-                        </DropdownMenuItem> */}
                     </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -275,7 +283,6 @@ export default function CompanyActionsMenu({
                 </DropdownMenu>
             </ButtonGroup>
 
-            {/* hidden input to upload attachments */}
             <input
                 ref={attachmentInputRef}
                 type="file"

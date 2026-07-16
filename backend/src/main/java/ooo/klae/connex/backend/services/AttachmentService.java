@@ -242,7 +242,6 @@ public class AttachmentService {
         String normalizedType = normalizeType(entityType);
         requireVisibleTarget(workspaceId, normalizedType, entityId);
         StoredBinary stored = managedObjectService.storeAttachment(workspaceId, source);
-        managedObjectService.compensateAttachmentOnRollback(workspaceId, stored.url());
 
         Attachment attachment = new Attachment();
         attachment.setEntityType(normalizedType);
@@ -295,7 +294,11 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
-        if (attachmentMapper.countUrl(workspaceId, before.getUrl()) <= 1) {
+        List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
+        if (!referenceIds.contains(id)) {
+            throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        }
+        if (referenceIds.size() == 1) {
             managedObjectService.deleteAttachmentAfterCommit(workspaceId, before.getUrl());
         }
         attachmentMapper.delete(workspaceId, id);

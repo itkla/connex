@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.Base64;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import software.amazon.awssdk.core.ResponseInputStream;
@@ -14,6 +15,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -27,21 +30,36 @@ public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
     private final ObjectStorageProperties properties;
     private final S3Client client;
 
-    public S3ObjectStorage(ObjectStorageProperties properties) {
+    public S3ObjectStorage(ObjectStorageProperties properties, Environment environment) {
+        this(properties, buildClient(properties, environment));
+    }
+
+    S3ObjectStorage(ObjectStorageProperties properties, S3Client client) {
         this.properties = properties;
+        this.client = client;
+    }
+
+    private static S3Client buildClient(
+            ObjectStorageProperties properties,
+            Environment environment) {
+        ObjectStorageTransportStartupValidator.validate(properties, environment);
         S3ClientBuilder builder = S3Client.builder()
             .region(Region.of(properties.getS3().getRegion()))
-            .forcePathStyle(properties.getS3().isPathStyle());
+            .forcePathStyle(properties.getS3().isPathStyle())
+            .overrideConfiguration(configuration -> configuration
+                .apiCallTimeout(properties.getS3().getApiCallTimeout())
+                .apiCallAttemptTimeout(properties.getS3().getApiCallAttemptTimeout()));
         URI endpoint = properties.s3EndpointUri();
         if (endpoint != null) {
             builder.endpointOverride(endpoint);
         }
-        client = builder.build();
+        return builder.build();
     }
 
     @Override
     public void put(String key, UploadSource source, String contentType, byte[] sha256) {
         String validKey = ObjectStorageKey.requireValid(key);
+        requireUnversionedBucket();
         PutObjectRequest request = PutObjectRequest.builder()
             .bucket(properties.getS3().getBucket())
             .key(validKey)
@@ -80,6 +98,7 @@ public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
     @Override
     public void delete(String key) {
         String validKey = ObjectStorageKey.requireValid(key);
+        requireUnversionedBucket();
         try {
             client.deleteObject(request -> request
                 .bucket(properties.getS3().getBucket())
@@ -92,10 +111,29 @@ public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
     @Override
     public boolean isReady() {
         try {
-            client.headBucket(request -> request.bucket(properties.getS3().getBucket()));
+            client.headBucket(HeadBucketRequest.builder()
+                .bucket(properties.getS3().getBucket())
+                .build());
+            requireUnversionedBucket();
             return true;
-        } catch (SdkException exception) {
+        } catch (ObjectStorageException | SdkException exception) {
             return false;
+        }
+    }
+
+    private void requireUnversionedBucket() {
+        try {
+            var response = client.getBucketVersioning(GetBucketVersioningRequest.builder()
+                .bucket(properties.getS3().getBucket())
+                .build());
+            if (response.status() != null) {
+                throw new ObjectStorageException(
+                    "S3 bucket versioning must never have been enabled for managed objects");
+            }
+        } catch (ObjectStorageException exception) {
+            throw exception;
+        } catch (SdkException exception) {
+            throw new ObjectStorageException("S3 bucket versioning could not be verified", exception);
         }
     }
 

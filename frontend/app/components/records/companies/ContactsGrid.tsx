@@ -12,24 +12,34 @@ import { createContact, importBusinessCard, isFieldError, uploadContactPicture }
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
-export default function ContactsGrid({ contacts, company, allTags }: { contacts: Contact[], company: Company, allTags: Tag[] }) {
-    const router = useRouter();
-    const t = useTranslations('CompaniesContactsGrid');
-    const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
-    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>({
+function emptyContactPayload(companyId: number): CreateContactPayload {
+    return {
         name: '',
         email: '',
         phone: '',
         title: '',
-        companyId: company?.id,
-    });
+        companyId,
+    };
+}
+
+export default function ContactsGrid({ contacts, company, allTags }: { contacts: Contact[], company: Company, allTags: Tag[] }) {
+    const router = useRouter();
+    const t = useTranslations('CompaniesContactsGrid');
+    const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(
+        () => emptyContactPayload(company.id),
+    );
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
 
     const closeNewContactDialog = (open: boolean) => {
         setNewContactDialogOpen(open);
-        if (!open) setCreationSucceeded(false);
+        if (!open) {
+            setNewContactPayload(emptyContactPayload(company.id));
+            setImageFile(null);
+            setCreationSucceeded(false);
+        }
     };
     return (
         <>
@@ -61,8 +71,6 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                             email={contact.email}
                             tags={contact.tagIds?.map((tagId) => allTags.find((t) => t.id === tagId))?.filter((t): t is Tag => t !== undefined) ?? []}
                             phone={contact.phone}
-                        // onQuickEdit={onQuickEdit ? () => onQuickEdit(person) : undefined}
-                        // onDelete={onDelete ? () => onDelete(person) : undefined}
                         />
                     ))}
                 </ul>
@@ -89,18 +97,11 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         if (imageFile) {
                             try {
                                 await uploadContactPicture(newContact.id, imageFile);
-                            } catch (error) {
-                                if (!businessCard) throw error;
+                            } catch {
                                 avatarUploadFailed = true;
                             }
                         }
-                        setNewContactPayload({
-                            name: '',
-                            email: '',
-                            phone: '',
-                            title: '',
-                            companyId: company?.id,
-                        });
+                        setNewContactPayload(emptyContactPayload(company.id));
                         setImageFile(null);
                         if (!avatarUploadFailed) toast.success(t('toastContactCreated'));
                         setIsCreating(false);
@@ -114,7 +115,6 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         if (isFieldError(error) || businessCard) {
                             throw error;
                         }
-                        console.error(error);
                         toast.error(t('toastCreateContactFailed'));
                     } finally {
                         setIsCreating(false);

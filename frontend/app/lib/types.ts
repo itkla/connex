@@ -515,8 +515,11 @@ export type BusinessCardRequestErrorKind =
     | 'unsupportedType'
     | 'unreadable'
     | 'busy'
+    | 'conflict'
     | 'timeout'
     | 'unavailable'
+    | 'recoveryStorage'
+    | 'rejected'
     | 'failed';
 
 export type CreateTaskPayload = {
@@ -719,7 +722,6 @@ export type UpdateCompanyPayload = {
     industry?: string;
     phone?: string;
     address?: string;
-    logoUrl?: string;
 };
 
 export type Contact = {
@@ -1325,7 +1327,6 @@ export type UpdateContactPayload = {
     phone?: string;
     title?: string;
     companyId?: number | null;
-    imageUrl?: string;
 };
 
 export type ContactFilters = {

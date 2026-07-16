@@ -167,6 +167,7 @@ type QuickEditMediaUploadProps = {
     existingUrl: string | null;
     fallback: ReactNode;
     onSelect: (file: File | null) => void;
+    onInvalidSelect?: () => void;
 };
 
 /**
@@ -174,7 +175,7 @@ type QuickEditMediaUploadProps = {
  * and keyboard focus. Previews the pending file (managing the object URL's lifecycle so it
  * is revoked, not leaked) and otherwise falls back to the existing image.
  */
-export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fallback, onSelect }: QuickEditMediaUploadProps) {
+export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fallback, onSelect, onInvalidSelect }: QuickEditMediaUploadProps) {
     const previewSrc = useMemo(() => (file ? URL.createObjectURL(file) : existingUrl), [file, existingUrl]);
     useEffect(() => {
         if (!file || !previewSrc) return;
@@ -205,7 +206,12 @@ export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fall
                 onChange={(event) => {
                     const selectedFile = event.currentTarget.files?.[0];
                     event.currentTarget.value = '';
-                    if (selectedFile && isManagedImageFile(selectedFile)) onSelect(selectedFile);
+                    if (!selectedFile) return;
+                    if (isManagedImageFile(selectedFile)) {
+                        onSelect(selectedFile);
+                    } else {
+                        onInvalidSelect?.();
+                    }
                 }}
                 className="sr-only"
             />

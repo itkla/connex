@@ -75,6 +75,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
+        "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
         "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",

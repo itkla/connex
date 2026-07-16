@@ -56,7 +56,7 @@ const EMBEDDED_BY_ACTION: Record<string, EmbeddedKind> = {
 /** Embedded kinds backed by a self-loading create container (vs. a shell-less form body fed the shared rosters). */
 const CONTAINER_KINDS = new Set<EmbeddedKind>(['deal', 'person', 'company']);
 
-type Anchor = { top: number; left: number; maxHeight: number };
+type Anchor = { top: number; left: number; width: number; maxHeight: number };
 
 /** True once mounted on the client; false during SSR so portals/sheets only render after hydration. */
 function useIsClient(): boolean {
@@ -86,13 +86,14 @@ export default function QuickCreateLauncher() {
     const isMobile = useIsMobile();
     const [open, setOpen] = useState(false);
     const [anchor, setAnchor] = useState<Anchor | null>(null);
-    const [pending, setPending] = useState(false);
     const [openCount, setOpenCount] = useState(0);
     const [expanded, setExpanded] = useState(false);
+    const [presentationIsMobile, setPresentationIsMobile] = useState(isMobile);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
+    const pendingRef = useRef(false);
     const titleId = useId();
 
     const currentUserId = context.user?.id ?? null;
@@ -100,31 +101,45 @@ export default function QuickCreateLauncher() {
     const computeAnchor = useCallback((): Anchor | null => {
         const rect = rootRef.current?.getBoundingClientRect();
         if (!rect) return null;
-        const top = rect.top;
+        const width = Math.min(PANEL_WIDTH, window.innerWidth - (VIEWPORT_MARGIN * 2));
+        const top = Math.max(VIEWPORT_MARGIN, rect.top);
+        const preferredLeft = rect.right + PANEL_GAP;
+        const left = Math.min(
+            Math.max(VIEWPORT_MARGIN, preferredLeft),
+            window.innerWidth - VIEWPORT_MARGIN - width,
+        );
         return {
             top,
-            left: rect.right + PANEL_GAP,
+            left,
+            width,
             maxHeight: window.innerHeight - top - VIEWPORT_MARGIN,
         };
     }, []);
 
     const closeLauncher = useCallback(() => {
-        if (pending) return;
+        if (pendingRef.current) return;
         setOpen(false);
         const trigger = triggerRef.current;
         if (trigger) requestAnimationFrame(() => trigger.focus());
-    }, [pending]);
+    }, []);
 
     const openLauncher = useCallback(() => {
-        setPending(false);
+        pendingRef.current = false;
         setExpanded(false);
+        setPresentationIsMobile(isMobile);
         setOpenCount((count) => count + 1);
         setAnchor(computeAnchor());
         setOpen(true);
-    }, [computeAnchor]);
+    }, [computeAnchor, isMobile]);
+
+    const activeIsMobile = presentationIsMobile;
+
+    const handlePendingChange = useCallback((next: boolean) => {
+        pendingRef.current = next;
+    }, []);
 
     useEffect(() => {
-        if (!open || isMobile) return;
+        if (!open || activeIsMobile) return;
         const reflow = () => setAnchor(computeAnchor());
         window.addEventListener('resize', reflow);
         window.addEventListener('scroll', reflow, true);
@@ -132,21 +147,21 @@ export default function QuickCreateLauncher() {
             window.removeEventListener('resize', reflow);
             window.removeEventListener('scroll', reflow, true);
         };
-    }, [open, isMobile, computeAnchor]);
+    }, [open, activeIsMobile, computeAnchor]);
 
     useEffect(() => {
-        if (!open || isMobile) return;
+        if (!open || activeIsMobile) return;
         const raf = requestAnimationFrame(() => {
             const target = panelRef.current?.querySelector<HTMLElement>('[data-autofocus]');
             target?.focus();
         });
         return () => cancelAnimationFrame(raf);
-    }, [open, isMobile]);
+    }, [open, activeIsMobile]);
 
     const selectAction = useCallback(
         (action: AppAction) => {
             closeLauncher();
-            if (isMobile) {
+            if (activeIsMobile) {
                 window.setTimeout(() => {
                     void run(action.id, { source: 'menu' });
                 }, MOBILE_HANDOFF_DELAY_MS);
@@ -154,7 +169,7 @@ export default function QuickCreateLauncher() {
             }
             void run(action.id, { source: 'menu' });
         },
-        [closeLauncher, run, isMobile],
+        [closeLauncher, run, activeIsMobile],
     );
 
     const handlePanelKeyDown = useCallback(
@@ -188,7 +203,7 @@ export default function QuickCreateLauncher() {
             titleId={titleId}
             onSelect={selectAction}
             onClose={closeLauncher}
-            showChrome={!isMobile}
+            showChrome={!activeIsMobile}
         />
     );
 
@@ -209,7 +224,7 @@ export default function QuickCreateLauncher() {
                 {t('quickCreate.trigger')}
             </motion.button>
 
-            {mounted && isMobile ? (
+            {mounted && activeIsMobile ? (
                 <Drawer
                     open={open}
                     onOpenChange={(next) => (next ? openLauncher() : closeLauncher())}
@@ -237,13 +252,13 @@ export default function QuickCreateLauncher() {
                             currentUserId={currentUserId}
                             onFallback={selectAction}
                             onClose={closeLauncher}
-                            onPendingChange={setPending}
+                            onPendingChange={handlePendingChange}
                         />
                     </DrawerContent>
                 </Drawer>
             ) : null}
 
-            {mounted && !isMobile
+            {mounted && !activeIsMobile
                 ? createPortal(
                       <AnimatePresence>
                           {open ? (
@@ -272,7 +287,7 @@ export default function QuickCreateLauncher() {
                                       style={{
                                           top: anchor?.top ?? 0,
                                           left: anchor?.left ?? 0,
-                                          width: PANEL_WIDTH,
+                                          width: anchor?.width ?? PANEL_WIDTH,
                                           maxHeight: anchor?.maxHeight,
                                           transformOrigin: 'top left',
                                       }}
@@ -489,10 +504,22 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
     const [direction, setDirection] = useState(1);
     const [refs, setRefs] = useState<FlowRefs | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const [dismissLocked, setDismissLocked] = useState(false);
+    const submittingRef = useRef(false);
+    const dismissLockedRef = useRef(false);
+    const interactionLocked = submitting || dismissLocked;
 
-    useEffect(() => {
-        onPendingChange(submitting);
-    }, [submitting, onPendingChange]);
+    const handleSubmittingChange = useCallback((next: boolean) => {
+        submittingRef.current = next;
+        setSubmitting(next);
+        onPendingChange(next || dismissLockedRef.current);
+    }, [onPendingChange]);
+
+    const handleDismissLockChange = useCallback((next: boolean) => {
+        dismissLockedRef.current = next;
+        setDismissLocked(next);
+        onPendingChange(submittingRef.current || next);
+    }, [onPendingChange]);
 
     useEffect(() => {
         if (view === 'selector' || CONTAINER_KINDS.has(view) || refs) return;
@@ -524,16 +551,16 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
 
     const closeFromContainer = useCallback(
         (next: boolean) => {
-            if (!next) onClose();
+            if (!next && !submittingRef.current && !dismissLockedRef.current) onClose();
         },
         [onClose],
     );
 
     const back = useCallback(() => {
-        if (submitting) return;
+        if (submittingRef.current || dismissLockedRef.current) return;
         setDirection(-1);
         setView('selector');
-    }, [submitting]);
+    }, []);
 
     const defaults = view === 'selector' ? undefined : deriveCreateDefaults(context, view);
     const defaultPerson = refs?.persons.find((p) => p.id === defaults?.personId) ?? null;
@@ -546,7 +573,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                     <button
                         type="button"
                         onClick={back}
-                        disabled={submitting}
+                        disabled={interactionLocked}
                         aria-label={t('quickCreate.back')}
                         className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
                     >
@@ -565,7 +592,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                 <button
                     type="button"
                     onClick={onClose}
-                    disabled={submitting}
+                    disabled={interactionLocked}
                     aria-label={t('quickCreate.close')}
                     className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
                 >
@@ -584,7 +611,14 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                     ) : view === 'deal' ? (
                         <DealCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
                     ) : view === 'person' ? (
-                        <ContactCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
+                        <ContactCreateContainer
+                            embedded
+                            open
+                            onOpenChange={closeFromContainer}
+                            onCancel={back}
+                            onDismissLockChange={handleDismissLockChange}
+                            defaults={defaults}
+                        />
                     ) : refs === null || currentUserId == null ? (
                         <div className="grid min-h-[28rem] place-items-center">
                             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
@@ -599,7 +633,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultDeal={defaultDeal}
                             defaultDueDate=""
                             defaultDescription=""
-                            onSubmittingChange={setSubmitting}
+                            onSubmittingChange={handleSubmittingChange}
                             onCancel={back}
                             onClose={onClose}
                         />
@@ -612,7 +646,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultPerson={defaultPerson}
                             defaultDeal={defaultDeal}
                             defaultContent=""
-                            onSubmittingChange={setSubmitting}
+                            onSubmittingChange={handleSubmittingChange}
                             onCancel={back}
                             onClose={onClose}
                         />
@@ -623,7 +657,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             currentUserId={currentUserId}
                             defaultPerson={defaultPerson}
                             defaultDeal={defaultDeal}
-                            onSubmittingChange={setSubmitting}
+                            onSubmittingChange={handleSubmittingChange}
                             onCancel={back}
                             onClose={onClose}
                         />
