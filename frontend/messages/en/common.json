@@ -13,6 +13,13 @@
     "deal": "Deal",
     "company": "Company"
   },
+  "MemberScope": {
+    "label": "Owner",
+    "ariaLabel": "Filter by owner",
+    "me": "Me",
+    "unassigned": "Unassigned",
+    "clear": "Clear"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "Features",

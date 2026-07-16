@@ -29,7 +29,7 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, facetChips, countActiveFilters } from '@/app/components/records/types';
@@ -154,7 +154,7 @@ const EMPTY_DEAL_DRAFT: CreateDealPayload = {
     expectedCloseDate: undefined,
 };
 
-const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk'] as const;
+const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk', 'owner'] as const;
 
 function resolveNamedFacetIds<T extends { id: number; name: string }>(values: string[] | undefined, items: T[]): number[] | undefined {
     if (!values?.length) return undefined;
@@ -197,6 +197,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
@@ -383,6 +384,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const allStages = useMemo(() => Object.values(stagesByPipeline).flat(), [stagesByPipeline]);
     const activeFilterState = useMemo(() => normalizeDealFilters(filterState), [filterState]);
+    const ownerScope = useMemo(() => interpretMemberScope(activeFilterState.owner), [activeFilterState.owner]);
     const serverFilters = useMemo<DealFilterParams>(() => {
         const status = activeFilterState.status?.filter(
             (value): value is 'open' | 'closed' | 'won' | 'lost' =>
@@ -399,8 +401,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             noCompany: activeFilterState.company?.includes(FILTER_EMPTY) || undefined,
             pipelineId: resolveNamedFacetIds(activeFilterState.pipeline, pipelines),
             stageId: resolveNamedFacetIds(activeFilterState.stage, allStages),
+            scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
+            memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
         };
-    }, [activeFilterState, dealFacets.companies, pipelines, allStages]);
+    }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
     const deferredQuery = useDeferredValue(query.trim());
 
@@ -862,8 +866,29 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         changeQuery('');
         changeFilters({});
     }, [changeQuery, changeFilters]);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const ownerCounts = useMemo(
+        () => new Map(dealFacets.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [dealFacets.owners],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        changeFilters({ ...activeFilterState, owner: values });
+    }, [activeFilterState, changeFilters]);
+    const ownerChips: FilterChipData[] = (activeFilterState.owner ?? []).map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope((activeFilterState.owner ?? []).filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => changeQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, activeFilterState, changeFilters),
     ];
 
@@ -1075,6 +1100,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={activeFilterState.owner}
+                            onChange={changeOwnerScope}
+                            members={members}
+                            counts={ownerCounts}
+                            unassignedCount={ownerCounts.get(FILTER_EMPTY)}
+                        />
                         <RecordsFilterPills<Deal>
                             facets={facets}
                             filterState={activeFilterState}

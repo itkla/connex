@@ -92,7 +92,8 @@ export default function DealsKanban({
             ? selected
             : defaultPipelineId;
     const [boardRevision, setBoardRevision] = useState(0);
-    const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${boardRevision}:${revision}`;
+    const scopeKey = `${filters.scope ?? ''}:${filters.memberIds?.join(',') ?? ''}`;
+    const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${boardRevision}:${revision}:${scopeKey}`;
     const [boardState, setBoardState] = useState<{
         key: string | null;
         deals: Deal[];
@@ -102,7 +103,7 @@ export default function DealsKanban({
     useEffect(() => {
         if (selectedPipelineId == null || boardKey == null) return;
         let cancelled = false;
-        getDealBoard(selectedPipelineId)
+        getDealBoard(selectedPipelineId, { scope: filters.scope, memberIds: filters.memberIds })
             .then((loaded) => {
                 if (!cancelled) setBoardState({ key: boardKey, deals: loaded, error: null });
             })
@@ -117,7 +118,7 @@ export default function DealsKanban({
         return () => {
             cancelled = true;
         };
-    }, [boardKey, selectedPipelineId, t]);
+    }, [boardKey, selectedPipelineId, filters.scope, filters.memberIds, t]);
 
     const boardLoading = boardKey != null && boardState.key !== boardKey;
     const boardError = boardState.key === boardKey ? boardState.error : null;
