@@ -127,7 +127,8 @@
     "toastFailedCopyEmail": "Failed to copy email",
     "toastPhoneCopied": "Phone copied",
     "toastFailedCopyPhone": "Failed to copy phone",
-    "toastCompanyChanged": "Company changed"
+    "toastCompanyChanged": "Company changed",
+    "ownerLabel": "Owner: {name}"
   },
   "ContactsActionsMenu": {
     "edit": "Edit",

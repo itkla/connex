@@ -127,7 +127,8 @@
     "toastFailedCopyEmail": "メールをコピーできませんでした",
     "toastPhoneCopied": "電話番号をコピーしました",
     "toastFailedCopyPhone": "電話番号をコピーできませんでした",
-    "toastCompanyChanged": "会社を変更しました"
+    "toastCompanyChanged": "会社を変更しました",
+    "ownerLabel": "担当者: {name}"
   },
   "ContactsActionsMenu": {
     "edit": "編集",

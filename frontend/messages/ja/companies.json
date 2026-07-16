@@ -114,7 +114,8 @@
     "projected": "予測収益",
     "tooltipActivities": "アクティビティ · {count}",
     "tooltipTasks": "タスク · {count}",
-    "tooltipNotes": "メモ · {count}"
+    "tooltipNotes": "メモ · {count}",
+    "ownerLabel": "担当者: {name}"
   },
   "CompaniesContactsGrid": {
     "contacts": "コンタクト",

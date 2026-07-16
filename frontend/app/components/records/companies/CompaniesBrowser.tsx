@@ -524,6 +524,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const applyBulkTag = useCallback((tagId: number) => {
@@ -794,6 +795,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <CompanyCard
                                 company={item}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 metrics={metricsByCompanyId.get(item.id)}
                                 metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
                                 onFirstExpand={() => ensureMetricsLoaded(item.id)}
@@ -874,7 +876,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                     open={bulkOwnerOpen}
                     onOpenChange={setBulkOwnerOpen}
                     count={selectedCompanyIds.length}
-                    members={members}
+                    members={activeMembers}
                     messages={{
                         success: (count) => t('toastOwnerAssigned', { count }),
                         partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),

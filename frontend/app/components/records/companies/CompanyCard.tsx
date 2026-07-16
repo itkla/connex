@@ -4,6 +4,7 @@ import { Loader2Icon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronRightIcon } from '@heroicons/react/24/solid';
+import { UserCircleIcon } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
 import { type Company, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
@@ -15,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 interface CompanyCardProps {
     company: Company;
+    ownerName?: string;
     metrics?: CompanyMetrics;
     metricsStatus: LoadStatus;
     onFirstExpand?: () => void;
@@ -22,7 +24,7 @@ interface CompanyCardProps {
     onDelete?: () => void;
 }
 
-export default function CompanyCard({ company, metrics, metricsStatus, onFirstExpand }: CompanyCardProps) {
+export default function CompanyCard({ company, ownerName, metrics, metricsStatus, onFirstExpand }: CompanyCardProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const router = useRouter();
     const t = useTranslations('CompaniesCard');
@@ -48,6 +50,12 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                     {company.industry && (
                         <p className="mt-0.5 text-sm text-muted-foreground truncate">
                             {company.industry}
+                        </p>
+                    )}
+                    {ownerName && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground truncate">
+                            <UserCircleIcon className="size-3.5 shrink-0" />
+                            <span className="truncate">{t('ownerLabel', { name: ownerName })}</span>
                         </p>
                     )}
                 </div>

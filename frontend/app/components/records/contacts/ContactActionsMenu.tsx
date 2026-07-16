@@ -63,7 +63,7 @@ export default function ContactActionsMenu({
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => {
         if (!assignOwnerOpen || members.length > 0) return;
-        getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+        getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
     }, [assignOwnerOpen, members.length]);
     const { activeWorkspaceId } = useWorkspace();
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;

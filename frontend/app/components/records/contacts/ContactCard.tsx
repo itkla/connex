@@ -21,7 +21,7 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 // import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
-import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
 
 function initialsOf(name: string): string {
@@ -58,6 +58,7 @@ interface ContactCardProps {
     email?: string;
     phone?: string;
     imageUrl?: string;
+    ownerName?: string;
     tags?: Tag[];
     onQuickEdit?: () => void;
     onDelete?: () => void;
@@ -68,6 +69,7 @@ export default function ContactCard({
     name = 'Tahm Kench',
     title = 'CTO',
     company = '',
+    ownerName,
     companyId,
     email,
     phone,
@@ -244,6 +246,13 @@ export default function ContactCard({
                     <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                         <BuildingOffice2Icon className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{company}</span>
+                    </span>
+                )}
+
+                {ownerName && (
+                    <span className="inline-flex max-w-full items-center gap-1.5 self-start text-xs text-muted-foreground">
+                        <UserCircleIcon className="size-3.5 shrink-0" />
+                        <span className="truncate">{t('ownerLabel', { name: ownerName })}</span>
                     </span>
                 )}
 

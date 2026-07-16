@@ -198,6 +198,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const selectAllMatching = useCallback(async () => {
@@ -695,6 +696,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                 email={item.email}
                                 phone={item.phone}
                                 imageUrl={item.imageUrl}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
@@ -774,7 +776,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     open={bulkOwnerOpen}
                     onOpenChange={setBulkOwnerOpen}
                     count={selectedContactIds.length}
-                    members={members}
+                    members={activeMembers}
                     messages={{
                         success: (count) => t('toastOwnerAssigned', { count }),
                         partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
