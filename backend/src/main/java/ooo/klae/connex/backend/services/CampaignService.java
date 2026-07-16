@@ -149,6 +149,15 @@ public class CampaignService {
         return toAudienceDto(requireAudience(workspaceId, campaignId));
     }
 
+    /** Returns the campaign's live audience definition, or {@code null} when none is set yet. */
+    @RequirePermission(Permission.CAMPAIGN_VIEW)
+    public CampaignAudienceDto getAudience(int campaignId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCampaign(workspaceId, campaignId);
+        CampaignAudience audience = campaignMapper.getAudience(workspaceId, campaignId);
+        return audience == null ? null : toAudienceDto(audience);
+    }
+
     /**
      * Estimates the active audience using email marketing opt-in by default. Processing restrictions
      * take precedence over workspace-owned suppressions, which take precedence over missing consent.

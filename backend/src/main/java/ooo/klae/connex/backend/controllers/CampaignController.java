@@ -79,6 +79,12 @@ public class CampaignController {
         return campaignService.setAudience(id, request);
     }
 
+    @GetMapping("/{id}/audience")
+    @RequirePermission(Permission.CAMPAIGN_VIEW)
+    public CampaignAudienceDto getAudience(@Positive @PathVariable int id) {
+        return campaignService.getAudience(id);
+    }
+
     @PostMapping("/{id}/audience/estimate")
     @RequirePermission(Permission.CAMPAIGN_VIEW)
     public CampaignAudienceEstimateDto estimateAudience(@Positive @PathVariable int id) {

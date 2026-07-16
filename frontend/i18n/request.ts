@@ -22,6 +22,7 @@ const namespaces = [
     "contacts",
     "deals",
     "pipelines",
+    "campaigns",
     "users",
     "map",
     "introductions",

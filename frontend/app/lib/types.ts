@@ -1062,6 +1062,145 @@ export type SavedViewConfig = {
     segments?: SegmentDefinition;
 };
 
+export type CampaignStatus =
+    | "draft"
+    | "scheduled"
+    | "active"
+    | "paused"
+    | "completed"
+    | "archived";
+
+export type Campaign = {
+    id: number;
+    name: string;
+    objective: string | null;
+    type: string;
+    status: CampaignStatus;
+    ownerUserId: number | null;
+    budgetAmount: number | null;
+    budgetCurrency: string | null;
+    startAt: string | null;
+    endAt: string | null;
+    parentCampaignId: number | null;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignPayload = {
+    name: string;
+    objective?: string | null;
+    type: string;
+    status?: CampaignStatus | null;
+    ownerUserId?: number | null;
+    budgetAmount?: number | null;
+    budgetCurrency?: string | null;
+    startAt?: string | null;
+    endAt?: string | null;
+    parentCampaignId?: number | null;
+};
+
+export type CampaignAudienceRecordType = "person" | "company" | "deal";
+
+export type CampaignAudience = {
+    campaignId: number;
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+    mode: string;
+    updatedAt: string;
+};
+
+export type CampaignAudiencePayload = {
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+};
+
+export type RecordLabel = {
+    id: number;
+    label: string;
+};
+
+export type CampaignAudienceEstimate = {
+    estimatedIncluded: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    excludedTotal: number;
+    sampleLabels: RecordLabel[];
+};
+
+export type CampaignAudienceExclusionReason =
+    | "consent_missing"
+    | "suppressed"
+    | "restricted";
+
+export type CampaignAudienceMember = {
+    recordType: CampaignAudienceRecordType;
+    recordId: number;
+    status: "included" | "excluded";
+    exclusionReason: CampaignAudienceExclusionReason | null;
+};
+
+export type CampaignAudienceSnapshotSummary = {
+    version: number;
+    recordType: CampaignAudienceRecordType;
+    estimatedIncluded: number;
+    excludedTotal: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
+    campaignId: number;
+    definition: SegmentDefinition;
+    members: CampaignAudienceMember[];
+};
+
+export type ContactChannelConsent = {
+    id: number;
+    personId: number;
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string | null;
+    evidenceRef: string | null;
+    capturedAt: string | null;
+    updatedAt: string;
+};
+
+export type ContactChannelConsentPayload = {
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string;
+    evidenceRef?: string | null;
+    capturedAt?: string | null;
+};
+
+export type SuppressionEntry = {
+    id: number;
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId: number | null;
+    reason: string;
+    note: string | null;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type SuppressionEntryPayload = {
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId?: number | null;
+    reason: string;
+    note?: string | null;
+};
+
 export type SegmentResult = {
     ids: number[];
 };

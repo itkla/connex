@@ -3213,3 +3213,92 @@ export function deleteWorkspaceMailConfig(workspaceId: number) {
 export function sendWorkspaceMailTest(workspaceId: number) {
     return postJson<Types.MailTestResult>(`/api/workspaces/${workspaceId}/mail-config/test`, {});
 }
+
+export function getCampaigns(init: RequestInit = {}) {
+    return getJson<Types.Campaign[]>(`/api/campaigns`, init);
+}
+
+export function getCampaignsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
+}
+
+export function getCampaign(id: number, init: RequestInit = {}) {
+    return getJson<Types.Campaign>(`/api/campaigns/${id}`, init);
+}
+
+export function getCampaignFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.Campaign>((init) => getCampaign(id, init), cookie);
+}
+
+export function createCampaign(payload: Types.CampaignPayload) {
+    return postJson<Types.Campaign>(`/api/campaigns`, payload);
+}
+
+export function updateCampaign(id: number, payload: Types.CampaignPayload) {
+    return putJson<Types.Campaign>(`/api/campaigns/${id}`, payload);
+}
+
+export function deleteCampaign(id: number) {
+    return deleteJson<void>(`/api/campaigns/${id}`);
+}
+
+export function getCampaignAudience(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudience | undefined>(`/api/campaigns/${id}/audience`, init);
+}
+
+export function getCampaignAudienceFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.CampaignAudience | undefined>(
+        (init) => getCampaignAudience(id, init),
+        cookie,
+    );
+}
+
+export function setCampaignAudience(id: number, payload: Types.CampaignAudiencePayload) {
+    return putJson<Types.CampaignAudience>(`/api/campaigns/${id}/audience`, payload);
+}
+
+export function estimateCampaignAudience(id: number) {
+    return postJson<Types.CampaignAudienceEstimate>(`/api/campaigns/${id}/audience/estimate`, {});
+}
+
+export function snapshotCampaignAudience(id: number) {
+    return postJson<Types.CampaignAudienceSnapshot>(`/api/campaigns/${id}/audience/snapshot`, {});
+}
+
+export function getCampaignSnapshots(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceSnapshotSummary[]>(
+        `/api/campaigns/${id}/audience/snapshots`,
+        init,
+    );
+}
+
+export function getCampaignSnapshot(id: number, version: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceSnapshot>(
+        `/api/campaigns/${id}/audience/snapshots/${version}`,
+        init,
+    );
+}
+
+export function getPersonConsent(personId: number, init: RequestInit = {}) {
+    return getJson<Types.ContactChannelConsent[]>(`/api/persons/${personId}/consent`, init);
+}
+
+export function setPersonConsent(personId: number, payload: Types.ContactChannelConsentPayload) {
+    return putJson<Types.ContactChannelConsent>(`/api/persons/${personId}/consent`, payload);
+}
+
+export function getSuppressions(init: RequestInit = {}) {
+    return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+export function getSuppressionsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.SuppressionEntry>((init) => getSuppressions(init), cookie);
+}
+
+export function createSuppression(payload: Types.SuppressionEntryPayload) {
+    return postJson<Types.SuppressionEntry>(`/api/suppressions`, payload);
+}
+
+export function deleteSuppression(id: number) {
+    return deleteJson<void>(`/api/suppressions/${id}`);
+}
