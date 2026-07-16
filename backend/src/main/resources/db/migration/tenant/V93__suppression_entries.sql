@@ -3,7 +3,7 @@ CREATE TABLE suppression_entry (
     workspace_id  INT NOT NULL,
     scope         VARCHAR(16) NOT NULL,
     channel       VARCHAR(16) NOT NULL,
-    address       VARCHAR(320) NOT NULL,
+    address       VARCHAR(320) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     person_id     INT NULL,
     reason        VARCHAR(32) NOT NULL,
     note          VARCHAR(512) NULL,

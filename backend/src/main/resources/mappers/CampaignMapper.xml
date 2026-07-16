@@ -146,7 +146,7 @@
         SELECT 1 FROM suppression_entry suppression
         WHERE suppression.workspace_id = #{workspaceId}
           AND suppression.channel = #{channel}
-          AND suppression.address = LOWER(TRIM(p.email))
+          AND suppression.address = LOWER(TRIM(p.email)) COLLATE utf8mb4_bin
       )
   </select>
 

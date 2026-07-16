@@ -7,7 +7,7 @@ CREATE TABLE campaign (
     status              VARCHAR(16) NOT NULL DEFAULT 'draft',
     owner_user_id       INT NULL,
     budget_amount       DECIMAL(15,2) NULL,
-    budget_currency     CHAR(3) NULL,
+    budget_currency     CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NULL,
     start_at            DATETIME NULL,
     end_at              DATETIME NULL,
     parent_campaign_id  INT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE campaign (
         OR (budget_amount IS NOT NULL AND budget_currency IS NOT NULL)
     ),
     CONSTRAINT chk_campaign_budget_currency
-        CHECK (budget_currency IS NULL OR budget_currency = UPPER(budget_currency)),
+        CHECK (budget_currency IS NULL OR budget_currency REGEXP '^[A-Z]{3}$'),
     CONSTRAINT chk_campaign_dates CHECK (start_at IS NULL OR end_at IS NULL OR start_at <= end_at),
     UNIQUE KEY uq_campaign_workspace_id (workspace_id, id),
     CONSTRAINT fk_campaign_parent
@@ -47,6 +47,6 @@ CREATE TABLE campaign_audience (
     CONSTRAINT fk_campaign_audience_campaign
         FOREIGN KEY (workspace_id, campaign_id)
         REFERENCES campaign(workspace_id, id) ON DELETE CASCADE,
-    UNIQUE KEY uq_campaign_audience_campaign (campaign_id),
+    UNIQUE KEY uq_campaign_audience_campaign (workspace_id, campaign_id),
     UNIQUE KEY uq_campaign_audience_workspace_id (workspace_id, id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Active smart-segment audience definition per campaign';
