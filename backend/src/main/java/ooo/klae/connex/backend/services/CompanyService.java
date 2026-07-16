@@ -328,10 +328,13 @@ public class CompanyService {
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
-        company.setOwnerId(workspaceService.getCurrentUserId());
+        int ownerId = workspaceService.getCurrentUserId();
+        workspaceService.lockAndRequireMember(company.getWorkspaceId(), ownerId);
+        company.setOwnerId(ownerId);
         company.setLogoUrl(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
@@ -397,7 +400,7 @@ public class CompanyService {
     public Company updateOwner(int id, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, id);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         companyMapper.updateOwner(workspaceId, id, ownerId);
         auditService.record("company.updateOwner", "company", id, company.getName(),
             "Updated owner on " + company.getName(),

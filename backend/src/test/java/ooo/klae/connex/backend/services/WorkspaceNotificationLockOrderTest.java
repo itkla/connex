@@ -40,6 +40,17 @@ class WorkspaceNotificationLockOrderTest {
     @InjectMocks private WorkspaceService service;
 
     @Test
+    void ownerReferenceLocksMembershipBeforeValidation() {
+        when(workspaceMapper.isMember(7, 9)).thenReturn(true);
+
+        service.lockAndRequireMember(7, 9);
+
+        InOrder order = inOrder(notificationMapper, workspaceMapper);
+        order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(workspaceMapper).isMember(7, 9);
+    }
+
+    @Test
     void declineLocksMembershipBeforeNotificationDeleteAndStateChange() {
         MemberDto pending = new MemberDto();
         pending.setStatus("pending");

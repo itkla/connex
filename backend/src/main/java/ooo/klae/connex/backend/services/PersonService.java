@@ -171,7 +171,9 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
-        person.setOwnerId(workspaceService.getCurrentUserId());
+        int ownerId = workspaceService.getCurrentUserId();
+        workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        person.setOwnerId(ownerId);
         person.setImageUrl(null);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
@@ -214,7 +216,7 @@ public class PersonService {
     public Person updateOwner(int id, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, id);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         personMapper.updateOwner(workspaceId, id, ownerId);
         auditService.record("person.updateOwner", "person", id, person.getName(),
             "Updated owner on " + person.getName(),

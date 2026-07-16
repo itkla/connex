@@ -278,6 +278,16 @@ public class WorkspaceService {
         }
     }
 
+    /**
+     * Locks a user's membership rows in workspace order and requires an active membership in the
+     * requested workspace. Owner-bearing org-data writes use this membership-to-record lock order
+     * to serialize with member and account offboarding.
+     */
+    public void lockAndRequireMember(int workspaceId, int userId) {
+        notificationMapper.lockRecipientMemberships(userId);
+        requireMember(workspaceId, userId);
+    }
+
     /** Returns whether every requested id is an active member of the workspace. */
     public boolean areActiveMembers(int workspaceId, List<Integer> memberIds) {
         return workspaceMapper.countActiveMembers(workspaceId, memberIds) == memberIds.size();
