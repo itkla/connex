@@ -25,7 +25,9 @@
     "activePipeline": "Active Pipeline",
     "noActiveDeals": "No active deals.",
     "connections": "Connections",
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "processingSuspended": "Processing suspended",
+    "provisionCeased": "Provision ceased"
   },
   "ContactConnections": {
     "warmPath": "Warm intro path",
@@ -137,7 +139,8 @@
     "toastRemovedFromCompany": "Removed {contactName} from {companyName}",
     "toastFailedRemoveFromCompany": "Failed to remove from company",
     "toastContactDeleted": "Contact deleted",
-    "toastFailedDelete": "Failed to delete"
+    "toastFailedDelete": "Failed to delete",
+    "restrictions": "Processing restrictions"
   },
   "ContactsStatCard": {
     "viewAllTitle": "View all {label}",
@@ -324,5 +327,18 @@
     "tag": "Tag",
     "toastFailedAdd": "Failed to add tag",
     "toastFailedRemove": "Failed to remove tag"
+  },
+  "ContactRestrictions": {
+    "title": "Processing restrictions",
+    "description": "APPI cease-of-use controls for {name}. Restricted contacts stay visible for management but stop being processed.",
+    "suspendLabel": "Suspend processing",
+    "suspendHint": "Stops scoring, automation, suggestions, AI features, and exports for this contact.",
+    "provisionLabel": "Cease third-party provision",
+    "provisionHint": "Blocks new workspace shares and excludes this contact from AI provider calls.",
+    "provisionWarning": "Saving revokes every existing workspace share of this contact immediately.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "toastSaved": "Restrictions updated.",
+    "toastFailed": "Restrictions could not be updated."
   }
 }
