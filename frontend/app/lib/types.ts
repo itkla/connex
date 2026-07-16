@@ -675,6 +675,7 @@ export type UpdateNotePayload = {
 export type Company = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     website: string;
     industry: string;
@@ -738,6 +739,7 @@ export type UpdateCompanyPayload = {
 export type Contact = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     email: string;
     phone: string;

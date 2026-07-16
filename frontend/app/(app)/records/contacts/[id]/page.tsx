@@ -76,6 +76,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
         await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
     ).filter((u): u is User => u !== null);
 
+    const owner = contact.ownerId != null
+        ? interactionUsers.find((u) => u.id === contact.ownerId)
+            ?? await getUserById(contact.ownerId, init).catch(() => null)
+        : null;
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
@@ -201,6 +206,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                                 <InfoRow label={t("title")} value={contact.title ?? ''} />
                                 <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
+                                <InfoRow
+                                    label={t("owner")}
+                                    value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
+                                />
                                 <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                                 <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                                 <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />

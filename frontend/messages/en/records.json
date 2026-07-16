@@ -234,15 +234,15 @@
     "toastFailed": "Couldn't update the records"
   },
   "RecordsBulkOwnerDialog": {
-    "title": "Assign owner to {count} deals",
-    "description": "Set the owner for every selected deal.",
+    "title": "Assign owner to {count, plural, one {# record} other {# records}}",
+    "description": "Set the owner for every selected record.",
     "ownerLabel": "Owner",
     "unassignedPlaceholder": "Unassigned",
     "noMembersFound": "No members found",
     "unassignHint": "Leave empty to remove the owner.",
     "cancel": "Cancel",
     "apply": "Assign",
-    "toastFailed": "Couldn't update the deals"
+    "toastFailed": "Couldn't update the records"
   },
   "RecordsBulkStageDialog": {
     "title": "Move {count} deals to a stage",

@@ -234,15 +234,15 @@
     "toastFailed": "レコードを更新できませんでした"
   },
   "RecordsBulkOwnerDialog": {
-    "title": "{count}件の取引に担当者を割り当て",
-    "description": "選択したすべての取引の担当者を設定します。",
+    "title": "{count, plural, one {#件のレコード} other {#件のレコード}}に担当者を割り当て",
+    "description": "選択したすべてのレコードの担当者を設定します。",
     "ownerLabel": "担当者",
     "unassignedPlaceholder": "未割り当て",
     "noMembersFound": "メンバーが見つかりません",
     "unassignHint": "担当者を解除するには空欄のままにします。",
     "cancel": "キャンセル",
     "apply": "割り当て",
-    "toastFailed": "取引を更新できませんでした"
+    "toastFailed": "レコードを更新できませんでした"
   },
   "RecordsBulkStageDialog": {
     "title": "{count}件の取引をステージへ移動",
