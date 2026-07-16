@@ -34,8 +34,9 @@ read-only, and production inference never downloads models or calls an external 
   bridge with no gateway address.
 - A Linux AMD64 host for the released image set. The OCR image additionally requires AVX on every
   assigned processor.
-- A signed release manifest verified with its exact tag-bound identity, with all three
-  `CONNEX_*_IMAGE` values set to the manifest's immutable digests (see
+- A signed release manifest verified with its exact tag-bound identity, with
+  `CONNEX_BACKEND_DIGEST`, `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` set to the
+  manifest's corresponding 64-character lowercase digests without the `sha256:` prefix (see
   [RELEASE.md](RELEASE.md)), or a local build through the `docker-compose.build.yml` overlay.
 - Generated secrets and — for production — a **verified-TLS database** (the app is fail-closed:
   outside dev it requires `sslMode=VERIFY_CA` or `VERIFY_IDENTITY`).
@@ -96,10 +97,12 @@ height, and pixel limits from `CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES`,
 `CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS`, so one configured boundary applies before and after the
 private service hop.
 
-Worker startup failures emit an allowlisted `reason` code without exception messages. Operators can
-distinguish `unsupported_cpu_architecture`, `cpu_capabilities_unreadable`, `avx_unavailable`,
-`models_unavailable`, `runtime_dependency_unavailable`, `invalid_configuration`, and
-`engine_initialization_failed` in OCR container logs without exposing configuration values.
+Worker and supervisor startup failures emit only the allowlisted component, reason code, and
+exception type chain. Operators can distinguish `unsupported_cpu_architecture`,
+`cpu_capabilities_unreadable`, `avx_unavailable`, `models_unavailable`,
+`runtime_dependency_unavailable`, `invalid_configuration`, `engine_initialization_failed`,
+`server_initialization_failed`, and `worker_launch_failed` in OCR container logs without exposing
+exception messages or configuration values.
 
 The backend applies a process-wide budget of five scans per minute and a cross-workspace principal
 budget of three scans per minute by default (`CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE` and
@@ -273,9 +276,10 @@ migrator at a time.
 
 1. Stage the four directories on the host. If the old deployment used a custom or mounted
    `CONNEX_UPLOADS_DIR`, copy from that location instead. After staging and checksum verification,
-   verify the target release manifest and put its three exact `CONNEX_*_IMAGE` digest references in
-   the mode-0600 `.env`, but do not run `up`; pulling the target images does not replace the
-   still-running old containers.
+   verify the target release manifest and put its exact `CONNEX_BACKEND_DIGEST`,
+   `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` values in the mode-0600 `.env` as
+   64-character lowercase digests without the `sha256:` prefix, but do not run `up`; pulling the
+   target images does not replace the still-running old containers.
 
    ```bash
    export MIGRATION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)"

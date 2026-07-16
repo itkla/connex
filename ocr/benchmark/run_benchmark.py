@@ -30,6 +30,7 @@ BENCHMARK_OPENER = benchmark_opener()
 CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87"
 CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
 CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
+CANONICAL_FIXTURE_METADATA_SHA256 = "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29"
 CANONICAL_IMAGE_NAMES = {
     "backend": "ghcr.io/itkla/connex-backend",
     "frontend": "ghcr.io/itkla/connex-frontend",
@@ -77,7 +78,14 @@ def main() -> int:
     print(rendered)
     if arguments.report is not None:
         arguments.report.write_text(rendered + "\n", encoding="utf-8")
-    verify_qualification_report(report, manifest, source_revision)
+    verify_qualification_report(
+        report,
+        manifest,
+        source_revision,
+        configuration["base_url"],
+        arguments.requests_per_minute,
+        runtime_image_references(runtime),
+    )
     return 0
 
 
@@ -142,7 +150,7 @@ def validated_source_revision(value: str) -> str:
 
 def validated_image_reference(value: str, name: str) -> str:
     digest = value.rsplit("@", maxsplit=1)[-1]
-    if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest) is None:
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
         raise ValueError(f"{name} must identify an immutable sha256 image digest")
     return value
 
@@ -294,6 +302,20 @@ def inspect_runtime_container(component: str, container_id: str) -> dict[str, ob
         "imageReference": image_reference,
         "imageId": image_id,
     }
+
+
+def runtime_image_references(runtime: dict[str, object]) -> dict[str, str]:
+    containers = runtime.get("containers")
+    if not isinstance(containers, dict):
+        raise ValueError("Benchmark runtime containers are unavailable")
+    references: dict[str, str] = {}
+    for component in CANONICAL_IMAGE_NAMES:
+        container = containers.get(component)
+        reference = container.get("imageReference") if isinstance(container, dict) else None
+        if not isinstance(reference, str):
+            raise ValueError(f"The {component} benchmark image reference is unavailable")
+        references[component] = reference
+    return references
 
 
 def command_output(arguments: list[str], working_directory: Path) -> str:
@@ -506,7 +528,10 @@ def summarize(outcomes: list[dict[str, object]], benchmark_provenance: dict[str,
 def verify_qualification_report(
     report: object,
     manifest: dict[str, object],
-    source_revision: str | None = None,
+    source_revision: str,
+    base_url: str,
+    requests_per_minute: int,
+    image_references: dict[str, str],
 ) -> None:
     if not isinstance(report, dict):
         raise ValueError("Benchmark qualification report must be an object")
@@ -572,10 +597,14 @@ def verify_qualification_report(
     if len(set(expected_ids)) != 40 or len(set(actual_ids)) != 40:
         raise ValueError("Benchmark qualification case ids must be unique")
     provenance_value = report.get("provenance")
-    if not isinstance(provenance_value, dict):
-        raise ValueError("Benchmark qualification provenance is required")
-    if source_revision is not None and provenance_value.get("sourceRevision") != source_revision:
-        raise ValueError("Benchmark qualification source revision does not match the release")
+    validate_qualification_provenance(
+        provenance_value,
+        source_revision,
+        base_url,
+        requests_per_minute,
+        image_references,
+    )
+    assert isinstance(provenance_value, dict)
     recomputed = summarize(verified_cases, provenance_value)
     for selector in ("caseCount", "accuracy", "p95LatencySeconds", "gates"):
         if report.get(selector) != recomputed[selector]:
@@ -592,6 +621,101 @@ def verify_qualification_report(
         raise ValueError("Benchmark qualification gates are incomplete")
     if any(not isinstance(gate, dict) or gate.get("passed") is not True for gate in gates.values()):
         raise ValueError("Benchmark qualification thresholds did not all pass")
+
+
+def validate_qualification_provenance(
+    provenance_value: object,
+    source_revision: str,
+    base_url: str,
+    requests_per_minute: int,
+    image_references: dict[str, str],
+) -> None:
+    if not isinstance(provenance_value, dict):
+        raise ValueError("Benchmark qualification provenance is required")
+    required_keys = {
+        "sourceRevision",
+        "runtime",
+        "baseUrl",
+        "requestsPerMinute",
+        "manifestSha256",
+        "fixturesSha256",
+        "fixtureMetadataSha256",
+        "fixtureGeneratorSha256",
+        "fixtureFontSha256",
+        "ocrRequirementsLockSha256",
+    }
+    if set(provenance_value) != required_keys:
+        raise ValueError("Benchmark qualification provenance fields are invalid")
+    expected_revision = validated_source_revision(source_revision)
+    if provenance_value.get("sourceRevision") != expected_revision:
+        raise ValueError("Benchmark qualification source revision does not match the release")
+    expected_base_url = validated_base_url(base_url)
+    if provenance_value.get("baseUrl") != expected_base_url:
+        raise ValueError("Benchmark qualification base URL does not match the release run")
+    if isinstance(requests_per_minute, bool) or not isinstance(requests_per_minute, int) \
+            or requests_per_minute <= 0:
+        raise ValueError("Expected benchmark request rate must be a positive integer")
+    if provenance_value.get("requestsPerMinute") != requests_per_minute:
+        raise ValueError("Benchmark qualification request rate does not match the release run")
+    benchmark_root = Path(__file__).parent
+    expected_digests = {
+        "manifestSha256": CANONICAL_MANIFEST_SHA256,
+        "fixturesSha256": CANONICAL_FIXTURES_SHA256,
+        "fixtureMetadataSha256": CANONICAL_FIXTURE_METADATA_SHA256,
+        "fixtureGeneratorSha256": file_sha256(benchmark_root / "generate_cards.py"),
+        "fixtureFontSha256": CANONICAL_FONT_SHA256,
+        "ocrRequirementsLockSha256": file_sha256(benchmark_root.parent / "requirements.lock"),
+    }
+    for field, expected in expected_digests.items():
+        if provenance_value.get(field) != expected:
+            raise ValueError(f"Benchmark qualification {field} does not match the canonical input")
+    validate_qualification_runtime(provenance_value.get("runtime"), image_references)
+
+
+def validate_qualification_runtime(
+    runtime_value: object,
+    image_references: dict[str, str],
+) -> None:
+    if not isinstance(runtime_value, dict) or set(runtime_value) != {"containers", "host"}:
+        raise ValueError("Benchmark qualification runtime fields are invalid")
+    if set(image_references) != set(CANONICAL_IMAGE_NAMES):
+        raise ValueError("Expected benchmark image references are incomplete")
+    containers = runtime_value.get("containers")
+    if not isinstance(containers, dict) or set(containers) != set(CANONICAL_IMAGE_NAMES):
+        raise ValueError("Benchmark qualification runtime containers are invalid")
+    for component, repository in CANONICAL_IMAGE_NAMES.items():
+        expected_reference = image_references[component]
+        if not isinstance(expected_reference, str) or not expected_reference.startswith(repository + "@"):
+            raise ValueError(f"Expected {component} benchmark image reference is invalid")
+        validated_image_reference(expected_reference, component)
+        container = containers.get(component)
+        if not isinstance(container, dict) or set(container) != {
+            "containerId", "imageReference", "imageId",
+        }:
+            raise ValueError(f"The {component} benchmark runtime fields are invalid")
+        container_id = container.get("containerId")
+        image_reference = container.get("imageReference")
+        image_id = container.get("imageId")
+        if not isinstance(container_id, str) or re.fullmatch(r"[0-9a-f]{12,64}", container_id) is None:
+            raise ValueError(f"The {component} benchmark container id is invalid")
+        if image_reference != expected_reference:
+            raise ValueError(f"The {component} benchmark image reference does not match the release")
+        if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise ValueError(f"The {component} benchmark image id is invalid")
+    host = runtime_value.get("host")
+    if not isinstance(host, dict) or set(host) != {
+        "avx", "machine", "platform", "python", "dockerServer",
+    }:
+        raise ValueError("Benchmark qualification host fields are invalid")
+    if host.get("avx") is not True:
+        raise ValueError("Benchmark qualification host must provide AVX")
+    machine = host.get("machine")
+    if not isinstance(machine, str) or machine.casefold() not in {"amd64", "x86_64"}:
+        raise ValueError("Benchmark qualification host must be AMD64")
+    for field in ("platform", "python", "dockerServer"):
+        value = host.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Benchmark qualification host {field} is invalid")
 
 
 if __name__ == "__main__":

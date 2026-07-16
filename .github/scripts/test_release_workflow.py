@@ -5,6 +5,7 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "release.yml"
+DEPLOYMENT_PATH = Path(__file__).parents[2] / "docs" / "DEPLOYMENT.md"
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
@@ -82,8 +83,18 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_qualification_and_sbom_are_recomputed_and_bound(self) -> None:
         workflow_source = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertEqual(2, workflow_source.count("benchmark/verify_report.py"))
+        expected_argument_counts = {
+            "--base-url": 2,
+            "--requests-per-minute": 3,
+            "--backend-image-reference": 2,
+            "--frontend-image-reference": 2,
+            "--ocr-image-reference": 2,
+        }
+        for argument, expected_count in expected_argument_counts.items():
+            self.assertEqual(expected_count, workflow_source.count(argument))
         self.assertIn("verify-attested-sbom.py", workflow_source)
         self.assertNotIn("all(. == true)", workflow_source)
+        self.assertNotIn("CONNEX_*_IMAGE", DEPLOYMENT_PATH.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

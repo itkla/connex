@@ -42,10 +42,34 @@ class HealthResponse(io.BytesIO):
 class SupervisorTest(unittest.TestCase):
     def test_main_rejects_invalid_configuration(self) -> None:
         with (
-            patch.dict(os.environ, {"CONNEX_OCR_PORT": "invalid"}),
+            patch.dict(os.environ, {"CONNEX_OCR_PORT": "private-invalid"}),
             patch("ocr_service.supervisor.signal.signal"),
+            patch("ocr_service.startup.print") as rendered,
         ):
             self.assertEqual(1, main())
+
+        message = rendered.call_args.args[0]
+        self.assertIn("component=supervisor", message)
+        self.assertIn("reason=invalid_configuration", message)
+        self.assertNotIn("private-invalid", message)
+
+    def test_main_reports_worker_launch_failure_without_exception_message(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("ocr_service.supervisor.signal.signal"),
+            patch(
+                "ocr_service.supervisor.subprocess.Popen",
+                side_effect=OSError("private executable detail"),
+            ),
+            patch("ocr_service.startup.print") as rendered,
+        ):
+            self.assertEqual(1, main())
+
+        message = rendered.call_args.args[0]
+        self.assertIn("component=supervisor", message)
+        self.assertIn("reason=worker_launch_failed", message)
+        self.assertIn("exception_types=builtins.OSError", message)
+        self.assertNotIn("private", message)
 
     def test_main_exits_after_worker_fails_before_readiness(self) -> None:
         process = Mock()

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import os
@@ -27,6 +28,59 @@ from benchmark.run_benchmark import (
 
 
 class BenchmarkManifestTest(unittest.TestCase):
+    BASE_URL = "http://127.0.0.1:18088"
+    REQUESTS_PER_MINUTE = 120
+    IMAGE_REFERENCES = {
+        component: f"ghcr.io/itkla/connex-{component}@sha256:" + digest * 64
+        for component, digest in (("backend", "b"), ("frontend", "c"), ("ocr", "d"))
+    }
+
+    def qualification_provenance(self) -> dict[str, object]:
+        benchmark = Path(__file__).parents[1] / "benchmark"
+        requirements_lock = Path(__file__).parents[1] / "requirements.lock"
+        return {
+            "sourceRevision": "a" * 40,
+            "runtime": {
+                "containers": {
+                    component: {
+                        "containerId": digest * 12,
+                        "imageReference": reference,
+                        "imageId": "sha256:" + digest * 64,
+                    }
+                    for (component, reference), digest in zip(
+                        self.IMAGE_REFERENCES.items(), ("b", "c", "d"), strict=True
+                    )
+                },
+                "host": {
+                    "avx": True,
+                    "machine": "x86_64",
+                    "platform": "Linux-test",
+                    "python": "3.12.10",
+                    "dockerServer": "28.3.2",
+                },
+            },
+            "baseUrl": self.BASE_URL,
+            "requestsPerMinute": self.REQUESTS_PER_MINUTE,
+            "manifestSha256": "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87",
+            "fixturesSha256": "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5",
+            "fixtureMetadataSha256": "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29",
+            "fixtureGeneratorSha256": hashlib.sha256(
+                (benchmark / "generate_cards.py").read_bytes()
+            ).hexdigest(),
+            "fixtureFontSha256": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5",
+            "ocrRequirementsLockSha256": hashlib.sha256(requirements_lock.read_bytes()).hexdigest(),
+        }
+
+    def verify_qualification(self, report: object, manifest: dict[str, object]) -> None:
+        verify_qualification_report(
+            report,
+            manifest,
+            "a" * 40,
+            self.BASE_URL,
+            self.REQUESTS_PER_MINUTE,
+            self.IMAGE_REFERENCES,
+        )
+
     def qualification_outcomes(self) -> tuple[dict[str, object], list[dict[str, object]]]:
         manifest = json.loads(
             (Path(__file__).parents[1] / "benchmark" / "manifest.json").read_text(encoding="utf-8")
@@ -97,35 +151,79 @@ class BenchmarkManifestTest(unittest.TestCase):
 
     def test_qualification_recomputes_every_gate_from_exact_raw_cases(self) -> None:
         manifest, outcomes = self.qualification_outcomes()
-        provenance_value = {"sourceRevision": "a" * 40}
+        provenance_value = self.qualification_provenance()
         report = summarize(outcomes, provenance_value)
 
-        verify_qualification_report(report, manifest, "a" * 40)
+        self.verify_qualification(report, manifest)
 
         outcomes[0]["actual"]["email"] = "incorrect@example.test"
         outcomes[0]["correct"]["email"] = False
         with self.assertRaisesRegex(ValueError, "raw case outcomes"):
-            verify_qualification_report(report, manifest, "a" * 40)
+            self.verify_qualification(report, manifest)
 
     def test_qualification_rejects_self_reported_correctness(self) -> None:
         manifest, outcomes = self.qualification_outcomes()
-        report = summarize(outcomes, {"sourceRevision": "a" * 40})
+        report = summarize(outcomes, self.qualification_provenance())
         outcomes[0]["actual"]["email"] = "incorrect@example.test"
 
         with self.assertRaisesRegex(ValueError, "correctness does not match"):
-            verify_qualification_report(report, manifest, "a" * 40)
+            self.verify_qualification(report, manifest)
 
     def test_qualification_rejects_missing_or_duplicate_cases(self) -> None:
         manifest, outcomes = self.qualification_outcomes()
-        provenance_value = {"sourceRevision": "a" * 40}
+        provenance_value = self.qualification_provenance()
         report = summarize(outcomes, provenance_value)
         report["cases"][1]["id"] = report["cases"][0]["id"]
 
         with self.assertRaisesRegex(ValueError, "order and ids"):
-            verify_qualification_report(report, manifest, "a" * 40)
+            self.verify_qualification(report, manifest)
 
         with self.assertRaisesRegex(ValueError, "exactly 40"):
-            verify_qualification_report({"cases": []}, manifest, "a" * 40)
+            self.verify_qualification({"cases": []}, manifest)
+
+    def test_qualification_rejects_forged_provenance(self) -> None:
+        manifest, outcomes = self.qualification_outcomes()
+        report = summarize(outcomes, self.qualification_provenance())
+        mutations = {
+            "manifest": lambda value: value.__setitem__("manifestSha256", "0" * 64),
+            "fixtures": lambda value: value.__setitem__("fixturesSha256", "0" * 64),
+            "metadata": lambda value: value.__setitem__("fixtureMetadataSha256", "0" * 64),
+            "generator": lambda value: value.__setitem__("fixtureGeneratorSha256", "0" * 64),
+            "font": lambda value: value.__setitem__("fixtureFontSha256", "0" * 64),
+            "lock": lambda value: value.__setitem__("ocrRequirementsLockSha256", "0" * 64),
+            "rate": lambda value: value.__setitem__("requestsPerMinute", 3),
+            "base URL": lambda value: value.__setitem__("baseUrl", "https://forged.example"),
+            "runtime": lambda value: value.__setitem__("runtime", {}),
+            "extra field": lambda value: value.__setitem__("forged", True),
+        }
+        for name, mutate in mutations.items():
+            forged = copy.deepcopy(report)
+            provenance_value = forged["provenance"]
+            self.assertIsInstance(provenance_value, dict)
+            mutate(provenance_value)
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.verify_qualification(forged, manifest)
+
+    def test_qualification_rejects_unbound_runtime_identity(self) -> None:
+        manifest, outcomes = self.qualification_outcomes()
+        report = summarize(outcomes, self.qualification_provenance())
+        wrong_references = dict(self.IMAGE_REFERENCES)
+        wrong_references["ocr"] = "ghcr.io/itkla/connex-ocr@sha256:" + "e" * 64
+
+        with self.assertRaisesRegex(ValueError, "does not match the release"):
+            verify_qualification_report(
+                report,
+                manifest,
+                "a" * 40,
+                self.BASE_URL,
+                self.REQUESTS_PER_MINUTE,
+                wrong_references,
+            )
+
+        forged = copy.deepcopy(report)
+        forged["provenance"]["runtime"]["host"]["avx"] = False
+        with self.assertRaisesRegex(ValueError, "AVX"):
+            self.verify_qualification(forged, manifest)
 
     def test_authenticated_benchmark_rejects_redirects(self) -> None:
         request = Request(
@@ -317,7 +415,12 @@ class BenchmarkManifestTest(unittest.TestCase):
         for value in ("main", "a" * 39, "g" * 40):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validated_source_revision(value)
-        for value in ("backend:latest", "backend@sha256:short", "backend@sha512:" + "b" * 64):
+        for value in (
+            "backend:latest",
+            "backend@sha256:short",
+            "backend@sha256:" + "B" * 64,
+            "backend@sha512:" + "b" * 64,
+        ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validated_image_reference(value, "BACKEND_IMAGE")
 

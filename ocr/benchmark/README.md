@@ -47,6 +47,13 @@ export CONNEX_BENCHMARK_OCR_CONTAINER="$(docker compose -f ../../deploy/docker-c
 python3 run_benchmark.py \
   --images /tmp/connex-benchmark-fixtures \
   --report /tmp/connex-business-card-benchmark.json
+python3 verify_report.py \
+  /tmp/connex-business-card-benchmark.json "$(git rev-parse HEAD)" \
+  --base-url "$CONNEX_BENCHMARK_BASE_URL" \
+  --requests-per-minute 3 \
+  --backend-image-reference 'ghcr.io/itkla/connex-backend@sha256:...' \
+  --frontend-image-reference 'ghcr.io/itkla/connex-frontend@sha256:...' \
+  --ocr-image-reference "$OCR_IMAGE"
 ```
 
 The runner ignores environment proxy settings and never follows redirects, so session, CSRF, and
@@ -55,6 +62,8 @@ checked-out benchmark sources and derives all image identities and OCR resource 
 inspection; caller-supplied source or image labels are not accepted. The report binds the canonical
 manifest, exact fixture images and metadata, pinned font, generator, dependency lock, running image
 references and IDs, host/runtime metadata, and request rate.
+Independent verification requires the expected origin, request rate, and three immutable release
+image references so a report cannot self-assert its qualification inputs.
 
 Requests are spaced at three per minute by default to respect production throttles. Increase the
 rate only for a disposable stack whose per-principal and global scan limits were raised to match.

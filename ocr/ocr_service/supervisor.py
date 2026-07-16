@@ -12,6 +12,8 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .startup import report_startup_failure
+
 
 @dataclass(frozen=True)
 class HealthState:
@@ -47,14 +49,14 @@ def main() -> int:
         inference_timeout = _number("CONNEX_OCR_REQUEST_TIMEOUT_SECONDS", 12.0, 1.0, 120.0)
         port = _integer("CONNEX_OCR_PORT", 8090, 1, 65_535)
     except ValueError as exception:
-        print(str(exception), file=sys.stderr)
+        report_startup_failure("supervisor", "configuration", exception)
         return 1
     backoff_seconds = 1.0
     while not stop.is_set():
         try:
             process = subprocess.Popen([sys.executable, "-m", "ocr_service"])
         except OSError as exception:
-            print(f"OCR worker failed to start: {type(exception).__name__}", file=sys.stderr)
+            report_startup_failure("supervisor", "worker_launch", exception)
             return 1
         current_process[0] = process
         result = supervise(

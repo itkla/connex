@@ -499,7 +499,12 @@ jobs:
               --report ../business-card-benchmark.json \
               --requests-per-minute 120
           PYTHONPATH=../ocr python ../ocr/benchmark/verify_report.py \
-            ../business-card-benchmark.json "$GITHUB_SHA"
+            ../business-card-benchmark.json "$GITHUB_SHA" \
+            --base-url http://127.0.0.1:18088 \
+            --requests-per-minute 120 \
+            --backend-image-reference "$(jq -r '.image + "@" + .digest' ../release-backend.json)" \
+            --frontend-image-reference "$(jq -r '.image + "@" + .digest' ../release-frontend.json)" \
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' ../release-ocr.json)"
           tar --sort=name --mtime="@${BUILD_EPOCH}" --owner=0 --group=0 --numeric-owner \
             -cf ../business-card-benchmark-fixtures.tar \
             -C /tmp/connex-benchmark-fixtures .
@@ -542,7 +547,13 @@ jobs:
           REPORT_SHA256="$(sha256sum "$REPORT_FILE" | cut -d ' ' -f1)"
           FIXTURES_SHA256="$(sha256sum "$FIXTURES_FILE" | cut -d ' ' -f1)"
           DEPLOY_SHA256="$(sha256sum "$DEPLOY_BUNDLE" | cut -d ' ' -f1)"
-          PYTHONPATH=ocr python ocr/benchmark/verify_report.py "$REPORT_FILE" "$GITHUB_SHA"
+          PYTHONPATH=ocr python ocr/benchmark/verify_report.py \
+            "$REPORT_FILE" "$GITHUB_SHA" \
+            --base-url http://127.0.0.1:18088 \
+            --requests-per-minute 120 \
+            --backend-image-reference "$(jq -r '.image + "@" + .digest' release-backend.json)" \
+            --frontend-image-reference "$(jq -r '.image + "@" + .digest' release-frontend.json)" \
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' release-ocr.json)"
           for component in backend frontend ocr; do
             descriptor="release-${component}.json"
             expected="$(jq -r '.image + "@" + .digest' "$descriptor")"
