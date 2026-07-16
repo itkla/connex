@@ -192,16 +192,23 @@ async function currentClientRequestIdentity(): Promise<string | null> {
 }
 
 /** Returns a non-reversible browser-storage scope for the active user and workspace. */
-export async function clientRecoveryScope(): Promise<string | null> {
+export async function clientRecoveryScope(init: RequestInit = {}): Promise<string | null> {
     const workspaceId = clientWorkspaceId();
     if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
     let response: Response;
     try {
-        response = await fetch(`${API_BASE}/api/auth/me`, {
-            credentials: "include",
-            cache: "no-store",
-        });
-    } catch {
+        response = await withBusinessCardRequestTimeout(
+            10_000,
+            init.signal,
+            (signal) => fetch(`${API_BASE}/api/auth/me`, {
+                ...init,
+                credentials: "include",
+                cache: "no-store",
+                signal,
+            }),
+        );
+    } catch (error) {
+        if (init.signal?.aborted || error instanceof ApiError) throw error;
         return null;
     }
     if (!response.ok) return null;
@@ -1680,11 +1687,16 @@ export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: R
 export function getBusinessCardImportStatus(requestId: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
     headers.set("Idempotency-Key", requestId);
-    return getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
-        ...init,
-        cache: "no-store",
-        headers,
-    });
+    return withBusinessCardRequestTimeout(
+        10_000,
+        init.signal,
+        (signal) => getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
+            ...init,
+            cache: "no-store",
+            headers,
+            signal,
+        }),
+    );
 }
 
 export function deleteContact(id: number, init: RequestInit = {}) {

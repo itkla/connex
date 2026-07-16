@@ -258,14 +258,22 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     avatarUploadFailed = true;
                 }
             }
-            if (!avatarUploadFailed) toastSuccess(t('toastContactCreated'));
             setIsCreating(false);
-            setCreationSucceeded(true);
-            setTimeout(() => {
-                closeNewContactDialog(false);
-                refresh();
-            }, 900);
-            return { avatarUploadFailed };
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized) return;
+                    finalized = true;
+                    toastSuccess(t('toastContactCreated'));
+                    setCreationSucceeded(true);
+                    setTimeout(() => {
+                        closeNewContactDialog(false);
+                        refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
             if (isFieldError(err) || businessCard) {
                 throw err;

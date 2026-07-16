@@ -12,7 +12,7 @@ import { isFieldError } from '@/app/lib/api';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { DialogStatusCover } from '@/components/ui/dialog-status-cover';
 import {
@@ -36,6 +36,90 @@ const inputError = 'ring-2 ring-destructive focus:ring-destructive';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
 const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
 const PAGE_EASE: [number, number, number, number] = [0.77, 0, 0.175, 1];
+
+function useCompanyLogoSelection({
+    active,
+    setLogoFile,
+    onInvalid,
+}: {
+    active: boolean;
+    setLogoFile: Dispatch<SetStateAction<File | null>>;
+    onInvalid: () => void;
+}) {
+    const [logoPreview, setLogoPreview] = useState<string | null>(null);
+    const [selectionPending, setSelectionPending] = useState(false);
+    const [previousActive, setPreviousActive] = useState(active);
+    const activeRef = useRef(active);
+    const sequenceRef = useRef(0);
+    const previewRef = useRef<string | null>(null);
+    const onInvalidRef = useRef(onInvalid);
+
+    useLayoutEffect(() => {
+        onInvalidRef.current = onInvalid;
+    });
+
+    useLayoutEffect(() => {
+        activeRef.current = active;
+        if (!active) {
+            sequenceRef.current += 1;
+        }
+    }, [active]);
+
+    if (active !== previousActive) {
+        setPreviousActive(active);
+        if (!active) {
+            setSelectionPending(false);
+            setLogoPreview(null);
+        }
+    }
+
+    useEffect(() => {
+        if (active) return;
+        if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+        previewRef.current = null;
+    }, [active]);
+
+    useEffect(() => () => {
+        activeRef.current = false;
+        sequenceRef.current += 1;
+        if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    }, []);
+
+    const applyFile = async (file: File | undefined | null) => {
+        if (!file || !activeRef.current) return;
+        const sequence = sequenceRef.current + 1;
+        sequenceRef.current = sequence;
+        setSelectionPending(true);
+        try {
+            const supported = await isManagedImageFile(file);
+            if (!activeRef.current || sequence !== sequenceRef.current) return;
+            if (!supported) {
+                onInvalidRef.current();
+                return;
+            }
+            if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+            const nextPreview = URL.createObjectURL(file);
+            previewRef.current = nextPreview;
+            setLogoPreview(nextPreview);
+            setLogoFile(file);
+        } finally {
+            if (activeRef.current && sequence === sequenceRef.current) {
+                setSelectionPending(false);
+            }
+        }
+    };
+
+    const removeLogo = () => {
+        sequenceRef.current += 1;
+        setSelectionPending(false);
+        if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+        previewRef.current = null;
+        setLogoPreview(null);
+        setLogoFile(null);
+    };
+
+    return { logoPreview, selectionPending, applyFile, removeLogo };
+}
 
 type Props = {
     open: boolean;
@@ -75,10 +159,19 @@ export default function NewCompanyDialog({
     const [direction, setDirection] = useState(1);
     const [editing, setEditing] = useState<{ mode: 'new' } | { mode: 'edit'; contact: PendingContact }>({ mode: 'new' });
     const [announcement, setAnnouncement] = useState('');
-    const [logoPreview, setLogoPreview] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const {
+        logoPreview,
+        selectionPending: logoSelectionPending,
+        applyFile,
+        removeLogo,
+    } = useCompanyLogoSelection({
+        active: open,
+        setLogoFile,
+        onInvalid: () => toastError(t('logoUnsupported')),
+    });
 
     const initial = payload.name.trim().charAt(0).toUpperCase();
 
@@ -124,26 +217,8 @@ export default function NewCompanyDialog({
             setWebsiteFormatError(null);
             setView('company');
             setEditing({ mode: 'new' });
-            setLogoPreview(null);
         }
     }
-
-    useEffect(() => {
-        return () => {
-            if (logoPreview) URL.revokeObjectURL(logoPreview);
-        };
-    }, [logoPreview]);
-
-    const applyFile = async (file: File | undefined | null) => {
-        if (!file) return;
-        if (!await isManagedImageFile(file)) {
-            toastError(t('logoUnsupported'));
-            return;
-        }
-        if (logoPreview) URL.revokeObjectURL(logoPreview);
-        setLogoPreview(URL.createObjectURL(file));
-        setLogoFile(file);
-    };
 
     const handleLogoChange = (e: ChangeEvent<HTMLInputElement>) => {
         void applyFile(e.target.files?.[0]);
@@ -153,13 +228,8 @@ export default function NewCompanyDialog({
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
+        if (isCreating || logoSelectionPending || isSuccess) return;
         void applyFile(e.dataTransfer.files?.[0]);
-    };
-
-    const removeLogo = () => {
-        if (logoPreview) URL.revokeObjectURL(logoPreview);
-        setLogoPreview(null);
-        setLogoFile(null);
     };
 
     const handleWebsiteBlur = () => {
@@ -171,13 +241,13 @@ export default function NewCompanyDialog({
     };
 
     const handleOpenChange = (next: boolean) => {
-        if (!next && isCreating) return;
+        if (!next && (isCreating || logoSelectionPending)) return;
         onOpenChange(next);
     };
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating || websiteBlocked) return;
+        if (isCreating || logoSelectionPending || websiteBlocked) return;
         resetFieldErrors();
         try {
             await createNewCompany();
@@ -330,6 +400,7 @@ export default function NewCompanyDialog({
                                 id="company-logo"
                                 type="file"
                                 accept={MANAGED_IMAGE_ACCEPT}
+                                disabled={isCreating || logoSelectionPending || isSuccess}
                                 onChange={handleLogoChange}
                                 className="sr-only"
                             />
@@ -515,7 +586,7 @@ export default function NewCompanyDialog({
 
                                 <ResponsiveDialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
                                     <ResponsiveDialogClose asChild>
-                                        <Button type="button" variant="outline" disabled={isCreating}>
+                                        <Button type="button" variant="outline" disabled={isCreating || logoSelectionPending}>
                                             {t('cancel')}
                                         </Button>
                                     </ResponsiveDialogClose>
@@ -523,7 +594,7 @@ export default function NewCompanyDialog({
                                         type="submit"
                                         form="new-company-form"
                                         variant="brand"
-                                        disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
+                                        disabled={isCreating || logoSelectionPending || hasErrors || isSuccess || websiteBlocked}
                                         className="min-w-24 shadow-sm transition hover:shadow-md"
                                     >
                                         {isCreating ? (
@@ -567,6 +638,7 @@ export default function NewCompanyDialog({
 }
 
 type NewCompanyFormProps = {
+    active: boolean;
     payload: CreateCompanyPayload;
     setPayload: Dispatch<SetStateAction<CreateCompanyPayload>>;
     logoFile: File | null;
@@ -587,6 +659,7 @@ type NewCompanyFormProps = {
  * with the caller; this is a controlled form and its transient UI state resets on mount.
  */
 export function NewCompanyForm({
+    active,
     payload,
     setPayload,
     setLogoFile,
@@ -597,10 +670,19 @@ export function NewCompanyForm({
     onCancel,
 }: NewCompanyFormProps) {
     const t = useTranslations('CompaniesNewDialog');
-    const [logoPreview, setLogoPreview] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const {
+        logoPreview,
+        selectionPending: logoSelectionPending,
+        applyFile,
+        removeLogo,
+    } = useCompanyLogoSelection({
+        active,
+        setLogoFile,
+        onInvalid: () => toastError(t('logoUnsupported')),
+    });
 
     const initial = payload.name.trim().charAt(0).toUpperCase();
 
@@ -637,23 +719,6 @@ export function NewCompanyForm({
                 ? 'success'
                 : 'idle';
 
-    useEffect(() => {
-        return () => {
-            if (logoPreview) URL.revokeObjectURL(logoPreview);
-        };
-    }, [logoPreview]);
-
-    const applyFile = async (file: File | undefined | null) => {
-        if (!file) return;
-        if (!await isManagedImageFile(file)) {
-            toastError(t('logoUnsupported'));
-            return;
-        }
-        if (logoPreview) URL.revokeObjectURL(logoPreview);
-        setLogoPreview(URL.createObjectURL(file));
-        setLogoFile(file);
-    };
-
     const handleLogoChange = (e: ChangeEvent<HTMLInputElement>) => {
         void applyFile(e.target.files?.[0]);
         e.target.value = '';
@@ -662,13 +727,8 @@ export function NewCompanyForm({
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
+        if (isCreating || logoSelectionPending || isSuccess) return;
         void applyFile(e.dataTransfer.files?.[0]);
-    };
-
-    const removeLogo = () => {
-        if (logoPreview) URL.revokeObjectURL(logoPreview);
-        setLogoPreview(null);
-        setLogoFile(null);
     };
 
     const handleWebsiteBlur = () => {
@@ -681,7 +741,7 @@ export function NewCompanyForm({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating || websiteBlocked) return;
+        if (isCreating || logoSelectionPending || websiteBlocked) return;
         resetFieldErrors();
         try {
             await createNewCompany();
@@ -737,6 +797,7 @@ export function NewCompanyForm({
                             id="company-logo"
                             type="file"
                             accept={MANAGED_IMAGE_ACCEPT}
+                            disabled={isCreating || logoSelectionPending || isSuccess}
                             onChange={handleLogoChange}
                             className="sr-only"
                         />
@@ -907,14 +968,14 @@ export function NewCompanyForm({
                 </form>
 
                 <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '290ms' }}>
-                    <Button type="button" variant="outline" disabled={isCreating} onClick={onCancel}>
+                    <Button type="button" variant="outline" disabled={isCreating || logoSelectionPending} onClick={onCancel}>
                         {t('cancel')}
                     </Button>
                     <Button
                         type="submit"
                         form="new-company-form"
                         variant="brand"
-                        disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
+                        disabled={isCreating || logoSelectionPending || hasErrors || isSuccess || websiteBlocked}
                         className="min-w-24 shadow-sm transition hover:shadow-md"
                     >
                         {isCreating ? (

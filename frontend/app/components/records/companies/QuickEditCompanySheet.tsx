@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { BuildingOffice2Icon } from '@heroicons/react/24/outline';
 
@@ -52,17 +52,34 @@ export default function QuickEditCompanySheet({
 }: Props) {
     const t = useTranslations('CompaniesQuickEditSheet');
     const total = selectedCompanies.length;
+    const [pendingMediaIds, setPendingMediaIds] = useState<Set<number>>(new Set());
+    const mediaPending = pendingMediaIds.size > 0;
+
+    const setMediaPending = (id: number, pending: boolean) => {
+        setPendingMediaIds((current) => {
+            const next = new Set(current);
+            if (pending) next.add(id);
+            else next.delete(id);
+            return next;
+        });
+    };
 
     return (
         <QuickEditSheetShell
             open={open}
-            onOpenChange={onOpenChange}
+            onOpenChange={(next) => {
+                if (!next && mediaPending) return;
+                onOpenChange(next);
+            }}
             icon={<BuildingOffice2Icon />}
             title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
             count={total}
             isSaving={isSaving}
-            onSave={saveEdits}
+            interactionPending={mediaPending}
+            onSave={() => {
+                if (!mediaPending) saveEdits();
+            }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
         >
@@ -84,6 +101,9 @@ export default function QuickEditCompanySheet({
                         }
                         onSelect={(file) => updateLogoFile(c.id, file)}
                         onInvalidSelect={() => toastError(t('unsupportedLogo'))}
+                        onPendingChange={(pending) => setMediaPending(c.id, pending)}
+                        active={open}
+                        disabled={isSaving}
                     />
                 ) : (
                     <CompanyAvatar company={c} type="large" />

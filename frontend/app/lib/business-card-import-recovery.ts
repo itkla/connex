@@ -21,6 +21,7 @@ type RecoveryEntry = {
     expiresAt: number;
     phase: RecoveryPhase;
     pendingAvatar: boolean;
+    revision: number;
 };
 
 export type RecoveredBusinessCardImport = {
@@ -28,6 +29,13 @@ export type RecoveredBusinessCardImport = {
     result: BusinessCardImportResult | null;
     terminal: 'completed' | 'gone';
     pendingAvatar: boolean;
+    revision: number | null;
+};
+
+export type BusinessCardImportRecoveryReconciliation = {
+    recovered: RecoveredBusinessCardImport | null;
+    reusableRequestId: string | null;
+    reusableRevision: number | null;
 };
 
 /** Indicates that the browser cannot durably retain response-loss recovery state. */
@@ -52,6 +60,12 @@ function parseRecoveryEntry(value: unknown): RecoveryEntry | null {
         ? storedPhase
         : 'legacy';
     const pendingAvatar = 'pendingAvatar' in value && value.pendingAvatar === true;
+    const revision = 'revision' in value
+        && typeof value.revision === 'number'
+        && Number.isSafeInteger(value.revision)
+        && value.revision >= 0
+        ? value.revision
+        : 0;
     const expiresAt = phase === 'legacy'
         ? Math.max(value.expiresAt, value.createdAt + LEGACY_RECOVERY_TTL_MS)
         : value.expiresAt;
@@ -61,6 +75,7 @@ function parseRecoveryEntry(value: unknown): RecoveryEntry | null {
         expiresAt,
         phase,
         pendingAvatar,
+        revision,
     };
 }
 
@@ -119,12 +134,11 @@ function readEntries(scope: string): RecoveryEntry[] {
     }
 }
 
-function readEntry(scope: string, requestId: string): RecoveryEntry {
+function readEntry(scope: string, requestId: string): RecoveryEntry | null {
     try {
-        const parsed: unknown = JSON.parse(
-            window.localStorage.getItem(entryKey(scope, requestId)) ?? 'null',
-        );
-        const entry = parseRecoveryEntry(parsed);
+        const stored = window.localStorage.getItem(entryKey(scope, requestId));
+        if (stored === null) return null;
+        const entry = parseRecoveryEntry(JSON.parse(stored));
         if (!entry || entry.requestId !== requestId) {
             throw new BusinessCardRecoveryStorageUnavailableError();
         }
@@ -145,7 +159,8 @@ function persistEntry(scope: string, entry: RecoveryEntry): void {
             || persisted.createdAt !== entry.createdAt
             || persisted.expiresAt !== entry.expiresAt
             || persisted.phase !== entry.phase
-            || persisted.pendingAvatar !== entry.pendingAvatar) {
+            || persisted.pendingAvatar !== entry.pendingAvatar
+            || persisted.revision !== entry.revision) {
             throw new BusinessCardRecoveryStorageUnavailableError();
         }
     } catch (error) {
@@ -154,145 +169,333 @@ function persistEntry(scope: string, entry: RecoveryEntry): void {
     }
 }
 
-async function recoveryScope(): Promise<string> {
+async function recoveryScope(signal?: AbortSignal): Promise<string> {
     if (typeof window === 'undefined') throw new BusinessCardRecoveryStorageUnavailableError();
-    try {
-        const scope = await clientRecoveryScope();
-        if (!scope) throw new BusinessCardRecoveryStorageUnavailableError();
-        return scope;
-    } catch (error) {
-        if (error instanceof BusinessCardRecoveryStorageUnavailableError) throw error;
-        throw new BusinessCardRecoveryStorageUnavailableError();
-    }
+    const scope = await clientRecoveryScope({ signal });
+    if (!scope) throw new BusinessCardRecoveryStorageUnavailableError();
+    return scope;
 }
 
-function delay(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+function abortError(signal: AbortSignal): unknown {
+    return signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
 }
 
-async function withRecoveryLock<T>(scope: string, operation: () => Promise<T> | T): Promise<T> {
-    if (!navigator.locks) throw new BusinessCardRecoveryStorageUnavailableError();
-    return navigator.locks.request(LOCK_PREFIX + scope, operation);
-}
-
-/** Durably registers, reserves, and submits one opaque key before multipart upload may begin. */
-export async function prepareBusinessCardImportRecovery(
-    requestId: string | null,
-    pendingAvatar: boolean,
-): Promise<string> {
-    const scope = await recoveryScope();
-    return withRecoveryLock(scope, async () => {
-        const activeRequestId = requestId ?? window.crypto.randomUUID();
-        let entry: RecoveryEntry;
-        if (requestId) {
-            entry = readEntry(scope, activeRequestId);
-        } else {
-            const createdAt = Date.now();
-            entry = {
-                requestId: activeRequestId,
-                createdAt,
-                expiresAt: createdAt + REGISTERED_TTL_MS,
-                phase: 'registered',
-                pendingAvatar,
-            };
-            persistEntry(scope, entry);
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(abortError(signal));
+            return;
         }
-        if (entry.expiresAt <= Date.now()) {
-            removeEntry(scope, activeRequestId);
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener('abort', handleAbort);
+            resolve();
+        }, milliseconds);
+        const handleAbort = () => {
+            window.clearTimeout(timer);
+            reject(signal ? abortError(signal) : new DOMException('The operation was aborted', 'AbortError'));
+        };
+        signal?.addEventListener('abort', handleAbort, { once: true });
+    });
+}
+
+async function withRecoveryLock<T>(
+    scope: string,
+    operation: () => T,
+    signal?: AbortSignal,
+): Promise<T> {
+    if (!navigator.locks) throw new BusinessCardRecoveryStorageUnavailableError();
+    return navigator.locks.request(LOCK_PREFIX + scope, { signal }, operation);
+}
+
+async function currentEntry(
+    scope: string,
+    candidate: RecoveryEntry,
+    signal?: AbortSignal,
+): Promise<RecoveryEntry | null> {
+    return withRecoveryLock(scope, () => {
+        const entry = readEntry(scope, candidate.requestId);
+        if (!entry
+            || entry.createdAt !== candidate.createdAt
+            || entry.phase !== candidate.phase
+            || entry.revision !== candidate.revision) return null;
+        return entry;
+    }, signal);
+}
+
+async function removeCurrentEntry(
+    scope: string,
+    candidate: RecoveryEntry,
+    signal?: AbortSignal,
+): Promise<boolean> {
+    return withRecoveryLock(scope, () => {
+        const entry = readEntry(scope, candidate.requestId);
+        if (!entry
+            || entry.createdAt !== candidate.createdAt
+            || entry.phase !== candidate.phase
+            || entry.revision !== candidate.revision) return false;
+        removeEntry(scope, candidate.requestId);
+        return true;
+    }, signal);
+}
+
+/** Durably registers a fresh opaque key before any reservation request may begin. */
+export async function registerBusinessCardImportRecovery(
+    pendingAvatar: boolean,
+    signal?: AbortSignal,
+): Promise<string> {
+    const scope = await recoveryScope(signal);
+    return withRecoveryLock(scope, () => {
+        const requestId = window.crypto.randomUUID();
+        const createdAt = Date.now();
+        persistEntry(scope, {
+            requestId,
+            createdAt,
+            expiresAt: createdAt + REGISTERED_TTL_MS,
+            phase: 'registered',
+            pendingAvatar,
+            revision: 0,
+        });
+        return requestId;
+    }, signal);
+}
+
+/** Reserves a durably registered opaque key before multipart upload may begin. */
+export async function prepareBusinessCardImportRecovery(
+    requestId: string,
+    pendingAvatar: boolean,
+    signal?: AbortSignal,
+): Promise<number> {
+    const scope = await recoveryScope(signal);
+    const entry = await withRecoveryLock(scope, () => {
+        const current = readEntry(scope, requestId);
+        if (!current) {
+            throw new ApiError(
+                'Business-card import recovery is unavailable',
+                410,
+                'BUSINESS_CARD_IMPORT_RESULT_GONE',
+            );
+        }
+        if (current.expiresAt <= Date.now()) {
+            removeEntry(scope, requestId);
             throw new ApiError(
                 'Business-card import recovery expired',
                 410,
                 'BUSINESS_CARD_IMPORT_RESULT_GONE',
             );
         }
-        const reservation = await reserveBusinessCardImport(activeRequestId);
-        const expiresAt = Date.parse(reservation.expiresAt);
-        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-            throw new Error('Business-card import reservation is unavailable');
+        return current;
+    }, signal);
+
+    const reservation = await reserveBusinessCardImport(requestId, { signal });
+    const expiresAt = Date.parse(reservation.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new Error('Business-card import reservation is unavailable');
+    }
+
+    return withRecoveryLock(scope, () => {
+        const current = readEntry(scope, requestId);
+        if (!current
+            || current.createdAt !== entry.createdAt
+            || current.phase !== entry.phase
+            || current.revision !== entry.revision) {
+            throw new ApiError(
+                'Business-card import recovery is unavailable',
+                410,
+                'BUSINESS_CARD_IMPORT_RESULT_GONE',
+            );
         }
+        const revision = current.revision + 1;
+        persistEntry(scope, {
+            ...current,
+            expiresAt,
+            phase: 'submitted',
+            pendingAvatar,
+            revision,
+        });
+        return revision;
+    }, signal);
+}
+
+/** Records that the optional avatar upload completed before import recovery is cleared. */
+export async function markBusinessCardImportAvatarCompleted(
+    requestId: string,
+    signal?: AbortSignal,
+): Promise<number | null> {
+    const scope = await recoveryScope(signal);
+    return withRecoveryLock(scope, () => {
+        const entry = readEntry(scope, requestId);
+        if (!entry) return null;
+        if (!entry.pendingAvatar) return entry.revision;
+        const revision = entry.revision + 1;
         persistEntry(scope, {
             ...entry,
-            expiresAt,
-            phase: entry.phase === 'submitted' || entry.phase === 'legacy'
-                ? 'submitted'
-                : 'reserved',
+            pendingAvatar: false,
+            revision,
         });
-        persistEntry(scope, { ...entry, expiresAt, phase: 'submitted', pendingAvatar });
-        return activeRequestId;
-    });
+        return revision;
+    }, signal);
 }
 
 /** Removes a completed or conclusively rejected import UUID. */
-export async function clearBusinessCardImportRecovery(requestId: string): Promise<void> {
-    const scope = await recoveryScope();
-    await withRecoveryLock(scope, () => removeEntry(scope, requestId));
+export async function clearBusinessCardImportRecovery(
+    requestId: string,
+    signal?: AbortSignal,
+    expectedRevision?: number | null,
+): Promise<void> {
+    const scope = await recoveryScope(signal);
+    await withRecoveryLock(scope, () => {
+        const entry = readEntry(scope, requestId);
+        if (!entry) return;
+        if (expectedRevision != null && entry.revision !== expectedRevision) {
+            throw new ApiError(
+                'Business-card recovery changed before acknowledgment',
+                409,
+                'BUSINESS_CARD_RECOVERY_CHANGED',
+            );
+        }
+        removeEntry(scope, requestId);
+    }, signal);
 }
+
+type EntryCheckOutcome = {
+    recovered: RecoveredBusinessCardImport | null;
+    reusableRequestId: string | null;
+    reusableRevision: number | null;
+    pending: boolean;
+};
 
 async function checkEntries(
     scope: string,
     entries: RecoveryEntry[],
-): Promise<{ recovered: RecoveredBusinessCardImport | null; pending: boolean }> {
+    signal?: AbortSignal,
+): Promise<EntryCheckOutcome> {
     let pending = false;
+    let reusableRequestId: string | null = null;
+    let reusableRevision: number | null = null;
     for (const entry of entries) {
-        if (entry.phase === 'registered' || entry.phase === 'reserved') {
-            continue;
-        }
         try {
-            const result = await getBusinessCardImportStatus(entry.requestId);
+            const result = await getBusinessCardImportStatus(entry.requestId, { signal });
+            const current = await currentEntry(scope, entry, signal);
+            if (!current) continue;
             return {
                 recovered: {
                     requestId: entry.requestId,
                     result,
                     terminal: 'completed',
-                    pendingAvatar: entry.pendingAvatar,
+                    pendingAvatar: current.pendingAvatar,
+                    revision: current.revision,
                 },
+                reusableRequestId: null,
+                reusableRevision: null,
                 pending,
             };
         } catch (error) {
             if (!(error instanceof ApiError)) throw error;
-            if (error.status === 401 || error.status === 403) continue;
             if (error.status === 410) {
-                removeEntry(scope, entry.requestId);
+                const current = await currentEntry(scope, entry, signal);
+                if (!current) continue;
                 return {
                     recovered: {
                         requestId: entry.requestId,
                         result: null,
                         terminal: 'gone',
                         pendingAvatar: false,
+                        revision: current.revision,
                     },
+                    reusableRequestId: null,
+                    reusableRevision: null,
                     pending,
                 };
             }
-            if (error.status === 409) {
+            if (error.status !== 404 && error.status !== 409) throw error;
+            const current = await currentEntry(scope, entry, signal);
+            if (!current) continue;
+            if (current.phase === 'registered' || current.phase === 'reserved') {
+                if (!reusableRequestId) {
+                    reusableRequestId = current.requestId;
+                    reusableRevision = current.revision;
+                }
+                continue;
+            }
+            if (error.status === 409 || Date.now() < current.expiresAt) {
                 pending = true;
                 continue;
             }
-            if (error.status !== 404) throw error;
-            if (Date.now() < entry.expiresAt) {
-                pending = true;
-                continue;
-            }
-            removeEntry(scope, entry.requestId);
+            await removeCurrentEntry(scope, current, signal);
         }
     }
-    return { recovered: null, pending };
+    return { recovered: null, reusableRequestId, reusableRevision, pending };
+}
+
+/** Identifies cross-tab changes to durable business-card recovery state. */
+export function isBusinessCardRecoveryStorageEvent(event: StorageEvent): boolean {
+    return event.storageArea === window.localStorage
+        && (event.key === null || event.key.startsWith(STORAGE_PREFIX));
 }
 
 /** Reconciles opaque response-loss candidates without loading private draft data. */
-export async function reconcileBusinessCardImportRecovery(): Promise<RecoveredBusinessCardImport | null> {
-    const scope = await recoveryScope();
-    return withRecoveryLock(scope, async () => {
-        const entries = readEntries(scope);
-        for (let attempt = 0; attempt <= RECOVERY_POLL_DELAYS_MS.length; attempt += 1) {
-            const outcome = await checkEntries(scope, entries);
-            if (outcome.recovered) return outcome.recovered;
-            if (!outcome.pending) return null;
-            const nextDelay = RECOVERY_POLL_DELAYS_MS[attempt];
-            if (nextDelay == null) {
-                throw new Error('Business-card recovery is still pending');
+export async function reconcileBusinessCardImportRecovery(
+    signal?: AbortSignal,
+    inMemoryRequestId?: string | null,
+): Promise<BusinessCardImportRecoveryReconciliation> {
+    const scope = await recoveryScope(signal);
+    for (let attempt = 0; attempt <= RECOVERY_POLL_DELAYS_MS.length; attempt += 1) {
+        const entries = await withRecoveryLock(scope, () => readEntries(scope), signal);
+        if (entries.length === 0) {
+            if (!inMemoryRequestId) {
+                return { recovered: null, reusableRequestId: null, reusableRevision: null };
             }
-            await delay(nextDelay);
+            try {
+                const result = await getBusinessCardImportStatus(inMemoryRequestId, { signal });
+                return {
+                    recovered: {
+                        requestId: inMemoryRequestId,
+                        result,
+                        terminal: 'completed',
+                        pendingAvatar: false,
+                        revision: null,
+                    },
+                    reusableRequestId: null,
+                    reusableRevision: null,
+                };
+            } catch (error) {
+                if (!(error instanceof ApiError)) throw error;
+                if (error.status === 410) {
+                    return {
+                        recovered: {
+                            requestId: inMemoryRequestId,
+                            result: null,
+                            terminal: 'gone',
+                            pendingAvatar: false,
+                            revision: null,
+                        },
+                        reusableRequestId: null,
+                        reusableRevision: null,
+                    };
+                }
+                throw error;
+            }
         }
-        return null;
-    });
+        const outcome = await checkEntries(scope, entries, signal);
+        if (outcome.recovered) {
+            return {
+                recovered: outcome.recovered,
+                reusableRequestId: null,
+                reusableRevision: null,
+            };
+        }
+        if (!outcome.pending) {
+            return {
+                recovered: null,
+                reusableRequestId: outcome.reusableRequestId,
+                reusableRevision: outcome.reusableRevision,
+            };
+        }
+        const nextDelay = RECOVERY_POLL_DELAYS_MS[attempt];
+        if (nextDelay == null) {
+            throw new Error('Business-card recovery is still pending');
+        }
+        await delay(nextDelay, signal);
+    }
+    return { recovered: null, reusableRequestId: null, reusableRevision: null };
 }

@@ -101,16 +101,24 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                                 avatarUploadFailed = true;
                             }
                         }
-                        setNewContactPayload(emptyContactPayload(company.id));
-                        setImageFile(null);
-                        if (!avatarUploadFailed) toast.success(t('toastContactCreated'));
                         setIsCreating(false);
-                        setCreationSucceeded(true);
-                        setTimeout(() => {
-                            closeNewContactDialog(false);
-                            router.refresh();
-                        }, 900);
-                        return { avatarUploadFailed };
+                        let finalized = false;
+                        return {
+                            avatarUploadFailed,
+                            avatarUploaded: imageFile != null && !avatarUploadFailed,
+                            finalize: () => {
+                                if (finalized) return;
+                                finalized = true;
+                                setNewContactPayload(emptyContactPayload(company.id));
+                                setImageFile(null);
+                                toast.success(t('toastContactCreated'));
+                                setCreationSucceeded(true);
+                                setTimeout(() => {
+                                    closeNewContactDialog(false);
+                                    router.refresh();
+                                }, 900);
+                            },
+                        };
                     } catch (error) {
                         if (isFieldError(error) || businessCard) {
                             throw error;

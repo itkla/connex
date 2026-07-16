@@ -104,18 +104,26 @@ export default function ContactCreateContainer({
                     avatarUploadFailed = true;
                 }
             }
-            if (!avatarUploadFailed) toastSuccess(t('feedback.personCreated'));
-            publishRecordMutation('contact');
-            if (imported?.company) publishRecordMutation('company');
             creatingRef.current = false;
             setCreating(false);
-            setSucceeded(true);
             emitDismissLock();
-            setTimeout(() => {
-                onOpenChange(false);
-                router.refresh();
-            }, 900);
-            return { avatarUploadFailed };
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized) return;
+                    finalized = true;
+                    toastSuccess(t('feedback.personCreated'));
+                    publishRecordMutation('contact');
+                    if (imported?.company) publishRecordMutation('company');
+                    setSucceeded(true);
+                    setTimeout(() => {
+                        onOpenChange(false);
+                        router.refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
             creatingRef.current = false;
             setCreating(false);

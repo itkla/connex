@@ -19,6 +19,7 @@ import {
     type FormEvent,
     SetStateAction,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
     type RefObject,
@@ -64,7 +65,11 @@ type Props = {
     onSubmissionPendingChange?: (pending: boolean) => void;
 };
 
-export type ContactCreationOutcome = { avatarUploadFailed: boolean } | void;
+export type ContactCreationOutcome = {
+    avatarUploadFailed: boolean;
+    avatarUploaded: boolean;
+    finalize: () => void;
+} | void;
 
 export default function NewContactDialog({
     newContactDialogOpen,
@@ -193,11 +198,21 @@ export function NewContactForm({
     const router = useRouter();
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [submissionPending, setSubmissionPending] = useState(false);
+    const [imageSelectionPending, setImageSelectionPending] = useState(false);
+    const [cardSelectionPending, setCardSelectionPending] = useState(false);
     const [prevActive, setPrevActive] = useState(active);
-    const recoveredImportHandledRef = useRef(false);
+    const recoveredImportHandledRef = useRef<string | null>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
     const submissionPendingRef = useRef(false);
     const imageSelectionSequenceRef = useRef(0);
+    const imageSelectionPendingRef = useRef(false);
+    const cardSelectionPendingRef = useRef(false);
+    const activeRef = useRef(active);
+    const recoveryInteractionRef = useRef(false);
+    const acknowledgmentGenerationRef = useRef(0);
+    const onCancelRef = useRef(onCancel);
+    const onRecoveredImportRef = useRef(onRecoveredImport);
+    const onSubmissionPendingChangeRef = useRef(onSubmissionPendingChange);
     const businessCard = useBusinessCardCapture({
         active,
         payload: newContactPayload,
@@ -221,31 +236,67 @@ export function NewContactForm({
         ? scanResult?.company.value ?? null
         : null;
 
+    useLayoutEffect(() => {
+        activeRef.current = active;
+        onCancelRef.current = onCancel;
+        onRecoveredImportRef.current = onRecoveredImport;
+        onSubmissionPendingChangeRef.current = onSubmissionPendingChange;
+        if (!active) {
+            acknowledgmentGenerationRef.current += 1;
+            imageSelectionSequenceRef.current += 1;
+            imageSelectionPendingRef.current = false;
+            cardSelectionPendingRef.current = false;
+        }
+    }, [active, onCancel, onRecoveredImport, onSubmissionPendingChange]);
+
     useEffect(() => {
         if (companySearch.error) toastError(t('companySearchFailed'));
     }, [companySearch.error, t]);
 
-    useEffect(() => {
-        if (!recoveredImport || recoveredImportHandledRef.current) return;
-        recoveredImportHandledRef.current = true;
+    useLayoutEffect(() => {
+        if (!active
+            || !recoveredImport
+            || recoveredImportHandledRef.current === recoveredImport.requestId) return;
+        recoveredImportHandledRef.current = recoveredImport.requestId;
+        const controller = new AbortController();
+        const generation = acknowledgmentGenerationRef.current + 1;
+        acknowledgmentGenerationRef.current = generation;
+        submissionPendingRef.current = true;
+        setSubmissionPending(true);
+        onSubmissionPendingChangeRef.current?.(true);
         void (async () => {
-            if (recoveredImport.result) {
-                toastSuccess(t('cardImportRecovered'));
-                onRecoveredImport?.(recoveredImport.result);
-            } else {
-                toastError(t('cardImportRecoveryGone'));
+            try {
+                await acknowledgeRecoveredImport(controller.signal);
+                if (controller.signal.aborted
+                    || !activeRef.current
+                    || acknowledgmentGenerationRef.current !== generation) return;
+                if (recoveredImport.result) {
+                    toastSuccess(t('cardImportRecovered'));
+                    onRecoveredImportRef.current?.(recoveredImport.result);
+                } else {
+                    toastError(t('cardImportRecoveryGone'));
+                }
+                if (recoveredImport.pendingAvatar) {
+                    toastError(t('cardImportRecoveredAvatarPending'));
+                }
+                router.refresh();
+                onCancelRef.current();
+            } catch {
+                if (controller.signal.aborted
+                    || !activeRef.current
+                    || acknowledgmentGenerationRef.current !== generation) return;
+                recoveredImportHandledRef.current = null;
+                toastError(t('cardImportRecoveryFailed'));
+            } finally {
+                if (acknowledgmentGenerationRef.current === generation) {
+                    submissionPendingRef.current = false;
+                    setSubmissionPending(false);
+                    onSubmissionPendingChangeRef.current?.(false);
+                }
             }
-            if (recoveredImport.pendingAvatar) {
-                toastError(t('cardImportRecoveredAvatarPending'));
-            }
-            await acknowledgeRecoveredImport();
-            onCancel();
-            router.refresh();
-        })().catch(() => {
-            recoveredImportHandledRef.current = false;
-            toastError(t('cardImportRecoveryFailed'));
-        });
-    }, [acknowledgeRecoveredImport, onCancel, onRecoveredImport, recoveredImport, router, t]);
+        })();
+        return () => controller.abort();
+    }, [acknowledgeRecoveredImport, active, recoveredImport, router, t]);
 
     const handleCreate = async () => {
         resetFieldErrors();
@@ -254,14 +305,18 @@ export function NewContactForm({
             businessCardImport = await businessCard.prepareImportDraft(imageFile != null);
             if (businessCard.file && !businessCardImport) return;
             const outcome = await createNewContact(businessCardImport);
+            if (!outcome) return;
+            if (businessCardImport && outcome.avatarUploaded) {
+                await businessCard.markImportAvatarCompleted();
+            }
             await businessCard.resolveImportRetry();
+            outcome.finalize();
             if (outcome?.avatarUploadFailed) {
                 toastError(t('cardAvatarUploadFailed'));
             }
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
-                await businessCard.resolveImportRetry();
                 const k = Object.keys(err.fieldErrors)[0];
                 if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
             } else if (businessCardImport) {
@@ -274,6 +329,8 @@ export function NewContactForm({
         event.preventDefault();
         if (submissionPendingRef.current
             || isCreating
+            || imageSelectionPendingRef.current
+            || cardSelectionPendingRef.current
             || businessCard.isScanning
             || businessCard.recoveryStatus === 'checking'
             || businessCard.recoveryStatus === 'acknowledging') return;
@@ -300,6 +357,8 @@ export function NewContactForm({
         if (!active) {
             setImagePreview(null);
             setSubmissionPending(false);
+            setImageSelectionPending(false);
+            setCardSelectionPending(false);
             resetFieldErrors();
         }
     }
@@ -307,8 +366,10 @@ export function NewContactForm({
     useEffect(() => {
         if (active) return;
         imageSelectionSequenceRef.current += 1;
-        recoveredImportHandledRef.current = false;
+        recoveredImportHandledRef.current = null;
         submissionPendingRef.current = false;
+        imageSelectionPendingRef.current = false;
+        cardSelectionPendingRef.current = false;
     }, [active]);
 
     useEffect(() => () => {
@@ -316,14 +377,24 @@ export function NewContactForm({
     }, []);
 
     useEffect(() => {
+        if (!active || businessCard.recoveryStatus !== 'checking') return;
+        recoveryInteractionRef.current = false;
+        const markInteraction = () => {
+            recoveryInteractionRef.current = true;
+        };
+        document.addEventListener('pointerdown', markInteraction, true);
+        document.addEventListener('keydown', markInteraction, true);
+        return () => {
+            document.removeEventListener('pointerdown', markInteraction, true);
+            document.removeEventListener('keydown', markInteraction, true);
+        };
+    }, [active, businessCard.recoveryStatus]);
+
+    useEffect(() => {
         const previousStatus = previousRecoveryStatusRef.current;
         previousRecoveryStatusRef.current = businessCard.recoveryStatus;
         if (!active || previousStatus === 'ready' || businessCard.recoveryStatus !== 'ready') return;
-        const focused = document.activeElement;
-        if (focused instanceof HTMLInputElement
-            || focused instanceof HTMLTextAreaElement
-            || focused instanceof HTMLSelectElement
-            || focused instanceof HTMLButtonElement) return;
+        if (recoveryInteractionRef.current) return;
         const frame = window.requestAnimationFrame(() => nameInputRef.current?.focus());
         return () => window.cancelAnimationFrame(frame);
     }, [active, businessCard.recoveryStatus]);
@@ -341,24 +412,34 @@ export function NewContactForm({
         e.target.value = '';
         if (submissionPendingRef.current || isCreating || businessCard.requiresExactImportRetry) return;
         if (!file) return;
-        const supported = await isManagedImageFile(file);
-        if (selectionSequence !== imageSelectionSequenceRef.current || !active) return;
-        if (!supported) {
-            toastError(t('cardSelectionUnsupported'));
-            return;
+        imageSelectionPendingRef.current = true;
+        setImageSelectionPending(true);
+        try {
+            const supported = await isManagedImageFile(file);
+            if (selectionSequence !== imageSelectionSequenceRef.current || !activeRef.current) return;
+            if (!supported) {
+                toastError(t('cardSelectionUnsupported'));
+                return;
+            }
+            if (imagePreview) URL.revokeObjectURL(imagePreview);
+            setImagePreview(URL.createObjectURL(file));
+            setImageFile(file);
+        } finally {
+            if (selectionSequence === imageSelectionSequenceRef.current && activeRef.current) {
+                imageSelectionPendingRef.current = false;
+                setImageSelectionPending(false);
+            }
         }
-        if (imagePreview) URL.revokeObjectURL(imagePreview);
-        setImagePreview(URL.createObjectURL(file));
-        setImageFile(file);
     };
 
     const hasErrors = Object.keys(fieldErrors).length > 0
         || businessCard.companyValidationError != null
         || businessCard.importError != null
         || businessCard.recoveryStatus === 'error';
-    const formPending = submissionPending || isCreating;
+    const formPending = submissionPending || isCreating || imageSelectionPending || cardSelectionPending;
     const recoveryBlocked = businessCard.recoveryStatus === 'checking'
-        || businessCard.recoveryStatus === 'acknowledging';
+        || businessCard.recoveryStatus === 'acknowledging'
+        || recoveredImport != null;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
     const visibleImagePreview = imageFile ? imagePreview : null;
@@ -437,6 +518,10 @@ export function NewContactForm({
                             onFileSelected={businessCard.selectFile}
                             onCancelScan={businessCard.cancelScan}
                             onRetryScan={businessCard.retryScan}
+                            onSelectionPendingChange={(pending) => {
+                                cardSelectionPendingRef.current = pending;
+                                setCardSelectionPending(pending);
+                            }}
                             onRemove={businessCard.companyMode === 'create'
                                 ? undefined
                                 : businessCard.discardCardImage}
@@ -466,6 +551,9 @@ export function NewContactForm({
                             disabled={formPending}
                             onClick={() => {
                                 if (submissionPendingRef.current) return;
+                                imageSelectionSequenceRef.current += 1;
+                                imageSelectionPendingRef.current = false;
+                                setImageSelectionPending(false);
                                 if (businessCard.requiresExactImportRetry) {
                                     businessCard.deferImportRetry();
                                 }

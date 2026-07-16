@@ -146,14 +146,22 @@ export default function CompanyActionsMenu({
                     avatarUploadFailed = true;
                 }
             }
-            if (!avatarUploadFailed) toastSuccess(t('toastContactCreated'));
             setIsCreatingContact(false);
-            setContactCreationSucceeded(true);
-            setTimeout(() => {
-                closeNewContactDialog(false);
-                router.refresh();
-            }, 900);
-            return { avatarUploadFailed };
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized) return;
+                    finalized = true;
+                    toastSuccess(t('toastContactCreated'));
+                    setContactCreationSucceeded(true);
+                    setTimeout(() => {
+                        closeNewContactDialog(false);
+                        router.refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
             if (isFieldError(err) || businessCard) {
                 throw err;

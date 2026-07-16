@@ -122,8 +122,13 @@ export default function CompanyCreateContainer({
         try {
             const companyPayload = cleanCompanyPayload(payload);
             const created = await createCompany(companyPayload);
+            let logoUploadFailed = false;
             if (logoFile) {
-                await uploadCompanyLogo(created.id, logoFile);
+                try {
+                    await uploadCompanyLogo(created.id, logoFile);
+                } catch {
+                    logoUploadFailed = true;
+                }
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
@@ -140,6 +145,7 @@ export default function CompanyCreateContainer({
                 }
             }
             toastSuccess(t('feedback.companyCreated'));
+            if (logoUploadFailed) toastError(t('feedback.companyLogoUploadFailed'));
             setCreating(false);
             setSucceeded(true);
             setTimeout(() => {
@@ -156,6 +162,7 @@ export default function CompanyCreateContainer({
     if (embedded) {
         return (
             <NewCompanyForm
+                active={open}
                 onCancel={onCancel ?? (() => onOpenChange(false))}
                 payload={payload}
                 setPayload={setPayload}

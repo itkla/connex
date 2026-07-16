@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
-import { type ChangeEvent, useEffect, useId, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 import type {
     BusinessCardRequestErrorKind,
@@ -43,6 +43,7 @@ type BusinessCardCaptureProps = {
     onFileSelected: (file: File) => void;
     onCancelScan: () => void;
     onRetryScan: () => void;
+    onSelectionPendingChange: (pending: boolean) => void;
     onRemove?: () => void;
     onDiscardImage?: () => void;
 };
@@ -196,6 +197,7 @@ export function BusinessCardCapture({
     onFileSelected,
     onCancelScan,
     onRetryScan,
+    onSelectionPendingChange,
     onRemove,
     onDiscardImage,
 }: BusinessCardCaptureProps) {
@@ -205,12 +207,26 @@ export function BusinessCardCapture({
     const cameraInputRef = useRef<HTMLInputElement>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const selectionSequenceRef = useRef(0);
+    const activeRef = useRef(true);
+    const onSelectionPendingChangeRef = useRef(onSelectionPendingChange);
     const [selectionError, setSelectionError] = useState(false);
-    const cardControlsDisabled = disabled || requiresExactImportRetry;
+    const [selectionPending, setSelectionPending] = useState(false);
+    const cardControlsDisabled = disabled || requiresExactImportRetry || selectionPending;
+
+    useLayoutEffect(() => {
+        onSelectionPendingChangeRef.current = onSelectionPendingChange;
+    });
 
     useEffect(() => () => {
+        activeRef.current = false;
         selectionSequenceRef.current += 1;
+        onSelectionPendingChangeRef.current(false);
     }, []);
+
+    const setPending = (pending: boolean) => {
+        setSelectionPending(pending);
+        onSelectionPendingChangeRef.current(pending);
+    };
 
     const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
         const selectionSequence = selectionSequenceRef.current + 1;
@@ -218,18 +234,26 @@ export function BusinessCardCapture({
         const selectedFile = event.currentTarget.files?.[0];
         event.currentTarget.value = '';
         if (!selectedFile) return;
-        const supported = await isManagedImageFile(selectedFile);
-        if (selectionSequence !== selectionSequenceRef.current) return;
-        if (!supported) {
-            setSelectionError(true);
-            return;
+        setPending(true);
+        try {
+            const supported = await isManagedImageFile(selectedFile);
+            if (!activeRef.current || selectionSequence !== selectionSequenceRef.current) return;
+            if (!supported) {
+                setSelectionError(true);
+                return;
+            }
+            setSelectionError(false);
+            onFileSelected(selectedFile);
+        } finally {
+            if (activeRef.current && selectionSequence === selectionSequenceRef.current) {
+                setPending(false);
+            }
         }
-        setSelectionError(false);
-        onFileSelected(selectedFile);
     };
 
     const handleRemove = () => {
         selectionSequenceRef.current += 1;
+        setPending(false);
         setSelectionError(false);
         onRemove?.();
     };
@@ -386,6 +410,8 @@ export function BusinessCardCapture({
                             className="w-fit"
                             disabled={disabled}
                             onClick={() => {
+                                selectionSequenceRef.current += 1;
+                                setPending(false);
                                 setSelectionError(false);
                                 onDiscardImage();
                             }}

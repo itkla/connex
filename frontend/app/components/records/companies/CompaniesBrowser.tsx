@@ -376,8 +376,13 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         try {
             const companyPayload = cleanCompanyPayload(newPayload);
             const created = await createCompany(companyPayload);
+            let logoUploadFailed = false;
             if (logoFile) {
-                await uploadCompanyLogo(created.id, logoFile);
+                try {
+                    await uploadCompanyLogo(created.id, logoFile);
+                } catch {
+                    logoUploadFailed = true;
+                }
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
@@ -389,6 +394,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                 }
             }
             toastSuccess(t('toastCompanyCreated'));
+            if (logoUploadFailed) toastError(t('toastLogoUploadFailed'));
             setIsCreating(false);
             setCreationSucceeded(true);
             setTimeout(() => {

@@ -44,6 +44,7 @@
     "entityLabel": "company",
     "toastMetricsLoadFailed": "企業の指標を読み込めませんでした",
     "toastCompanyCreated": "企業を作成しました",
+    "toastLogoUploadFailed": "企業は作成しましたが、ロゴをアップロードできませんでした。企業プロフィールから追加してください。",
     "toastCreateFailed": "会社を作成できませんでした",
     "toastNoChanges": "保存する変更はありません",
     "toastNameRequired": "「{name}」には名前が必要です",
