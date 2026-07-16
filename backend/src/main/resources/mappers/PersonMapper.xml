@@ -6,6 +6,7 @@
   <resultMap id="PersonResult" type="Person">
     <id     property="id"        column="id"/>
     <result property="workspaceId" column="workspace_id"/>
+    <result property="ownerId" column="owner_id"/>
     <result property="name"      column="name"/>
     <result property="email"     column="email"/>
     <result property="phone"     column="phone"/>
@@ -33,7 +34,7 @@
   </resultMap>
 
   <sql id="personColumns">
-    p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
+    p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
     p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at
   </sql>
 
@@ -352,9 +353,9 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
     VALUES (
-      #{workspaceId}, #{name}, #{email}, #{phone},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
@@ -365,10 +366,10 @@
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
     VALUES
     <foreach collection="list" item="p" separator=",">
-      (#{p.workspaceId}, #{p.name}, #{p.email}, #{p.phone},
+      (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, #{p.name}, #{p.email}, #{p.phone},
        <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
        #{p.title}, #{p.imageUrl})
     </foreach>
@@ -384,6 +385,12 @@
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
     </set>
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateOwner">
+    UPDATE person
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{personId}
   </update>
 
   <select id="lockById" resultType="java.lang.Integer">
@@ -421,6 +428,15 @@
   </update>
 
   <delete id="delete">DELETE FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+  <update id="clearMemberOwnership">
+    UPDATE person SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE person SET owner_id = NULL WHERE owner_id = #{userId}
+  </update>
 
   <insert id="addTag">
     INSERT IGNORE INTO person_tag (person_id, tag_id)

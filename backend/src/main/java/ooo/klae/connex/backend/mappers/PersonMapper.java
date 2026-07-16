@@ -67,6 +67,10 @@ public interface PersonMapper {
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);
     int update(Person person);
+    int updateOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("ownerId") Integer ownerId);
     int updateImageUrlIfCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
@@ -86,6 +90,12 @@ public interface PersonMapper {
         @Param("provisionCeased") boolean provisionCeased
     );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Clears contact ownership held by a member within one workspace. */
+    void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /** Clears contact ownership held by a user across all workspaces. */
+    void clearOwnershipAnywhere(@Param("userId") int userId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);

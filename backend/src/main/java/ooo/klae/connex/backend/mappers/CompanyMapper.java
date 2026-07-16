@@ -84,12 +84,22 @@ public interface CompanyMapper {
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);
     int update(Company company);
+    int updateOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId,
+        @Param("ownerId") Integer ownerId);
     int updateLogoUrlIfCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("currentLogoUrl") String currentLogoUrl,
         @Param("logoUrl") String logoUrl);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Clears company ownership held by a member within one workspace. */
+    void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /** Clears company ownership held by a user across all workspaces. */
+    void clearOwnershipAnywhere(@Param("userId") int userId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);

@@ -4,11 +4,11 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, workspace_id, name, website, industry, phone, address, created_at, updated_at, logo_url
+    id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
   <sql id="qualifiedCompanyColumns">
-    c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address,
+    c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
     c.created_at, c.updated_at, c.logo_url
   </sql>
 
@@ -403,7 +403,8 @@
 
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
-      c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
+      c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+      c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
     WHERE (c.workspace_id = #{workspaceId}
@@ -453,15 +454,19 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
-    VALUES (#{workspaceId}, #{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
+    VALUES (
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry}, #{phone},
+      #{address}, #{logoUrl}
+    )
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
     VALUES
     <foreach collection="list" item="c" separator=",">
-      (#{c.workspaceId}, #{c.name}, #{c.website}, #{c.industry}, #{c.phone}, #{c.address}, #{c.logoUrl})
+      (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, #{c.name}, #{c.website}, #{c.industry},
+       #{c.phone}, #{c.address}, #{c.logoUrl})
     </foreach>
   </insert>
 
@@ -473,6 +478,12 @@
         phone = #{phone},
         address = #{address}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateOwner">
+    UPDATE company
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{companyId}
   </update>
 
   <select id="lockById" resultType="java.lang.Integer">
@@ -488,6 +499,15 @@
   </update>
 
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+  <update id="clearMemberOwnership">
+    UPDATE company SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
+  </update>
 
   <insert id="addTag">
     INSERT IGNORE INTO company_tag (company_id, tag_id)
