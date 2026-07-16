@@ -1686,6 +1686,14 @@ export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }
 
+/** Reads business-card readiness for the authorized active workspace. */
+export function getBusinessCardAvailability(init: RequestInit = {}) {
+    return getJson<Types.BusinessCardAvailability>("/api/business-cards/availability", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
 /** Reads contact candidates from one business-card image without mutating workspace data. */
 export function scanBusinessCard(
     image: File,

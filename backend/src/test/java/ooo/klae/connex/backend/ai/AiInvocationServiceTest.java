@@ -5,9 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -34,11 +38,13 @@ import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -52,6 +58,8 @@ class AiInvocationServiceTest {
     private static final String FEATURE = "relationship.summary";
 
     @Mock private AiFeatureGate aiFeatureGate;
+    @Mock private AiMediaAdmissionService aiMediaAdmissionService;
+    @Mock private AiMediaAdmissionService.Lease mediaLease;
     @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private AiProvider aiProvider;
     @Mock private AiProviderRouter aiProviderRouter;
@@ -63,10 +71,10 @@ class AiInvocationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiInvocationService(aiFeatureGate, aiProviderConfigService, aiProviderRouter,
-                workspaceService, auditService, new ObjectMapper());
+        service = new AiInvocationService(aiFeatureGate, aiMediaAdmissionService, aiProviderConfigService,
+                aiProviderRouter, workspaceService, auditService, new ObjectMapper());
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
-                null, null, null, null, false,
+                null, null, null, null, false, true,
                 AiCredentials.of(Map.of(
                         "accessKeyId", "AKIA_TEST",
                         "secretAccessKey", "SECRET_ACCESS_KEY")));
@@ -75,6 +83,7 @@ class AiInvocationServiceTest {
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
         lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID)).thenReturn(resolved);
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
+        lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
     }
 
     @Test
@@ -135,6 +144,108 @@ class AiInvocationServiceTest {
         assertEquals(0, audits.get(1).get("demaskWarnings"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
+    }
+
+    @Test
+    void completeWithImagePropagatesBoundedMediaAndAuditsMetadataOnly() {
+        AiInvocation base = invocation("Summarize relationship state");
+        AiInputImage image = new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        service.complete(invocation);
+
+        verify(aiFeatureGate).requireAiImageUsable();
+        verify(aiFeatureGate, never()).requireAiUsable();
+        ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(requestCaptor.capture());
+        assertEquals(1, requestCaptor.getValue().images().size());
+        assertEquals(4, requestCaptor.getValue().images().getFirst().size());
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals(1, audits.get(0).get("mediaCount"));
+        assertEquals(4, audits.get(0).get("mediaBytes"));
+        assertEquals(List.of("image/jpeg"), audits.get(0).get("mediaTypes"));
+        assertNoContent(audits.get(0));
+        assertNoContent(audits.get(1));
+        assertMediaLeaseClosesBeforeTerminalAudit();
+    }
+
+    @Test
+    void completeWithImageAdmissionDeniedAuditsAttemptAndBlockedWithoutProviderEgress() {
+        AiInvocation base = invocation("Summarize relationship state");
+        AiInputImage image = new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+        when(aiMediaAdmissionService.acquire(anyInt(), anyList()))
+                .thenThrow(new TooManyRequestsException("AI image processing is busy"));
+
+        assertThrows(TooManyRequestsException.class, () -> service.complete(invocation));
+
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals("attempt", audits.get(0).get("outcome"));
+        assertEquals("blocked", audits.get(1).get("outcome"));
+        assertEquals("media_admission", audits.get(1).get("reason"));
+        assertEquals(1, audits.get(1).get("mediaCount"));
+        assertNoContent(audits.get(0));
+        assertNoContent(audits.get(1));
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void completeWithImageRejectsResolvedTextOnlyProviderBeforeAdapterEgress() {
+        AiInvocation base = invocation("Summarize relationship state");
+        AiInputImage image = new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+        resolved = new ResolvedAiProvider("openai_compatible", null, "llama3.3:70b",
+                "https://provider.example.test/v1", null, null, null, false, false,
+                AiCredentials.of(Map.of()));
+        when(aiProviderConfigService.resolveForOrg(ORG_ID)).thenReturn(resolved);
+
+        AiProviderException exception = assertThrows(AiProviderException.class,
+                () -> service.complete(invocation));
+
+        assertEquals("Configured AI model does not support image input", exception.getMessage());
+        Map<?, ?> metadata = singleAuditMetadata();
+        assertEquals("blocked", metadata.get("outcome"));
+        assertEquals("provider_capability", metadata.get("reason"));
+        assertEquals("openai_compatible", metadata.get("provider"));
+        assertNoContent(metadata);
+        verify(aiMediaAdmissionService, never()).acquire(anyInt(), anyList());
+        verify(aiProviderRouter, never()).adapterFor(any());
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void completeStructuredWithImageReleasesAdmissionBeforeMalformedTerminalAudit() {
+        AiInvocation invocation = withImage(invocation("Summarize relationship state"));
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("not json", 10, 3, "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        AiStructuredOutcome.Malformed<IntroRationaleContent> malformed = asMalformed(outcome);
+        assertEquals(AiStructuredOutcome.REASON_MALFORMED, malformed.reason());
+        assertMediaLeaseClosesBeforeTerminalAudit();
+    }
+
+    @Test
+    void completeStructuredWithImageReleasesAdmissionAfterBindingFailure() {
+        AiInvocation invocation = withImage(invocation("Summarize relationship state"));
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{\"rationale\":{}}", 10, 3, "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, outcome);
+        verify(mediaLease).close();
     }
 
     @Test
@@ -253,6 +364,26 @@ class AiInvocationServiceTest {
         return new AiInvocation(FEATURE, context, prompt, 64, 0.2);
     }
 
+    private static AiInvocation withImage(AiInvocation invocation) {
+        AiInputImage image = new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
+        return new AiInvocation(
+                invocation.feature(), invocation.context(), invocation.prompt(), List.of(image),
+                invocation.maxTokens(), invocation.temperature());
+    }
+
+    private void assertMediaLeaseClosesBeforeTerminalAudit() {
+        InOrder order = inOrder(auditService, aiProvider, mediaLease);
+        order.verify(auditService).recordIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+        order.verify(aiProvider).complete(any());
+        order.verify(mediaLease).close();
+        order.verify(auditService).recordIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+    }
+
     private Map<?, ?> singleAuditMetadata() {
         List<Map<?, ?>> audits = auditMetadata(1);
         return audits.getFirst();
@@ -284,5 +415,6 @@ class AiInvocationServiceTest {
         assertFalse(serialized.contains("Use concise analysis"));
         assertFalse(serialized.contains("ready for follow-up"));
         assertFalse(serialized.contains("SECRET_ACCESS_KEY"));
+        assertFalse(serialized.contains("/9j/"));
     }
 }

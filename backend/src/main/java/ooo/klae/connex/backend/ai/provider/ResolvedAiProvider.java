@@ -12,6 +12,7 @@ import java.util.Objects;
  * @param deployment nullable provider deployment
  * @param projectId nullable provider project identifier
  * @param allowInternalEndpoint whether private endpoint addresses are allowed
+ * @param imageInputSupported whether the exact resolved provider/model snapshot supports images
  * @param credentials decrypted credential material for provider use
  */
 public record ResolvedAiProvider(
@@ -23,6 +24,7 @@ public record ResolvedAiProvider(
         String deployment,
         String projectId,
         boolean allowInternalEndpoint,
+        boolean imageInputSupported,
         AiCredentials credentials) {
 
     public ResolvedAiProvider {
@@ -50,6 +52,7 @@ public record ResolvedAiProvider(
                 + ", deployment=" + deployment
                 + ", projectId=" + projectId
                 + ", allowInternalEndpoint=" + allowInternalEndpoint
+                + ", imageInputSupported=" + imageInputSupported
                 + ", credentials=<redacted>]";
     }
 }

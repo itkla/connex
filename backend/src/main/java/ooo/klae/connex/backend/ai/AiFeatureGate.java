@@ -22,12 +22,20 @@ public class AiFeatureGate {
     private final ObjectProvider<AiProviderReadiness> providerReadiness;
 
     public boolean isAiUsable() {
+        return isAiUsable(false);
+    }
+
+    public boolean isAiImageUsable() {
+        return isAiUsable(true);
+    }
+
+    private boolean isAiUsable(boolean imageInput) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = workspaceService.getCurrentOrgId();
         int actorId = workspaceService.getCurrentUserId();
         return aiProperties.isEnabled()
                 && workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE)
-                && readiness(orgId);
+                && readiness(orgId, imageInput);
     }
 
     public void requireAiUsable() {
@@ -36,8 +44,16 @@ public class AiFeatureGate {
         }
     }
 
-    private boolean readiness(int orgId) {
+    public void requireAiImageUsable() {
+        if (!isAiImageUsable()) {
+            throw new ForbiddenException("AI image features are not available");
+        }
+    }
+
+    private boolean readiness(int orgId, boolean imageInput) {
         AiProviderReadiness readiness = providerReadiness.getIfAvailable();
-        return readiness != null && readiness.isReadyForOrg(orgId);
+        return readiness != null && (imageInput
+                ? readiness.isImageInputReadyForOrg(orgId)
+                : readiness.isReadyForOrg(orgId));
     }
 }

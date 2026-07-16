@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.vertex;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -22,6 +23,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -47,7 +50,7 @@ class VertexAdapterTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new VertexAdapter(vertexClient, googleAccessTokenClient, objectMapper);
+        adapter = new VertexAdapter(vertexClient, googleAccessTokenClient, objectMapper, new AiProperties());
     }
 
     @Test
@@ -57,8 +60,10 @@ class VertexAdapterTest {
 
     @Test
     void complete_geminiBuildsEncodedEndpointAndRequestAndParsesResponse() throws Exception {
-        when(googleAccessTokenClient.accessToken(any(AiCredentials.class))).thenReturn(ACCESS_TOKEN);
-        when(vertexClient.complete(any(URI.class), eq(ACCESS_TOKEN), anyString()))
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "candidates": [{
@@ -73,7 +78,11 @@ class VertexAdapterTest {
 
         ArgumentCaptor<URI> endpoint = ArgumentCaptor.forClass(URI.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(vertexClient).complete(endpoint.capture(), eq(ACCESS_TOKEN), body.capture());
+        ArgumentCaptor<AiRequestDeadline> deadlines = ArgumentCaptor.forClass(AiRequestDeadline.class);
+        verify(googleAccessTokenClient).accessToken(any(AiCredentials.class), deadlines.capture());
+        verify(vertexClient).complete(
+                endpoint.capture(), eq(ACCESS_TOKEN), body.capture(), deadlines.capture());
+        assertSame(deadlines.getAllValues().getFirst(), deadlines.getAllValues().getLast());
         assertEquals("https://us-central1-aiplatform.googleapis.com/v1/projects/connex-prod1/locations/"
                 + "us-central1/publishers/google/models/gemini-2.5-pro%40001:generateContent",
                 endpoint.getValue().toString());
@@ -95,8 +104,10 @@ class VertexAdapterTest {
 
     @Test
     void complete_claudeBuildsEncodedEndpointAndRequestAndParsesResponse() throws Exception {
-        when(googleAccessTokenClient.accessToken(any(AiCredentials.class))).thenReturn(ACCESS_TOKEN);
-        when(vertexClient.complete(any(URI.class), eq(ACCESS_TOKEN), anyString()))
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "content": [
@@ -112,7 +123,8 @@ class VertexAdapterTest {
 
         ArgumentCaptor<URI> endpoint = ArgumentCaptor.forClass(URI.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(vertexClient).complete(endpoint.capture(), eq(ACCESS_TOKEN), body.capture());
+        verify(vertexClient).complete(
+                endpoint.capture(), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
         assertEquals("https://us-central1-aiplatform.googleapis.com/v1/projects/connex-prod1/locations/"
                 + "us-central1/publishers/anthropic/models/claude-sonnet-4%4020250514:rawPredict",
                 endpoint.getValue().toString());
@@ -133,8 +145,10 @@ class VertexAdapterTest {
 
     @Test
     void complete_omitsBlankSystemPromptsForBothFamilies() throws Exception {
-        when(googleAccessTokenClient.accessToken(any(AiCredentials.class))).thenReturn(ACCESS_TOKEN);
-        when(vertexClient.complete(any(URI.class), eq(ACCESS_TOKEN), anyString()))
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(geminiResponse(), claudeResponse());
 
         adapter.complete(request("gemini-2.5-flash", " "));
@@ -142,7 +156,11 @@ class VertexAdapterTest {
 
         ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
         verify(vertexClient, org.mockito.Mockito.times(2))
-                .complete(any(URI.class), eq(ACCESS_TOKEN), bodies.capture());
+                .complete(
+                        any(URI.class),
+                        eq(ACCESS_TOKEN),
+                        bodies.capture(),
+                        any(AiRequestDeadline.class));
         assertFalse(objectMapper.readTree(bodies.getAllValues().get(0)).has("systemInstruction"));
         assertFalse(objectMapper.readTree(bodies.getAllValues().get(1)).has("system"));
     }
@@ -182,8 +200,10 @@ class VertexAdapterTest {
 
     @Test
     void complete_malformedFamilyResponsesAreSanitized() {
-        when(googleAccessTokenClient.accessToken(any(AiCredentials.class))).thenReturn(ACCESS_TOKEN);
-        when(vertexClient.complete(any(URI.class), eq(ACCESS_TOKEN), anyString()))
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("{\"response\":\"SENSITIVE_RESPONSE_BODY\"}");
 
         AiProviderException gemini = assertThrows(AiProviderException.class,
@@ -201,8 +221,10 @@ class VertexAdapterTest {
 
     @Test
     void complete_neverExposesCredentialsTokenPromptOrResponseInExceptionsOrToString() {
-        when(googleAccessTokenClient.accessToken(any(AiCredentials.class))).thenReturn(ACCESS_TOKEN);
-        when(vertexClient.complete(any(URI.class), eq(ACCESS_TOKEN), anyString()))
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
                 .thenThrow(new IllegalStateException(SERVICE_ACCOUNT_JSON + PRIVATE_KEY + ACCESS_TOKEN
                         + PROMPT + "SENSITIVE_RESPONSE_BODY"));
         AiCompletionRequest request = new AiCompletionRequest(

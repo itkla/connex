@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
@@ -188,6 +189,12 @@ public class AiProviderConfigService implements AiProviderReadiness {
         return isReady(config);
     }
 
+    @Override
+    public boolean isImageInputReadyForOrg(int orgId) {
+        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        return isReady(config) && supportsImageInput(config);
+    }
+
     /**
      * Resolves the configured organization provider and decrypts credentials for provider use.
      * @param orgId the organization
@@ -207,6 +214,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 config.getDeployment(),
                 config.getProjectId(),
                 effectiveAllowInternalEndpoint(config),
+                supportsImageInput(config),
                 decryptCredentials(orgId, config.getCredentialRef()));
     }
 
@@ -241,11 +249,16 @@ public class AiProviderConfigService implements AiProviderReadiness {
                     && matches(VERTEX_REGION, config.getRegion())
                     && isSupportedVertexModelId(config.getModelId())
                     && isBlank(config.getEndpoint());
-            case PROVIDER_OPENAI_COMPATIBLE -> isValidGenericEndpoint(config.getEndpoint(),
+            case PROVIDER_OPENAI_COMPATIBLE -> isValidGenericEndpointShape(config.getEndpoint(),
                     effectiveAllowInternalEndpoint(config))
                     && hasBoundedText(config.getModelId(), 128);
             default -> false;
         };
+    }
+
+    private static boolean supportsImageInput(AiProviderConfig config) {
+        return config != null && AiImageInputSupport.supports(
+                config.getProvider(), config.getModelId(), config.getRegion());
     }
 
     private AiCredentials decryptCredentials(int orgId, String credentialRef) {
@@ -494,13 +507,17 @@ public class AiProviderConfigService implements AiProviderReadiness {
     }
 
     private boolean isValidGenericEndpoint(String endpoint, boolean allowInternal) {
-        URI uri = parseAbsoluteEndpoint(endpoint);
-        if (uri == null) {
+        if (!isValidGenericEndpointShape(endpoint, allowInternal)) {
             return false;
         }
-        boolean validScheme = "https".equalsIgnoreCase(uri.getScheme())
-                || allowInternal && "http".equalsIgnoreCase(uri.getScheme());
-        return validScheme && aiEndpointAddressValidator.isFetchable(uri.getHost(), allowInternal);
+        URI uri = parseAbsoluteEndpoint(endpoint);
+        return uri != null && aiEndpointAddressValidator.isFetchable(uri.getHost(), allowInternal);
+    }
+
+    private static boolean isValidGenericEndpointShape(String endpoint, boolean allowInternal) {
+        URI uri = parseAbsoluteEndpoint(endpoint);
+        return uri != null && ("https".equalsIgnoreCase(uri.getScheme())
+                || allowInternal && "http".equalsIgnoreCase(uri.getScheme()));
     }
 
     private static URI parseAbsoluteEndpoint(String endpoint) {

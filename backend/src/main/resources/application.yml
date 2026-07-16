@@ -179,6 +179,7 @@ connex:
         connect-timeout: ${CONNEX_OCR_CONNECT_TIMEOUT:2s}
         request-timeout: ${CONNEX_OCR_REQUEST_TIMEOUT:15s}
         readiness-cache: ${CONNEX_OCR_READINESS_CACHE:5s}
+        local-first-wait: ${CONNEX_OCR_LOCAL_FIRST_WAIT:2s}
         max-response-bytes: ${CONNEX_OCR_MAX_RESPONSE_BYTES:1048576}
         max-image-bytes: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:8388608}
         max-width: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:8192}
@@ -252,6 +253,9 @@ connex:
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
+        max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
+        max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}
+        max-media-working-bytes: ${CONNEX_AI_MAX_MEDIA_WORKING_BYTES:67108864}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).
