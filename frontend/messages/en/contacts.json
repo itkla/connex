@@ -27,7 +27,9 @@
     "connections": "Connections",
     "timeline": "Timeline",
     "processingSuspended": "Processing suspended",
-    "provisionCeased": "Provision ceased"
+    "provisionCeased": "Provision ceased",
+    "owner": "Owner",
+    "ownerUnassigned": "Unassigned"
   },
   "ContactConnections": {
     "warmPath": "Warm intro path",
@@ -100,7 +102,12 @@
     "clearSelection": "Clear selection",
     "pageSelected": "All {count} on this page selected.",
     "selecting": "Selecting…",
-    "selectAllMatching": "Select all {total}"
+    "selectAllMatching": "Select all {total}",
+    "columnOwner": "Owner",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Updated owner on {count} contacts",
+    "toastOwnerAssignedPartial": "Updated owner on {succeeded} of {total} contacts",
+    "toastOwnerFailed": "Couldn't update {failed} contacts"
   },
   "ContactsCard": {
     "actionsAria": "Contact actions",
@@ -120,7 +127,8 @@
     "toastFailedCopyEmail": "Failed to copy email",
     "toastPhoneCopied": "Phone copied",
     "toastFailedCopyPhone": "Failed to copy phone",
-    "toastCompanyChanged": "Company changed"
+    "toastCompanyChanged": "Company changed",
+    "ownerLabel": "Owner: {name}"
   },
   "ContactsActionsMenu": {
     "edit": "Edit",
@@ -140,7 +148,10 @@
     "toastFailedRemoveFromCompany": "Failed to remove from company",
     "toastContactDeleted": "Contact deleted",
     "toastFailedDelete": "Failed to delete",
-    "restrictions": "Processing restrictions"
+    "restrictions": "Processing restrictions",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Owner updated",
+    "toastOwnerFailed": "Couldn't update the owner"
   },
   "ContactsStatCard": {
     "viewAllTitle": "View all {label}",

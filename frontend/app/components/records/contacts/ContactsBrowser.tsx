@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
-import { BuildingOffice2Icon, NoSymbolIcon, TagIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
     TableCellsIcon,
@@ -36,8 +36,9 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
+import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
@@ -193,6 +194,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const selectAllMatching = useCallback(async () => {
@@ -477,6 +483,12 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             getSortValue: (c) => c.title ?? null,
         },
         {
+            key: 'owner',
+            label: t('columnOwner'),
+            sortable: false,
+            render: (c) => (c.ownerId != null ? memberById.get(c.ownerId)?.displayName ?? '' : ''),
+        },
+        {
             key: 'createdAt',
             label: t('columnCreated'),
             getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
@@ -488,7 +500,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId]);
+    ], [t, tempByContactId, memberById]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
@@ -520,6 +532,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'remove' }); }}>
                         <TagIcon />
                         {t('removeTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
                     </DropdownMenuItem>
                     {!allMatchingActive && (
                         <>
@@ -680,6 +696,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                 email={item.email}
                                 phone={item.phone}
                                 imageUrl={item.imageUrl}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
@@ -752,6 +769,20 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         failure: (failed) => t('toastTagFailed', { failed }),
                     }}
                     onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedContactIds.length}
+                    members={activeMembers}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignPersonOwner(selectedContactIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
             </div>

@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
-import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon, ShieldExclamationIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -28,7 +28,9 @@ import NewActivityDialog from '@/app/components/records/contacts/NewActivityDial
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { deleteContact, updateContact } from '@/app/lib/api';
+import { deleteContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
+import { type WorkspaceMember } from '@/app/lib/types';
 import { type Contact, type Deal } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 import RestrictionsDialog from '@/app/components/records/contacts/RestrictionsDialog';
@@ -57,6 +59,12 @@ export default function ContactActionsMenu({
     const [noteOpen, setNoteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [restrictionsOpen, setRestrictionsOpen] = useState(false);
+    const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => {
+        if (!assignOwnerOpen || members.length > 0) return;
+        getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
+    }, [assignOwnerOpen, members.length]);
     const { activeWorkspaceId } = useWorkspace();
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
     const handleRemoveCompany = async () => {
@@ -194,6 +202,17 @@ export default function ContactActionsMenu({
                                 <DropdownMenuItem
                                     onSelect={(e) => {
                                         e.preventDefault();
+                                        setAssignOwnerOpen(true);
+                                    }}
+                                >
+                                    <UserCircleIcon className="size-4" />
+                                    <span>{t('assignOwner')}</span>
+                                </DropdownMenuItem>
+                            )}
+                            {owned && (
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
                                         setShareOpen(true);
                                     }}
                                 >
@@ -289,6 +308,23 @@ export default function ContactActionsMenu({
                     entityName={contact.name}
                     open={shareOpen}
                     onOpenChange={setShareOpen}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={assignOwnerOpen}
+                    onOpenChange={setAssignOwnerOpen}
+                    count={1}
+                    members={members}
+                    messages={{
+                        success: () => t('toastOwnerAssigned'),
+                        partial: () => t('toastOwnerAssigned'),
+                        failure: () => t('toastOwnerFailed'),
+                    }}
+                    onApply={async (ownerId) => {
+                        await updatePersonOwner(contact.id, ownerId);
+                        return { succeeded: 1, failed: 0, errors: [] };
+                    }}
+                    onSuccess={() => router.refresh()}
                 />
             </div>
         </>
