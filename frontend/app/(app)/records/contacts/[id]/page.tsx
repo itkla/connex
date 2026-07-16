@@ -100,6 +100,16 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                                         {contact.name}
                                     </h1>
+                                    {contact.suspendedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("processingSuspended")}
+                                        </span>
+                                    ) : null}
+                                    {contact.provisionCeasedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("provisionCeased")}
+                                        </span>
+                                    ) : null}
                                     <TagEditor
                                         contactId={contact.id}
                                         currentTags={contact.tags ?? []}

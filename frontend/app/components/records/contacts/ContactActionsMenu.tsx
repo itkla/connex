@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
-import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon, ShieldExclamationIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -31,6 +31,7 @@ import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { deleteContact, updateContact } from '@/app/lib/api';
 import { type Contact, type Deal } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
+import RestrictionsDialog from '@/app/components/records/contacts/RestrictionsDialog';
 
 export default function ContactActionsMenu({
     contact,
@@ -55,6 +56,7 @@ export default function ContactActionsMenu({
     const [taskOpen, setTaskOpen] = useState(false);
     const [noteOpen, setNoteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
+    const [restrictionsOpen, setRestrictionsOpen] = useState(false);
     const { activeWorkspaceId } = useWorkspace();
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
     const handleRemoveCompany = async () => {
@@ -200,6 +202,17 @@ export default function ContactActionsMenu({
                                     <span>{t('share')}</span>
                                 </DropdownMenuItem>
                             )}
+                            {owned && (
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        setRestrictionsOpen(true);
+                                    }}
+                                >
+                                    <ShieldExclamationIcon className="size-4" />
+                                    <span>{t('restrictions')}</span>
+                                </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 variant="destructive"
@@ -225,6 +238,8 @@ export default function ContactActionsMenu({
                 />
 
                 <EditContactSheet contact={contact} open={editOpen} onOpenChange={setEditOpen} />
+
+                <RestrictionsDialog contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} />
 
                 <NewActivityDialog
                     contactId={contact.id}

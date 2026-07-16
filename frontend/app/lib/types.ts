@@ -695,6 +695,61 @@ export type Contact = {
     /** Engine-evaluation opt-outs (issue #358); read-only, set via the evaluation endpoint. */
     riskExcluded?: boolean;
     introExcluded?: boolean;
+    /** APPI processing restrictions (issue #221); read-only, set via the restrictions endpoint. */
+    suspendedAt?: string | null;
+    provisionCeasedAt?: string | null;
+};
+
+export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';
+
+export type DataSubjectRequestStatus =
+    | 'received'
+    | 'verifying'
+    | 'in_progress'
+    | 'responded'
+    | 'refused'
+    | 'closed';
+
+export type DataSubjectRequest = {
+    id: number;
+    orgId: number;
+    requestType: DataSubjectRequestType;
+    status: DataSubjectRequestStatus;
+    channel?: string | null;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string | null;
+    subjectWorkspaceId?: number | null;
+    subjectPersonId?: number | null;
+    receivedAt: string;
+    identityVerifiedAt?: string | null;
+    dueAt?: string | null;
+    respondedAt?: string | null;
+    closedAt?: string | null;
+    summary?: string | null;
+    resolution?: string | null;
+    createdBy?: number | null;
+    updatedBy?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DataSubjectRequestBody = {
+    requestType: DataSubjectRequestType;
+    status?: DataSubjectRequestStatus;
+    channel?: string;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string;
+    subjectWorkspaceId?: number;
+    subjectPersonId?: number;
+    receivedAt?: string;
+    identityVerifiedAt?: string;
+    dueAt?: string;
+    respondedAt?: string;
+    closedAt?: string;
+    summary?: string;
+    resolution?: string;
 };
 
 export type Deal = {

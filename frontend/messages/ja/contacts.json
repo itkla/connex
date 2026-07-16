@@ -25,7 +25,9 @@
     "activePipeline": "アクティブなパイプライン",
     "noActiveDeals": "アクティブな案件はありません。",
     "connections": "つながり",
-    "timeline": "タイムライン"
+    "timeline": "タイムライン",
+    "processingSuspended": "利用停止中",
+    "provisionCeased": "第三者提供停止中"
   },
   "ContactConnections": {
     "warmPath": "紹介ルート",
@@ -136,7 +138,8 @@
     "toastRemovedFromCompany": "{contactName} を {companyName} から削除しました",
     "toastFailedRemoveFromCompany": "会社から削除できませんでした",
     "toastContactDeleted": "コンタクトを削除しました",
-    "toastFailedDelete": "削除できませんでした"
+    "toastFailedDelete": "削除できませんでした",
+    "restrictions": "取扱い制限"
   },
   "ContactsStatCard": {
     "viewAllTitle": "{label} をすべて表示",
@@ -250,5 +253,18 @@
     "tag": "タグ",
     "toastFailedAdd": "タグを追加できませんでした",
     "toastFailedRemove": "タグを削除できませんでした"
+  },
+  "ContactRestrictions": {
+    "title": "取扱い制限",
+    "description": "{name} さんの利用停止等の設定です。制限中も記録の管理はできますが、処理の対象から除外されます。",
+    "suspendLabel": "利用停止",
+    "suspendHint": "スコアリング・自動化・提案・AI機能・エクスポートの対象から除外します。",
+    "provisionLabel": "第三者提供の停止",
+    "provisionHint": "新しいワークスペース共有を禁止し、AIプロバイダーへの送信からも除外します。",
+    "provisionWarning": "保存すると、この連絡先の既存のワークスペース共有はすべて直ちに解除されます。",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "toastSaved": "取扱い制限を更新しました。",
+    "toastFailed": "取扱い制限を更新できませんでした。"
   }
 }

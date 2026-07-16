@@ -2260,6 +2260,45 @@ export function getOrgAudit(orgId: number, params: Types.AuditLogParams = {}, in
 }
 
 /*
+* == Data-subject requests (APPI 開示等, issue #221)
+*/
+
+export function getDataSubjectRequests(
+    orgId: number,
+    params: { status?: Types.DataSubjectRequestStatus; limit?: number; offset?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.DataSubjectRequest[]>(
+        `/api/orgs/${orgId}/data-subject-requests${buildQuery(params)}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export function createDataSubjectRequest(orgId: number, body: Types.DataSubjectRequestBody) {
+    return postJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests`, body);
+}
+
+export function updateDataSubjectRequest(orgId: number, requestId: number, body: Types.DataSubjectRequestBody) {
+    return putJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests/${requestId}`, body);
+}
+
+/**
+ * Assembles the subject-scoped disclosure for a verified disclosure request. The payload is the
+ * operator-facing raw material (Art. 33 assembly); callers save it as a file rather than render it.
+ */
+export function getDataSubjectDisclosure(orgId: number, requestId: number) {
+    return getJson<Record<string, unknown>>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/disclosure`,
+        { cache: "no-store" },
+    );
+}
+
+/** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
+export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+    return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
+}
+
+/*
 * == Workspaces (tenancy)
 */
 
