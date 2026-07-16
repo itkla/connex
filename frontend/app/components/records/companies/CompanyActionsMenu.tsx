@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -20,12 +20,13 @@ import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import EditCompanySheet from '@/app/components/records/companies/EditCompanySheet';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
+import { createContact, createDeal, deleteCompany, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -63,6 +64,12 @@ export default function CompanyActionsMenu({
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
+    const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => {
+        if (!assignOwnerOpen || members.length > 0) return;
+        getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+    }, [assignOwnerOpen, members.length]);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
@@ -296,6 +303,17 @@ export default function CompanyActionsMenu({
                             <DropdownMenuItem
                                 onSelect={(e) => {
                                     e.preventDefault();
+                                    setAssignOwnerOpen(true);
+                                }}
+                            >
+                                <UserCircleIcon className="size-4" />
+                                <span>{t('assignOwner')}</span>
+                            </DropdownMenuItem>
+                        )}
+                        {owned && (
+                            <DropdownMenuItem
+                                onSelect={(e) => {
+                                    e.preventDefault();
                                     setShareOpen(true);
                                 }}
                             >
@@ -323,6 +341,23 @@ export default function CompanyActionsMenu({
                 multiple
                 className="hidden"
                 onChange={onAttachmentFilesSelected}
+            />
+
+            <BulkAssignOwnerDialog
+                open={assignOwnerOpen}
+                onOpenChange={setAssignOwnerOpen}
+                count={1}
+                members={members}
+                messages={{
+                    success: () => t('toastOwnerAssigned'),
+                    partial: () => t('toastOwnerAssigned'),
+                    failure: () => t('toastOwnerFailed'),
+                }}
+                onApply={async (ownerId) => {
+                    await updateCompanyOwner(company.id, ownerId);
+                    return { succeeded: 1, failed: 0, errors: [] };
+                }}
+                onSuccess={() => router.refresh()}
             />
 
             <EditCompanySheet company={company} open={editOpen} onOpenChange={setEditOpen} />

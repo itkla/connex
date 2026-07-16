@@ -1512,6 +1512,22 @@ export function bulkDeleteCompanies(ids: number[]) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/delete`, { ids: chunk }));
 }
 
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function updateCompanyOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Company>(`/api/companies/${id}/owner`, { ownerId });
+}
+
+export function updatePersonOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
+}
+
 export function bulkAddTagToDeals(ids: number[], tagId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
 }

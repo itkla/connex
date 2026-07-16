@@ -18,7 +18,9 @@
     "openTasksSubtitle": "{count} open",
     "dealsSubtitle": "{count} deals",
     "loading": "Loading...",
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "owner": "Owner",
+    "ownerUnassigned": "Unassigned"
   },
   "CompaniesBrowser": {
     "title": "Companies",
@@ -70,7 +72,12 @@
     "clearSelection": "Clear selection",
     "pageSelected": "All {count} on this page selected.",
     "selecting": "Selecting…",
-    "selectAllMatching": "Select all {total}"
+    "selectAllMatching": "Select all {total}",
+    "columnOwner": "Owner",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Updated owner on {count} companies",
+    "toastOwnerAssignedPartial": "Updated owner on {succeeded} of {total} companies",
+    "toastOwnerFailed": "Couldn't update {failed} companies"
   },
   "CompaniesActionsMenu": {
     "edit": "Edit",
@@ -88,7 +95,10 @@
     "toastContactCreated": "Contact created",
     "toastCreateContactFailed": "Failed to create contact",
     "toastDealCreated": "Deal created",
-    "toastCreateDealFailed": "Failed to create deal"
+    "toastCreateDealFailed": "Failed to create deal",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Owner updated",
+    "toastOwnerFailed": "Couldn't update the owner"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "Open company page",

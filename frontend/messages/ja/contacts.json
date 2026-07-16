@@ -27,7 +27,9 @@
     "connections": "つながり",
     "timeline": "タイムライン",
     "processingSuspended": "利用停止中",
-    "provisionCeased": "第三者提供停止中"
+    "provisionCeased": "第三者提供停止中",
+    "owner": "担当者",
+    "ownerUnassigned": "未割り当て"
   },
   "ContactConnections": {
     "warmPath": "紹介ルート",
@@ -100,7 +102,12 @@
     "clearSelection": "選択を解除",
     "pageSelected": "このページの{count}件をすべて選択しました。",
     "selecting": "選択中…",
-    "selectAllMatching": "{total}件すべてを選択"
+    "selectAllMatching": "{total}件すべてを選択",
+    "columnOwner": "担当者",
+    "assignOwner": "担当者を割り当て",
+    "toastOwnerAssigned": "{count}件の連絡先の担当者を更新しました",
+    "toastOwnerAssignedPartial": "{total}件中{succeeded}件の連絡先の担当者を更新しました",
+    "toastOwnerFailed": "{failed}件の連絡先を更新できませんでした"
   },
   "ContactsCard": {
     "actionsAria": "コンタクトの操作",
@@ -140,7 +147,10 @@
     "toastFailedRemoveFromCompany": "会社から削除できませんでした",
     "toastContactDeleted": "コンタクトを削除しました",
     "toastFailedDelete": "削除できませんでした",
-    "restrictions": "取扱い制限"
+    "restrictions": "取扱い制限",
+    "assignOwner": "担当者を割り当て",
+    "toastOwnerAssigned": "担当者を更新しました",
+    "toastOwnerFailed": "担当者を更新できませんでした"
   },
   "ContactsStatCard": {
     "viewAllTitle": "{label} をすべて表示",

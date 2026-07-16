@@ -176,6 +176,12 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                 <InfoRow label={t("phone")} value={company.phone ?? ''} />
                                 <InfoRow label={t("address")} value={company.address ?? ''} />
                                 <InfoRow label={t("industry")} value={company.industry ?? ''} />
+                                <InfoRow
+                                    label={t("owner")}
+                                    value={company.ownerId != null
+                                        ? allUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
+                                        : t("ownerUnassigned")}
+                                />
                                 <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
                                 <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
                                 <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />

@@ -15,6 +15,7 @@ import {
     Squares2X2Icon,
     TableCellsIcon,
     TagIcon,
+    UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
@@ -35,10 +36,11 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
@@ -519,6 +521,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
 
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const applyBulkTag = useCallback((tagId: number) => {
         return bulkTag.mode === 'add'
@@ -543,6 +549,12 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             getSortValue: (c) => tempByCompanyId.get(c.id)?.score ?? null,
             sortable: false,
             render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
+        },
+        {
+            key: 'owner',
+            label: t('columnOwner'),
+            sortable: false,
+            render: (c) => (c.ownerId != null ? memberById.get(c.ownerId)?.displayName ?? '' : ''),
         },
         {
             key: 'website',
@@ -579,7 +591,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId]);
+    ], [t, tempByCompanyId, memberById]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
@@ -637,6 +649,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'remove' }); }}>
                         <TagIcon />
                         {t('removeTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
@@ -851,6 +867,20 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         failure: (failed) => t('toastTagFailed', { failed }),
                     }}
                     onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedCompanyIds.length}
+                    members={members}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignCompanyOwner(selectedCompanyIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
             </div>
