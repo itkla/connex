@@ -5,7 +5,7 @@ import ContactCard from "@/app/components/records/contacts/ContactCard";
 import { PlusIcon } from "@heroicons/react/24/outline";
 
 import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
@@ -32,8 +32,25 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
+    const closeTimerRef = useRef<number | null>(null);
+    const closeGenerationRef = useRef(0);
+
+    const invalidatePendingClose = useCallback(() => {
+        closeGenerationRef.current += 1;
+        if (closeTimerRef.current == null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
+
+    useEffect(() => () => invalidatePendingClose(), [invalidatePendingClose]);
+
+    const openNewContactDialog = () => {
+        invalidatePendingClose();
+        setNewContactDialogOpen(true);
+    };
 
     const closeNewContactDialog = (open: boolean) => {
+        invalidatePendingClose();
         setNewContactDialogOpen(open);
         if (!open) {
             setNewContactPayload(emptyContactPayload(company.id));
@@ -47,9 +64,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {t('contacts')}
                 </h2>
-                <button onClick={() => {
-                    setNewContactDialogOpen(true);
-                }}>
+                <button onClick={openNewContactDialog}>
                     <PlusIcon className="size-4 text-muted-foreground hover:text-foreground transition-colors duration-300 cursor-pointer" />
                 </button>
             </div>
@@ -113,7 +128,11 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                                 setImageFile(null);
                                 toast.success(t('toastContactCreated'));
                                 setCreationSucceeded(true);
-                                setTimeout(() => {
+                                invalidatePendingClose();
+                                const closeGeneration = closeGenerationRef.current;
+                                closeTimerRef.current = window.setTimeout(() => {
+                                    if (closeGenerationRef.current !== closeGeneration) return;
+                                    closeTimerRef.current = null;
                                     closeNewContactDialog(false);
                                     router.refresh();
                                 }, 900);

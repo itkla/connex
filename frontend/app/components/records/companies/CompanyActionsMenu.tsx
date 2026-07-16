@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
@@ -77,6 +77,15 @@ export default function CompanyActionsMenu({
     const [contactCreationSucceeded, setContactCreationSucceeded] = useState(false);
     const [isCreatingDeal, setIsCreatingDeal] = useState(false);
     const [dealCreationSucceeded, setDealCreationSucceeded] = useState(false);
+    const contactCloseTimerRef = useRef<number | null>(null);
+    const contactCloseGenerationRef = useRef(0);
+
+    const invalidatePendingContactClose = useCallback(() => {
+        contactCloseGenerationRef.current += 1;
+        if (contactCloseTimerRef.current == null) return;
+        window.clearTimeout(contactCloseTimerRef.current);
+        contactCloseTimerRef.current = null;
+    }, []);
 
     const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
         () => emptyDealPayload(company.id),
@@ -92,11 +101,18 @@ export default function CompanyActionsMenu({
         }).catch(() => setPipelines([]));
     }, []);
 
+    useEffect(
+        () => () => invalidatePendingContactClose(),
+        [invalidatePendingContactClose],
+    );
+
     const showNewContactDialog = () => {
+        invalidatePendingContactClose();
         setNewContactDialogOpen(true);
     };
 
     const closeNewContactDialog = (open: boolean) => {
+        invalidatePendingContactClose();
         setNewContactDialogOpen(open);
         if (!open) {
             setNewContactPayload(emptyContactPayload(company.id));
@@ -156,7 +172,11 @@ export default function CompanyActionsMenu({
                     finalized = true;
                     toastSuccess(t('toastContactCreated'));
                     setContactCreationSucceeded(true);
-                    setTimeout(() => {
+                    invalidatePendingContactClose();
+                    const closeGeneration = contactCloseGenerationRef.current;
+                    contactCloseTimerRef.current = window.setTimeout(() => {
+                        if (contactCloseGenerationRef.current !== closeGeneration) return;
+                        contactCloseTimerRef.current = null;
                         closeNewContactDialog(false);
                         router.refresh();
                     }, 900);

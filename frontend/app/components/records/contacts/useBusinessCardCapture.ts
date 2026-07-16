@@ -631,6 +631,7 @@ export function useBusinessCardCapture({
     const continueManually = () => {
         deferImportRetry();
         clearCard(true);
+        setRecoveredImport(null);
     };
 
     const retryRecovery = useCallback(() => {
