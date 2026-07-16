@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -296,20 +297,21 @@ public class DealService {
      */
     public PageResponse<Deal> queryDealsPage(String query, String sort, String dir, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, int limit, int offset) {
+            boolean noCompany, List<String> statuses, List<String> risks,
+            MemberScope memberScope, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks);
+            noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new PageResponse<>(List.of(), 0);
         }
         List<Deal> items = dealMapper.getDealsPageFiltered(
             workspaceId, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, limit, offset);
+            noCompany, statuses, riskIds, memberScope, limit, offset);
         long total = dealMapper.countDealsFiltered(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds);
+            noCompany, statuses, riskIds, memberScope);
         return new PageResponse<>(items, total);
     }
 
@@ -318,17 +320,17 @@ public class DealService {
      */
     public DealMetricsDto queryDealMetrics(String query, String currency, List<Integer> pipelineIds,
             List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
-            List<String> statuses, List<String> risks) {
+            List<String> statuses, List<String> risks, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks);
+            noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new DealMetricsDto(List.of(), 0);
         }
         List<DealCurrencyMetricsDto> byCurrency = dealMapper.dealMetricsFiltered(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds);
+            noCompany, statuses, riskIds, memberScope);
         long totalCount = byCurrency.stream()
             .mapToLong(metrics -> metrics.openCount() + metrics.closedCount())
             .sum();
@@ -337,13 +339,14 @@ public class DealService {
 
     private List<Integer> resolveRiskCandidates(int workspaceId, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks) {
+            boolean noCompany, List<String> statuses, List<String> risks,
+            MemberScope memberScope) {
         if (risks == null || risks.isEmpty() || risks.containsAll(ALL_RISK_LEVELS)) {
             return null;
         }
         List<Integer> baseIds = dealMapper.getFilteredDealIds(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, null, MAX_RISK_CANDIDATES + 1);
+            noCompany, statuses, null, memberScope, MAX_RISK_CANDIDATES + 1);
         if (baseIds.size() > MAX_RISK_CANDIDATES) {
             throw new BadRequestException(
                 "Risk filter matches too many deals; narrow the other filters before loading records");
@@ -366,6 +369,10 @@ public class DealService {
         return matches.stream().sorted().toList();
     }
 
+    /**
+     * Assembles the workspace-wide filter facet vocabulary. Facet counts deliberately ignore
+     * the active member scope so filter options never vanish while a scope is applied.
+     */
     public DealFacets getDealFacets() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<FacetCount> status = dealMapper.countsByStatus(workspaceId);
@@ -374,14 +381,13 @@ public class DealService {
             dealMapper.countsByStage(workspaceId),
             dealMapper.countsByPipeline(workspaceId),
             dealMapper.countsByCompany(workspaceId),
+            dealMapper.countsByOwner(workspaceId),
             dealMapper.countsByCurrency(workspaceId),
             List.of()
         );
     }
 
-    /**
-     * Returns a complete pipeline board when its absolute ordering can be represented safely.
-     */
+    /** Returns the full pipeline board with global positions when reordering is bounded. */
     public List<Deal> getDealBoard(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = dealMapper.countDealsByPipelineId(workspaceId, pipelineId);
@@ -389,7 +395,7 @@ public class DealService {
             throw new BadRequestException(
                 "This pipeline is too large for Kanban reordering; use the paginated table view");
         }
-        return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
+        return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
     public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {

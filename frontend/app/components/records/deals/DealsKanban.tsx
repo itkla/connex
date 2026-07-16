@@ -27,6 +27,7 @@ interface DealsKanbanProps {
     query: string;
     currency?: string;
     filters: DealFilterParams;
+    currentUserId: number;
     revision: number;
     reduce: boolean;
 }
@@ -60,6 +61,7 @@ export default function DealsKanban({
     query,
     currency,
     filters,
+    currentUserId,
     revision,
     reduce,
 }: DealsKanbanProps) {
@@ -224,8 +226,12 @@ export default function DealsKanban({
             const level = boardRisks.get(deal.id)?.level ?? 'none';
             if (!filters.risk.includes(level)) return false;
         }
+        if (filters.scope === 'me' && deal.ownerId !== currentUserId) return false;
+        if (filters.scope === 'unassigned' && deal.ownerId != null) return false;
+        if (filters.scope === 'members'
+            && (deal.ownerId == null || !filters.memberIds?.includes(deal.ownerId))) return false;
         return true;
-    }, [boardRisks, currency, filters, pipelineById, query, resolvedCompanyById, stageById]);
+    }, [boardRisks, currency, currentUserId, filters, pipelineById, query, resolvedCompanyById, stageById]);
 
     const columns: KanbanColumnDef[] = useMemo(() => {
         const stages = selectedPipelineId != null ? stagesByPipeline[selectedPipelineId] ?? [] : [];

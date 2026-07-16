@@ -59,6 +59,17 @@
     )
   </select>
 
+  <select id="countActiveMembers" resultType="int">
+    SELECT COUNT(*)
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'active'
+      AND user_id IN
+      <foreach collection="memberIds" item="memberId" open="(" separator="," close=")">
+        #{memberId}
+      </foreach>
+  </select>
+
   <select id="getMembers" resultType="User">
     SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone, u.locale,
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at

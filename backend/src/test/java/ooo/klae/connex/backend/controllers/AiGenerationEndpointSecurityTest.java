@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.IntroductionService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
@@ -66,6 +67,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private DealBriefService dealBriefService;
     @MockitoBean private DealRiskRationaleService dealRiskRationaleService;
     @MockitoBean private WorkspaceService workspaceService;
+    @MockitoBean private MemberScopeResolver memberScopeResolver;
     @MockitoBean private IntroductionService introductionService;
     @MockitoBean private IntroRationaleService introRationaleService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;

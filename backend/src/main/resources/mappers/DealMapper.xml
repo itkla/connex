@@ -112,9 +112,25 @@
     </where>
   </sql>
 
+  <sql id="memberScopePredicate">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND d.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND d.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND d.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
   <sql id="dealListFilterWhere">
     <where>
       AND d.workspace_id = #{workspaceId}
+      <include refid="memberScopePredicate"/>
       <if test="query != null">
         AND (d.name LIKE #{query}
           OR d.currency LIKE #{query}
@@ -662,13 +678,23 @@
     SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count, c.name AS label
     FROM deal d
     JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
-    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.company_id IS NOT NULL
     GROUP BY d.company_id, c.name
     UNION ALL
     SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
-    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NULL
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.company_id IS NULL
     HAVING COUNT(*) &gt; 0
+  </select>
+
+  <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(CAST(d.owner_id AS CHAR), '__empty__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY d.owner_id
   </select>
 
   <select id="countsByCurrency" resultType="ooo.klae.connex.backend.dto.FacetCount">
@@ -676,6 +702,14 @@
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
     GROUP BY d.currency
+  </select>
+
+  <select id="getDealBoard" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.pipeline_id = #{pipelineId}
+    ORDER BY d.stage_id, d.position, d.id
   </select>
 
   <select id="getDealsByPipelineId" resultMap="DealResult">
