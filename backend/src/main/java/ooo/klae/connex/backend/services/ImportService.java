@@ -794,7 +794,9 @@ public class ImportService {
             if (norm == null || byName.containsKey(norm) || !pending.add(norm)) continue;
             Company company = new Company();
             company.setName(row.companyName.trim());
-            byName.put(norm, companyService.createCompany(company).getId());
+            Company created = companyService.createCompany(company);
+            companyMapper.updateOwner(workspaceId, created.getId(), null);
+            byName.put(norm, created.getId());
         }
         return byName;
     }

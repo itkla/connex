@@ -5,6 +5,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -110,6 +111,37 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, preview.getToSkip());
+    }
+
+    @Test
+    void imports_leaveCreatedCompaniesAndPersonsUnassigned() {
+        importService.commitCompanies(req(
+            List.of(map("Company", "name")),
+            List.of(Map.of("Company", "Unassigned Direct Company")),
+            "fill_empty"));
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email"), map("Company", "company")),
+            List.of(Map.of(
+                "Name", "Unassigned Imported Person",
+                "Email", "unassigned.imported.person@x.test",
+                "Company", "Unassigned Resolved Company")),
+            "fill_empty"));
+
+        List<Company> companies = companyMapper.getAllCompanies(workspace.getId());
+        Company direct = companies.stream()
+            .filter(company -> "Unassigned Direct Company".equals(company.getName()))
+            .findFirst()
+            .orElseThrow();
+        Company resolved = companies.stream()
+            .filter(company -> "Unassigned Resolved Company".equals(company.getName()))
+            .findFirst()
+            .orElseThrow();
+        Person person = personMapper.findByEmails(
+            workspace.getId(), List.of("unassigned.imported.person@x.test")).getFirst();
+
+        assertNull(direct.getOwnerId());
+        assertNull(resolved.getOwnerId());
+        assertNull(person.getOwnerId());
     }
 
     @Test
