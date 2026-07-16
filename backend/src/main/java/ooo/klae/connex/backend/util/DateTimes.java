@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Shared, tolerant parsing of the UTC {@code yyyy-MM-dd HH:mm:ss} datetimes that MySQL DATETIME
@@ -25,6 +26,24 @@ public final class DateTimes {
      * @param value the datetime string, possibly null/blank
      * @return epoch millis, or null when the value is null/blank/unparseable
      */
+    /**
+     * Reports whether a timestamp fits the MySQL {@code DATETIME} year range (1000–9999) after
+     * the fractional-second rounding MySQL applies on store — nanos of half a second or more
+     * round up to the next whole second, which can roll {@code 9999-12-31T23:59:59.5} past the
+     * supported range.
+     * @param value the timestamp, possibly null
+     * @return true when null or storable in a MySQL {@code DATETIME} column
+     */
+    public static boolean fitsMysqlDateTimeRange(LocalDateTime value) {
+        if (value == null) {
+            return true;
+        }
+        LocalDateTime stored = value.getNano() >= 500_000_000
+            ? value.truncatedTo(ChronoUnit.SECONDS).plusSeconds(1)
+            : value;
+        return stored.getYear() >= 1000 && stored.getYear() <= 9999;
+    }
+
     public static Long epochMillis(String value) {
         if (value == null || value.isBlank()) {
             return null;

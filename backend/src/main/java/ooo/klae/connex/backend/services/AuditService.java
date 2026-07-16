@@ -80,6 +80,24 @@ public class AuditService {
     }
 
     /**
+     * Records a single successful audit event and propagates any persistence failure, for
+     * operations that must not proceed without a durable access record (e.g. bulk personal-data
+     * disclosure). Call inside the operation's transaction so a failed append aborts it.
+     *
+     * @param action      dotted action name
+     * @param entityType  target entity type (null for non-entity events)
+     * @param entityId    target entity id (nullable)
+     * @param targetLabel human-readable target descriptor
+     * @param summary     human-readable one-liner
+     * @param changes     field diff or metadata object; may be null
+     */
+    public void recordStrict(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, Object changes) {
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
+                null, false, false, null, null);
+    }
+
+    /**
      * Records a successful audit event with explicit workspace/org scope.
      * @param action action name
      * @param entityType audited entity type
@@ -164,35 +182,45 @@ public class AuditService {
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId) {
         try {
-            AuditLog entry = new AuditLog();
-            entry.setAction(truncate(action, ACTION_MAX));
-            entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
-            entry.setEntityId(entityId);
-            entry.setTargetLabel(truncate(sanitizeAuditText(targetLabel), LABEL_MAX));
-            entry.setOutcome(outcome);
-            entry.setSummary(truncate(sanitizeAuditText(summary), SUMMARY_MAX));
-            entry.setChanges(toSanitizedJson(changes));
-            entry.setContext(toSanitizedJson(context));
-
-            if (explicitScope) {
-                entry.setWorkspaceId(workspaceId);
-                entry.setOrgId(orgId);
-            } else {
-                boolean orgLevel = "organization".equals(entityType);
-                entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
-                entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
-            }
-            resolveActor(entry);
-            resolveRequest(entry);
-
-            if (independent) {
-                auditIntegrityService.appendIndependent(entry);
-            } else {
-                auditIntegrityService.append(entry);
-            }
+            writeUnchecked(action, entityType, entityId, targetLabel, outcome, summary, changes,
+                    context, independent, explicitScope, workspaceId, orgId);
         } catch (Exception e) {
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
+        }
+    }
+
+    /**
+     * Writes an audit event to the database, propagating any failure to the caller.
+     */
+    private void writeUnchecked(String action, String entityType, Integer entityId, String targetLabel,
+            String outcome, String summary, Object changes, Object context, boolean independent,
+            boolean explicitScope, Integer workspaceId, Integer orgId) {
+        AuditLog entry = new AuditLog();
+        entry.setAction(truncate(action, ACTION_MAX));
+        entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
+        entry.setEntityId(entityId);
+        entry.setTargetLabel(truncate(sanitizeAuditText(targetLabel), LABEL_MAX));
+        entry.setOutcome(outcome);
+        entry.setSummary(truncate(sanitizeAuditText(summary), SUMMARY_MAX));
+        entry.setChanges(toSanitizedJson(changes));
+        entry.setContext(toSanitizedJson(context));
+
+        if (explicitScope) {
+            entry.setWorkspaceId(workspaceId);
+            entry.setOrgId(orgId);
+        } else {
+            boolean orgLevel = "organization".equals(entityType);
+            entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
+            entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
+        }
+        resolveActor(entry);
+        resolveRequest(entry);
+
+        if (independent) {
+            auditIntegrityService.appendIndependent(entry);
+        } else {
+            auditIntegrityService.append(entry);
         }
     }
 

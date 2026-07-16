@@ -17,8 +17,9 @@ import java.util.Set;
  * means the {@code ON DELETE SET NULL} cascade is the only mechanism that can
  * ever null {@code actor_id}, so its foreign keys must stay; {@code
  * workspace_role} is control-plane so {@code workspace_member.role_id} keeps
- * its constraint; {@code appi_incident} is control-plane so it stays writable
- * during an org-catalog outage it may be describing.
+ * its constraint; {@code appi_incident} and {@code data_subject_request} are
+ * control-plane so they stay writable during an org-catalog outage they may be
+ * describing.
  *
  * <p>This registry classifies TABLES for the physical split; it is orthogonal
  * to {@code TenantScopeInterceptor}'s mapper-namespace sets, which classify
@@ -42,6 +43,7 @@ public final class TablePlaneRegistry {
         "audit_log",
         "audit_log_integrity_checkpoint",
         "audit_log_integrity_head",
+        "data_subject_request",
         "email_change_token",
         "federated_identity",
         "notification_preference",
