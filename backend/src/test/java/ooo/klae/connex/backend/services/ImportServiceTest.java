@@ -136,8 +136,9 @@ class ImportServiceTest extends AbstractServiceTest {
             .filter(company -> "Unassigned Resolved Company".equals(company.getName()))
             .findFirst()
             .orElseThrow();
-        Person person = personMapper.findByEmails(
-            workspace.getId(), List.of("unassigned.imported.person@x.test")).getFirst();
+        int personId = personMapper.findByEmails(
+            workspace.getId(), List.of("unassigned.imported.person@x.test")).getFirst().getId();
+        Person person = personMapper.getPersonById(workspace.getId(), personId);
 
         assertNull(direct.getOwnerId());
         assertNull(resolved.getOwnerId());

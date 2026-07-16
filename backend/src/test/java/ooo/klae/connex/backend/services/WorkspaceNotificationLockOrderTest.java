@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -13,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
@@ -40,14 +44,23 @@ class WorkspaceNotificationLockOrderTest {
     @InjectMocks private WorkspaceService service;
 
     @Test
-    void ownerReferenceLocksMembershipBeforeValidation() {
-        when(workspaceMapper.isMember(7, 9)).thenReturn(true);
+    void ownerReferenceUsesCurrentLockingMembershipValidation() {
+        when(workspaceMapper.lockActiveMember(7, 9)).thenReturn(9);
 
         service.lockAndRequireMember(7, 9);
 
-        InOrder order = inOrder(notificationMapper, workspaceMapper);
-        order.verify(notificationMapper).lockRecipientMemberships(9);
-        order.verify(workspaceMapper).isMember(7, 9);
+        verify(workspaceMapper).lockActiveMember(7, 9);
+        verifyNoInteractions(notificationMapper);
+    }
+
+    @Test
+    void ownerReferenceRejectsInactiveMembershipUnderLock() {
+        when(workspaceMapper.lockActiveMember(7, 9)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> service.lockAndRequireMember(7, 9));
+
+        verify(workspaceMapper).lockActiveMember(7, 9);
+        verifyNoInteractions(notificationMapper);
     }
 
     @Test

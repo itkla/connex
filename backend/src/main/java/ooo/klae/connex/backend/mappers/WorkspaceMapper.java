@@ -17,6 +17,7 @@ public interface WorkspaceMapper {
     List<WorkspaceMembershipDto> getMembershipsForUser(int userId);
     Workspace getDefaultWorkspace();
     boolean isMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    Integer lockActiveMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int countActiveMembers(
         @Param("workspaceId") int workspaceId,

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -279,13 +280,15 @@ public class WorkspaceService {
     }
 
     /**
-     * Locks a user's membership rows in workspace order and requires an active membership in the
-     * requested workspace. Owner-bearing org-data writes use this membership-to-record lock order
-     * to serialize with member and account offboarding.
+     * Locks and requires an active membership in the requested workspace. Owner-bearing org-data
+     * writes use this membership-to-record lock order to serialize with member and account
+     * offboarding.
      */
+    @Transactional(propagation = Propagation.MANDATORY)
     public void lockAndRequireMember(int workspaceId, int userId) {
-        notificationMapper.lockRecipientMemberships(userId);
-        requireMember(workspaceId, userId);
+        if (workspaceMapper.lockActiveMember(workspaceId, userId) == null) {
+            throw new ForbiddenException("User " + userId + " is not a member of this workspace");
+        }
     }
 
     /** Returns whether every requested id is an active member of the workspace. */
