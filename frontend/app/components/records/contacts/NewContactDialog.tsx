@@ -221,6 +221,9 @@ export function NewContactForm({
     });
     const previousRecoveryStatusRef = useRef(businessCard.recoveryStatus);
     const recoveredImport = businessCard.recoveredImport;
+    const recoveredImportToken = recoveredImport
+        ? `${recoveredImport.requestId}:${recoveredImport.revision ?? 'missing'}:${recoveredImport.terminal}`
+        : null;
     const acknowledgeRecoveredImport = businessCard.acknowledgeRecoveredImport;
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const companySearch = useCompanySearch(
@@ -256,8 +259,9 @@ export function NewContactForm({
     useLayoutEffect(() => {
         if (!active
             || !recoveredImport
-            || recoveredImportHandledRef.current === recoveredImport.requestId) return;
-        recoveredImportHandledRef.current = recoveredImport.requestId;
+            || !recoveredImportToken
+            || recoveredImportHandledRef.current === recoveredImportToken) return;
+        recoveredImportHandledRef.current = recoveredImportToken;
         const controller = new AbortController();
         const generation = acknowledgmentGenerationRef.current + 1;
         acknowledgmentGenerationRef.current = generation;
@@ -296,7 +300,7 @@ export function NewContactForm({
             }
         })();
         return () => controller.abort();
-    }, [acknowledgeRecoveredImport, active, recoveredImport, router, t]);
+    }, [acknowledgeRecoveredImport, active, recoveredImport, recoveredImportToken, router, t]);
 
     const handleCreate = async () => {
         resetFieldErrors();

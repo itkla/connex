@@ -267,14 +267,16 @@ export async function prepareBusinessCardImportRecovery(
 ): Promise<number> {
     const scope = await recoveryScope(signal);
     const entry = await withRecoveryLock(scope, () => {
-        const current = readEntry(scope, requestId);
-        if (!current) {
-            throw new ApiError(
-                'Business-card import recovery is unavailable',
-                410,
-                'BUSINESS_CARD_IMPORT_RESULT_GONE',
-            );
-        }
+        const stored = readEntry(scope, requestId);
+        const current = stored ?? {
+            requestId,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + REGISTERED_TTL_MS,
+            phase: 'registered' as const,
+            pendingAvatar,
+            revision: 0,
+        };
+        if (!stored) persistEntry(scope, current);
         if (current.expiresAt <= Date.now()) {
             removeEntry(scope, requestId);
             throw new ApiError(
@@ -314,6 +316,49 @@ export async function prepareBusinessCardImportRecovery(
         });
         return revision;
     }, signal);
+}
+
+async function checkInMemoryRequest(
+    requestId: string,
+    signal?: AbortSignal,
+): Promise<BusinessCardImportRecoveryReconciliation> {
+    try {
+        const result = await getBusinessCardImportStatus(requestId, { signal });
+        return {
+            recovered: {
+                requestId,
+                result,
+                terminal: 'completed',
+                pendingAvatar: false,
+                revision: null,
+            },
+            reusableRequestId: null,
+            reusableRevision: null,
+        };
+    } catch (error) {
+        if (!(error instanceof ApiError)) throw error;
+        if (error.status === 410) {
+            return {
+                recovered: {
+                    requestId,
+                    result: null,
+                    terminal: 'gone',
+                    pendingAvatar: false,
+                    revision: null,
+                },
+                reusableRequestId: null,
+                reusableRevision: null,
+            };
+        }
+        if (error.status === 404 || error.status === 409) {
+            return {
+                recovered: null,
+                reusableRequestId: requestId,
+                reusableRevision: null,
+            };
+        }
+        throw error;
+    }
 }
 
 /** Records that the optional avatar upload completed before import recovery is cleared. */
@@ -441,40 +486,11 @@ export async function reconcileBusinessCardImportRecovery(
     const scope = await recoveryScope(signal);
     for (let attempt = 0; attempt <= RECOVERY_POLL_DELAYS_MS.length; attempt += 1) {
         const entries = await withRecoveryLock(scope, () => readEntries(scope), signal);
+        if (inMemoryRequestId && !entries.some((entry) => entry.requestId === inMemoryRequestId)) {
+            return checkInMemoryRequest(inMemoryRequestId, signal);
+        }
         if (entries.length === 0) {
-            if (!inMemoryRequestId) {
-                return { recovered: null, reusableRequestId: null, reusableRevision: null };
-            }
-            try {
-                const result = await getBusinessCardImportStatus(inMemoryRequestId, { signal });
-                return {
-                    recovered: {
-                        requestId: inMemoryRequestId,
-                        result,
-                        terminal: 'completed',
-                        pendingAvatar: false,
-                        revision: null,
-                    },
-                    reusableRequestId: null,
-                    reusableRevision: null,
-                };
-            } catch (error) {
-                if (!(error instanceof ApiError)) throw error;
-                if (error.status === 410) {
-                    return {
-                        recovered: {
-                            requestId: inMemoryRequestId,
-                            result: null,
-                            terminal: 'gone',
-                            pendingAvatar: false,
-                            revision: null,
-                        },
-                        reusableRequestId: null,
-                        reusableRevision: null,
-                    };
-                }
-                throw error;
-            }
+            return { recovered: null, reusableRequestId: null, reusableRevision: null };
         }
         const outcome = await checkEntries(scope, entries, signal);
         if (outcome.recovered) {
