@@ -39,6 +39,7 @@ import QuickEditSheet, { type ContactDraft } from '@/app/components/records/cont
 import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 const NO_ITEMS: Contact[] = [];
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
@@ -158,6 +159,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         reload();
         loadFacets();
     }, [clearSelection, reload, loadFacets]);
+
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'contact') refresh();
+    }), [refresh]);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!personFacets) return [];

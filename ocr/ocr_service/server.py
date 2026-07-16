@@ -3,6 +3,7 @@ import json
 import os
 import socket
 import threading
+import time
 from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -77,13 +78,13 @@ class OcrServer(ThreadingHTTPServer):
         with self._deadline_lock:
             return self._active_generation
 
-    def begin_inference(self) -> tuple[int, threading.Timer]:
+    def begin_inference(self, timeout_seconds: float) -> tuple[int, threading.Timer]:
         with self._deadline_lock:
             self._deadline_generation += 1
             generation = self._deadline_generation
             self._active_generation = generation
         timer = threading.Timer(
-            self.config.request_timeout_seconds,
+            timeout_seconds,
             self._inference_timed_out,
             args=(generation,),
         )
@@ -135,6 +136,7 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
     def setup(self) -> None:
         super().setup()
         self._request_expired = threading.Event()
+        self._request_deadline = time.monotonic() + self.server.config.request_timeout_seconds
         self._request_timer = threading.Timer(
             self.server.config.request_timeout_seconds,
             self._expire_request,
@@ -196,7 +198,10 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
             self._respond(HTTPStatus.TOO_MANY_REQUESTS, {"error": "OCR busy"})
             return
         try:
-            generation, timer = self.server.begin_inference()
+            remaining_seconds = self._request_deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                return
+            generation, timer = self.server.begin_inference(remaining_seconds)
             try:
                 try:
                     lines = self.server.engine.recognize(content, content_type)
@@ -223,7 +228,6 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
         if len(content) != content_length:
             self._respond(HTTPStatus.BAD_REQUEST, {"error": "Incomplete request body"})
             return None
-        self._request_timer.cancel()
         return content
 
     def _authorized(self) -> bool:

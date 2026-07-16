@@ -47,6 +47,7 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
     public void run(ApplicationArguments arguments) {
         LegacyMigrationMode mode = properties.getLegacyMigration().getMode();
         if (mode == LegacyMigrationMode.OFF) {
+            requireNoLegacyReferences();
             return;
         }
         requireMaintenanceInvocation(mode);
@@ -78,6 +79,37 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
                 "Legacy upload migration did not complete; correct the reported records and rerun it");
         }
         applicationContext.close();
+    }
+
+    private void requireNoLegacyReferences() {
+        int remaining = tenantWorkScope.unrouted(controlMapper::countUserReferences);
+        int afterId = 0;
+        int batchSize = properties.getLegacyMigration().getBatchSize();
+        while (true) {
+            int cursor = afterId;
+            List<Integer> workspaceIds = tenantWorkScope.unrouted(
+                () -> controlMapper.findWorkspaceIds(cursor, batchSize));
+            if (workspaceIds.isEmpty()) {
+                break;
+            }
+            for (int workspaceId : workspaceIds) {
+                if (workspaceId <= afterId) {
+                    throw new IllegalStateException(
+                        "Legacy upload workspace enumeration did not advance");
+                }
+                afterId = workspaceId;
+                int references = tenantWorkScope.inWorkspace(
+                    workspaceId, () -> tenantMapper.countReferences(workspaceId));
+                remaining = Math.addExact(remaining, references);
+            }
+            if (workspaceIds.size() < batchSize) {
+                break;
+            }
+        }
+        if (remaining > 0) {
+            throw new IllegalStateException(
+                "Legacy public upload references remain; run the documented legacy upload migration before starting this version");
+        }
     }
 
     private void requireMaintenanceInvocation(LegacyMigrationMode mode) {
@@ -183,7 +215,7 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
             LegacyMigrationMode mode,
             MigrationSummary summary,
             BatchFinder finder,
-            RecordAction validator,
+            RecordValidator validator,
             RecordAction migrator,
             WorkspaceProjection projection) {
         int afterId = 0;
@@ -200,9 +232,9 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
                     fileReader.validateOwnership(record, prefix);
                     ResolvedLegacyUpload resolved = fileReader.read(record.getUrl(), prefix);
                     if (mode == LegacyMigrationMode.DRY_RUN) {
-                        validator.apply(record, resolved);
+                        long storedSize = validator.apply(record, resolved);
                         if (projection != null) {
-                            projection.add(resolved.size());
+                            projection.add(storedSize);
                         }
                         summary.valid++;
                     } else {
@@ -230,6 +262,11 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
     @FunctionalInterface
     private interface RecordAction {
         void apply(LegacyUploadRecord record, ResolvedLegacyUpload resolved);
+    }
+
+    @FunctionalInterface
+    private interface RecordValidator {
+        long apply(LegacyUploadRecord record, ResolvedLegacyUpload resolved);
     }
 
     private static final class WorkspaceProjection {

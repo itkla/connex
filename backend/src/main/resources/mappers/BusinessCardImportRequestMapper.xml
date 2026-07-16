@@ -3,22 +3,75 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper">
 
-  <insert id="claim">
+  <insert id="reserve">
     INSERT IGNORE INTO business_card_import_request
-      (workspace_id, idempotency_key, request_fingerprint)
+      (workspace_id, idempotency_key, request_fingerprint, expires_at,
+       created_by_user_id, submission_expires_at, reservation_slot)
     VALUES
-      (#{workspaceId}, #{idempotencyKey}, #{requestFingerprint})
+      (#{workspaceId}, #{idempotencyKey}, NULL, #{expiresAt},
+       #{userId}, #{submissionExpiresAt}, #{reservationSlot})
   </insert>
 
   <select id="get" resultType="ooo.klae.connex.backend.businesscard.BusinessCardImportRecord">
     SELECT request_fingerprint AS requestFingerprint,
       person_id AS personId,
       attachment_id AS attachmentId,
-      company_id AS companyId
+      company_id AS companyId,
+      expires_at AS expiresAt,
+      created_by_user_id AS createdByUserId,
+      submission_expires_at AS submissionExpiresAt,
+      reservation_slot AS reservationSlot
+    FROM business_card_import_request
+    WHERE workspace_id = #{workspaceId} AND idempotency_key = #{idempotencyKey}
+  </select>
+
+  <select id="getForUpdate" resultType="ooo.klae.connex.backend.businesscard.BusinessCardImportRecord">
+    SELECT request_fingerprint AS requestFingerprint,
+      person_id AS personId,
+      attachment_id AS attachmentId,
+      company_id AS companyId,
+      expires_at AS expiresAt,
+      created_by_user_id AS createdByUserId,
+      submission_expires_at AS submissionExpiresAt,
+      reservation_slot AS reservationSlot
     FROM business_card_import_request
     WHERE workspace_id = #{workspaceId} AND idempotency_key = #{idempotencyKey}
     FOR UPDATE
   </select>
+
+  <update id="bindReservation">
+    UPDATE business_card_import_request
+    SET request_fingerprint = #{requestFingerprint},
+      expires_at = #{expiresAt},
+      submission_expires_at = NULL,
+      reservation_slot = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND request_fingerprint IS NULL
+      AND created_by_user_id = #{userId}
+      AND submission_expires_at &gt; #{now}
+      AND expires_at &gt; #{now}
+  </update>
+
+  <update id="renewReservation">
+    UPDATE business_card_import_request
+    SET submission_expires_at = #{submissionExpiresAt},
+      created_by_user_id = #{userId}
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND request_fingerprint IS NULL
+      AND created_by_user_id = #{userId}
+      AND reservation_slot IS NOT NULL
+      AND expires_at &gt; #{now}
+  </update>
+
+  <delete id="deleteAbandonedReservations">
+    DELETE FROM business_card_import_request
+    WHERE workspace_id = #{workspaceId}
+      AND created_by_user_id = #{userId}
+      AND request_fingerprint IS NULL
+      AND submission_expires_at &lt;= #{now}
+  </delete>
 
   <update id="complete">
     UPDATE business_card_import_request
@@ -28,6 +81,7 @@
       completed_at = CURRENT_TIMESTAMP
     WHERE workspace_id = #{workspaceId}
       AND idempotency_key = #{idempotencyKey}
+      AND request_fingerprint IS NOT NULL
       AND person_id IS NULL
       AND attachment_id IS NULL
   </update>
@@ -35,19 +89,17 @@
   <delete id="deleteExpired">
     DELETE FROM business_card_import_request
     WHERE workspace_id = #{workspaceId}
-      AND completed_at IS NOT NULL
-      AND created_at &lt; #{cutoff}
-    ORDER BY created_at, idempotency_key
+      AND expires_at &lt;= #{cutoff}
+    ORDER BY expires_at, idempotency_key
     LIMIT #{limit}
   </delete>
 
   <select id="workspaceIdsWithExpired" resultType="int">
     SELECT workspace_id
     FROM business_card_import_request
-    WHERE completed_at IS NOT NULL
-      AND created_at &lt; #{cutoff}
+    WHERE expires_at &lt;= #{cutoff}
     GROUP BY workspace_id
-    ORDER BY MIN(created_at), workspace_id
+    ORDER BY MIN(expires_at), workspace_id
     LIMIT #{limit}
   </select>
 

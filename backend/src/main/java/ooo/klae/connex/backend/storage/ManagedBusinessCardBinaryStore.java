@@ -28,9 +28,4 @@ public class ManagedBusinessCardBinaryStore implements BusinessCardBinaryStore {
             workspaceId, fileName, contentType, content);
         return new StoredBusinessCard(stored.url(), stored.size());
     }
-
-    @Override
-    public void delete(int workspaceId, String url) {
-        managedObjectService.deleteAttachment(workspaceId, url);
-    }
 }

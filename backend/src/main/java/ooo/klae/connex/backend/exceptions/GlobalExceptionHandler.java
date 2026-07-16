@@ -31,6 +31,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
     }
 
+    @ExceptionHandler(BusinessCardImportResultGoneException.class)
+    public ResponseEntity<Map<String, String>> businessCardImportResultGone(
+            BusinessCardImportResultGoneException ex) {
+        return ResponseEntity.status(HttpStatus.GONE)
+            .body(Map.of("code", "BUSINESS_CARD_IMPORT_RESULT_GONE", "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<String> badRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());

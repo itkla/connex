@@ -5,6 +5,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -21,6 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
+import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
 import ooo.klae.connex.backend.services.BusinessCardService;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,7 +69,8 @@ class BusinessCardControllerTest {
         ArgumentCaptor<BusinessCardCompanyAction> actionCaptor =
                 ArgumentCaptor.forClass(BusinessCardCompanyAction.class);
         verify(businessCardService).importCard(
-                any(), contactCaptor.capture(), actionCaptor.capture(), org.mockito.ArgumentMatchers.eq(IDEMPOTENCY_KEY));
+                any(), contactCaptor.capture(), actionCaptor.capture(),
+                org.mockito.ArgumentMatchers.eq(IDEMPOTENCY_KEY));
         org.junit.jupiter.api.Assertions.assertEquals("Ada Lovelace", contactCaptor.getValue().name());
         org.junit.jupiter.api.Assertions.assertEquals(
                 new BusinessCardCompanyAction.Existing(7), actionCaptor.getValue());
@@ -116,5 +119,19 @@ class BusinessCardControllerTest {
             .andExpect(status().isOk());
 
         verify(businessCardService).importStatus(IDEMPOTENCY_KEY);
+    }
+
+    @Test
+    void importReservationUsesTheOpaqueIdempotencyHeader() throws Exception {
+        when(businessCardService.reserveImport(IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportReservationResponse(
+                java.time.Instant.parse("2026-07-16T00:00:00Z")));
+
+        mockMvc.perform(post("/api/business-cards/import/reservation")
+                .header("Idempotency-Key", IDEMPOTENCY_KEY))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.expiresAt").value("2026-07-16T00:00:00Z"));
+
+        verify(businessCardService).reserveImport(IDEMPOTENCY_KEY);
     }
 }

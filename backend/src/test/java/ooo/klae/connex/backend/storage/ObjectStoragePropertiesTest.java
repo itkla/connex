@@ -21,4 +21,17 @@ class ObjectStoragePropertiesTest {
 
         assertTrue(properties.isAmbiguousWriteCleanupDelayValid());
     }
+
+    @Test
+    void perUserReadLimitCannotExceedTheGlobalLimit() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        properties.setMaxConcurrentReads(2);
+        properties.setMaxConcurrentReadsPerUser(3);
+
+        assertFalse(properties.isReadConcurrencyConfigurationValid());
+
+        properties.setMaxConcurrentReadsPerUser(2);
+
+        assertTrue(properties.isReadConcurrencyConfigurationValid());
+    }
 }

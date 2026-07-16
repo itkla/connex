@@ -162,15 +162,15 @@ class CompanyServiceTest extends AbstractServiceTest {
         prefixOnly.setName("Analytical Labs Group");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.findVisibleNameCandidates(
-                7, "analytical%labs%", "analytical labs", 16))
+                7, "analytical%labs%", "analytical labs", 17))
             .thenReturn(List.of(exact, prefixOnly));
         CompanyService service = companyService(mapper, workspaceService);
 
         assertEquals(List.of(exact),
-            service.findVisibleByNormalizedName("  Ａnalytical　Labs  "));
+            service.findVisibleByNormalizedName("  Ａnalytical　Labs  ").companies());
 
         verify(mapper).findVisibleNameCandidates(
-            7, "analytical%labs%", "analytical labs", 16);
+            7, "analytical%labs%", "analytical labs", 17);
         verify(mapper, never()).getAllCompanies(7);
     }
 

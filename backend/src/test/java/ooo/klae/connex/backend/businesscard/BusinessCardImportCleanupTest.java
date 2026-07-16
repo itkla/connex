@@ -50,7 +50,7 @@ class BusinessCardImportCleanupTest {
 
     @Test
     void sweepsCompletedClaimsAcrossEveryActiveCatalogWithinTheBatchBound() {
-        LocalDateTime cutoff = LocalDateTime.of(2026, 7, 14, 12, 0);
+        LocalDateTime cutoff = LocalDateTime.of(2026, 7, 15, 12, 0);
         when(placementRegistry.activeCatalogs()).thenReturn(Arrays.asList(null, "dedicated_org"));
         when(mapper.workspaceIdsWithExpired(cutoff, 3)).thenReturn(List.of(7, 8));
         when(mapper.deleteExpired(7, cutoff, 3)).thenReturn(2);

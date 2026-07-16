@@ -21,7 +21,6 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.annotation.PostConstruct;
@@ -53,6 +52,7 @@ public class ManagedObjectService {
     private final WorkspaceObjectStorageQuotaService quotaService;
     private final UserImageReplacementAdmissionService userImageAdmissionService;
     private final ManagedObjectWriteAdmissionService writeAdmissionService;
+    private final ManagedObjectReadAdmissionService readAdmissionService;
     private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
     private final AtomicLong readinessGeneration = new AtomicLong();
     private volatile ReadinessSnapshot readinessSnapshot;
@@ -224,12 +224,12 @@ public class ManagedObjectService {
             "user-image", 0, userId, legacyUrl, image.extension());
         String key = userImageKey(userId, objectToken);
         writeAdmissionService.admit(() -> {
-            deletionRetryQueue.cancelUserInCurrentTransaction(key);
             storeDeterministic(
                 key,
                 UploadSource.from(source.fileName(), image.contentType(), content),
                 image.contentType(),
-                () -> deletionRetryQueue.enqueueRollbackTombstoneUser(key));
+                () -> deletionRetryQueue.prepareUserWrite(key),
+                () -> deletionRetryQueue.cancelUserInCurrentTransaction(key));
             return null;
         });
         return new StoredMigratedImage(
@@ -286,7 +286,7 @@ public class ManagedObjectService {
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
         String token = requireManagedToken(attachment.getUrl(), ATTACHMENT_URL_PREFIX);
-        StoredObject object = get(attachmentKey(workspaceId, token));
+        StoredObject object = getForResponse(attachmentKey(workspaceId, token));
         return new ManagedContent(
             object,
             uploadPolicy.safeResponseContentType(attachment.getContentType()),
@@ -300,7 +300,7 @@ public class ManagedObjectService {
             String persistedUrl,
             String requestedToken) {
         String token = requireRequestedToken(persistedUrl, personImageUrl(personId, requestedToken), requestedToken);
-        StoredObject object = get(personImageKey(ownerWorkspaceId, personId, token));
+        StoredObject object = getForResponse(personImageKey(ownerWorkspaceId, personId, token));
         return new ManagedContent(object, imageContentType(token), "contact-picture." + extension(token));
     }
 
@@ -310,13 +310,13 @@ public class ManagedObjectService {
             String persistedUrl,
             String requestedToken) {
         String token = requireRequestedToken(persistedUrl, companyImageUrl(companyId, requestedToken), requestedToken);
-        StoredObject object = get(companyImageKey(ownerWorkspaceId, companyId, token));
+        StoredObject object = getForResponse(companyImageKey(ownerWorkspaceId, companyId, token));
         return new ManagedContent(object, imageContentType(token), "company-logo." + extension(token));
     }
 
     public ManagedContent openUserImage(int userId, String persistedUrl, String requestedToken) {
         String token = requireRequestedToken(persistedUrl, userImageUrl(userId, requestedToken), requestedToken);
-        StoredObject object = get(userImageKey(userId, token));
+        StoredObject object = getForResponse(userImageKey(userId, token));
         return new ManagedContent(object, imageContentType(token), "profile-picture." + extension(token));
     }
 
@@ -372,12 +372,14 @@ public class ManagedObjectService {
             String key,
             UploadSource source,
             String contentType,
-            Runnable rollbackCleanup) {
+            Runnable prepareCleanup,
+            Runnable cancelCleanup) {
         byte[] checksum = sha256(source);
         requireTransactionSynchronization();
-        registerRollbackCleanup(rollbackCleanup);
+        prepareCleanup.run();
         try {
             objectStorage.put(key, source, contentType, checksum);
+            cancelCleanup.run();
         } catch (ObjectStorageException exception) {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
@@ -392,15 +394,20 @@ public class ManagedObjectService {
                 key,
                 source,
                 contentType,
-                () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
+                () -> deletionRetryQueue.prepareTenantWrite(workspaceId, key),
+                () -> deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key));
             return null;
         });
     }
 
     private void storeUser(String key, UploadSource source, String contentType) {
         writeAdmissionService.admit(() -> {
-            store(key, source, contentType,
-                () -> deletionRetryQueue.enqueueRollbackTombstoneUser(key));
+            store(
+                key,
+                source,
+                contentType,
+                () -> deletionRetryQueue.prepareUserWrite(key),
+                () -> deletionRetryQueue.cancelUserInCurrentTransaction(key));
             return null;
         });
     }
@@ -412,13 +419,13 @@ public class ManagedObjectService {
             String contentType) {
         writeAdmissionService.admit(() -> {
             quotaService.reserve(workspaceId, key, source.contentLength());
-            deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key);
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
             storeDeterministic(
                 key,
                 source,
                 contentType,
-                () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
+                () -> deletionRetryQueue.prepareTenantWrite(workspaceId, key),
+                () -> deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key));
             return null;
         });
     }
@@ -427,15 +434,18 @@ public class ManagedObjectService {
             String key,
             UploadSource source,
             String contentType,
-            Runnable rollbackCleanup) {
+            Runnable prepareCleanup,
+            Runnable cancelCleanup) {
         byte[] checksum = sha256(source);
         requireTransactionSynchronization();
         if (verifyChecksumIfPresent(key, source.contentLength(), checksum)) {
+            cancelCleanup.run();
             return;
         }
-        registerRollbackCleanup(rollbackCleanup);
+        prepareCleanup.run();
         try {
             objectStorage.put(key, source, contentType, checksum);
+            cancelCleanup.run();
         } catch (ObjectStorageException exception) {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
@@ -480,6 +490,10 @@ public class ManagedObjectService {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
         }
+    }
+
+    private StoredObject getForResponse(String key) {
+        return readAdmissionService.admit(() -> get(key));
     }
 
     private void markUnavailable() {
@@ -590,45 +604,7 @@ public class ManagedObjectService {
     }
 
     private void deleteTenantOnRollback(int workspaceId, String key) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
-                    runOutsideCompletedTransaction(
-                        () -> deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key));
-                }
-            }
-        });
-    }
-
-    private static void registerRollbackCleanup(Runnable cleanup) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
-                    runOutsideCompletedTransaction(cleanup);
-                }
-            }
-        });
-    }
-
-    private static void runOutsideCompletedTransaction(Runnable cleanup) {
-        Thread thread = Thread.startVirtualThread(cleanup);
-        boolean interrupted = false;
-        while (thread.isAlive()) {
-            try {
-                thread.join();
-            } catch (InterruptedException exception) {
-                interrupted = true;
-            }
-        }
-        if (interrupted) {
-            Thread.currentThread().interrupt();
-        }
+        deletionRetryQueue.enqueueRollbackTombstoneTenant(workspaceId, key);
     }
 
     private static void requireTransactionSynchronization() {

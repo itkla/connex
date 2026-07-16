@@ -203,11 +203,11 @@ export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fall
                 type="file"
                 accept={MANAGED_IMAGE_ACCEPT}
                 aria-label={label}
-                onChange={(event) => {
+                onChange={async (event) => {
                     const selectedFile = event.currentTarget.files?.[0];
                     event.currentTarget.value = '';
                     if (!selectedFile) return;
-                    if (isManagedImageFile(selectedFile)) {
+                    if (await isManagedImageFile(selectedFile)) {
                         onSelect(selectedFile);
                     } else {
                         onInvalidSelect?.();

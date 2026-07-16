@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.24.0@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
 ARG BUILD_TIME
 ARG SOURCE_DATE_EPOCH
@@ -12,7 +12,8 @@ LABEL org.opencontainers.image.title="connex-ocr" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HOME=/opt/connex-ocr
+    HOME=/opt/connex-ocr \
+    PADDLE_PDX_CACHE_HOME=/tmp/paddlex
 
 WORKDIR /opt/connex-ocr/app
 

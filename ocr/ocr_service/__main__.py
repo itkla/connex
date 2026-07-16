@@ -11,8 +11,11 @@ def main() -> int:
     try:
         config = ServiceConfig.from_environment()
         engine = PaddleEngine(config)
-    except Exception:
-        print("OCR service initialization failed", file=sys.stderr)
+    except Exception as exception:
+        print(
+            f"OCR service initialization failed: {type(exception).__name__}: {exception}",
+            file=sys.stderr,
+        )
         return 1
     server = create_server(config, engine)
 

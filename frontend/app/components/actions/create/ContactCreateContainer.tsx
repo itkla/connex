@@ -9,6 +9,7 @@ import { createContact, importBusinessCard, isFieldError, uploadContactPicture }
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
 
 const EMPTY_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
@@ -93,9 +94,8 @@ export default function ContactCreateContainer({
         setCreating(true);
         emitDismissLock();
         try {
-            const newContact = businessCard
-                ? (await importBusinessCard(businessCard)).contact
-                : await createContact(payload);
+            const imported = businessCard ? await importBusinessCard(businessCard) : null;
+            const newContact = imported?.contact ?? await createContact(payload);
             let avatarUploadFailed = false;
             if (imageFile) {
                 try {
@@ -105,6 +105,8 @@ export default function ContactCreateContainer({
                 }
             }
             if (!avatarUploadFailed) toastSuccess(t('feedback.personCreated'));
+            publishRecordMutation('contact');
+            if (imported?.company) publishRecordMutation('company');
             creatingRef.current = false;
             setCreating(false);
             setSucceeded(true);
@@ -135,7 +137,11 @@ export default function ContactCreateContainer({
                 isCreating={creating}
                 isSuccess={succeeded}
                 createNewContact={createNewContact}
-                onRecoveredImport={() => router.refresh()}
+                onRecoveredImport={(result) => {
+                    publishRecordMutation('contact');
+                    if (result.company) publishRecordMutation('company');
+                    router.refresh();
+                }}
                 onImportRetryRequiredChange={handleImportRetryRequiredChange}
                 onSubmissionPendingChange={handleSubmissionPendingChange}
             />
@@ -153,7 +159,11 @@ export default function ContactCreateContainer({
             isCreating={creating}
             isSuccess={succeeded}
             createNewContact={createNewContact}
-            onRecoveredImport={() => router.refresh()}
+            onRecoveredImport={(result) => {
+                publishRecordMutation('contact');
+                if (result.company) publishRecordMutation('company');
+                router.refresh();
+            }}
             onImportRetryRequiredChange={handleImportRetryRequiredChange}
             onSubmissionPendingChange={handleSubmissionPendingChange}
         />

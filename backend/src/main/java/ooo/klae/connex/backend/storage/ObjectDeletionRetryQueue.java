@@ -59,6 +59,34 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
+    public void prepareTenantWrite(int workspaceId, String key) {
+        String validKey = ObjectStorageKey.requireValid(key);
+        try {
+            tenantWorkScope.inWorkspace(workspaceId, () -> {
+                transactionExecutor.enqueueTenant(
+                    workspaceId, validKey, 2, ambiguousWriteCleanupAt());
+                warnTenantBacklog(workspaceId);
+            });
+        } catch (RuntimeException exception) {
+            throw new ServiceUnavailableException(
+                "Private object cleanup could not be prepared safely");
+        }
+    }
+
+    public void prepareUserWrite(String key) {
+        String validKey = ObjectStorageKey.requireValid(key);
+        try {
+            tenantWorkScope.unrouted(() -> {
+                transactionExecutor.enqueueUser(validKey, 2, ambiguousWriteCleanupAt());
+                warnUserBacklog();
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            throw new ServiceUnavailableException(
+                "Private object cleanup could not be prepared safely");
+        }
+    }
+
     public void enqueueRollbackTombstoneTenant(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {

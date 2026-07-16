@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.storage;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -65,8 +67,15 @@ class LegacyUploadMigrationRunnerTest {
         lenient().when(objectStorage.isReady()).thenReturn(true);
         lenient().when(controlMapper.findWorkspaceIds(0, 100)).thenReturn(List.of());
         lenient().when(controlMapper.findUserImages(0, 100)).thenReturn(List.of());
+        lenient().when(controlMapper.countUserReferences()).thenReturn(0);
         lenient().when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
             Supplier<?> work = invocation.getArgument(0);
+            return work.get();
+        });
+        lenient().when(tenantWorkScope.inWorkspace(
+            anyInt(), org.mockito.ArgumentMatchers.<Supplier<Integer>>any()
+        )).thenAnswer(invocation -> {
+            Supplier<Integer> work = invocation.getArgument(1);
             return work.get();
         });
         lenient().doAnswer(invocation -> {
@@ -77,14 +86,66 @@ class LegacyUploadMigrationRunnerTest {
     }
 
     @Test
-    void disabledModeDoesNotInspectStorageOrWorkspaces() {
+    void disabledModeRequiresEveryLegacyReferenceToBeGone() {
         properties.getLegacyMigration().setMode(LegacyMigrationMode.OFF);
+        when(controlMapper.findWorkspaceIds(0, 100)).thenReturn(List.of(3));
+        when(tenantMapper.countReferences(3)).thenReturn(0);
 
         runner.run(arguments);
 
         verify(objectStorage, never()).isReady();
-        verify(controlMapper, never()).findWorkspaceIds(anyInt(), anyInt());
+        verify(controlMapper).countUserReferences();
+        verify(tenantMapper).countReferences(3);
         verify(applicationContext, never()).close();
+    }
+
+    @Test
+    void disabledModeFailsStartupWhenTenantLegacyReferencesRemain() {
+        properties.getLegacyMigration().setMode(LegacyMigrationMode.OFF);
+        when(controlMapper.findWorkspaceIds(0, 100)).thenReturn(List.of(3));
+        when(tenantMapper.countReferences(3)).thenReturn(1);
+
+        assertThrows(IllegalStateException.class, () -> runner.run(arguments));
+
+        verify(objectStorage, never()).isReady();
+    }
+
+    @Test
+    void disabledModeFailsStartupWhenProfileImageReferencesRemain() {
+        properties.getLegacyMigration().setMode(LegacyMigrationMode.OFF);
+        when(controlMapper.countUserReferences()).thenReturn(1);
+
+        assertThrows(IllegalStateException.class, () -> runner.run(arguments));
+
+        verify(controlMapper).findWorkspaceIds(0, 100);
+        verify(objectStorage, never()).isReady();
+    }
+
+    @Test
+    void disabledModeFailsClosedWhenAWorkspaceCannotBeRouted() {
+        properties.getLegacyMigration().setMode(LegacyMigrationMode.OFF);
+        when(controlMapper.findWorkspaceIds(0, 100)).thenReturn(List.of(3));
+        doThrow(new IllegalStateException("route unavailable"))
+            .when(tenantWorkScope)
+            .inWorkspace(eq(3), org.mockito.ArgumentMatchers.<Supplier<Integer>>any());
+
+        assertThrows(IllegalStateException.class, () -> runner.run(arguments));
+
+        verify(objectStorage, never()).isReady();
+    }
+
+    @Test
+    void disabledModeChecksEveryWorkspacePage() {
+        properties.getLegacyMigration().setMode(LegacyMigrationMode.OFF);
+        properties.getLegacyMigration().setBatchSize(2);
+        when(controlMapper.findWorkspaceIds(0, 2)).thenReturn(List.of(1, 2));
+        when(controlMapper.findWorkspaceIds(2, 2)).thenReturn(List.of(3));
+
+        runner.run(arguments);
+
+        verify(tenantMapper).countReferences(1);
+        verify(tenantMapper).countReferences(2);
+        verify(tenantMapper).countReferences(3);
     }
 
     @Test
@@ -113,6 +174,7 @@ class LegacyUploadMigrationRunnerTest {
         when(tenantMapper.findCompanyImages(3, 0, 100)).thenReturn(List.of());
         when(tenantMapper.countReferences(3)).thenReturn(1);
         when(fileReader.read(record.getUrl(), "/attachments/")).thenReturn(resolved);
+        when(transaction.validateAttachment(record, resolved)).thenReturn(1L);
 
         runner.run(arguments);
 

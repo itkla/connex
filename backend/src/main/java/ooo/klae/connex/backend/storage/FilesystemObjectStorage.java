@@ -1,13 +1,16 @@
 package ooo.klae.connex.backend.storage;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -18,7 +21,10 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -44,19 +50,28 @@ public class FilesystemObjectStorage implements ObjectStorage {
 
     private final ObjectStorageProperties properties;
     private final AtomicLong reservedBytes = new AtomicLong();
+    private final ConcurrentHashMap<Path, PathLease> pathLeases = new ConcurrentHashMap<>();
+    private final Object directoryMutationLock = new Object();
 
     @Override
     public void put(String key, UploadSource source, String contentType, byte[] sha256) {
         Path target = resolve(key);
+        PathLease lease = retain(target);
+        if (!lease.lock.writeLock().tryLock()) {
+            release(target, lease);
+            throw new ObjectStorageException("Managed object is currently being read");
+        }
         Path temporary = null;
         long reservation = source.contentLength();
         boolean capacityReserved = false;
         try {
-            ensurePrivateDirectory(target.getParent());
-            reserveCapacity(target.getParent(), reservation);
-            capacityReserved = true;
-            temporary = Files.createTempFile(target.getParent(), ".connex-object-", ".tmp");
-            restrictFile(temporary);
+            synchronized (directoryMutationLock) {
+                ensurePrivateDirectory(target.getParent());
+                reserveCapacity(target.getParent(), reservation);
+                capacityReserved = true;
+                temporary = Files.createTempFile(target.getParent(), ".connex-object-", ".tmp");
+                restrictFile(temporary);
+            }
             MessageDigest digest = sha256();
             long copied;
             try (InputStream input = new DigestInputStream(source.openStream(), digest);
@@ -89,12 +104,19 @@ public class FilesystemObjectStorage implements ObjectStorage {
                 } catch (IOException ignored) {
                 }
             }
+            lease.lock.writeLock().unlock();
+            release(target, lease);
         }
     }
 
     @Override
     public StoredObject get(String key) {
         Path target = resolve(key);
+        PathLease lease = retain(target);
+        if (!lease.lock.readLock().tryLock()) {
+            release(target, lease);
+            throw new ObjectStorageException("Managed object is currently changing");
+        }
         try {
             if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
                 throw new ObjectStorageNotFoundException("Managed object was not found");
@@ -107,19 +129,38 @@ public class FilesystemObjectStorage implements ObjectStorage {
                 channel.close();
                 throw new ObjectStorageNotFoundException("Managed object was not found");
             }
-            return new StoredObject(Channels.newInputStream(channel), channel.size());
+            long contentLength = channel.size();
+            InputStream stream = new FilesystemReadStream(
+                Channels.newInputStream(channel), target, lease);
+            return new StoredObject(stream, contentLength);
         } catch (ObjectStorageNotFoundException exception) {
+            lease.lock.readLock().unlock();
+            release(target, lease);
             throw exception;
         } catch (IOException exception) {
+            lease.lock.readLock().unlock();
+            release(target, lease);
             throw new ObjectStorageException("Filesystem object read failed", exception);
+        } catch (RuntimeException exception) {
+            lease.lock.readLock().unlock();
+            release(target, lease);
+            throw exception;
         }
     }
 
     @Override
     public void delete(String key) {
         Path target = resolve(key);
+        PathLease lease = retain(target);
+        if (!lease.lock.writeLock().tryLock()) {
+            release(target, lease);
+            throw new ObjectStorageException("Managed object is currently being read");
+        }
         try {
             if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                synchronized (directoryMutationLock) {
+                    pruneEmptyEntityDirectories(key, target.getParent());
+                }
                 return;
             }
             if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
@@ -127,10 +168,16 @@ public class FilesystemObjectStorage implements ObjectStorage {
             }
             Files.delete(target);
             forceDirectory(target.getParent());
+            synchronized (directoryMutationLock) {
+                pruneEmptyEntityDirectories(key, target.getParent());
+            }
         } catch (ObjectStorageException exception) {
             throw exception;
         } catch (IOException exception) {
             throw new ObjectStorageException("Filesystem object deletion failed", exception);
+        } finally {
+            lease.lock.writeLock().unlock();
+            release(target, lease);
         }
     }
 
@@ -163,6 +210,52 @@ public class FilesystemObjectStorage implements ObjectStorage {
             throw new ObjectStorageException("Invalid managed object path");
         }
         return resolved;
+    }
+
+    private PathLease retain(Path target) {
+        return pathLeases.compute(target, (ignored, current) -> {
+            PathLease lease = current == null ? new PathLease() : current;
+            lease.references += 1;
+            return lease;
+        });
+    }
+
+    private void release(Path target, PathLease lease) {
+        pathLeases.computeIfPresent(target, (ignored, current) -> {
+            if (current != lease) {
+                return current;
+            }
+            current.references -= 1;
+            return current.references == 0 ? null : current;
+        });
+    }
+
+    private void pruneEmptyEntityDirectories(String key, Path directory) throws IOException {
+        String[] segments = key.split("/");
+        if (segments.length != 5
+                || !"workspaces".equals(segments[0])
+                || !("person-images".equals(segments[2])
+                    || "company-images".equals(segments[2]))) {
+            return;
+        }
+        Path categoryRoot = root()
+            .resolve(segments[0])
+            .resolve(segments[1])
+            .resolve(segments[2]);
+        Path current = directory;
+        while (!current.equals(categoryRoot) && current.startsWith(categoryRoot)) {
+            Path parent = current.getParent();
+            try {
+                Files.delete(current);
+                forceDirectory(parent);
+            } catch (DirectoryNotEmptyException exception) {
+                return;
+            } catch (NoSuchFileException exception) {
+                current = parent;
+                continue;
+            }
+            current = parent;
+        }
     }
 
     private Path root() {
@@ -284,5 +377,35 @@ public class FilesystemObjectStorage implements ObjectStorage {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    private final class FilesystemReadStream extends FilterInputStream {
+        private final Path target;
+        private final PathLease lease;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private FilesystemReadStream(InputStream input, Path target, PathLease lease) {
+            super(input);
+            this.target = target;
+            this.lease = lease;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                super.close();
+            } finally {
+                lease.lock.readLock().unlock();
+                release(target, lease);
+            }
+        }
+    }
+
+    private static final class PathLease {
+        private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+        private int references;
     }
 }

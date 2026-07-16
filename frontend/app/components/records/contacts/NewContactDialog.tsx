@@ -21,6 +21,7 @@ import {
     useEffect,
     useRef,
     useState,
+    type RefObject,
     type WheelEvent,
 } from 'react';
 import {
@@ -194,13 +195,16 @@ export function NewContactForm({
     const [submissionPending, setSubmissionPending] = useState(false);
     const [prevActive, setPrevActive] = useState(active);
     const recoveredImportHandledRef = useRef(false);
+    const nameInputRef = useRef<HTMLInputElement>(null);
     const submissionPendingRef = useRef(false);
+    const imageSelectionSequenceRef = useRef(0);
     const businessCard = useBusinessCardCapture({
         active,
         payload: newContactPayload,
         setPayload: setNewContactPayload,
         onImportRetryRequiredChange,
     });
+    const previousRecoveryStatusRef = useRef(businessCard.recoveryStatus);
     const recoveredImport = businessCard.recoveredImport;
     const acknowledgeRecoveredImport = businessCard.acknowledgeRecoveredImport;
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
@@ -225,8 +229,15 @@ export function NewContactForm({
         if (!recoveredImport || recoveredImportHandledRef.current) return;
         recoveredImportHandledRef.current = true;
         void (async () => {
-            toastSuccess(t('cardImportRecovered'));
-            onRecoveredImport?.(recoveredImport.result);
+            if (recoveredImport.result) {
+                toastSuccess(t('cardImportRecovered'));
+                onRecoveredImport?.(recoveredImport.result);
+            } else {
+                toastError(t('cardImportRecoveryGone'));
+            }
+            if (recoveredImport.pendingAvatar) {
+                toastError(t('cardImportRecoveredAvatarPending'));
+            }
             await acknowledgeRecoveredImport();
             onCancel();
             router.refresh();
@@ -240,17 +251,17 @@ export function NewContactForm({
         resetFieldErrors();
         let businessCardImport: BusinessCardImportDraft | undefined;
         try {
-            businessCardImport = await businessCard.prepareImportDraft();
+            businessCardImport = await businessCard.prepareImportDraft(imageFile != null);
             if (businessCard.file && !businessCardImport) return;
             const outcome = await createNewContact(businessCardImport);
-            businessCard.resolveImportRetry();
+            await businessCard.resolveImportRetry();
             if (outcome?.avatarUploadFailed) {
                 toastError(t('cardAvatarUploadFailed'));
             }
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
-                businessCard.resolveImportRetry();
+                await businessCard.resolveImportRetry();
                 const k = Object.keys(err.fieldErrors)[0];
                 if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
             } else if (businessCardImport) {
@@ -264,7 +275,8 @@ export function NewContactForm({
         if (submissionPendingRef.current
             || isCreating
             || businessCard.isScanning
-            || businessCard.recoveryStatus !== 'ready') return;
+            || businessCard.recoveryStatus === 'checking'
+            || businessCard.recoveryStatus === 'acknowledging') return;
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         onSubmissionPendingChange?.(true);
@@ -294,9 +306,27 @@ export function NewContactForm({
 
     useEffect(() => {
         if (active) return;
+        imageSelectionSequenceRef.current += 1;
         recoveredImportHandledRef.current = false;
         submissionPendingRef.current = false;
     }, [active]);
+
+    useEffect(() => () => {
+        imageSelectionSequenceRef.current += 1;
+    }, []);
+
+    useEffect(() => {
+        const previousStatus = previousRecoveryStatusRef.current;
+        previousRecoveryStatusRef.current = businessCard.recoveryStatus;
+        if (!active || previousStatus === 'ready' || businessCard.recoveryStatus !== 'ready') return;
+        const focused = document.activeElement;
+        if (focused instanceof HTMLInputElement
+            || focused instanceof HTMLTextAreaElement
+            || focused instanceof HTMLSelectElement
+            || focused instanceof HTMLButtonElement) return;
+        const frame = window.requestAnimationFrame(() => nameInputRef.current?.focus());
+        return () => window.cancelAnimationFrame(frame);
+    }, [active, businessCard.recoveryStatus]);
 
     useEffect(() => {
         return () => {
@@ -304,12 +334,16 @@ export function NewContactForm({
         };
     }, [imagePreview]);
 
-    const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const handleImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
+        const selectionSequence = imageSelectionSequenceRef.current + 1;
+        imageSelectionSequenceRef.current = selectionSequence;
         const file = e.target.files?.[0];
         e.target.value = '';
         if (submissionPendingRef.current || isCreating || businessCard.requiresExactImportRetry) return;
         if (!file) return;
-        if (!isManagedImageFile(file)) {
+        const supported = await isManagedImageFile(file);
+        if (selectionSequence !== imageSelectionSequenceRef.current || !active) return;
+        if (!supported) {
             toastError(t('cardSelectionUnsupported'));
             return;
         }
@@ -323,7 +357,8 @@ export function NewContactForm({
         || businessCard.importError != null
         || businessCard.recoveryStatus === 'error';
     const formPending = submissionPending || isCreating;
-    const recoveryBlocked = businessCard.recoveryStatus !== 'ready';
+    const recoveryBlocked = businessCard.recoveryStatus === 'checking'
+        || businessCard.recoveryStatus === 'acknowledging';
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
     const visibleImagePreview = imageFile ? imagePreview : null;
@@ -373,10 +408,19 @@ export function NewContactForm({
                 </div>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
-                    {businessCard.recoveryStatus === 'checking' ? (
+                    {businessCard.recoveryStatus === 'checking'
+                        || businessCard.recoveryStatus === 'acknowledging' ? (
                         <BusinessCardRecoveryStatus />
                     ) : businessCard.recoveryStatus === 'error' ? (
-                        <BusinessCardRecoveryError onRetry={businessCard.retryRecovery} />
+                        <BusinessCardRecoveryError
+                            onRetry={businessCard.retryRecovery}
+                            onDiscard={businessCard.file ? businessCard.discardCardImage : undefined}
+                        />
+                    ) : businessCard.recoveryStatus === 'storageUnavailable' ? (
+                        <BusinessCardRecoveryStorageWarning
+                            onRetry={businessCard.retryRecovery}
+                            onDiscard={businessCard.file ? businessCard.discardCardImage : undefined}
+                        />
                     ) : !businessCard.availabilityResolved ? (
                         <BusinessCardAvailabilityPlaceholder />
                     ) : businessCard.available ? (
@@ -393,7 +437,9 @@ export function NewContactForm({
                             onFileSelected={businessCard.selectFile}
                             onCancelScan={businessCard.cancelScan}
                             onRetryScan={businessCard.retryScan}
-                            onRemove={businessCard.removeCard}
+                            onRemove={businessCard.companyMode === 'create'
+                                ? undefined
+                                : businessCard.discardCardImage}
                             onDiscardImage={businessCard.companyMode === 'create'
                                 ? undefined
                                 : businessCard.discardCardImage}
@@ -409,6 +455,7 @@ export function NewContactForm({
                         resolvedCompany={resolvedCompany}
                         matchedCompanyName={matchedCompanyName}
                         isCreating={formPending || recoveryBlocked}
+                        nameInputRef={nameInputRef}
                         onListWheel={handleListWheel}
                     />
 
@@ -455,7 +502,13 @@ function BusinessCardRecoveryStatus() {
     );
 }
 
-function BusinessCardRecoveryError({ onRetry }: { onRetry: () => void }) {
+function BusinessCardRecoveryError({
+    onRetry,
+    onDiscard,
+}: {
+    onRetry: () => void;
+    onDiscard?: () => void;
+}) {
     const t = useTranslations('ContactsNewContactDialog');
 
     return (
@@ -463,10 +516,46 @@ function BusinessCardRecoveryError({ onRetry }: { onRetry: () => void }) {
             <p className="text-xs leading-relaxed text-destructive" role="alert">
                 {t('cardImportRecoveryFailed')}
             </p>
-            <Button type="button" variant="outline" size="sm" className="w-fit" onClick={onRetry}>
-                <ArrowPathIcon data-icon="inline-start" />
-                {t('cardImportRecoveryRetry')}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+                    <ArrowPathIcon data-icon="inline-start" />
+                    {t('cardImportRecoveryRetry')}
+                </Button>
+                {onDiscard && (
+                    <Button type="button" variant="outline" size="sm" onClick={onDiscard}>
+                        {t('continueWithoutCardImage')}
+                    </Button>
+                )}
+            </div>
+        </section>
+    );
+}
+
+function BusinessCardRecoveryStorageWarning({
+    onRetry,
+    onDiscard,
+}: {
+    onRetry: () => void;
+    onDiscard?: () => void;
+}) {
+    const t = useTranslations('ContactsNewContactDialog');
+
+    return (
+        <section className="grid gap-3 rounded-xl border border-warning/40 bg-warning/5 p-3">
+            <p className="text-xs leading-relaxed text-muted-foreground" role="status">
+                {t('cardImportRecoveryStorageUnavailable')}
+            </p>
+            <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+                    <ArrowPathIcon data-icon="inline-start" />
+                    {t('cardImportRecoveryRetry')}
+                </Button>
+                {onDiscard && (
+                    <Button type="button" variant="outline" size="sm" onClick={onDiscard}>
+                        {t('continueWithoutCardImage')}
+                    </Button>
+                )}
+            </div>
         </section>
     );
 }
@@ -497,6 +586,7 @@ type ContactDetailsFieldsProps = {
     resolvedCompany: Company | null;
     matchedCompanyName: string | null;
     isCreating: boolean;
+    nameInputRef: RefObject<HTMLInputElement | null>;
     onListWheel: (event: WheelEvent<HTMLDivElement>) => void;
 };
 
@@ -509,6 +599,7 @@ function ContactDetailsFields({
     resolvedCompany,
     matchedCompanyName,
     isCreating,
+    nameInputRef,
     onListWheel,
 }: ContactDetailsFieldsProps) {
     const t = useTranslations('ContactsNewContactDialog');
@@ -521,6 +612,7 @@ function ContactDetailsFields({
                 <div className="group relative">
                     <UserIcon className={fieldLeadIconClass} />
                     <input
+                        ref={nameInputRef}
                         id="name"
                         type="text"
                         autoFocus

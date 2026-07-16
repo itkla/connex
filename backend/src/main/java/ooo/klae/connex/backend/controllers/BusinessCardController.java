@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
+import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.services.BusinessCardService;
 
@@ -53,6 +54,18 @@ public class BusinessCardController {
             @Valid @RequestPart("companyAction") BusinessCardCompanyAction companyAction,
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
         return businessCardService.importCard(image, contact, companyAction, idempotencyKey);
+    }
+
+    /**
+     * Reserves an opaque import key before any private multipart content is submitted.
+     *
+     * @param idempotencyKey caller-generated UUID retained across retries
+     * @return server-defined reservation retention boundary
+     */
+    @PostMapping("/import/reservation")
+    public BusinessCardImportReservationResponse reserveImport(
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return businessCardService.reserveImport(idempotencyKey);
     }
 
     /**

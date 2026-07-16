@@ -34,8 +34,9 @@ read-only, and production inference never downloads models or calls an external 
   bridge with no gateway address.
 - A Linux AMD64 host for the released image set. The OCR image additionally requires AVX on every
   assigned processor.
-- A released version tag (see [RELEASE.md](RELEASE.md)) for `CONNEX_VERSION`, or build locally with
-  the `docker-compose.build.yml` overlay.
+- A signed release manifest verified with its exact tag-bound identity, with all three
+  `CONNEX_*_IMAGE` values set to the manifest's immutable digests (see
+  [RELEASE.md](RELEASE.md)), or a local build through the `docker-compose.build.yml` overlay.
 - Generated secrets and — for production — a **verified-TLS database** (the app is fail-closed:
   outside dev it requires `sslMode=VERIFY_CA` or `VERIFY_IDENTITY`).
 
@@ -89,16 +90,27 @@ bounded exponential backoff, resetting to one second only after 30 seconds of st
 Compose's `unless-stopped` policy restores the supervisor after Docker
 daemon and host restarts. Keep that sidecar deadline strictly below the backend's
 `CONNEX_OCR_REQUEST_TIMEOUT=15s`; overriding them in the opposite order lets abandoned inference
-occupy the only worker after the backend has timed out.
+occupy the only worker after the backend has timed out. Compose derives the sidecar byte, width,
+height, and pixel limits from `CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES`,
+`CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH`, `CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT`, and
+`CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS`, so one configured boundary applies before and after the
+private service hop.
 
-The backend also applies per-user, per-workspace fixed-window limits of 12 scans and 12 imports per
-minute by default (`CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE` and
-`CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE`). These limits are maintained in each backend process;
+The backend applies a process-wide budget of five scans per minute and a cross-workspace principal
+budget of three scans per minute by default (`CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE` and
+`CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE`), leaving capacity that one principal cannot consume.
+Imports remain limited to 12 per user and workspace per minute
+(`CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE`). These limits are maintained in each backend process;
 deployments with multiple backend replicas should enforce equivalent aggregate limits at their
 trusted ingress or replace this local limiter with a shared admission service.
-Completed idempotency claims use a 24-hour replay horizon by default. A bounded catalog-aware sweep
-removes expired claims from active and dormant workspaces without loading private import drafts into
-the control plane.
+Before a browser sends private multipart data, it receives a two-minute submission lease
+(`CONNEX_BUSINESS_CARD_RESERVATION_LEASE`). Each user may hold at most four unsubmitted leases per
+workspace (`CONNEX_BUSINESS_CARD_MAX_OUTSTANDING_RESERVATIONS`); expired leases are reclaimed on the
+next reservation and by the scheduled sweep. Completed idempotency claims use a 24-hour replay
+horizon (`CONNEX_BUSINESS_CARD_IDEMPOTENCY_RETENTION`). A catalog-aware sweep removes up to 1,000
+expired claims per workspace pass by default
+(`CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_BATCH_SIZE`) without loading private import drafts into
+the control plane. Keep the submission lease shorter than the replay horizon.
 
 `CONNEX_DEPLOYMENT_PROFILE` drives fail-closed posture enforcement (issue #497): `saas` forbids the
 internal-access opt-ins (bootstrap, private SSO issuer hosts, internal AI/SMTP hosts); `silo` and
@@ -118,6 +130,9 @@ backend endpoints; the object store must not be exposed as a public origin.
 
 The deployment templates use the filesystem provider and mount the Docker `object_data` volume at
 `/var/lib/connex/objects`. Include that volume in backups and restores alongside MySQL. The backend
+image uses stable numeric UID/GID `10001:10001`; preserve that ownership when restoring the volume.
+The filesystem provider is for a single backend replica because its active-reader leases are
+process-local. Use S3-compatible storage before adding backend replicas. The backend
 reserves each in-flight write against the volume and stops accepting writes or reporting storage
 ready when the configured free-space floor would be crossed. The default floor is 1 GiB; size
 `CONNEX_OBJECT_STORAGE_FILESYSTEM_MIN_FREE_BYTES` to leave enough room for operational recovery and
@@ -134,14 +149,19 @@ CONNEX_OBJECT_STORAGE_S3_API_CALL_TIMEOUT=15s
 CONNEX_OBJECT_STORAGE_S3_API_CALL_ATTEMPT_TIMEOUT=5s
 CONNEX_OBJECT_STORAGE_AMBIGUOUS_WRITE_CLEANUP_DELAY_MS=60000
 CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_WRITES=4
+CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS=32
+CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS_PER_USER=4
+CONNEX_OBJECT_STORAGE_READ_TIMEOUT_MS=30000
 CONNEX_OBJECT_STORAGE_MAX_PENDING_TENANT_AMBIGUOUS_WRITE_CLEANUPS=100
 ```
 
 S3 credentials come from the AWS SDK default credential chain, such as an instance/task role or
 the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN`
 environment variables. Keep the bucket private, disable public ACLs/policies, require TLS, grant
-the backend object read/write/delete plus bucket-head and bucket-versioning-read access, and enable
-the provider's at-rest encryption. Bucket versioning must never have been enabled, including a
+the backend object read/write/delete plus bucket-head and bucket-versioning-read access, including
+the reserved `connex-readiness/` probe prefix, and enable the provider's at-rest encryption. Storage
+readiness writes a unique probe, checksum-reads it, and deletes it; denial or corruption at any stage
+keeps uploads and business-card import unavailable. Bucket versioning must never have been enabled, including a
 suspended state: an unversioned delete otherwise retains recoverable noncurrent PII while the quota
 ledger records physical deletion. The backend verifies this before every write/delete and reports
 storage unavailable if the provider cannot prove the state. A custom endpoint may use HTTP only for an explicitly
@@ -149,6 +169,10 @@ trusted service under the Spring `dev` profile; startup rejects plain HTTP in ev
 The attempt timeout must be positive and no greater than the total API-call timeout. The ambiguous
 write cleanup delay must exceed the total call timeout so a timed-out write cannot finish after its
 compensating delete; the default waits 60 seconds before the first of two successful delete passes.
+The provider selection is immutable after the first managed write. Do not switch between
+`filesystem` and `s3` by configuration or copy the filesystem tree verbatim: filesystem files have
+an implementation suffix that S3 keys do not. A provider cutover requires a checksummed,
+key-translating migration, read verification, rollback point, and retained source copy.
 
 The default per-file limit is 25 MiB
 (`CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES=26214400`), with a 27 MiB multipart request envelope
@@ -164,11 +188,21 @@ catalog so concurrent uploads cannot overrun either limit. Legacy public-upload 
 treated as managed objects; the maintenance migration reserves their exact validated byte sizes
 when it moves them into private storage.
 
+Managed downloads hold one global and one authenticated-user admission lease until close, with
+defaults of 32 global reads, four reads per user, and a 30-second hard stream deadline
+(`CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS`,
+`CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS_PER_USER`, and
+`CONNEX_OBJECT_STORAGE_READ_TIMEOUT_MS`). The MVC streaming executor is bounded to the same global
+limit. Filesystem deletion waits for active readers, so quota is not released while deleted bytes
+remain held by an open descriptor.
+
 Object removal uses durable database queues. Tenant-owned objects are recorded in that tenant
 catalog's `object_deletion_queue`; control-plane user-profile objects use
 `user_object_deletion_queue`. The metadata update and deletion intent commit atomically. The backend
-retries due rows every 60 seconds. Rollback cleanup for a write with an uncertain provider outcome is
-held as a delayed two-pass tombstone: the first successful delete is rescheduled for confirmation,
+retries due rows every 60 seconds. Before every provider write, Connex commits a delayed two-pass
+tombstone in an isolated transaction; the metadata transaction cancels it only after the write is
+confirmed. A rollback, process exit, database cancellation failure, or ambiguous provider response
+therefore leaves durable cleanup intent. The first successful delete is rescheduled for confirmation,
 and only the second successful delete finalizes the row. Provider writes are admitted without waiting,
 so saturated storage cannot accumulate transactions holding database connections; a workspace stops
 starting new writes when its ambiguous-write cleanup backlog reaches the configured hard ceiling.
@@ -191,13 +225,11 @@ SELECT COUNT(*) AS pending, MAX(attempts) AS max_attempts,
 FROM user_object_deletion_queue;
 ```
 
-A hard process or host failure after an object is written but before its database mutation
-commits can leave an unreferenced object that no transaction callback can enqueue. Periodically
-inventory objects older than a conservative grace period and compare each opaque URL token with
-the `url`, `image_url`, `logo_url`, and `profile_picture_url` values in the appropriate tenant or
-control catalog before deleting it. Never delete solely from object age, and never emit object
-keys or upload metadata into logs. Existing database rows that reference legacy frontend-local
-upload paths require the one-shot migration below.
+For defense in depth, periodic object inventories may compare opaque tokens with the `url`,
+`image_url`, `logo_url`, and `profile_picture_url` values in the appropriate tenant or control
+catalog. Never delete solely from object age, and never emit object keys or upload metadata into
+logs. Existing database rows that reference legacy frontend-local upload paths require the one-shot
+migration below.
 
 #### Migrating legacy public uploads
 
@@ -216,8 +248,9 @@ migrator at a time.
 
 1. Stage the four directories on the host. If the old deployment used a custom or mounted
    `CONNEX_UPLOADS_DIR`, copy from that location instead. After staging and checksum verification,
-   set `CONNEX_VERSION` to the complete target release in the mode-0600 `.env`, but do not run `up`;
-   pulling the target images does not replace the still-running old containers.
+   verify the target release manifest and put its three exact `CONNEX_*_IMAGE` digest references in
+   the mode-0600 `.env`, but do not run `up`; pulling the target images does not replace the
+   still-running old containers.
 
    ```bash
    export MIGRATION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)"
@@ -320,12 +353,17 @@ migrator at a time.
 ## Run
 
 ```bash
-docker compose pull        # fetch the pinned CONNEX_VERSION images from GHCR
+docker compose pull        # fetch the verified CONNEX_*_DIGEST image set from GHCR
 docker compose up -d
 curl -s http://localhost/api/version      # {"version":"<tag>",...}
 ```
 
-Roll forward by bumping `CONNEX_VERSION` and re-running `pull` + `up -d`.
+Production `deploy/.env` must set `CONNEX_BACKEND_DIGEST`, `CONNEX_FRONTEND_DIGEST`, and
+`CONNEX_OCR_DIGEST` to the 64 lowercase hexadecimal characters after `sha256:` in the verified
+signed release manifest. The production Compose bundle fixes the registry, image names, and digest
+algorithm, so these variables cannot substitute a tag or alternate repository. Roll forward by
+verifying a new manifest, replacing the complete three-digest set, and re-running `pull` plus
+`up -d`.
 
 ## Local evaluation (not for production)
 

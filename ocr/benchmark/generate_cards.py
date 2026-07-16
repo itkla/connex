@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -9,27 +10,68 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 WIDTH = 1_200
 HEIGHT = 700
+CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87"
+CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
+CANONICAL_FONT_REVISION = "f8d157532fbfaeda587e826d4cd5b21a49186f7c"
+CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manifest", type=Path, default=Path(__file__).with_name("manifest.json"))
     parser.add_argument("--output", type=Path, default=Path(__file__).with_name("generated"))
     arguments = parser.parse_args()
-    manifest = json.loads(arguments.manifest.read_text(encoding="utf-8"))
+    manifest_path = Path(__file__).with_name("manifest.json")
+    if file_sha256(manifest_path) != CANONICAL_MANIFEST_SHA256:
+        raise ValueError("Canonical benchmark manifest hash does not match the reviewed suite")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or len(cases) != 40:
+        raise ValueError("Canonical benchmark manifest must contain exactly 40 cases")
+    font_path = benchmark_font()
+    if arguments.output.exists() and any(arguments.output.iterdir()):
+        raise ValueError("Benchmark output directory must be empty")
     arguments.output.mkdir(parents=True, exist_ok=True)
-    for index, case in enumerate(manifest["cases"]):
-        image = render(case, index)
-        image.save(arguments.output / f"{case['id']}.jpg", format="JPEG", quality=92, optimize=True)
+    fixtures: list[dict[str, object]] = []
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict) or not isinstance(case.get("id"), str):
+            raise ValueError("Every canonical benchmark case must have a string id")
+        image = render(case, index, font_path)
+        image_path = arguments.output / f"{case['id']}.jpg"
+        image.save(image_path, format="JPEG", quality=92, optimize=True)
+        fixtures.append({
+            "id": case["id"],
+            "sha256": file_sha256(image_path),
+            "size": image_path.stat().st_size,
+        })
+    fixture_digest = hashlib.sha256()
+    for fixture in sorted(fixtures, key=lambda item: str(item["id"])):
+        case_id = str(fixture["id"])
+        fixture_digest.update(case_id.encode("utf-8"))
+        fixture_digest.update(b"\0")
+        fixture_digest.update((arguments.output / f"{case_id}.jpg").read_bytes())
+    if fixture_digest.hexdigest() != CANONICAL_FIXTURES_SHA256:
+        raise ValueError("Generated benchmark fixtures do not match the reviewed canonical set")
+    metadata = {
+        "schemaVersion": 1,
+        "manifestSha256": CANONICAL_MANIFEST_SHA256,
+        "generatorSha256": file_sha256(Path(__file__)),
+        "fontSha256": CANONICAL_FONT_SHA256,
+        "fontSourceRevision": CANONICAL_FONT_REVISION,
+        "fixturesSha256": CANONICAL_FIXTURES_SHA256,
+        "cases": fixtures,
+    }
+    (arguments.output / "fixtures.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
-def render(case: dict[str, object], seed: int) -> Image.Image:
+def render(case: dict[str, object], seed: int, font_path: Path) -> Image.Image:
     fields = case["fields"]
     assert isinstance(fields, dict)
-    language = str(case["language"])
-    regular = font(language, 38)
-    medium = font(language, 48)
-    display = font(language, 72)
+    regular = font(font_path, 38)
+    medium = font(font_path, 48)
+    display = font(font_path, 72)
     image = Image.new("RGB", (WIDTH, HEIGHT), "#f7f4ec")
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, 24, HEIGHT), fill="#1e5448")
@@ -88,14 +130,25 @@ def center(draw: ImageDraw.ImageDraw, text: str, y: int, selected_font, color: s
     draw.text(((WIDTH - width) / 2, y), text, font=selected_font, fill=color)
 
 
-def font(language: str, size: int):
-    if language in {"ja", "mixed"}:
-        candidate = os.environ.get("CONNEX_BENCHMARK_JA_FONT", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-    else:
-        candidate = os.environ.get("CONNEX_BENCHMARK_EN_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-    if not Path(candidate).is_file():
-        raise FileNotFoundError(f"Set the benchmark font environment variable; missing: {candidate}")
-    return ImageFont.truetype(candidate, size)
+def benchmark_font() -> Path:
+    candidate = Path(os.environ.get("CONNEX_BENCHMARK_FONT", ""))
+    if not candidate.is_file():
+        raise FileNotFoundError("CONNEX_BENCHMARK_FONT must identify the pinned benchmark font")
+    if file_sha256(candidate) != CANONICAL_FONT_SHA256:
+        raise ValueError("Benchmark font hash does not match the pinned font")
+    return candidate
+
+
+def font(path: Path, size: int):
+    return ImageFont.truetype(path, size)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def condition(image: Image.Image, selected: str, seed: int) -> Image.Image:

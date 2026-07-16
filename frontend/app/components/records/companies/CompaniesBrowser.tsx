@@ -40,6 +40,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -247,6 +248,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         reload();
         loadFacets();
     }, [clearSelection, resetMetrics, reload, loadFacets]);
+
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'company') refresh();
+    }), [refresh]);
 
     const selectAllMatching = useCallback(async () => {
         const requestId = selectAllRequestRef.current + 1;

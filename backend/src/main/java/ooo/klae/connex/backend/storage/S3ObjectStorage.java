@@ -1,7 +1,14 @@
 package ooo.klae.connex.backend.storage;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.UUID;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
@@ -13,9 +20,10 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.GetBucketVersioningRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -29,6 +37,8 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
     private final ObjectStorageProperties properties;
     private final S3Client client;
+    private final String readinessProbeKey =
+        "connex-readiness/" + UUID.randomUUID() + ".probe";
 
     public S3ObjectStorage(ObjectStorageProperties properties, Environment environment) {
         this(properties, buildClient(properties, environment));
@@ -100,9 +110,10 @@ public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
         String validKey = ObjectStorageKey.requireValid(key);
         requireUnversionedBucket();
         try {
-            client.deleteObject(request -> request
+            client.deleteObject(DeleteObjectRequest.builder()
                 .bucket(properties.getS3().getBucket())
-                .key(validKey));
+                .key(validKey)
+                .build());
         } catch (SdkException exception) {
             throw new ObjectStorageException("S3 object deletion failed", exception);
         }
@@ -110,14 +121,63 @@ public class S3ObjectStorage implements ObjectStorage, AutoCloseable {
 
     @Override
     public boolean isReady() {
+        boolean probeWritten = false;
         try {
             client.headBucket(HeadBucketRequest.builder()
                 .bucket(properties.getS3().getBucket())
                 .build());
             requireUnversionedBucket();
+            byte[] content = readinessProbeKey.getBytes(StandardCharsets.UTF_8);
+            put(
+                readinessProbeKey,
+                UploadSource.from("readiness.probe", "application/octet-stream", content),
+                "application/octet-stream",
+                sha256(content));
+            probeWritten = true;
+            boolean matches;
+            try (StoredObject stored = get(readinessProbeKey);
+                    DigestInputStream input = new DigestInputStream(
+                        stored.inputStream(), sha256Digest())) {
+                long copied = input.transferTo(OutputStream.nullOutputStream());
+                matches = stored.contentLength() == content.length
+                    && copied == content.length
+                    && MessageDigest.isEqual(sha256(content), input.getMessageDigest().digest());
+            }
+            if (!matches) {
+                return false;
+            }
+            delete(readinessProbeKey);
+            probeWritten = false;
             return true;
-        } catch (ObjectStorageException | SdkException exception) {
+        } catch (IOException | ObjectStorageException | SdkException exception) {
             return false;
+        } finally {
+            if (probeWritten) {
+                deleteProbeBestEffort();
+            }
+        }
+    }
+
+    private void deleteProbeBestEffort() {
+        try {
+            client.deleteObject(DeleteObjectRequest.builder()
+                .bucket(properties.getS3().getBucket())
+                .key(readinessProbeKey)
+                .build());
+        } catch (SdkException exception) {
+            return;
+        }
+    }
+
+    private static byte[] sha256(byte[] content) {
+        return sha256Digest().digest(content);
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
     }
 

@@ -50,6 +50,18 @@ public class ObjectStorageProperties {
     private int maxConcurrentWrites = 4;
 
     @Min(1)
+    @Max(256)
+    private int maxConcurrentReads = 32;
+
+    @Min(1)
+    @Max(64)
+    private int maxConcurrentReadsPerUser = 4;
+
+    @Min(1_000)
+    @Max(300_000)
+    private long readTimeoutMs = 30_000;
+
+    @Min(1)
     private long maxWorkspaceBytes = 10L * 1024L * 1024L * 1024L;
 
     @Min(1)
@@ -187,6 +199,11 @@ public class ObjectStorageProperties {
     public boolean isFilesystemConfigurationValid() {
         return provider != Provider.FILESYSTEM
             || (filesystemRoot != null && !filesystemRoot.isBlank());
+    }
+
+    @AssertTrue(message = "per-user object reads must not exceed the global read limit")
+    public boolean isReadConcurrencyConfigurationValid() {
+        return maxConcurrentReadsPerUser <= maxConcurrentReads;
     }
 
     @AssertTrue(message = "S3 object storage requires a bucket, region, and valid optional endpoint")

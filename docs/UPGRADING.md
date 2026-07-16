@@ -12,8 +12,9 @@ migration-discipline part of #87 §9 / #102).
 - **SemVer**, one product version per release, stamped as a **version-locked backend + frontend + OCR
   image set** (see [RELEASE.md](RELEASE.md)). The components are never upgraded independently, even
   when a deployment leaves optional OCR disabled; the running backend version is at `GET /api/version`.
-- On-prem and air-gapped installs pin an **exact version/digest** — released tags are immutable and
-  never moved.
+- On-prem and air-gapped installs verify the tag-bound release manifest and pin its exact image
+  digests. Registry version and SHA tags are convenience pointers and are never the deployment
+  integrity boundary.
 
 ## Supported upgrade paths (proposed)
 
@@ -28,7 +29,8 @@ migration-discipline part of #87 §9 / #102).
 - **Shipped migrations are immutable.** A migration that has been released is never edited, renamed,
   or deleted — doing so breaks Flyway checksum validation on any database that already applied it.
   Change is always a **new** migration. This is enforced in CI (`ci.yml` → *Migrations — forward-only
-  guard*): a pull request may only **add** files under `backend/src/main/resources/db/migration/`.
+  guard*): pull requests and direct `main` pushes may only **add** files under
+  `backend/src/main/resources/db/migration/`.
 - **Expand-contract with delayed drops.** The destructive half of a change lags the additive half by
   several releases, so a version-skipping customer never meets a `DROP` before their data has moved
   off the old shape:
@@ -55,17 +57,79 @@ migration-discipline part of #87 §9 / #102).
 3. **Back up the quiesced set** — snapshot the database, private object storage, and any staged legacy
    media as one recovery point. Do not proceed without a verified, restorable backup; there is no
    automatic rollback of a migration.
-4. **Pin and pull the complete target set** — set `CONNEX_VERSION` to the exact release in a mode-0600
-   `deploy/.env`, then run `docker compose pull`. Require the backend, frontend, and optional OCR image
-   to be locally available before starting the target version.
-5. **Apply** — run `docker compose up -d`. Flyway runs the new migrations on backend start.
-6. **Verify** — `curl -s http://<host>/api/version` shows the new version; smoke the app and private
-   media downloads.
-7. **On failure** — stop the stack, **restore the complete backup**, and pin back to the previous version.
-   Never hand-edit `flyway_schema_history` or delete a partially-applied migration; restore instead.
+4. **Pin and pull the complete target set** — verify the exact tag-bound `release-manifest.json` as
+   documented in [RELEASE.md](RELEASE.md), then set `CONNEX_BACKEND_DIGEST`,
+   `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` in the mode-0600 `deploy/.env` to the 64
+   lowercase hexadecimal characters after `sha256:` for each image. Run `docker compose pull` and
+   require the backend, frontend, and optional OCR digest to be locally available before starting
+   the target version.
+5. **Normalize object-volume ownership when required** — the backend runtime identity is permanently
+   `10001:10001`. Before the first upgrade from a preview image that used a dynamic UID/GID, run the
+   following idempotent preflight while writers remain stopped:
+
+   ```bash
+   docker compose run --rm --no-deps --user 0 --entrypoint sh backend -c '
+     current="$(stat -c "%u:%g" /var/lib/connex/objects)"
+     if [ "$current" != "10001:10001" ]; then
+       chown -R 10001:10001 /var/lib/connex/objects
+     fi
+     chmod 0700 /var/lib/connex/objects
+   '
+   ```
+
+6. **Start the data plane with ingress closed** — leave Caddy stopped. Start the database, optional
+   OCR service, and backend first, and require Compose health before touching the old frontend
+   container:
+
+   ```bash
+   docker compose up -d --wait --wait-timeout 300 db backend
+   docker compose --profile ocr up -d --wait --wait-timeout 300 ocr backend  # only when OCR is enabled
+   ```
+
+   Flyway and the normal-startup legacy-reference guard finish before backend health becomes ready.
+   If legacy references remain, the backend fails and the old frontend container is left intact so
+   its writable-layer media can still be staged. After backend health succeeds, start the frontend
+   without Caddy:
+
+   ```bash
+   docker compose up -d --wait --wait-timeout 300 frontend
+   ```
+
+7. **Verify internally before publishing ingress** — use the pinned Caddy image as a one-shot client
+   on the private Compose network:
+
+   ```bash
+   docker compose run --rm --no-deps --entrypoint wget caddy -qO- \
+     http://backend:8080/api/version
+   docker compose run --rm --no-deps --entrypoint wget caddy -qO- \
+     http://backend:8080/api/capabilities
+   docker compose run --rm --no-deps --entrypoint wget caddy -q --spider \
+     http://frontend:3000/auth/login
+   docker compose ps
+   ```
+
+   Require the target version, the expected business-card capabilities, healthy OCR when enabled,
+   exact configured image digests, and stable running containers on a second probe. Smoke a private
+   media download with an authenticated test session.
+8. **Publish ingress last** — only after every internal check passes, start Caddy and run the external
+   smoke:
+
+   ```bash
+   docker compose up -d --no-deps caddy
+   curl -fsS http://<host>/api/version
+   ```
+
+   Reopen upstream ingress or writers only after that smoke succeeds.
+9. **On pre-ingress failure** — keep Caddy and upstream ingress closed, stop the target application
+   containers, **restore the complete backup**, and pin back to the previous version. Restore is safe
+   only while no post-backup writes have been admitted. If a failure occurs after ingress reopens,
+   quiesce writers and assess the new writes before restoring. Never hand-edit
+   `flyway_schema_history` or delete a partially-applied migration.
 
 ## CI coverage & follow-ups
 
-The forward-only guard (no editing shipped migrations) runs on every pull request. A fuller
-**restore-a-previous-release → migrate → smoke** upgrade test becomes meaningful once released
-version baselines exist; it is a follow-up on this issue.
+The forward-only guard and its modify/delete/rename/type-change regression suite run on every pull
+request and `main` push. `FlywayUpgradeIntegrationTest` migrates representative populated V73 media,
+quota, deletion-queue, and import state through the current lineage. A full
+**restore-a-previous-release image → migrate → smoke** gate remains a follow-up once stable released
+version baselines exist.

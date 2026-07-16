@@ -2,7 +2,7 @@ name: connex
 
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     ports:
       - "${CONNEX_HTTP_PORT:-80}:80"
@@ -11,26 +11,35 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
 
   frontend:
-    image: ghcr.io/itkla/connex-frontend:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
+    image: ghcr.io/itkla/connex-frontend@sha256:${CONNEX_FRONTEND_DIGEST:?set CONNEX_FRONTEND_DIGEST to the verified 64-character digest in deploy/.env}
     restart: unless-stopped
     environment:
       API_URL: http://backend:8080
     expose:
       - "3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/auth/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   backend:
-    image: ghcr.io/itkla/connex-backend:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
+    image: ghcr.io/itkla/connex-backend@sha256:${CONNEX_BACKEND_DIGEST:?set CONNEX_BACKEND_DIGEST to the verified 64-character digest in deploy/.env}
     restart: unless-stopped
     env_file:
       - .env
     environment:
       CONNEX_DB_ROOT_PASSWORD: ""
+      CONNEX_READINESS_FILE: /tmp/connex-ready
     volumes:
       - object_data:/var/lib/connex/objects
     expose:
@@ -38,13 +47,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/connex-ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
     networks:
       default:
         gw_priority: 1
       ocr_internal: {}
 
   ocr:
-    image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
+    image: ghcr.io/itkla/connex-ocr@sha256:${CONNEX_OCR_DIGEST:?set CONNEX_OCR_DIGEST to the verified 64-character digest in deploy/.env}
     profiles: ["ocr"]
     restart: unless-stopped
     environment:
@@ -52,6 +66,10 @@ services:
       CONNEX_OCR_REQUEST_TIMEOUT_SECONDS: ${CONNEX_OCR_REQUEST_TIMEOUT_SECONDS:-12}
       CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-90}
       CONNEX_OCR_MAX_REQUEST_HANDLERS: ${CONNEX_OCR_MAX_REQUEST_HANDLERS:-8}
+      CONNEX_OCR_MAX_IMAGE_BYTES: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:-8388608}
+      CONNEX_OCR_MAX_WIDTH: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:-8192}
+      CONNEX_OCR_MAX_HEIGHT: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT:-8192}
+      CONNEX_OCR_MAX_PIXELS: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS:-24000000}
     expose:
       - "8090"
     read_only: true
@@ -75,7 +93,7 @@ services:
       retries: 4
 
   db:
-    image: mysql:8.4
+    image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
     restart: unless-stopped
     command: ["--log_bin_trust_function_creators=1"]
     environment:

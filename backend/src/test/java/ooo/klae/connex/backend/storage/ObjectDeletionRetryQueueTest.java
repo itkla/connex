@@ -189,6 +189,18 @@ class ObjectDeletionRetryQueueTest {
     }
 
     @Test
+    void cleanupPreparationFailsClosedBeforeAProviderWriteCanBegin() {
+        tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
+        String key = "workspaces/7/attachments/object.pdf";
+        doThrow(new IllegalStateException("database unavailable"))
+            .when(transactionExecutor).enqueueTenant(7, key, 2,
+                java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
+
+        assertThrows(ServiceUnavailableException.class,
+            () -> queue.prepareTenantWrite(7, key));
+    }
+
+    @Test
     void retrySweepAlwaysVisitsDefaultCatalog() {
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());

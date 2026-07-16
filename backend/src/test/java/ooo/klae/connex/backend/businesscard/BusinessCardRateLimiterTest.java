@@ -30,6 +30,7 @@ class BusinessCardRateLimiterTest {
     void setUp() {
         properties = new BusinessCardProperties();
         properties.setMaxScansPerMinute(2);
+        properties.setMaxGlobalScansPerMinute(3);
         properties.setMaxImportsPerMinute(1);
         properties.setRateLimitMaxKeys(3);
         User user = new User();
@@ -39,10 +40,33 @@ class BusinessCardRateLimiterTest {
     }
 
     @Test
-    void limitsScansPerAuthenticatedUserAndWorkspace() {
+    void limitsScansPerAuthenticatedPrincipal() {
         BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
 
         assertDoesNotThrow(limiter::requireScanAllowed);
+        assertDoesNotThrow(limiter::requireScanAllowed);
+        assertThrows(TooManyRequestsException.class, limiter::requireScanAllowed);
+    }
+
+    @Test
+    void scanLimitFollowsThePrincipalAcrossWorkspaces() {
+        BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
+
+        assertDoesNotThrow(limiter::requireScanAllowed);
+        assertDoesNotThrow(limiter::requireScanAllowed);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(6);
+        assertThrows(TooManyRequestsException.class, limiter::requireScanAllowed);
+    }
+
+    @Test
+    void globalScanBudgetPreservesCapacityAcrossPrincipals() {
+        BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
+        User second = new User();
+        second.setId(10);
+
+        assertDoesNotThrow(limiter::requireScanAllowed);
+        assertDoesNotThrow(limiter::requireScanAllowed);
+        when(authService.getCurrentUser()).thenReturn(second);
         assertDoesNotThrow(limiter::requireScanAllowed);
         assertThrows(TooManyRequestsException.class, limiter::requireScanAllowed);
     }
@@ -53,7 +77,9 @@ class BusinessCardRateLimiterTest {
 
         assertDoesNotThrow(limiter::requireScanAllowed);
         assertDoesNotThrow(limiter::requireImportAllowed);
+        assertDoesNotThrow(limiter::requireReservationAllowed);
         assertThrows(TooManyRequestsException.class, limiter::requireImportAllowed);
+        assertThrows(TooManyRequestsException.class, limiter::requireReservationAllowed);
         assertDoesNotThrow(limiter::requireScanAllowed);
     }
 

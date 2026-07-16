@@ -17,5 +17,24 @@ class BusinessCardPropertiesTest {
                 () -> properties.setMaxImageBytes(0));
         assertThrows(IllegalArgumentException.class,
                 () -> properties.setMaxPixels(-1));
+        assertThrows(IllegalArgumentException.class,
+                () -> properties.setMaxGlobalScansPerMinute(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> properties.setReservationLease(Duration.ZERO));
+        properties.setReservationLease(Duration.ofHours(24));
+        assertThrows(IllegalArgumentException.class,
+                properties::validateRetentionWindows);
+        assertThrows(IllegalArgumentException.class,
+                () -> properties.setMaxOutstandingReservations(33));
+    }
+
+    @Test
+    void acceptsValidRetentionWindowsRegardlessOfSetterOrder() {
+        BusinessCardProperties properties = new BusinessCardProperties();
+
+        properties.setIdempotencyRetention(Duration.ofMinutes(1));
+        properties.setReservationLease(Duration.ofSeconds(30));
+
+        properties.validateRetentionWindows();
     }
 }

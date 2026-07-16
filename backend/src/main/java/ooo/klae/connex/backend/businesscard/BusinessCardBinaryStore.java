@@ -24,14 +24,6 @@ public interface BusinessCardBinaryStore {
     StoredBusinessCard store(int workspaceId, String fileName, String contentType, byte[] content);
 
     /**
-     * Deletes or schedules deletion of an object created by {@link #store}.
-     *
-     * @param workspaceId resolved workspace identifier
-     * @param url stored object URL
-     */
-    void delete(int workspaceId, String url);
-
-    /**
      * Durable metadata returned after an object write.
      *
      * @param url private backend-authorized object URL

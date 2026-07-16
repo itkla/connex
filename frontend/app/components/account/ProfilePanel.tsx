@@ -451,8 +451,8 @@ export default function ProfilePanel({ user }: Props) {
         preferredLocale !== confirmedUser.locale ||
         photo !== null && uploadedPhotoUrl !== confirmedUser.profilePictureUrl;
 
-    const selectPhoto = (file: File | null) => {
-        if (file && !isManagedImageFile(file)) {
+    const selectPhoto = async (file: File | null) => {
+        if (file && !await isManagedImageFile(file)) {
             toastError(t("photoUnsupported"));
             return;
         }
@@ -466,7 +466,7 @@ export default function ProfilePanel({ user }: Props) {
 
     const reset = () => {
         dispatchDraft({ type: "reset", value: profileDraft(confirmedUser) });
-        selectPhoto(null);
+        void selectPhoto(null);
         setFieldErrors({});
     };
 
@@ -560,7 +560,7 @@ export default function ProfilePanel({ user }: Props) {
             if (completedMutation) confirmUser(nextUser);
             if (mutationFailed) throw mutationError;
 
-            selectPhoto(null);
+            void selectPhoto(null);
             toastSuccess(t("saved"));
             router.refresh();
         } catch (err) {
@@ -574,7 +574,7 @@ export default function ProfilePanel({ user }: Props) {
                   : t("saveFailed");
             toastError(message);
             if (completedMutation) {
-                selectPhoto(null);
+                if (!photoUploadFailed) void selectPhoto(null);
                 router.refresh();
             }
         } finally {
@@ -599,7 +599,7 @@ export default function ProfilePanel({ user }: Props) {
                 submitting={submitting}
                 dispatchDraft={dispatchDraft}
                 onSelectPhoto={(file) => {
-                    if (!submitting) selectPhoto(file);
+                    if (!submitting) void selectPhoto(file);
                 }}
                 onReset={reset}
                 onSubmit={handleSubmit}

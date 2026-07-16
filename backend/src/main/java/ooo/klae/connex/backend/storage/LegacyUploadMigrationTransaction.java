@@ -29,8 +29,9 @@ public class LegacyUploadMigrationTransaction {
      *
      * @param record attachment reference
      * @param resolved bounded local source
+     * @return exact byte count that apply mode would store
      */
-    public void validateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
+    public long validateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
         byte[] content = resolved.content();
         ValidatedUpload upload = uploadPolicy.validateGeneric(
@@ -41,6 +42,7 @@ public class LegacyUploadMigrationTransaction {
             record.getUrl(),
             upload.extension(),
             content);
+        return content.length;
     }
 
     /**
@@ -48,8 +50,9 @@ public class LegacyUploadMigrationTransaction {
      *
      * @param record contact image reference
      * @param resolved bounded local source
+     * @return exact canonical byte count that apply mode would store
      */
-    public void validatePersonImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
+    public long validatePersonImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
         ValidatedImage image = imageUploadValidator.validate(imageSource(resolved));
         managedObjectService.validateMigratedPersonImageTarget(
@@ -58,6 +61,7 @@ public class LegacyUploadMigrationTransaction {
             record.getUrl(),
             image.extension(),
             image.content());
+        return image.content().length;
     }
 
     /**
@@ -65,8 +69,9 @@ public class LegacyUploadMigrationTransaction {
      *
      * @param record company image reference
      * @param resolved bounded local source
+     * @return exact canonical byte count that apply mode would store
      */
-    public void validateCompanyImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
+    public long validateCompanyImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
         ValidatedImage image = imageUploadValidator.validate(imageSource(resolved));
         managedObjectService.validateMigratedCompanyImageTarget(
@@ -75,6 +80,7 @@ public class LegacyUploadMigrationTransaction {
             record.getUrl(),
             image.extension(),
             image.content());
+        return image.content().length;
     }
 
     /**
@@ -82,14 +88,16 @@ public class LegacyUploadMigrationTransaction {
      *
      * @param record user image reference
      * @param resolved bounded local source
+     * @return exact canonical byte count that apply mode would store
      */
-    public void validateUserImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
+    public long validateUserImage(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         ValidatedImage image = imageUploadValidator.validate(imageSource(resolved));
         managedObjectService.validateMigratedUserImageTarget(
             record.getId(),
             record.getUrl(),
             image.extension(),
             image.content());
+        return image.content().length;
     }
 
     /**

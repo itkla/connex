@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.businesscard;
 import java.net.URI;
 import java.time.Duration;
 
+import jakarta.annotation.PostConstruct;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -24,11 +26,14 @@ public class BusinessCardProperties {
     private int maxWidth = 8_192;
     private int maxHeight = 8_192;
     private long maxPixels = 24_000_000;
-    private int maxScansPerMinute = 12;
+    private int maxScansPerMinute = 3;
+    private int maxGlobalScansPerMinute = 5;
     private int maxImportsPerMinute = 12;
     private int rateLimitMaxKeys = 10_000;
     private Duration idempotencyRetention = Duration.ofHours(24);
-    private int idempotencyCleanupBatchSize = 100;
+    private Duration reservationLease = Duration.ofMinutes(2);
+    private int maxOutstandingReservations = 4;
+    private int idempotencyCleanupBatchSize = 1_000;
 
     public boolean isEnabled() {
         return enabled;
@@ -134,6 +139,15 @@ public class BusinessCardProperties {
         this.maxScansPerMinute = positive(maxScansPerMinute, "maxScansPerMinute");
     }
 
+    public int getMaxGlobalScansPerMinute() {
+        return maxGlobalScansPerMinute;
+    }
+
+    public void setMaxGlobalScansPerMinute(int maxGlobalScansPerMinute) {
+        this.maxGlobalScansPerMinute = positive(
+                maxGlobalScansPerMinute, "maxGlobalScansPerMinute");
+    }
+
     public int getMaxImportsPerMinute() {
         return maxImportsPerMinute;
     }
@@ -158,6 +172,26 @@ public class BusinessCardProperties {
         this.idempotencyRetention = positive(idempotencyRetention, "idempotencyRetention");
     }
 
+    public Duration getReservationLease() {
+        return reservationLease;
+    }
+
+    public void setReservationLease(Duration reservationLease) {
+        this.reservationLease = positive(reservationLease, "reservationLease");
+    }
+
+    public int getMaxOutstandingReservations() {
+        return maxOutstandingReservations;
+    }
+
+    public void setMaxOutstandingReservations(int maxOutstandingReservations) {
+        if (maxOutstandingReservations <= 0 || maxOutstandingReservations > 32) {
+            throw new IllegalArgumentException(
+                    "maxOutstandingReservations must be between 1 and 32");
+        }
+        this.maxOutstandingReservations = maxOutstandingReservations;
+    }
+
     public int getIdempotencyCleanupBatchSize() {
         return idempotencyCleanupBatchSize;
     }
@@ -165,6 +199,14 @@ public class BusinessCardProperties {
     public void setIdempotencyCleanupBatchSize(int idempotencyCleanupBatchSize) {
         this.idempotencyCleanupBatchSize = positive(
                 idempotencyCleanupBatchSize, "idempotencyCleanupBatchSize");
+    }
+
+    @PostConstruct
+    void validateRetentionWindows() {
+        if (reservationLease.compareTo(idempotencyRetention) >= 0) {
+            throw new IllegalArgumentException(
+                    "reservationLease must be shorter than idempotencyRetention");
+        }
     }
 
     private static int positive(int value, String name) {

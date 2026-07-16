@@ -19,9 +19,12 @@ import java.util.UUID;
 import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,6 +71,11 @@ class LegacyUploadMigrationIntegrationTest {
         }
     }
 
+    @AfterEach
+    void clearAuthentication() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void migratesAndVerifiesTenantAndControlMediaWhileRetainingSources() throws Exception {
         Files.createDirectories(LEGACY_ROOT.resolve("attachments/person"));
@@ -82,6 +90,8 @@ class LegacyUploadMigrationIntegrationTest {
             workspaceMapper.insert(workspace);
         }
         User user = user(workspace.getId());
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
         Attachment attachment = attachment(workspace.getId(), user);
         Path attachmentSource = LEGACY_ROOT.resolve(
             attachment.getUrl().substring(1));

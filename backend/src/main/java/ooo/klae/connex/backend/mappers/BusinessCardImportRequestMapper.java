@@ -12,14 +12,41 @@ import ooo.klae.connex.backend.businesscard.BusinessCardImportRecord;
  */
 public interface BusinessCardImportRequestMapper {
 
-    int claim(
+    int reserve(
             @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
             @Param("idempotencyKey") String idempotencyKey,
-            @Param("requestFingerprint") byte[] requestFingerprint);
+            @Param("reservationSlot") int reservationSlot,
+            @Param("submissionExpiresAt") LocalDateTime submissionExpiresAt,
+            @Param("expiresAt") LocalDateTime expiresAt);
 
     BusinessCardImportRecord get(
             @Param("workspaceId") int workspaceId,
             @Param("idempotencyKey") String idempotencyKey);
+
+    BusinessCardImportRecord getForUpdate(
+            @Param("workspaceId") int workspaceId,
+            @Param("idempotencyKey") String idempotencyKey);
+
+    int bindReservation(
+            @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("requestFingerprint") byte[] requestFingerprint,
+            @Param("expiresAt") LocalDateTime expiresAt,
+            @Param("now") LocalDateTime now);
+
+    int renewReservation(
+            @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("submissionExpiresAt") LocalDateTime submissionExpiresAt,
+            @Param("now") LocalDateTime now);
+
+    int deleteAbandonedReservations(
+            @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
+            @Param("now") LocalDateTime now);
 
     int complete(
             @Param("workspaceId") int workspaceId,

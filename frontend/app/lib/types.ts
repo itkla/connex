@@ -472,8 +472,8 @@ export type CreateContactPayload = {
 };
 
 export type BusinessCardDetectedField = {
-    value: string | null;
-    confidence: number | null;
+    value?: string | null;
+    confidence?: number | null;
 };
 
 export type BusinessCardScanResult = {
@@ -484,7 +484,7 @@ export type BusinessCardScanResult = {
         title: BusinessCardDetectedField;
     };
     company: BusinessCardDetectedField & {
-        matchedCompanyId: number | null;
+        matchedCompanyId?: number | null;
     };
     warnings: string[];
 };
@@ -501,10 +501,14 @@ export type BusinessCardImportDraft = {
     companyAction: BusinessCardCompanyAction;
 };
 
+export type BusinessCardImportReservation = {
+    expiresAt: string;
+};
+
 export type BusinessCardImportResult = {
-    contact: Contact;
-    attachment: Attachment;
-    company: Company | null;
+    contact: Pick<Contact, 'id' | 'name'> & Partial<Pick<Contact, 'email' | 'phone' | 'title' | 'imageUrl'>>;
+    attachment: Pick<Attachment, 'id' | 'fileName' | 'url' | 'size'> & Partial<Pick<Attachment, 'contentType'>>;
+    company?: (Pick<Company, 'id' | 'name'> & Partial<Pick<Company, 'website' | 'industry' | 'phone' | 'address' | 'logoUrl'>>) | null;
 };
 
 export type BusinessCardRequestErrorKind =
@@ -516,6 +520,7 @@ export type BusinessCardRequestErrorKind =
     | 'unreadable'
     | 'busy'
     | 'conflict'
+    | 'gone'
     | 'timeout'
     | 'unavailable'
     | 'recoveryStorage'

@@ -26,7 +26,7 @@ docker run --detach \
     "$IMAGE" >/dev/null
 
 for _ in $(seq 1 60); do
-    if docker exec "$NAME" python -c "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"; then
+    if docker exec "$NAME" python -c "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)" 2>/dev/null; then
         READY=1
         break
     fi
@@ -37,6 +37,7 @@ for _ in $(seq 1 60); do
 done
 
 if [ "$READY" != 1 ]; then
+    docker inspect --format 'running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$NAME"
     docker logs "$NAME"
     exit 1
 fi

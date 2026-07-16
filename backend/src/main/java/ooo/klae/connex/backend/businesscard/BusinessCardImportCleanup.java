@@ -16,7 +16,7 @@ import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Bounded catalog-aware retention cleanup for completed business-card import claims.
+ * Bounded catalog-aware retention cleanup for business-card import reservations and claims.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,8 +33,7 @@ public class BusinessCardImportCleanup {
         fixedDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1H}",
         initialDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1H}")
     public void deleteExpired() {
-        LocalDateTime cutoff = LocalDateTime.ofInstant(
-            clock.instant().minus(properties.getIdempotencyRetention()), ZoneOffset.UTC);
+        LocalDateTime cutoff = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {
                 tenantWorkScope.withCatalog(catalog, () -> {

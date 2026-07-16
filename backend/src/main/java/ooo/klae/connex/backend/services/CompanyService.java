@@ -102,20 +102,35 @@ public class CompanyService {
      * case normalization. More than one result is intentionally preserved so callers never bind
      * an ambiguous OCR candidate automatically.
      */
-    public List<Company> findVisibleByNormalizedName(String name) {
+    public NormalizedCompanyMatches findVisibleByNormalizedName(String name) {
         String key = BusinessCardTextNormalizer.companyKey(name);
         if (key.isBlank()) {
-            return List.of();
+            return new NormalizedCompanyMatches(List.of(), false);
         }
         String pattern = java.util.Arrays.stream(key.split(" "))
                 .map(LikePattern::escape)
                 .collect(Collectors.joining("%", "", "%"));
-        return companyMapper.findVisibleNameCandidates(
-                        workspaceService.getCurrentWorkspaceId(), pattern, key,
-                        COMPANY_NAME_CANDIDATE_LIMIT)
-                .stream()
+        List<Company> candidates = companyMapper.findVisibleNameCandidates(
+                workspaceService.getCurrentWorkspaceId(), pattern, key,
+                COMPANY_NAME_CANDIDATE_LIMIT + 1);
+        boolean truncated = candidates.size() > COMPANY_NAME_CANDIDATE_LIMIT;
+        List<Company> matches = candidates.stream()
+                .limit(COMPANY_NAME_CANDIDATE_LIMIT)
                 .filter(company -> key.equals(BusinessCardTextNormalizer.companyKey(company.getName())))
                 .toList();
+        return new NormalizedCompanyMatches(matches, truncated);
+    }
+
+    /**
+     * Exact normalized company-name matches plus whether the broad candidate query was truncated.
+     *
+     * @param companies exact normalized visible matches
+     * @param truncated whether additional broad candidates were omitted
+     */
+    public record NormalizedCompanyMatches(List<Company> companies, boolean truncated) {
+        public NormalizedCompanyMatches {
+            companies = List.copyOf(companies);
+        }
     }
 
     public CompanyEngagementDto getCompanyEngagement(int companyId) {

@@ -1,3 +1,4 @@
+import http.client
 import json
 import socket
 import threading
@@ -306,11 +307,14 @@ class InferenceDeadlineTest(unittest.TestCase):
             },
             method="POST",
         )
-        request_status: list[int] = []
+        request_failed = threading.Event()
 
         def invoke() -> None:
-            with urllib.request.urlopen(request, timeout=5) as response:
-                request_status.append(response.status)
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    response.read()
+            except (OSError, http.client.HTTPException):
+                request_failed.set()
 
         request_thread = threading.Thread(target=invoke)
         request_thread.start()
@@ -330,7 +334,47 @@ class InferenceDeadlineTest(unittest.TestCase):
             server.server_close()
             server_thread.join(2)
 
-        self.assertEqual([200], request_status)
+        self.assertTrue(request_failed.is_set())
+
+    def test_body_upload_and_inference_share_one_deadline(self) -> None:
+        token = "test-service-token-0000000000000000"
+        engine = BlockingEngine()
+        fatal_timeout = threading.Event()
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token=token,
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=0.4,
+        )
+        server = create_server(config, engine, fatal_timeout.set)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        connection = socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
+        connection.sendall(
+            b"POST /v1/ocr HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Authorization: Bearer " + token.encode() + b"\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Content-Length: 5\r\n\r\nx"
+        )
+        time.sleep(0.25)
+        inference_started_at = time.monotonic()
+        connection.sendall(b"mage")
+
+        try:
+            self.assertTrue(engine.started.wait(1))
+            self.assertTrue(fatal_timeout.wait(0.35))
+            self.assertLess(time.monotonic() - inference_started_at, 0.35)
+        finally:
+            engine.release.set()
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
 
 
 class InferenceFailureTest(unittest.TestCase):

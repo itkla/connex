@@ -268,9 +268,13 @@ attachments, email, object storage, or removable media.
 
 Every production environment needs an isolated restore drill that proves:
 
-- The database backup restores.
+- The database and the point-in-time-consistent private object-store backup restore together.
 - The selected volume-key or keyring/key-manager state restores.
 - Connex can start without modifying the application package.
+- An authenticated member can download a representative attachment and render a restored contact,
+  company, and user image without crossing tenant boundaries.
+- Workspace quota rows reconcile with restored managed objects, and both tenant and user deletion
+  queues resume without losing or prematurely releasing charged bytes.
 - A withheld or revoked customer key prevents access as expected.
 - A restored customer key brings the service back without plaintext export.
 

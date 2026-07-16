@@ -2,9 +2,9 @@ import io
 import http.client
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from ocr_service.supervisor import HealthState, WorkerResult, _health, _next_backoff, _number, _ready, supervise
+from ocr_service.supervisor import HealthState, WorkerResult, _health, _next_backoff, _number, _ready, main, supervise
 
 
 class FakeProcess:
@@ -40,6 +40,46 @@ class HealthResponse(io.BytesIO):
 
 
 class SupervisorTest(unittest.TestCase):
+    def test_main_rejects_invalid_configuration(self) -> None:
+        with (
+            patch.dict(os.environ, {"CONNEX_OCR_PORT": "invalid"}),
+            patch("ocr_service.supervisor.signal.signal"),
+        ):
+            self.assertEqual(1, main())
+
+    def test_main_exits_after_worker_fails_before_readiness(self) -> None:
+        process = Mock()
+        process.poll.return_value = 3
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("ocr_service.supervisor.signal.signal"),
+            patch("ocr_service.supervisor.subprocess.Popen", return_value=process),
+            patch(
+                "ocr_service.supervisor.supervise",
+                return_value=WorkerResult(False, 3, 0.0),
+            ),
+        ):
+            self.assertEqual(3, main())
+
+    def test_main_restarts_only_after_worker_reached_readiness(self) -> None:
+        process = Mock()
+        process.poll.return_value = 1
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("ocr_service.supervisor.signal.signal"),
+            patch("ocr_service.supervisor.subprocess.Popen", return_value=process) as popen,
+            patch(
+                "ocr_service.supervisor.supervise",
+                side_effect=[
+                    WorkerResult(True, 1, 31.0),
+                    WorkerResult(False, 1, 0.0),
+                ],
+            ),
+            patch("ocr_service.supervisor.threading.Event.wait", return_value=False),
+        ):
+            self.assertEqual(1, main())
+            self.assertEqual(2, popen.call_count)
+
     def test_returns_worker_exit_after_readiness(self) -> None:
         process = FakeProcess(wait_code=7)
         calls = 0

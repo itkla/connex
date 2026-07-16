@@ -58,7 +58,6 @@ type InFlightAiMutation = {
 
 type ResolvedClientRequestIdentity = {
     request: string;
-    recovery: string;
 };
 
 const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
@@ -185,7 +184,6 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
             currentCsrf.headerName,
             currentCsrf.token,
         ].join("\u0000"),
-        recovery: [workspaceId, currentCsrf.requestIdentity].join("\u0000"),
     };
 }
 
@@ -193,13 +191,27 @@ async function currentClientRequestIdentity(): Promise<string | null> {
     return (await resolveClientRequestIdentity())?.request ?? null;
 }
 
-/** Returns a non-reversible browser-storage scope for the active session and workspace. */
+/** Returns a non-reversible browser-storage scope for the active user and workspace. */
 export async function clientRecoveryScope(): Promise<string | null> {
-    const identity = await resolveClientRequestIdentity();
-    if (!identity || typeof window === "undefined" || !window.crypto.subtle) return null;
+    const workspaceId = clientWorkspaceId();
+    if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
+    let response: Response;
+    try {
+        response = await fetch(`${API_BASE}/api/auth/me`, {
+            credentials: "include",
+            cache: "no-store",
+        });
+    } catch {
+        return null;
+    }
+    if (!response.ok) return null;
+    const body: unknown = await response.json().catch(() => null);
+    if (typeof body !== "object" || body === null || !("id" in body)) return null;
+    const userId = body.id;
+    if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) return null;
     const digest = await window.crypto.subtle.digest(
         "SHA-256",
-        new TextEncoder().encode(identity.recovery),
+        new TextEncoder().encode([workspaceId, userId].join("\u0000")),
     );
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -648,6 +660,7 @@ export function isFieldError(err: unknown): err is ApiError & { fieldErrors: Api
 /** Classifies card scan/import failures into stable UI states without exposing backend messages. */
 export function businessCardRequestErrorKind(error: unknown): Types.BusinessCardRequestErrorKind {
     if (error instanceof Error && error.name === "AbortError") return "aborted";
+    if (error instanceof Error && error.name === "TimeoutError") return "timeout";
     if (!(error instanceof ApiError)) return "failed";
 
     const code = error.code?.toUpperCase() ?? "";
@@ -664,6 +677,8 @@ export function businessCardRequestErrorKind(error: unknown): Types.BusinessCard
             return "timeout";
         case 409:
             return "conflict";
+        case 410:
+            return "gone";
         case 413:
             return "tooLarge";
         case 415:
@@ -677,6 +692,36 @@ export function businessCardRequestErrorKind(error: unknown): Types.BusinessCard
             return "unavailable";
         default:
             return error.status > 0 && error.status < 500 ? "rejected" : "failed";
+    }
+}
+
+async function withBusinessCardRequestTimeout<T>(
+    timeoutMilliseconds: number,
+    parentSignal: AbortSignal | null | undefined,
+    request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortFromParent = () => controller.abort();
+    if (parentSignal?.aborted) {
+        abortFromParent();
+    } else {
+        parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+    const timer = globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMilliseconds);
+    try {
+        return await request(controller.signal);
+    } catch (error) {
+        if (timedOut) {
+            throw new ApiError("Business-card request timed out", 408, "CLIENT_TIMEOUT");
+        }
+        throw error;
+    } finally {
+        globalThis.clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", abortFromParent);
     }
 }
 
@@ -1594,6 +1639,21 @@ export function scanBusinessCard(image: File, init: RequestInit = {}) {
     return postFormData<Types.BusinessCardScanResult>("/api/business-cards/scan", body, init);
 }
 
+/** Reserves an opaque import key before private multipart content is submitted. */
+export function reserveBusinessCardImport(requestId: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers);
+    headers.set("Idempotency-Key", requestId);
+    return withBusinessCardRequestTimeout(
+        10_000,
+        init.signal,
+        (signal) => postJson<Types.BusinessCardImportReservation>(
+            "/api/business-cards/import/reservation",
+            {},
+            { ...init, headers, signal },
+        ),
+    );
+}
+
 /** Creates the reviewed contact and stores its source card in one backend transaction. */
 export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: RequestInit = {}) {
     const body = new FormData();
@@ -1605,7 +1665,15 @@ export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: R
         headers[key] = value;
     });
     headers["Idempotency-Key"] = draft.requestId;
-    return postFormData<Types.BusinessCardImportResult>("/api/business-cards/import", body, { ...init, headers });
+    return withBusinessCardRequestTimeout(
+        30_000,
+        init.signal,
+        (signal) => postFormData<Types.BusinessCardImportResult>(
+            "/api/business-cards/import",
+            body,
+            { ...init, headers, signal },
+        ),
+    );
 }
 
 /** Reconciles a completed import without resubmitting private card or contact content. */

@@ -158,6 +158,35 @@ class FilesystemObjectStorageTest {
         assertFalse(storage.isReady());
     }
 
+    @Test
+    void refusesDeletionUntilAnActiveReaderCloses() throws Exception {
+        byte[] bytes = "slow reader".getBytes(StandardCharsets.UTF_8);
+        String key = "workspaces/17/attachments/slow.pdf";
+        storage.put(key, source(bytes), "application/pdf", sha256(bytes));
+        StoredObject open = storage.get(key);
+
+        assertThrows(ObjectStorageException.class, () -> storage.delete(key));
+        assertArrayEquals(bytes, open.inputStream().readAllBytes());
+
+        open.close();
+        storage.delete(key);
+        assertThrows(ObjectStorageNotFoundException.class, () -> storage.get(key));
+    }
+
+    @Test
+    void prunesEmptyEntityDirectoriesWithoutRemovingTheCategoryRoot() throws Exception {
+        byte[] bytes = {1, 2, 3};
+        String key = "workspaces/17/person-images/23/photo.png";
+        Path entityDirectory = root.resolve("workspaces/17/person-images/23");
+        Path categoryDirectory = entityDirectory.getParent();
+        storage.put(key, source(bytes), "image/png", sha256(bytes));
+
+        storage.delete(key);
+
+        assertFalse(Files.exists(entityDirectory));
+        assertTrue(Files.isDirectory(categoryDirectory));
+    }
+
     private static UploadSource source(byte[] bytes) {
         return UploadSource.from("example.bin", "application/octet-stream", bytes);
     }

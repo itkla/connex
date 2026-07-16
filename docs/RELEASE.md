@@ -10,19 +10,15 @@ This is **Release pipeline v0** (issue #496, epic #502). It builds Connex as thr
 | `ghcr.io/itkla/connex-frontend:<version>` | Next.js standalone server | `node server.js`, serves `:3000` |
 | `ghcr.io/itkla/connex-ocr:<version>` | CPU-only PaddleOCR with pre-fetched EN/JA card models | private Python service, serves `:8090` |
 
-All images are tagged with the **same product version** (from the git tag) plus an immutable `sha-<commit>` tag. A release is always the set at one version — the components are never upgraded independently. The running backend version is exposed at `GET /api/version`.
+All images receive the **same product version** (from the git tag) plus a `sha-<commit>` convenience
+tag. Tags are registry pointers, not an integrity boundary. The signed release manifest is the source
+of truth and pins every component by immutable digest. A release is always the set at one version —
+the components are never upgraded independently. The running backend version is exposed at
+`GET /api/version`.
 
 The frontend image bakes the **internal** backend address (`BACKEND_URL`, default `http://backend:8080`) into its build-time route rewrites, and defaults the server-side fetch base (`API_URL`) to the same. Because that is the internal service hop (the browser always talks to the frontend origin), the one image is portable across all deployment modes as long as the bundle names the backend service `backend`. Decoupling this behind an ingress proxy is a follow-up (#499).
 
 ## Cutting a release
-
-Before tagging a release that includes OCR changes, qualify the exact candidate commit on an
-x86-64 AVX host with two CPUs and 2 GiB assigned to the OCR container. Run the authenticated
-40-case English/Japanese/mixed benchmark against a disposable workspace by following
-[`../ocr/benchmark/README.md`](../ocr/benchmark/README.md), retain its JSON report in the release
-issue, and require all gates to pass: email and phone accuracy at least 95%, name at least 85%, title
-and company at least 80%, and end-to-end P95 latency at most eight seconds. Do not tag from an
-unqualified commit.
 
 Releases are **tag-triggered**. From the qualified commit on `main`:
 
@@ -33,51 +29,97 @@ git push origin v1.4.0
 
 `.github/workflows/release.yml` treats the three images as one release transaction:
 
-1. It rejects anything except strict `vMAJOR.MINOR.PATCH`, requires the tag to point at the current
-   `main` head, and waits for the commit's required CI and security checks to succeed.
-2. It builds each component with a reproducible commit timestamp and pushes only a run-scoped
-   `candidate-<run>` tag. Each exact candidate is rejected on high-or-critical known vulnerabilities,
-   signed with cosign, receives an SPDX SBOM attestation, and the OCR candidate must pass a real
-   authenticated inference smoke test. A rerun reuses that run's validated candidate digest instead
-   of rebuilding a potentially different image.
+1. It rejects anything except strict `vMAJOR.MINOR.PATCH`, requires the tag to point to the current
+   `main` head, and waits for the latest `push` run of the repository's CI, security, and
+   deployment-smoke workflows to succeed for that exact commit. Workflow identity is resolved
+   through the GitHub Actions API, not by accepting a matching check name from another integration.
+2. It builds each component with a reproducible commit timestamp and pushes only an attempt-scoped
+   `candidate-<run>-<attempt>` tag. Every attempt builds from the checked-out release commit with
+   pinned Buildx and BuildKit versions and emits BuildKit provenance; it never trusts content found
+   behind a pre-existing candidate tag. Each resulting digest is rejected on high-or-critical known
+   vulnerabilities, signed with cosign, and receives an SPDX SBOM attestation.
 3. It boots the exact three candidate digests together through the deployment Compose bundle with
-   OCR enabled. The gate verifies `/api/version`, scanning/import capabilities, the running image
-   digests, OCR isolation and resource limits, and the one-shot maintenance invocation.
-4. Only after the whole release set passes does it copy each candidate digest to the final
-   `:<version>` and `:sha-<commit>` names. Promotion first rejects any existing destination tag that
-   resolves to a different digest, then verifies both promoted names, signatures, and SBOM
-   attestations.
-5. It publishes a GitHub Release last, with release notes, all three SBOMs, a signed manifest mapping
-   every component to its immutable digest, and a signed Compose override that consumes those exact
-   digests.
+   OCR enabled. The gate verifies `/api/version`, scanning/import capabilities, running image
+   identities, OCR health/isolation/resource limits, and the one-shot maintenance invocation. It
+   then generates the canonical fixtures with the pinned font inside the exact OCR image and runs
+   the authenticated 40-case English/Japanese/mixed benchmark. Promotion is blocked unless every
+   HTTP response and accuracy/latency gate passes.
+4. After those gates pass, it creates one signed, run-scoped release transaction containing the
+   three image digests, raw SBOM hashes, deterministic deployment bundle hash, benchmark report, and
+   deterministic fixture archive. A retry reuses this committed transaction instead of mixing or
+   rebuilding candidates, so partial tag promotion can safely resume the same digest set.
+5. Promotion verifies the transaction, every candidate signature, SBOM attestation, and GitHub
+   build attestation; rejects any conflicting destination tag; and fills only absent matching
+   `:<version>` and `:sha-<commit>` convenience names.
+6. Publication uploads every transaction-bound asset to a draft GitHub Release, downloads and
+   re-hashes the complete draft, and only then makes it public. A public release is the availability
+   signal; partial drafts and orphaned registry tags are not.
 
-No final release tag is published before every component and the integrated release set pass. A
-failed run can be rerun safely: an absent final tag may be created, a matching tag is accepted, and
-a conflicting tag stops promotion. Never move a git tag once published — on-prem and air-gapped
-installs pin exact versions/digests, and moving tags would break checksum verification.
+The GitHub Release and its signed manifest are the release-set availability signal. Ignore orphaned
+registry tags if promotion is interrupted before that release exists. A failed run before transaction
+commit must be rerun with **all jobs**; after commit, any rerun consumes the original transaction,
+accepts matching tags, fills absent tags, and rejects conflicts. Never move a git tag once published.
 
 ## Verifying an image
 
 ```bash
-cosign verify \
-  --certificate-identity-regexp 'https://github.com/itkla/connex/.github/workflows/release.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/itkla/connex-backend:1.4.0
-
-cosign verify-attestation --type spdxjson \
-  --certificate-identity-regexp 'https://github.com/itkla/connex/.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/itkla/connex-backend:1.4.0
+VERSION=1.4.0
+IDENTITY="https://github.com/itkla/connex/.github/workflows/release.yml@refs/tags/v${VERSION}"
 
 cosign verify-blob \
   --bundle release-manifest.bundle.json \
-  --certificate-identity 'https://github.com/itkla/connex/.github/workflows/release.yml@refs/tags/v1.4.0' \
+  --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   release-manifest.json
+
+test "$(jq -r '.version' release-manifest.json)" = "$VERSION"
+for component in backend frontend ocr; do
+  expected="ghcr.io/itkla/connex-${component}"
+  test "$(jq -r --arg component "$component" \
+    '.images[$component].image' release-manifest.json)" = "$expected"
+  image="$(jq -r --arg component "$component" \
+    '.images[$component].image + "@" + .images[$component].digest' release-manifest.json)"
+  sbom="$(jq -r --arg component "$component" \
+    '.images[$component].sbom.file' release-manifest.json)"
+  test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = \
+    "$(jq -r --arg component "$component" \
+      '.images[$component].sbom.sha256' release-manifest.json)"
+  cosign verify \
+    --certificate-identity "$IDENTITY" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    "$image" >/dev/null
+  cosign verify-attestation --type spdxjson \
+    --certificate-identity "$IDENTITY" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    "$image" >/dev/null
+  gh attestation verify "oci://${image}" \
+    --repo itkla/connex \
+    --signer-workflow itkla/connex/.github/workflows/release.yml \
+    --source-digest "$(jq -r '.sourceSha' release-manifest.json)" \
+    --source-ref "refs/tags/v${VERSION}" >/dev/null
+done
+for selector in qualification.report qualification.fixtures deploymentBundle; do
+  file="$(jq -r ".${selector}.file" release-manifest.json)"
+  test "$(sha256sum "$file" | cut -d ' ' -f1)" = \
+    "$(jq -r ".${selector}.sha256" release-manifest.json)"
+done
+for component in backend frontend ocr; do
+  variable="CONNEX_$(tr '[:lower:]' '[:upper:]' <<<"$component")_DIGEST"
+  digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
+  printf '%s=%s\n' "$variable" "${digest#sha256:}"
+done
 ```
 
-Use the verified `release-compose-images.json` as a Compose override to pin every component by
-digest: `docker compose -f docker-compose.yml -f release-compose-images.json pull`.
+Put the three printed digest-only assignments into the mode-0600 `deploy/.env`. The production
+Compose file fixes the GHCR repositories and `sha256` algorithm, so its image inputs cannot carry a
+tag or alternate repository. Extract the verified `connex-<version>-deploy.tar` and run only that
+bundle with those digest values.
+
+The manifest signature bundle and every manifest-bound release asset can be verified without a
+registry connection. Cosign image signatures, SBOM attestations, and GitHub build provenance are
+registry-backed online checks; perform them while staging OCI images for an air-gapped transfer.
+Inside the disconnected environment, verify the transferred OCI digest against the already verified
+manifest before loading it. Do not describe registry provenance as independently offline-verifiable.
 
 ## Running the images
 
@@ -104,7 +146,11 @@ Two, no more:
 Staging currently checks out `main` and runs it via an out-of-repo systemd unit on the staging host. To consume the pipeline instead, on that host:
 
 1. Authenticate to GHCR (`docker login ghcr.io`).
-2. Replace the checkout-and-run unit with one that `docker pull`s the pinned `ghcr.io/itkla/connex-{backend,frontend}:<version>` set and runs them with the existing staging env (the fail-closed security env staging already requires — DB `sslMode`, secret-store, and audit secrets). When local OCR is enabled, pull the matching OCR image too, configure its token, and activate the `ocr` Compose profile.
-3. Bump the pinned version to roll forward.
+2. Replace the checkout-and-run unit with one that verifies the release manifest using the exact
+   tag-bound identity above, derives the three `image@sha256:...` references, and runs those digests
+   with the existing staging env (the fail-closed security env staging already requires — DB
+   `sslMode`, secret-store, and audit secrets). When local OCR is enabled, configure its token and
+   activate the `ocr` Compose profile.
+3. Verify and deploy a new signed manifest to roll forward.
 
 This step lives on the host because the systemd units and cloudflared config are not in the repository.

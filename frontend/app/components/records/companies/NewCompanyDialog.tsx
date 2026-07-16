@@ -59,7 +59,6 @@ export default function NewCompanyDialog({
     onOpenChange,
     payload,
     setPayload,
-    logoFile,
     setLogoFile,
     isCreating,
     isSuccess = false,
@@ -135,9 +134,9 @@ export default function NewCompanyDialog({
         };
     }, [logoPreview]);
 
-    const applyFile = (file: File | undefined | null) => {
+    const applyFile = async (file: File | undefined | null) => {
         if (!file) return;
-        if (!isManagedImageFile(file)) {
+        if (!await isManagedImageFile(file)) {
             toastError(t('logoUnsupported'));
             return;
         }
@@ -147,14 +146,14 @@ export default function NewCompanyDialog({
     };
 
     const handleLogoChange = (e: ChangeEvent<HTMLInputElement>) => {
-        applyFile(e.target.files?.[0]);
+        void applyFile(e.target.files?.[0]);
         e.target.value = '';
     };
 
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
-        applyFile(e.dataTransfer.files?.[0]);
+        void applyFile(e.dataTransfer.files?.[0]);
     };
 
     const removeLogo = () => {
@@ -644,9 +643,9 @@ export function NewCompanyForm({
         };
     }, [logoPreview]);
 
-    const applyFile = (file: File | undefined | null) => {
+    const applyFile = async (file: File | undefined | null) => {
         if (!file) return;
-        if (!isManagedImageFile(file)) {
+        if (!await isManagedImageFile(file)) {
             toastError(t('logoUnsupported'));
             return;
         }
@@ -656,14 +655,14 @@ export function NewCompanyForm({
     };
 
     const handleLogoChange = (e: ChangeEvent<HTMLInputElement>) => {
-        applyFile(e.target.files?.[0]);
+        void applyFile(e.target.files?.[0]);
         e.target.value = '';
     };
 
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
-        applyFile(e.dataTransfer.files?.[0]);
+        void applyFile(e.dataTransfer.files?.[0]);
     };
 
     const removeLogo = () => {

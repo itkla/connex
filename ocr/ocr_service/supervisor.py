@@ -48,17 +48,14 @@ def main() -> int:
         port = _integer("CONNEX_OCR_PORT", 8090, 1, 65_535)
     except ValueError as exception:
         print(str(exception), file=sys.stderr)
-        stop.wait()
-        return 0
+        return 1
     backoff_seconds = 1.0
     while not stop.is_set():
         try:
             process = subprocess.Popen([sys.executable, "-m", "ocr_service"])
-        except OSError:
-            if stop.wait(backoff_seconds):
-                break
-            backoff_seconds = min(backoff_seconds * 2, 60.0)
-            continue
+        except OSError as exception:
+            print(f"OCR worker failed to start: {type(exception).__name__}", file=sys.stderr)
+            return 1
         current_process[0] = process
         result = supervise(
             process,
@@ -70,6 +67,8 @@ def main() -> int:
         current_process[0] = None
         if stop.is_set():
             break
+        if not result.became_ready:
+            return result.exit_code if result.exit_code != 0 else 1
         backoff_seconds = _next_backoff(backoff_seconds, result)
         stop.wait(backoff_seconds)
     return 0

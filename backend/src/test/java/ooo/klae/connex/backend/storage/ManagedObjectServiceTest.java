@@ -3,12 +3,12 @@ package ooo.klae.connex.backend.storage;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -19,9 +19,6 @@ import java.io.ByteArrayOutputStream;
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -69,7 +67,8 @@ class ManagedObjectServiceTest {
             properties,
             quotaService,
             userImageAdmissionService,
-            new ManagedObjectWriteAdmissionService(properties));
+            new ManagedObjectWriteAdmissionService(properties),
+            new ManagedObjectReadAdmissionService(properties, () -> 9));
     }
 
     @Test
@@ -116,7 +115,7 @@ class ManagedObjectServiceTest {
     }
 
     @Test
-    void deterministicMigrationTargetRegistersCleanupOnlyForANewWrite() {
+    void deterministicMigrationPreparesAndCancelsCleanupAroundANewWrite() {
         TransactionSynchronizationManager.initSynchronization();
         try {
             service.storeMigratedAttachment(
@@ -128,18 +127,18 @@ class ManagedObjectServiceTest {
                     "application/pdf",
                     "legacy attachment".getBytes(StandardCharsets.UTF_8)));
 
-            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
-            TransactionSynchronizationManager.getSynchronizations().getFirst()
-                .afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
-            verify(deletionRetryQueue, never()).enqueueRollbackTombstoneTenant(
-                org.mockito.ArgumentMatchers.anyInt(), anyString());
+            verify(deletionRetryQueue).prepareTenantWrite(
+                org.mockito.ArgumentMatchers.eq(17), anyString());
+            verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(17), anyString());
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
     @Test
-    void deterministicMigrationRollbackQueuesReplaySafeCleanup() {
+    void deterministicMigrationLeavesAPrecommittedCleanupIfMetadataRollsBack() {
         TransactionSynchronizationManager.initSynchronization();
         try {
             StoredBinary stored = service.storeMigratedAttachment(
@@ -152,10 +151,9 @@ class ManagedObjectServiceTest {
                     "legacy attachment".getBytes(StandardCharsets.UTF_8)));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
 
-            TransactionSynchronizationManager.getSynchronizations().getFirst()
-                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
-
-            verify(deletionRetryQueue).enqueueRollbackTombstoneTenant(
+            verify(deletionRetryQueue).prepareTenantWrite(
+                17, "workspaces/17/attachments/" + token);
+            verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
                 17, "workspaces/17/attachments/" + token);
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
@@ -266,90 +264,78 @@ class ManagedObjectServiceTest {
     }
 
     @Test
-    void storeRegistersCleanupBeforeTransactionRollback() {
+    void storePersistsCleanupBeforeProviderWriteAndCancelsItInMetadataTransaction() {
         TransactionSynchronizationManager.initSynchronization();
         try {
             StoredBinary stored = service.storeAttachment(
                 12, "card.pdf", "application/pdf", new byte[] {1, 2, 3});
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
-            verify(objectStorage, never()).delete(anyString());
-            List<TransactionSynchronization> synchronizations =
-                TransactionSynchronizationManager.getSynchronizations();
-            assertEquals(1, synchronizations.size());
-            synchronizations.getFirst().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
-            verify(deletionRetryQueue).enqueueRollbackTombstoneTenant(
-                12, "workspaces/12/attachments/" + token);
+            String key = "workspaces/12/attachments/" + token;
+            InOrder order = inOrder(deletionRetryQueue, objectStorage);
+            order.verify(deletionRetryQueue).prepareTenantWrite(12, key);
+            order.verify(objectStorage).put(
+                org.mockito.ArgumentMatchers.eq(key),
+                any(UploadSource.class),
+                org.mockito.ArgumentMatchers.eq("application/pdf"),
+                any(byte[].class));
+            order.verify(deletionRetryQueue).cancelTenantInCurrentTransaction(12, key);
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
     @Test
-    void storeCleanupPreservesIndeterminateTransactionOutcome() {
+    void storeCleanupDoesNotDependOnAnAfterCompletionStatus() {
         TransactionSynchronizationManager.initSynchronization();
         try {
             StoredBinary stored = service.storeAttachment(
                 12, "card.pdf", "application/pdf", new byte[] {1, 2, 3});
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
-            List<TransactionSynchronization> synchronizations =
-                TransactionSynchronizationManager.getSynchronizations();
-
-            synchronizations.getFirst().afterCompletion(TransactionSynchronization.STATUS_UNKNOWN);
-
-            verify(deletionRetryQueue, never()).enqueueRollbackTombstoneTenant(12,
+            verify(deletionRetryQueue).prepareTenantWrite(12,
                 "workspaces/12/attachments/" + token);
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
     @Test
-    void userStoreUsesControlPlaneCleanupAndPreservesIndeterminateOutcome() throws Exception {
+    void userStorePrecommitsControlPlaneCleanup() throws Exception {
         TransactionSynchronizationManager.initSynchronization();
         try {
             service.storeUserImage(
                 8, UploadSource.from("portrait.png", "image/png", png(10, 20)));
-            List<TransactionSynchronization> synchronizations =
-                TransactionSynchronizationManager.getSynchronizations();
-
-            synchronizations.getFirst().afterCompletion(TransactionSynchronization.STATUS_UNKNOWN);
-
             verify(userImageAdmissionService).requireAllowed(8);
-            verify(deletionRetryQueue, never()).enqueueRollbackTombstoneUser(anyString());
+            verify(deletionRetryQueue).prepareUserWrite(anyString());
+            verify(deletionRetryQueue).cancelUserInCurrentTransaction(anyString());
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
     @Test
-    void rollbackCleanupRunsAfterTransactionThreadState() throws Exception {
-        Thread transactionThread = Thread.currentThread();
-        org.mockito.Mockito.doAnswer(invocation -> {
-            assertNotEquals(transactionThread, Thread.currentThread());
-            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
-            return null;
-        }).when(deletionRetryQueue).enqueueRollbackTombstoneUser(anyString());
+    void cleanupPreparationFailurePreventsProviderWrite() throws Exception {
+        doThrow(new ServiceUnavailableException("cleanup unavailable"))
+            .when(deletionRetryQueue).prepareUserWrite(anyString());
         TransactionSynchronizationManager.initSynchronization();
-        TransactionSynchronizationManager.setActualTransactionActive(true);
         try {
-            service.storeUserImage(
-                8, UploadSource.from("portrait.png", "image/png", png(10, 20)));
-
-            TransactionSynchronizationManager.getSynchronizations().getFirst()
-                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
-
-            verify(deletionRetryQueue).enqueueRollbackTombstoneUser(anyString());
+            assertThrows(ServiceUnavailableException.class, () -> service.storeUserImage(
+                8, UploadSource.from("portrait.png", "image/png", png(10, 20))));
+            verify(objectStorage, never()).put(
+                anyString(), any(UploadSource.class), anyString(), any(byte[].class));
         } finally {
-            TransactionSynchronizationManager.setActualTransactionActive(false);
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
     @Test
     void providerThatPersistsThenThrowsStillHasKnownKeyRollbackCleanup() {
-        Set<String> persistedKeys = new HashSet<>();
+        java.util.concurrent.atomic.AtomicReference<String> persistedKey =
+            new java.util.concurrent.atomic.AtomicReference<>();
         org.mockito.Mockito.doAnswer(invocation -> {
-            persistedKeys.add(invocation.getArgument(0));
+            persistedKey.set(invocation.getArgument(0));
             throw new ObjectStorageException("response lost");
         }).when(objectStorage).put(
             anyString(), any(UploadSource.class), anyString(), any(byte[].class));
@@ -358,12 +344,9 @@ class ManagedObjectServiceTest {
             assertThrows(ServiceUnavailableException.class, () -> service.storeAttachment(
                 12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}));
 
-            String key = persistedKeys.iterator().next();
-            List<TransactionSynchronization> synchronizations =
-                TransactionSynchronizationManager.getSynchronizations();
-            assertEquals(1, synchronizations.size());
-            synchronizations.getFirst().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
-            verify(deletionRetryQueue).enqueueRollbackTombstoneTenant(12, key);
+            verify(deletionRetryQueue).prepareTenantWrite(12, persistedKey.get());
+            verify(deletionRetryQueue, never()).cancelTenantInCurrentTransaction(
+                12, persistedKey.get());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }

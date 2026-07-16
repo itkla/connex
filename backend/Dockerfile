@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.24.0@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
 ARG BUILD_TIME
 ARG SOURCE_DATE_EPOCH
@@ -25,10 +25,10 @@ LABEL org.opencontainers.image.title="connex-backend" \
       org.opencontainers.image.version="${VERSION}"
 ENV JAVA_OPTS="" \
     CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT="/var/lib/connex/objects"
-RUN groupadd --system connex \
-    && useradd --system --gid connex --home-dir /app connex \
+RUN groupadd --system --gid 10001 connex \
+    && useradd --system --uid 10001 --gid connex --home-dir /app connex \
     && install -d -o connex -g connex -m 0700 /var/lib/connex/objects
 COPY --from=build /workspace/app.war /app/app.war
-USER connex
+USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.war"]
+ENTRYPOINT ["sh", "-c", "rm -f /tmp/connex-ready && exec java $JAVA_OPTS -jar /app/app.war"]
