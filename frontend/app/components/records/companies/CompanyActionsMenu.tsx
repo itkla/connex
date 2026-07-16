@@ -68,7 +68,7 @@ export default function CompanyActionsMenu({
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => {
         if (!assignOwnerOpen || members.length > 0) return;
-        getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+        getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
     }, [assignOwnerOpen, members.length]);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);

@@ -114,7 +114,8 @@
     "projected": "Projected",
     "tooltipActivities": "Activities · {count}",
     "tooltipTasks": "Tasks · {count}",
-    "tooltipNotes": "Notes · {count}"
+    "tooltipNotes": "Notes · {count}",
+    "ownerLabel": "Owner: {name}"
   },
   "CompaniesContactsGrid": {
     "contacts": "Contacts",
