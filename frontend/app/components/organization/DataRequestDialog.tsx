@@ -66,6 +66,12 @@ function toInputValue(iso: string | null | undefined) {
     return iso.replace(" ", "T").slice(0, 16);
 }
 
+function nowInputValue() {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
+
 function toApiValue(input: string) {
     if (!input) return undefined;
     return input.length === 16 ? `${input}:00` : input;
@@ -146,7 +152,7 @@ function RequestForm({
     const [subjectName, setSubjectName] = useState(editing?.subjectName ?? "");
     const [subjectEmail, setSubjectEmail] = useState(editing?.subjectEmail ?? "");
     const [channel, setChannel] = useState(editing?.channel ?? "");
-    const [receivedAt, setReceivedAt] = useState(toInputValue(editing?.receivedAt) || toInputValue(new Date().toISOString()));
+    const [receivedAt, setReceivedAt] = useState(toInputValue(editing?.receivedAt) || nowInputValue());
     const [identityVerifiedAt, setIdentityVerifiedAt] = useState(toInputValue(editing?.identityVerifiedAt));
     const [dueAt, setDueAt] = useState(toInputValue(editing?.dueAt));
     const [respondedAt, setRespondedAt] = useState(toInputValue(editing?.respondedAt));

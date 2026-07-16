@@ -45,7 +45,7 @@ const STATUS_VARIANT: Record<DataSubjectRequestStatus, "default" | "secondary" |
     in_progress: "default",
     responded: "secondary",
     refused: "destructive",
-    closed: "ghost",
+    closed: "secondary",
 };
 
 function formatDate(iso: string | null | undefined, locale: string) {
@@ -139,7 +139,7 @@ export default function DataRequestsPanel() {
             anchor.href = url;
             anchor.download = `disclosure-request-${request.id}.json`;
             anchor.click();
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
             toastSuccess(t("disclosureDownloaded"));
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("disclosureFailed"));
@@ -161,7 +161,9 @@ export default function DataRequestsPanel() {
     function handleSaved(saved: DataSubjectRequest) {
         setRequests((prev) => {
             const index = prev.findIndex((r) => r.id === saved.id);
-            if (index === -1) return [saved, ...prev];
+            const matchesFilter = statusFilter === "all" || saved.status === statusFilter;
+            if (index === -1) return matchesFilter ? [saved, ...prev] : prev;
+            if (!matchesFilter) return prev.filter((r) => r.id !== saved.id);
             const next = [...prev];
             next[index] = saved;
             return next;
