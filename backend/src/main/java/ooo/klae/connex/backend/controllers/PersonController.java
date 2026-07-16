@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
@@ -227,6 +229,12 @@ public class PersonController {
         return PersonDto.from(personService.update(id, dto.toBean()));
     }
 
+    /** Assigns or clears a contact's owner. */
+    @PutMapping("/{id}/owner")
+    public PersonDto updateOwner(@PathVariable int id, @Valid @RequestBody PersonOwnerDto dto) {
+        return PersonDto.from(personService.updateOwner(id, dto.getOwnerId()));
+    }
+
     /**
      * PUT endpoint to set the contact's engine-evaluation opt-outs (issue #358).
      * @param id
@@ -329,6 +337,12 @@ public class PersonController {
     @PostMapping("/bulk/delete")
     public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
         return bulkOperationService.deletePersons(request.getIds());
+    }
+
+    /** Assigns or clears the owner across many contacts. */
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToPersons(request.getIds(), request.getOwnerId());
     }
 
     /**

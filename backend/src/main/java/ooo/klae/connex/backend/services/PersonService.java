@@ -171,6 +171,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
+        person.setOwnerId(workspaceService.getCurrentUserId());
         person.setImageUrl(null);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
@@ -205,6 +206,23 @@ public class PersonService {
             auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return after;
+    }
+
+    /** Assigns or clears the owner of a contact in the active workspace. */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwner(int id, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = requireOwnedPerson(workspaceId, id);
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        personMapper.updateOwner(workspaceId, id, ownerId);
+        auditService.record("person.updateOwner", "person", id, person.getName(),
+            "Updated owner on " + person.getName(),
+            auditService.singleChange("ownerId", person.getOwnerId(), ownerId));
+        if (!Objects.equals(person.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "person", id, "person.owner_changed");
+        }
+        return requireOwnedPerson(workspaceId, id);
     }
 
     @Transactional

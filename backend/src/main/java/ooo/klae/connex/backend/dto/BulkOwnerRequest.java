@@ -10,7 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Request to assign an owner across many deals. A {@code null} ownerId unassigns the owner.
+ * Request to assign an owner across many records. A {@code null} ownerId unassigns the owner.
  * Capped at 1000 ids per call.
  */
 @Data

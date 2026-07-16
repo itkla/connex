@@ -331,6 +331,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        company.setOwnerId(workspaceService.getCurrentUserId());
         company.setLogoUrl(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
@@ -388,6 +389,23 @@ public class CompanyService {
             ruleTriggers.publish(workspaceId, "company", id, "company.updated");
         }
         return after;
+    }
+
+    /** Assigns or clears the owner of a company in the active workspace. */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateOwner(int id, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company company = requireOwnedCompany(workspaceId, id);
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        companyMapper.updateOwner(workspaceId, id, ownerId);
+        auditService.record("company.updateOwner", "company", id, company.getName(),
+            "Updated owner on " + company.getName(),
+            auditService.singleChange("ownerId", company.getOwnerId(), ownerId));
+        if (!Objects.equals(company.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "company", id, "company.owner_changed");
+        }
+        return requireOwnedCompany(workspaceId, id);
     }
 
     @Transactional

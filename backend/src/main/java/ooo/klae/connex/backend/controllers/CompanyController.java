@@ -19,10 +19,12 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyFacets;
+import ooo.klae.connex.backend.dto.CompanyOwnerDto;
 import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.CompanyTimelineDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -225,6 +227,12 @@ public class CompanyController {
         return CompanyDto.from(companyService.updateCompany(id, dto.toBean()));
     }
 
+    /** Assigns or clears a company's owner. */
+    @PutMapping("/{id}/owner")
+    public CompanyDto updateOwner(@PathVariable int id, @Valid @RequestBody CompanyOwnerDto dto) {
+        return CompanyDto.from(companyService.updateOwner(id, dto.getOwnerId()));
+    }
+
     /**
      * DELETE Deletes a company by ID.
      * @param id
@@ -303,6 +311,12 @@ public class CompanyController {
     @PostMapping("/bulk/delete")
     public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
         return bulkOperationService.deleteCompanies(request.getIds());
+    }
+
+    /** Assigns or clears the owner across many companies. */
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToCompanies(request.getIds(), request.getOwnerId());
     }
 
     /**
