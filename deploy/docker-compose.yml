@@ -65,7 +65,7 @@ services:
       CONNEX_OCR_SERVICE_TOKEN: ${CONNEX_OCR_SERVICE_TOKEN:-}
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "1"
       CONNEX_OCR_REQUEST_TIMEOUT_SECONDS: ${CONNEX_OCR_REQUEST_TIMEOUT_SECONDS:-12}
-      CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-90}
+      CONNEX_OCR_STARTUP_TIMEOUT_SECONDS: ${CONNEX_OCR_STARTUP_TIMEOUT_SECONDS:-180}
       CONNEX_OCR_MAX_REQUEST_HANDLERS: ${CONNEX_OCR_MAX_REQUEST_HANDLERS:-8}
       CONNEX_OCR_MAX_IMAGE_BYTES: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:-8388608}
       CONNEX_OCR_MAX_WIDTH: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:-8192}
@@ -90,7 +90,7 @@ services:
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
       interval: 15s
       timeout: 3s
-      start_period: 90s
+      start_period: 180s
       retries: 4
 
   db:

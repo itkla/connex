@@ -43,7 +43,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, forward)
     signal.signal(signal.SIGINT, forward)
     try:
-        startup_timeout = _number("CONNEX_OCR_STARTUP_TIMEOUT_SECONDS", 90.0, 10.0, 600.0)
+        startup_timeout = _number("CONNEX_OCR_STARTUP_TIMEOUT_SECONDS", 180.0, 10.0, 600.0)
         inference_timeout = _number("CONNEX_OCR_REQUEST_TIMEOUT_SECONDS", 12.0, 1.0, 120.0)
         port = _integer("CONNEX_OCR_PORT", 8090, 1, 65_535)
     except ValueError as exception:

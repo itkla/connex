@@ -29,10 +29,16 @@ git push origin v1.4.0
 
 `.github/workflows/release.yml` treats the three images as one release transaction:
 
-1. It rejects anything except strict `vMAJOR.MINOR.PATCH`, requires the tag to point to the current
-   `main` head, and waits for the latest `push` run of the repository's CI, security, and
-   deployment-smoke workflows to succeed for that exact commit. Workflow identity is resolved
-   through the GitHub Actions API, not by accepting a matching check name from another integration.
+Before the workflow can cut or resume a release, repository immutable releases must be enabled and
+the `CONNEX_RELEASE_ADMIN_TOKEN` Actions secret must provide repository Administration read access.
+The normal `GITHUB_TOKEN` remains the only token used to upload release assets. The administration
+token is used only to fail closed on the immutable-release policy precondition.
+
+1. It rejects anything except strict `vMAJOR.MINOR.PATCH`. Before creating a transaction, it requires
+   the tag to point to the current `main` head and waits for the latest `push` run of the repository's
+   CI, security, and deployment-smoke workflows to succeed for that exact commit. A resume uses the
+   already signed transaction even if `main` has advanced. Workflow identity is resolved through the
+   GitHub Actions API, not by accepting a matching check name from another integration.
 2. It builds each component with a reproducible commit timestamp and pushes only an attempt-scoped
    `candidate-<run>-<attempt>` tag. Every attempt builds from the checked-out release commit with
    pinned Buildx and BuildKit versions and emits BuildKit provenance; it never trusts content found
@@ -46,8 +52,9 @@ git push origin v1.4.0
    HTTP response and accuracy/latency gate passes.
 4. After those gates pass, it creates one signed, run-scoped release transaction containing the
    three image digests, raw SBOM hashes, deterministic deployment bundle hash, benchmark report, and
-   deterministic fixture archive. A retry reuses this committed transaction instead of mixing or
-   rebuilding candidates, so partial tag promotion can safely resume the same digest set.
+   deterministic fixture archive. The transaction artifact is named for its originating run attempt.
+   A retry discovers and reuses this committed transaction instead of mixing or rebuilding candidates,
+   so partial tag promotion can safely resume the same digest set.
 5. Promotion verifies the transaction, every candidate signature, SBOM attestation, and GitHub
    build attestation; rejects any conflicting destination tag; and fills only absent matching
    `:<version>` and `:sha-<commit>` convenience names.
@@ -57,8 +64,18 @@ git push origin v1.4.0
 
 The GitHub Release and its signed manifest are the release-set availability signal. Ignore orphaned
 registry tags if promotion is interrupted before that release exists. A failed run before transaction
-commit must be rerun with **all jobs**; after commit, any rerun consumes the original transaction,
-accepts matching tags, fills absent tags, and rejects conflicts. Never move a git tag once published.
+commit must be rerun with **all jobs**; a failed-job-only retry has no complete same-attempt candidate
+set and fails explicitly. After commit, any rerun consumes the original transaction, accepts matching
+tags, fills absent tags, and rejects conflicts. The remote tag target is re-fetched immediately before
+promotion and publication. Never move a git tag once published.
+
+The signed manifest records `qualification.protections.rotatingSecretHoldout=false` and
+`qualification.protections.debianSnapshot=false`. The canonical 40-card suite is deterministic and
+reviewed, but it is not a rotating secret holdout, and Debian packages installed in image builds are
+not yet resolved through a dated snapshot repository. Those are explicit unresolved release blockers
+for any assurance policy that requires either protection. Do not describe a release as having either
+protection until dedicated holdout storage/rotation and Debian snapshot inputs exist and the manifest
+flags are changed by a reviewed workflow update.
 
 ## Verifying an image
 

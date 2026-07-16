@@ -84,7 +84,7 @@ default (`CONNEX_OCR_MAX_REQUEST_HANDLERS`). Excess concurrent inference receive
 connections receive `503`, and a slow request cannot hold the inference slot. The backend uses the bearer-authenticated `/ready`
 probe, while Docker's unauthenticated `/health` probe exposes only readiness, active-inference state,
 and an opaque per-inference generation. A persistent supervisor continuously probes the worker, terminates native startup that has
-not become ready within `CONNEX_OCR_STARTUP_TIMEOUT_SECONDS=90`, and hard-kills an active or
+not become ready within `CONNEX_OCR_STARTUP_TIMEOUT_SECONDS=180`, and hard-kills an active or
 unresponsive worker after `CONNEX_OCR_REQUEST_TIMEOUT_SECONDS=12`. It restarts failed workers with
 bounded exponential backoff, resetting to one second only after 30 seconds of stable readiness;
 Compose's `unless-stopped` policy restores the supervisor after Docker

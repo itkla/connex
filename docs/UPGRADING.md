@@ -54,9 +54,13 @@ migration-discipline part of #87 §9 / #102).
 2. **Quiesce writers** — stop external ingress plus the frontend, backend, and OCR services. Keep the
    database running. Confirm no application or maintenance container remains able to create or delete
    records or objects.
-3. **Back up the quiesced set** — snapshot the database, private object storage, and any staged legacy
-   media as one recovery point. Do not proceed without a verified, restorable backup; there is no
-   automatic rollback of a migration.
+3. **Back up the quiesced set and exact deployment inputs** — snapshot the database, private object
+   storage, and any staged legacy media as one recovery point. Download and verify the currently
+   deployed release manifest, signature bundle, and exact `connex-<version>-deploy.tar`; preserve the
+   extracted bundle without modification. Copy the mode-0600 `deploy/.env` byte-for-byte into the
+   recovery set, retain its mode, and record SHA-256 hashes for both the deploy archive and environment
+   file. Do not proceed without a verified, restorable data backup plus these exact prior deployment
+   inputs; there is no automatic rollback of a migration.
 4. **Pin and pull the complete target set** — verify the exact tag-bound `release-manifest.json` as
    documented in [RELEASE.md](RELEASE.md), then set `CONNEX_BACKEND_DIGEST`,
    `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` in the mode-0600 `deploy/.env` to the 64
@@ -120,9 +124,13 @@ migration-discipline part of #87 §9 / #102).
    ```
 
    Reopen upstream ingress or writers only after that smoke succeeds.
-9. **On pre-ingress failure** — keep Caddy and upstream ingress closed, stop the target application
-   containers, **restore the complete backup**, and pin back to the previous version. Restore is safe
-   only while no post-backup writes have been admitted. If a failure occurs after ingress reopens,
+9. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
+   containers. Remove the target deployment directory, re-verify and extract the exact prior signed
+   deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
+   Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
+   backup** and start the previous version. Changing only image digest variables is not a rollback
+   because Compose structure and non-secret environment may have changed between releases. Restore is
+   safe only while no post-backup writes have been admitted. If a failure occurs after ingress reopens,
    quiesce writers and assess the new writes before restoring. Never hand-edit
    `flyway_schema_history` or delete a partially-applied migration.
 

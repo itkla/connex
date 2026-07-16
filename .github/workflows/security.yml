@@ -14,24 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install pinned structural YAML parser
+        run: >-
+          python -m pip install
+          --only-binary=:all:
+          --no-deps
+          --require-hashes
+          --requirement .github/scripts/action-pin-requirements.lock
       - name: Require immutable external action revisions
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          invalid = []
-          for workflow in sorted(Path(".github/workflows").glob("*.yml")):
-              for number, line in enumerate(workflow.read_text(encoding="utf-8").splitlines(), 1):
-                  match = re.search(r"\buses:\s*([^\s#]+)", line)
-                  if match is None or match.group(1).startswith("./"):
-                      continue
-                  action, separator, revision = match.group(1).rpartition("@")
-                  if not action or not separator or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
-                      invalid.append(f"{workflow}:{number}: {match.group(1)}")
-          if invalid:
-              raise SystemExit("External actions must use full commit SHAs:\n" + "\n".join(invalid))
-          PY
+        run: python .github/scripts/check-action-pins.py
+      - name: Regression-test action pin policy
+        run: python .github/scripts/test_action_pins.py
+      - name: Regression-test release delivery invariants
+        run: python .github/scripts/test_release_workflow.py
+      - name: Regression-test release artifact verification
+        run: python .github/scripts/test_attested_sbom.py
 
   secret-scan:
     name: Secret scan (gitleaks)

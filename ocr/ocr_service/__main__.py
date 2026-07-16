@@ -7,13 +7,23 @@ from .engine import PaddleEngine
 from .server import create_server
 
 
+def exception_type_chain(exception: BaseException) -> str:
+    names: list[str] = []
+    current: BaseException | None = exception
+    while current is not None and len(names) < 8:
+        kind = type(current)
+        names.append(f"{kind.__module__}.{kind.__qualname__}")
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return " <- ".join(names)
+
+
 def main() -> int:
     try:
         config = ServiceConfig.from_environment()
         engine = PaddleEngine(config)
     except Exception as exception:
         print(
-            f"OCR service initialization failed: {type(exception).__name__}: {exception}",
+            f"OCR service initialization failed: {exception_type_chain(exception)}",
             file=sys.stderr,
         )
         return 1

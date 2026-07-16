@@ -37,6 +37,6 @@ RUN useradd --system --uid 10001 --home-dir /opt/connex-ocr --shell /usr/sbin/no
 USER 10001
 EXPOSE 8090
 
-HEALTHCHECK --interval=15s --timeout=3s --start-period=90s --retries=4 CMD ["python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=180s --retries=4 CMD ["python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
 
 ENTRYPOINT ["python", "-m", "ocr_service.supervisor"]

@@ -35,6 +35,7 @@ CANONICAL_IMAGE_NAMES = {
     "frontend": "ghcr.io/itkla/connex-frontend",
     "ocr": "ghcr.io/itkla/connex-ocr",
 }
+SCORED_FIELDS = ("name", "email", "phone", "title", "company")
 
 
 def main() -> int:
@@ -76,8 +77,8 @@ def main() -> int:
     print(rendered)
     if arguments.report is not None:
         arguments.report.write_text(rendered + "\n", encoding="utf-8")
-    gates = report["gates"]
-    return 0 if all(gate["passed"] for gate in gates.values()) else 1
+    verify_qualification_report(report, manifest, source_revision)
+    return 0
 
 
 def environment() -> dict[str, str]:
@@ -247,14 +248,44 @@ def inspect_runtime_container(component: str, container_id: str) -> dict[str, ob
             raise ValueError("The OCR benchmark container port inspection is invalid")
         published_ports = [] if ports is None else [value for value in ports.values() if value is not None]
         cap_drop = host_config.get("CapDrop")
+        security_options = host_config.get("SecurityOpt")
+        devices = host_config.get("Devices")
+        device_requests = host_config.get("DeviceRequests")
+        tmpfs = host_config.get("Tmpfs")
+        mounts = inspection.get("Mounts")
+        networks = network_settings.get("Networks")
+        network_mode = host_config.get("NetworkMode")
+        exposed_ports = config.get("ExposedPorts")
+        tmp_options = tmpfs.get("/tmp", "") if isinstance(tmpfs, dict) else ""
+        tmp_option_set = set(tmp_options.split(","))
+        network_names = set(networks) if isinstance(networks, dict) else set()
         if (
-            host_config.get("Memory") != 2_147_483_648
+            config.get("User") != "10001"
+            or not isinstance(exposed_ports, dict)
+            or set(exposed_ports) != {"8090/tcp"}
+            or host_config.get("Memory") != 2_147_483_648
             or host_config.get("MemorySwap") != 2_147_483_648
             or host_config.get("NanoCpus") != 2_000_000_000
             or host_config.get("PidsLimit") != 128
             or host_config.get("ReadonlyRootfs") is not True
+            or host_config.get("Privileged") is not False
             or not isinstance(cap_drop, list)
             or "ALL" not in cap_drop
+            or not isinstance(security_options, list)
+            or "no-new-privileges:true" not in security_options
+            or devices != []
+            or device_requests not in (None, [])
+            or host_config.get("Binds") not in (None, [])
+            or host_config.get("Mounts") not in (None, [])
+            or mounts != []
+            or not isinstance(tmpfs, dict)
+            or set(tmpfs) != {"/tmp"}
+            or not {"rw", "noexec", "nosuid", "nodev"}.issubset(tmp_option_set)
+            or not ({"size=64m", "size=67108864"} & tmp_option_set)
+            or not isinstance(network_mode, str)
+            or not network_mode.endswith("_ocr_internal")
+            or len(network_names) != 1
+            or not next(iter(network_names)).endswith("_ocr_internal")
             or published_ports
         ):
             raise ValueError("The OCR benchmark container does not match the qualified resource and isolation profile")
@@ -443,9 +474,11 @@ def file_sha256(path: Path) -> str:
 
 def summarize(outcomes: list[dict[str, object]], benchmark_provenance: dict[str, object] | None = None) -> dict[str, object]:
     total = len(outcomes)
+    if total == 0:
+        raise ValueError("Benchmark outcomes must not be empty")
     accuracy = {
         field: sum(1 for outcome in outcomes if outcome["correct"][field]) / total
-        for field in ("name", "email", "phone", "title", "company")
+        for field in SCORED_FIELDS
     }
     latencies = sorted(float(outcome["latencySeconds"]) for outcome in outcomes)
     p95 = latencies[max(0, math.ceil(len(latencies) * 0.95) - 1)]
@@ -466,6 +499,73 @@ def summarize(outcomes: list[dict[str, object]], benchmark_provenance: dict[str,
     if benchmark_provenance is not None:
         report["provenance"] = benchmark_provenance
     return report
+
+
+def verify_qualification_report(
+    report: object,
+    manifest: dict[str, object],
+    source_revision: str | None = None,
+) -> None:
+    if not isinstance(report, dict):
+        raise ValueError("Benchmark qualification report must be an object")
+    expected_cases = manifest.get("cases")
+    actual_cases = report.get("cases")
+    if not isinstance(expected_cases, list) or len(expected_cases) != 40:
+        raise ValueError("Benchmark qualification manifest must contain exactly 40 cases")
+    if not isinstance(actual_cases, list) or len(actual_cases) != 40:
+        raise ValueError("Benchmark qualification report must contain exactly 40 cases")
+    expected_ids: list[str] = []
+    actual_ids: list[str] = []
+    for expected, actual in zip(expected_cases, actual_cases, strict=True):
+        if not isinstance(expected, dict) or not isinstance(actual, dict):
+            raise ValueError("Benchmark qualification cases must be objects")
+        expected_id = expected.get("id")
+        actual_id = actual.get("id")
+        if not isinstance(expected_id, str) or not isinstance(actual_id, str):
+            raise ValueError("Benchmark qualification case ids must be strings")
+        expected_ids.append(expected_id)
+        actual_ids.append(actual_id)
+        if actual_id != expected_id:
+            raise ValueError("Benchmark qualification case order and ids must match the canonical suite")
+        for selector in ("language", "layout", "condition"):
+            if actual.get(selector) != expected.get(selector):
+                raise ValueError(f"Benchmark qualification case {selector} does not match the canonical suite")
+        status = actual.get("status")
+        latency = actual.get("latencySeconds")
+        correct = actual.get("correct")
+        if isinstance(status, bool) or not isinstance(status, int) or status != 200:
+            raise ValueError("Every benchmark qualification request must return HTTP 200")
+        if isinstance(latency, bool) or not isinstance(latency, (int, float)):
+            raise ValueError("Benchmark qualification latency must be numeric")
+        if not math.isfinite(float(latency)) or float(latency) < 0:
+            raise ValueError("Benchmark qualification latency must be finite and non-negative")
+        if not isinstance(correct, dict) or set(correct) != set(SCORED_FIELDS):
+            raise ValueError("Benchmark qualification correctness fields are incomplete")
+        if any(not isinstance(correct[field], bool) for field in SCORED_FIELDS):
+            raise ValueError("Benchmark qualification correctness outcomes must be booleans")
+    if len(set(expected_ids)) != 40 or len(set(actual_ids)) != 40:
+        raise ValueError("Benchmark qualification case ids must be unique")
+    provenance_value = report.get("provenance")
+    if not isinstance(provenance_value, dict):
+        raise ValueError("Benchmark qualification provenance is required")
+    if source_revision is not None and provenance_value.get("sourceRevision") != source_revision:
+        raise ValueError("Benchmark qualification source revision does not match the release")
+    recomputed = summarize(actual_cases, provenance_value)
+    for selector in ("caseCount", "accuracy", "p95LatencySeconds", "gates"):
+        if report.get(selector) != recomputed[selector]:
+            raise ValueError(f"Benchmark qualification {selector} does not match raw case outcomes")
+    gates = recomputed["gates"]
+    if not isinstance(gates, dict) or set(gates) != {
+        "email",
+        "phone",
+        "name",
+        "title",
+        "company",
+        "p95Latency",
+    }:
+        raise ValueError("Benchmark qualification gates are incomplete")
+    if any(not isinstance(gate, dict) or gate.get("passed") is not True for gate in gates.values()):
+        raise ValueError("Benchmark qualification thresholds did not all pass")
 
 
 if __name__ == "__main__":

@@ -22,10 +22,35 @@ from benchmark.run_benchmark import (
     validated_base_url,
     validated_image_reference,
     validated_source_revision,
+    verify_qualification_report,
 )
 
 
 class BenchmarkManifestTest(unittest.TestCase):
+    def qualification_outcomes(self) -> tuple[dict[str, object], list[dict[str, object]]]:
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "benchmark" / "manifest.json").read_text(encoding="utf-8")
+        )
+        outcomes = [
+            {
+                "id": case["id"],
+                "language": case["language"],
+                "layout": case["layout"],
+                "condition": case["condition"],
+                "status": 200,
+                "latencySeconds": 1.0,
+                "correct": {
+                    "name": True,
+                    "email": True,
+                    "phone": True,
+                    "title": True,
+                    "company": True,
+                },
+            }
+            for case in manifest["cases"]
+        ]
+        return manifest, outcomes
+
     def test_manifest_has_required_coverage_and_synthetic_contacts(self) -> None:
         manifest = json.loads(
             (Path(__file__).parents[1] / "benchmark" / "manifest.json").read_text(encoding="utf-8")
@@ -68,6 +93,29 @@ class BenchmarkManifestTest(unittest.TestCase):
         self.assertEqual(1.0, report["accuracy"]["company"])
         self.assertTrue(report["gates"]["title"]["passed"])
         self.assertTrue(report["gates"]["company"]["passed"])
+
+    def test_qualification_recomputes_every_gate_from_exact_raw_cases(self) -> None:
+        manifest, outcomes = self.qualification_outcomes()
+        provenance_value = {"sourceRevision": "a" * 40}
+        report = summarize(outcomes, provenance_value)
+
+        verify_qualification_report(report, manifest, "a" * 40)
+
+        outcomes[0]["correct"]["email"] = False
+        with self.assertRaisesRegex(ValueError, "raw case outcomes"):
+            verify_qualification_report(report, manifest, "a" * 40)
+
+    def test_qualification_rejects_missing_or_duplicate_cases(self) -> None:
+        manifest, outcomes = self.qualification_outcomes()
+        provenance_value = {"sourceRevision": "a" * 40}
+        report = summarize(outcomes, provenance_value)
+        report["cases"][1]["id"] = report["cases"][0]["id"]
+
+        with self.assertRaisesRegex(ValueError, "order and ids"):
+            verify_qualification_report(report, manifest, "a" * 40)
+
+        with self.assertRaisesRegex(ValueError, "exactly 40"):
+            verify_qualification_report({"cases": []}, manifest, "a" * 40)
 
     def test_authenticated_benchmark_rejects_redirects(self) -> None:
         request = Request(
@@ -193,7 +241,11 @@ class BenchmarkManifestTest(unittest.TestCase):
 
     def test_runtime_inspection_requires_exact_ocr_limits(self) -> None:
         inspection = [{
-            "Config": {"Image": "ghcr.io/itkla/connex-ocr@sha256:" + "b" * 64},
+            "Config": {
+                "Image": "ghcr.io/itkla/connex-ocr@sha256:" + "b" * 64,
+                "User": "10001",
+                "ExposedPorts": {"8090/tcp": {}},
+            },
             "State": {"Running": True, "Health": {"Status": "healthy"}},
             "HostConfig": {
                 "Memory": 2_147_483_648,
@@ -202,8 +254,20 @@ class BenchmarkManifestTest(unittest.TestCase):
                 "PidsLimit": 128,
                 "ReadonlyRootfs": True,
                 "CapDrop": ["ALL"],
+                "Privileged": False,
+                "SecurityOpt": ["no-new-privileges:true"],
+                "Devices": [],
+                "DeviceRequests": None,
+                "Binds": None,
+                "Mounts": None,
+                "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=67108864"},
+                "NetworkMode": "connex_ocr_internal",
             },
-            "NetworkSettings": {"Ports": {"8090/tcp": None}},
+            "Mounts": [],
+            "NetworkSettings": {
+                "Ports": {"8090/tcp": None},
+                "Networks": {"connex_ocr_internal": {}},
+            },
             "Image": "sha256:" + "c" * 64,
         }]
         with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(inspection)):
@@ -211,6 +275,12 @@ class BenchmarkManifestTest(unittest.TestCase):
         self.assertEqual("ghcr.io/itkla/connex-ocr@sha256:" + "b" * 64, result["imageReference"])
 
         inspection[0]["HostConfig"]["Memory"] = 1
+        with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(inspection)):
+            with self.assertRaisesRegex(ValueError, "resource"):
+                inspect_runtime_container("ocr", "d" * 12)
+
+        inspection[0]["HostConfig"]["Memory"] = 2_147_483_648
+        inspection[0]["HostConfig"]["Privileged"] = True
         with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(inspection)):
             with self.assertRaisesRegex(ValueError, "resource"):
                 inspect_runtime_container("ocr", "d" * 12)

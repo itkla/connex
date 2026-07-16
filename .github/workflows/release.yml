@@ -24,12 +24,13 @@ jobs:
       build_epoch: ${{ steps.metadata.outputs.build_epoch }}
       build_time: ${{ steps.metadata.outputs.build_time }}
       transaction_exists: ${{ steps.transaction.outputs.exists }}
+      transaction_name: ${{ steps.transaction.outputs.name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
 
-      - name: Validate release ref
+      - name: Resolve release event metadata
         id: metadata
         run: |
           set -euo pipefail
@@ -37,9 +38,7 @@ jobs:
             echo "::error::Release tags must use strict vMAJOR.MINOR.PATCH SemVer."
             exit 1
           fi
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
-          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
           VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
@@ -49,9 +48,53 @@ jobs:
             echo "build_time=$BUILD_TIME"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Require successful trusted workflows for the release commit
+      - name: Detect a committed release transaction from an earlier attempt
+        id: transaction
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="release-transaction-${GITHUB_RUN_ID}-"
+          artifacts="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          count="$(jq --arg prefix "$prefix" \
+            '[.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false)] | length' \
+            <<<"$artifacts")"
+          test "$count" -le 1
+          if [ "$count" = 1 ]; then
+            name="$(jq -r --arg prefix "$prefix" \
+              '.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false) | .name' \
+              <<<"$artifacts")"
+            {
+              echo "exists=true"
+              echo "name=$name"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "exists=false"
+              echo "name="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Revalidate release tag and immutable publication policy
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+
+      - name: Require release commit to remain the main head
+        if: steps.transaction.outputs.exists != 'true'
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
+      - name: Require successful trusted workflows for the release commit
+        if: steps.transaction.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           required=(ci.yml security.yml deploy-smoke.yml)
@@ -85,26 +128,6 @@ jobs:
             fi
             sleep 15
           done
-
-      - name: Detect a committed release transaction from an earlier attempt
-        id: transaction
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          name="release-transaction-${GITHUB_RUN_ID}"
-          artifacts="$(gh api \
-            -H 'Accept: application/vnd.github+json' \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
-          count="$(jq --arg name "$name" \
-            '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
-            <<<"$artifacts")"
-          test "$count" -le 1
-          if [ "$count" = 1 ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
 
   candidate-images:
     name: Build and verify ${{ matrix.component }} candidate
@@ -264,6 +287,26 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
+      - name: Require complete candidates from this attempt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          artifacts="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          for component in backend frontend ocr; do
+            name="release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${component}"
+            count="$(jq --arg name "$name" \
+              '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
+              <<<"$artifacts")"
+            if [ "$count" != 1 ]; then
+              echo "::error::This attempt has no complete candidate set. Re-run all jobs, not only failed jobs."
+              exit 1
+            fi
+          done
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}-*
@@ -362,12 +405,31 @@ jobs:
           test "$(docker inspect "$BACKEND_CONTAINER" --format '{{.Config.User}}')" = "10001:10001"
           OCR_CONTAINER="$(compose ps -q ocr)"
           docker inspect "$OCR_CONTAINER" | jq -e '.[0] |
-            .HostConfig.Memory == 2147483648
+            .Config.User == "10001"
+            and (.Config.ExposedPorts | keys) == ["8090/tcp"]
+            and .HostConfig.Memory == 2147483648
             and .HostConfig.MemorySwap == 2147483648
             and .HostConfig.NanoCpus == 2000000000
             and .HostConfig.PidsLimit == 128
             and .HostConfig.ReadonlyRootfs == true
+            and .HostConfig.Privileged == false
             and (.HostConfig.CapDrop | index("ALL") != null)
+            and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
+            and .HostConfig.Devices == []
+            and (.HostConfig.DeviceRequests == null or .HostConfig.DeviceRequests == [])
+            and (.HostConfig.Binds == null or .HostConfig.Binds == [])
+            and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
+            and .Mounts == []
+            and (.HostConfig.Tmpfs | keys) == ["/tmp"]
+            and (.HostConfig.Tmpfs["/tmp"] | contains("rw"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
+            and ((.HostConfig.Tmpfs["/tmp"] | contains("size=64m"))
+              or (.HostConfig.Tmpfs["/tmp"] | contains("size=67108864")))
+            and (.HostConfig.NetworkMode | endswith("_ocr_internal"))
+            and ((.NetworkSettings.Networks | keys) | length) == 1
+            and ((.NetworkSettings.Networks | keys)[0] | endswith("_ocr_internal"))
             and ([.NetworkSettings.Ports[]? | select(. != null)] | length == 0)
           '
 
@@ -436,10 +498,8 @@ jobs:
               --images /tmp/connex-benchmark-fixtures \
               --report ../business-card-benchmark.json \
               --requests-per-minute 120
-          jq -e '.caseCount == 40
-            and ([.cases[].status] | all(. == 200))
-            and ([.gates[].passed] | all(. == true))' \
-            ../business-card-benchmark.json
+          PYTHONPATH=../ocr python ../ocr/benchmark/verify_report.py \
+            ../business-card-benchmark.json "$GITHUB_SHA"
           tar --sort=name --mtime="@${BUILD_EPOCH}" --owner=0 --group=0 --numeric-owner \
             -cf ../business-card-benchmark-fixtures.tar \
             -C /tmp/connex-benchmark-fixtures .
@@ -482,12 +542,7 @@ jobs:
           REPORT_SHA256="$(sha256sum "$REPORT_FILE" | cut -d ' ' -f1)"
           FIXTURES_SHA256="$(sha256sum "$FIXTURES_FILE" | cut -d ' ' -f1)"
           DEPLOY_SHA256="$(sha256sum "$DEPLOY_BUNDLE" | cut -d ' ' -f1)"
-          jq -e --arg sourceSha "$GITHUB_SHA" '
-            .caseCount == 40
-            and .provenance.sourceRevision == $sourceSha
-            and ([.cases[].status] | all(. == 200))
-            and ([.gates[].passed] | all(. == true))
-          ' "$REPORT_FILE"
+          PYTHONPATH=ocr python ocr/benchmark/verify_report.py "$REPORT_FILE" "$GITHUB_SHA"
           for component in backend frontend ocr; do
             descriptor="release-${component}.json"
             expected="$(jq -r '.image + "@" + .digest' "$descriptor")"
@@ -513,7 +568,11 @@ jobs:
               sourceSha:$sourceSha,
               transaction:{runId:$runId,runAttempt:$runAttempt},
               images:(map({key:.component,value:{image:.image,digest:.digest,sbom:.sbom}})|from_entries),
-              qualification:{report:{file:$reportFile,sha256:$reportSha256},fixtures:{file:$fixturesFile,sha256:$fixturesSha256}},
+              qualification:{
+                report:{file:$reportFile,sha256:$reportSha256},
+                fixtures:{file:$fixturesFile,sha256:$fixturesSha256},
+                protections:{rotatingSecretHoldout:false,debianSnapshot:false}
+              },
               deploymentBundle:{file:$deployFile,sha256:$deploySha256}
             }' \
             release-backend.json release-frontend.json release-ocr.json \
@@ -523,7 +582,7 @@ jobs:
       - name: Upload committed release transaction
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-transaction-${{ github.run_id }}
+          name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 90
           if-no-files-found: error
           path: |
@@ -550,17 +609,50 @@ jobs:
     if: ${{ always() && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      transaction_name: ${{ steps.transaction.outputs.name }}
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
+      - name: Resolve the committed release transaction
+        id: transaction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="release-transaction-${GITHUB_RUN_ID}-"
+          for attempt in $(seq 1 20); do
+            artifacts="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+            count="$(jq --arg prefix "$prefix" \
+              '[.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false)] | length' \
+              <<<"$artifacts")"
+            test "$count" -le 1
+            if [ "$count" = 1 ]; then
+              name="$(jq -r --arg prefix "$prefix" \
+                '.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false) | .name' \
+                <<<"$artifacts")"
+              echo "name=$name" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$attempt" = 20 ]; then
+              echo "::error::The committed release transaction artifact was not found."
+              exit 1
+            fi
+            sleep 3
+          done
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-transaction-${{ github.run_id }}
+          name: ${{ steps.transaction.outputs.name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
@@ -585,6 +677,7 @@ jobs:
 
       - name: Verify the committed release transaction
         env:
+          TRANSACTION_NAME: ${{ steps.transaction.outputs.name }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
@@ -598,6 +691,10 @@ jobs:
           test "$(jq -r '.version' release-manifest.json)" = "$VERSION"
           test "$(jq -r '.sourceSha' release-manifest.json)" = "$GITHUB_SHA"
           test "$(jq -r '.transaction.runId' release-manifest.json)" = "$GITHUB_RUN_ID"
+          TRANSACTION_ATTEMPT="$(jq -er '.transaction.runAttempt | select(type == "number" and . >= 1 and floor == .)' release-manifest.json)"
+          test "$TRANSACTION_NAME" = "release-transaction-${GITHUB_RUN_ID}-${TRANSACTION_ATTEMPT}"
+          test "$(jq -r '.qualification.protections.rotatingSecretHoldout' release-manifest.json)" = false
+          test "$(jq -r '.qualification.protections.debianSnapshot' release-manifest.json)" = false
           for component in backend frontend ocr; do
             expected_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/connex-${component}"
             test "$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)" = "$expected_image"
@@ -646,7 +743,13 @@ jobs:
             cosign verify-attestation --type spdxjson \
               --certificate-identity "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              "${image}@${digest}" >/dev/null
+              --output json \
+              "${image}@${digest}" > "verified-${component}-sbom-attestation.json"
+            sbom="$(jq -r --arg component "$component" \
+              '.images[$component].sbom.file' release-manifest.json)"
+            python .github/scripts/verify-attested-sbom.py \
+              "verified-${component}-sbom-attestation.json" \
+              "$sbom" "$image" "$digest"
             gh attestation verify "oci://${image}@${digest}" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
@@ -661,6 +764,12 @@ jobs:
               fi
             done
           done
+
+      - name: Revalidate release tag immediately before promotion
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
 
       - name: Promote and verify final tags
         env:
@@ -689,12 +798,23 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-transaction-${{ github.run_id }}
+          name: ${{ needs.promote.outputs.transaction_name }}
+
+      - name: Revalidate release tag immediately before publication
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
 
       - name: Publish the complete verified release atomically
         env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -713,8 +833,15 @@ jobs:
           for asset in "${assets[@]}"; do
             test -f "$asset"
           done
+          printf '%s\n' "${assets[@]}" | sort > /tmp/expected-release-assets
+          verify_asset_names() {
+            gh release view "$GITHUB_REF_NAME" --json assets \
+              --jq '.assets[].name' | sort > /tmp/actual-release-assets
+            diff -u /tmp/expected-release-assets /tmp/actual-release-assets
+          }
           if gh release view "$GITHUB_REF_NAME" --json isDraft >/tmp/release-state.json 2>/dev/null; then
             if [ "$(jq -r '.isDraft' /tmp/release-state.json)" != true ]; then
+              verify_asset_names
               rm -rf /tmp/published-release
               mkdir /tmp/published-release
               gh release download "$GITHUB_REF_NAME" --dir /tmp/published-release
@@ -722,6 +849,7 @@ jobs:
                 test "$(sha256sum "$asset" | cut -d ' ' -f1)" = \
                   "$(sha256sum "/tmp/published-release/$asset" | cut -d ' ' -f1)"
               done
+              gh release verify "$GITHUB_REF_NAME"
               exit 0
             fi
           else
@@ -733,6 +861,7 @@ jobs:
               --notes "One signed, benchmark-qualified frontend, backend, and OCR image set. Deploy only the immutable digests in release-manifest.json."
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          verify_asset_names
           rm -rf /tmp/draft-release
           mkdir /tmp/draft-release
           gh release download "$GITHUB_REF_NAME" --dir /tmp/draft-release
@@ -740,4 +869,6 @@ jobs:
             test "$(sha256sum "$asset" | cut -d ' ' -f1)" = \
               "$(sha256sum "/tmp/draft-release/$asset" | cut -d ' ' -f1)"
           done
+          bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
           gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release verify "$GITHUB_REF_NAME"

@@ -297,7 +297,7 @@ class SupervisorTest(unittest.TestCase):
                 {"CONNEX_OCR_STARTUP_TIMEOUT_SECONDS": raw},
             ):
                 with self.assertRaisesRegex(ValueError, "must be between"):
-                    _number("CONNEX_OCR_STARTUP_TIMEOUT_SECONDS", 90.0, 10.0, 600.0)
+                    _number("CONNEX_OCR_STARTUP_TIMEOUT_SECONDS", 180.0, 10.0, 600.0)
 
     def test_restart_backoff_resets_only_after_stable_readiness(self) -> None:
         self.assertEqual(8.0, _next_backoff(4.0, WorkerResult(True, 1, 29.9)))
