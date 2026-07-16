@@ -6,6 +6,7 @@
   <resultMap id="PersonResult" type="Person">
     <id     property="id"        column="id"/>
     <result property="workspaceId" column="workspace_id"/>
+    <result property="ownerId" column="owner_id"/>
     <result property="name"      column="name"/>
     <result property="email"     column="email"/>
     <result property="phone"     column="phone"/>
@@ -33,7 +34,7 @@
   </resultMap>
 
   <sql id="personColumns">
-    p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
+    p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
     p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at
   </sql>
 
@@ -251,6 +252,21 @@
     </where>
   </sql>
 
+  <sql id="memberScopePredicate">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND p.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND p.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND p.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
   <sql id="pageOrderBy">
     ORDER BY
     <choose>
@@ -271,6 +287,7 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     <include refid="pageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
@@ -289,6 +306,7 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
   </select>
 
   <select id="getPersonsFiltered" resultMap="PersonResult">
@@ -317,6 +335,14 @@
 
   <select id="hasPersonWithoutCompany" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND company_id IS NULL)
+  </select>
+
+  <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(CAST(p.owner_id AS CHAR), '__empty__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+    GROUP BY p.owner_id
   </select>
 
   <!-- Contacts the team has engaged (any activity, note, or task): warm-intro entry points. -->
@@ -352,9 +378,9 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
     VALUES (
-      #{workspaceId}, #{name}, #{email}, #{phone},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
@@ -365,10 +391,10 @@
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
     VALUES
     <foreach collection="list" item="p" separator=",">
-      (#{p.workspaceId}, #{p.name}, #{p.email}, #{p.phone},
+      (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, #{p.name}, #{p.email}, #{p.phone},
        <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
        #{p.title}, #{p.imageUrl})
     </foreach>
@@ -383,6 +409,12 @@
       <if test="title != null">title = #{title},</if>
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
     </set>
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateOwner">
+    UPDATE person
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
@@ -418,6 +450,15 @@
           ELSE NULL
         END
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="clearMemberOwnership">
+    UPDATE person SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE person SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
   <delete id="delete">DELETE FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -30,6 +31,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.JobMoveDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
@@ -38,13 +40,16 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
@@ -66,6 +71,8 @@ public class PersonController {
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
     private final BulkOperationService bulkOperationService;
+    private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
     private static final String WARMTH_SORT = "warmth";
 
     /**
@@ -120,17 +127,21 @@ public class PersonController {
         @RequestParam(required = false) String dir,
         @RequestParam(required = false) List<String> companies,
         @RequestParam(required = false) List<String> titles,
-        @RequestParam(defaultValue = "false") boolean noCompany
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         if (WARMTH_SORT.equalsIgnoreCase(sort)) {
             throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
         }
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            bounds.size(), bounds.offset())
+            memberScope, bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items, personService.countPersons(query, companies, titles, noCompany));
+        return new PageResponse<>(items,
+            personService.countPersons(query, companies, titles, noCompany, memberScope));
     }
 
     /**
@@ -170,7 +181,8 @@ public class PersonController {
         return new PersonFacets(
             personService.distinctCompanies(),
             personService.distinctTitles(),
-            personService.hasPersonWithoutCompany()
+            personService.hasPersonWithoutCompany(),
+            personService.countsByOwner()
         );
     }
 
@@ -225,6 +237,11 @@ public class PersonController {
     @PutMapping("/{id}")
     public PersonDto updatePerson(@PathVariable int id, @Valid @RequestBody PersonDto dto) {
         return PersonDto.from(personService.update(id, dto.toBean()));
+    }
+
+    @PutMapping("/{id}/owner")
+    public PersonDto updateOwner(@PathVariable int id, @Valid @RequestBody PersonOwnerDto dto) {
+        return PersonDto.from(personService.updateOwner(id, dto.getOwnerId()));
     }
 
     /**
@@ -329,6 +346,11 @@ public class PersonController {
     @PostMapping("/bulk/delete")
     public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
         return bulkOperationService.deletePersons(request.getIds());
+    }
+
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToPersons(request.getIds(), request.getOwnerId());
     }
 
     /**
@@ -454,5 +476,9 @@ public class PersonController {
     @GetMapping("/custom-field-values")
     public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForPersons(@RequestParam List<Integer> ids) {
         return personService.getCustomFieldValues(ids);
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
     }
 }

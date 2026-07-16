@@ -7,5 +7,6 @@ import java.util.List;
  */
 public record CompanyFacets(
     List<String> industries,
-    boolean hasNoIndustry
+    boolean hasNoIndustry,
+    List<FacetCount> owners
 ) {}

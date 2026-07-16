@@ -20,6 +20,8 @@ import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -27,6 +29,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.LinkedHashMap;
@@ -55,7 +58,9 @@ public class PersonService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuthService authService;
     private final AuditService auditService;
+    private final NotificationChangePublisher notificationChanges;
     private final WorkspaceService workspaceService;
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
@@ -98,14 +103,16 @@ public class PersonService {
     }
 
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, int limit, int offset) {
+            List<String> titles, boolean noCompany, MemberScope memberScope, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
-            companies, titles, noCompany, limit, offset);
+            companies, titles, noCompany, memberScope, limit, offset);
     }
 
-    public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
-        return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
+    public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope) {
+        return personMapper.countPersons(
+            workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany, memberScope);
     }
 
     /**
@@ -119,7 +126,8 @@ public class PersonService {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        long total = personMapper.countPersons(workspaceId, query, companies, titles, noCompany);
+        long total = personMapper.countPersons(
+            workspaceId, query, companies, titles, noCompany, MemberScope.allTeam());
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
@@ -144,6 +152,10 @@ public class PersonService {
 
     public boolean hasPersonWithoutCompany() {
         return personMapper.hasPersonWithoutCompany(workspaceService.getCurrentWorkspaceId());
+    }
+
+    public List<FacetCount> countsByOwner() {
+        return personMapper.countsByOwner(workspaceService.getCurrentWorkspaceId());
     }
 
     /**
@@ -173,6 +185,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
+        person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
@@ -196,6 +209,7 @@ public class PersonService {
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
+        person.setOwnerId(before.getOwnerId());
         person.setImageUrl(before.getImageUrl());
         personMapper.update(person);
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
@@ -207,6 +221,23 @@ public class PersonService {
             auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return after;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwner(int personId, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requireOwnedPerson(workspaceId, personId);
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        personMapper.updateOwner(workspaceId, personId, ownerId);
+        auditService.record("person.updateOwner", "person", personId, before.getName(),
+            "Updated owner on " + before.getName(),
+            auditService.singleChange("ownerId", before.getOwnerId(), ownerId));
+        notificationChanges.publish(workspaceId, "person", personId);
+        if (!Objects.equals(before.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "person", personId, "person.owner_changed");
+        }
+        return requireOwnedPerson(workspaceId, personId);
     }
 
     @Transactional

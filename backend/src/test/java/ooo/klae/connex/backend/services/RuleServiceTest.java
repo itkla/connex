@@ -220,6 +220,14 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_recordOwnerChangeEvents_allowed() {
+        assertDoesNotThrow(() -> ruleService.create(
+            req("company", entityChange("company.owner_changed"), "user", action("notify"))));
+        assertDoesNotThrow(() -> ruleService.create(
+            req("person", entityChange("person.owner_changed"), "user", action("notify"))));
+    }
+
+    @Test
     void create_entityChangeTask_allowed() {
         assertDoesNotThrow(
             () -> ruleService.create(req("task", entityChange("task.completed"), "user", action("notify"))));
