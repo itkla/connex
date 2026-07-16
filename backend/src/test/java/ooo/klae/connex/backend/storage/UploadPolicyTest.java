@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.InputStream;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,9 +57,13 @@ class UploadPolicyTest {
     void defaultPolicyAllowsGenericAttachmentAboveScannerLimit() {
         ObjectStorageProperties defaults = new ObjectStorageProperties();
         UploadPolicy defaultPolicy = new UploadPolicy(defaults);
-        byte[] attachment = new byte[8 * 1024 * 1024 + 1];
+        UploadSource attachment = new UploadSource(
+            "large.pdf",
+            "application/pdf",
+            8 * 1024 * 1024 + 1,
+            InputStream::nullInputStream
+        );
 
-        assertDoesNotThrow(() -> defaultPolicy.validateGeneric(
-            UploadSource.from("large.pdf", "application/pdf", attachment)));
+        assertDoesNotThrow(() -> defaultPolicy.validateGeneric(attachment));
     }
 }
