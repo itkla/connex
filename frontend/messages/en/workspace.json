@@ -259,12 +259,14 @@
       },
       "company": {
         "created": "created",
-        "updated": "updated"
+        "updated": "updated",
+        "owner_changed": "owner changed"
       },
       "person": {
         "created": "created",
         "updated": "updated",
-        "job_changed": "changed jobs"
+        "job_changed": "changed jobs",
+        "owner_changed": "owner changed"
       },
       "task": {
         "created": "created",
