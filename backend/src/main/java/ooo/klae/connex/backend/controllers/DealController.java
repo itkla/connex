@@ -182,7 +182,13 @@ public class DealController {
             resolveMemberScope(scope, memberIds));
     }
 
-    /** Returns every matching deal in one bounded member-scoped pipeline board. */
+    /**
+     * Returns every matching deal in one bounded member-scoped pipeline board. Scoped rows keep
+     * their global {@code position} values: a scoped board is a read-only subset, and clients
+     * that reorder deals must fetch the board unscoped (filtering client-side) so move ordinals
+     * are computed against the full stage — deriving ordinals from a scoped subset silently
+     * reorders hidden deals.
+     */
     @GetMapping("/board")
     public List<DealDto> getDealBoard(
             @RequestParam int pipelineId,

@@ -377,7 +377,7 @@ public class DealService {
             dealMapper.countsByStage(workspaceId, memberScope),
             dealMapper.countsByPipeline(workspaceId, memberScope),
             dealMapper.countsByCompany(workspaceId, memberScope),
-            dealMapper.countsByOwner(workspaceId, memberScope),
+            dealMapper.countsByOwner(workspaceId),
             dealMapper.countsByCurrency(workspaceId, memberScope),
             List.of()
         );

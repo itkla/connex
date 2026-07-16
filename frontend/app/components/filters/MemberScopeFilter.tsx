@@ -21,6 +21,8 @@ import { pillClass } from "./FilterPill";
 export const MEMBER_SCOPE_ME = "me";
 /** Sentinel value meaning "records with no owner". */
 export const MEMBER_SCOPE_UNASSIGNED = "__empty__";
+/** Maximum selectable members, mirroring the server-side memberIds cap. */
+export const MEMBER_SCOPE_MAX_MEMBERS = 50;
 
 /**
  * Splits a member-scope value list into its exclusive interpretation: the "me" sentinel,
@@ -150,10 +152,13 @@ export default function MemberScopeFilter({
                         <div className="max-h-72 overflow-y-auto">
                             {members.map((member) => {
                                 const count = counts?.get(String(member.id));
+                                const checked = mode === "members" && memberIds.includes(member.id);
+                                const atCap = mode === "members" && memberIds.length >= MEMBER_SCOPE_MAX_MEMBERS;
                                 return (
                                     <DropdownMenuCheckboxItem
                                         key={member.id}
-                                        checked={mode === "members" && memberIds.includes(member.id)}
+                                        checked={checked}
+                                        disabled={!checked && atCap}
                                         onSelect={(e) => {
                                             e.preventDefault();
                                             toggleMember(member.id);

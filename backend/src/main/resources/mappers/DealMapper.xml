@@ -699,7 +699,6 @@
            COUNT(*) AS count, NULL AS label
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
     GROUP BY d.owner_id
   </select>
 

@@ -1888,9 +1888,11 @@ export function getDealMetricsFromCookie(cookie: string | null, params: Types.De
 }
 
 /**
- * Stable filter-facet vocabulary (status, stage, pipeline, company, currency) with counts,
- * computed server-side over the whole workspace so options never vanish when the visible page
- * lacks them (e.g. the "Closed" status option).
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
+ * counts, computed server-side over the whole workspace so options never vanish when the
+ * visible page lacks them (e.g. the "Closed" status option). The owners facet in particular
+ * always reflects all-team counts — including the `__empty__` unassigned bucket — regardless
+ * of any active member scope, so the owner picker stays complete while a scope is applied.
  */
 export function getDealFacets(init: RequestInit = {}) {
     return getJson<Types.DealFacets>(`/api/deals/facets`, init);

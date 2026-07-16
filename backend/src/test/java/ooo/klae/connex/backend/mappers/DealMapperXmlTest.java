@@ -26,7 +26,6 @@ class DealMapperXmlTest {
         "countsByStage",
         "countsByPipeline",
         "countsByCompany",
-        "countsByOwner",
         "countsByCurrency",
         "getDealBoard"
     );

@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 @Transactional
 class DealMemberScopeIntegrationTest {
     private static final String PASSWORD = "Member-Scope-Test-Pw1!";
+    private static final int WORKSPACE_DEAL_TOTAL = 5;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -94,6 +95,7 @@ class DealMemberScopeIntegrationTest {
             "memberIds", fixture.firstMember().getId() + "," + fixture.secondMember().getId());
         assertEquals(2, facetCount(facets.path("owners"), fixture.firstMember().getId()));
         assertEquals(1, facetCount(facets.path("owners"), fixture.secondMember().getId()));
+        assertEquals(1, facetCount(facets.path("owners"), "__empty__"));
 
         JsonNode allTeamFacets = json(fixture, "/api/deals/facets");
         assertEquals(1, facetCount(allTeamFacets.path("owners"), "__empty__"));
@@ -149,7 +151,8 @@ class DealMemberScopeIntegrationTest {
         String[] params = parameters.toArray(String[]::new);
         assertEquals(expected, json(fixture, "/api/deals/page", params).path("total").asInt());
         assertEquals(expected, json(fixture, "/api/deals/metrics", params).path("totalCount").asInt());
-        assertEquals(expected, facetTotal(json(fixture, "/api/deals/facets", params).path("owners")));
+        assertEquals(WORKSPACE_DEAL_TOTAL,
+            facetTotal(json(fixture, "/api/deals/facets", params).path("owners")));
 
         List<String> boardParameters = new ArrayList<>(parameters);
         boardParameters.add("pipelineId");

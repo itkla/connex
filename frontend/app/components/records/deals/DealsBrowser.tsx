@@ -867,6 +867,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         changeFilters({});
     }, [changeQuery, changeFilters]);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const ownerCounts = useMemo(
         () => new Map(dealFacets.owners?.map((facet) => [facet.key, facet.count]) ?? []),
         [dealFacets.owners],
@@ -874,7 +875,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const changeOwnerScope = useCallback((values: string[]) => {
         changeFilters({ ...activeFilterState, owner: values });
     }, [activeFilterState, changeFilters]);
-    const ownerChips: FilterChipData[] = (activeFilterState.owner ?? []).map((value) => {
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
         const label = value === MEMBER_SCOPE_ME
             ? ts('me')
             : value === FILTER_EMPTY
@@ -883,7 +889,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         return {
             id: `owner:${value}`,
             label: `${ts('label')}: ${label}`,
-            onRemove: () => changeOwnerScope((activeFilterState.owner ?? []).filter((other) => other !== value)),
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
         };
     });
     const chips: FilterChipData[] = [
@@ -1103,7 +1109,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         <MemberScopeFilter
                             values={activeFilterState.owner}
                             onChange={changeOwnerScope}
-                            members={members}
+                            members={activeMembers}
                             counts={ownerCounts}
                             unassignedCount={ownerCounts.get(FILTER_EMPTY)}
                         />

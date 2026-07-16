@@ -203,10 +203,12 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("memberScope") MemberScope memberScope
     );
-    List<FacetCount> countsByOwner(
-        @Param("workspaceId") int workspaceId,
-        @Param("memberScope") MemberScope memberScope
-    );
+    /**
+     * Owner facet counts over the whole workspace, deliberately ignoring the active member
+     * scope: the owner picker must keep showing every owner option (with stable counts) while
+     * one owner is selected, mirroring standard multi-select facet self-exclusion.
+     */
+    List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     List<FacetCount> countsByCurrency(
         @Param("workspaceId") int workspaceId,
         @Param("memberScope") MemberScope memberScope
