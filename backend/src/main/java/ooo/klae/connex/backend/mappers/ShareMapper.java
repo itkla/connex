@@ -42,6 +42,7 @@ public interface ShareMapper {
             @Param("targetWorkspaceId") int targetWorkspaceId);
     int unsharePerson(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId);
+    int revokePersonShares(@Param("id") int id, @Param("workspaceId") int workspaceId);
     int unsharePipeline(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId);
 

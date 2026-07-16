@@ -49,6 +49,11 @@ class ConnectionServiceTest extends AbstractServiceTest {
         assertNull(connection.getCompanyId());
         assertNull(connection.getCompanyName());
 
+        personMapper.updateProcessingRestrictions(sibling.getId(), shared.getId(), true, true);
+        connection = connectionService.getConnections(source.getId()).getFirst();
+        assertNotNull(connection.getSuspendedAt());
+        assertNotNull(connection.getProvisionCeasedAt());
+
         assertEquals(1, shareMapper.shareCompany(
             foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
         connection = connectionService.getConnections(source.getId()).getFirst();
@@ -94,6 +99,22 @@ class ConnectionServiceTest extends AbstractServiceTest {
         IntroPathDto revoked = connectionService.findIntroPath(target.getId());
         assertFalse(revoked.isReachable());
         assertTrue(revoked.getSteps().isEmpty());
+    }
+
+    @Test
+    void introPathDoesNotTraverseOrTargetSuspendedContacts() {
+        Person source = engagedPerson("Known Source");
+        Person bridge = personIn(workspace, newCompany(), "Suspended Bridge");
+        Person target = personIn(workspace, newCompany(), "Target");
+        connect(source, bridge);
+        connect(bridge, target);
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), bridge.getId(), true, false);
+        assertFalse(connectionService.findIntroPath(target.getId()).isReachable());
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), bridge.getId(), false, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), target.getId(), true, false);
+        assertFalse(connectionService.findIntroPath(target.getId()).isReachable());
     }
 
     @Test

@@ -7,7 +7,8 @@
     </select>
 
     <select id="personIdsInWorkspace" resultType="int">
-        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
     </select>
 
     <select id="dealIdsInWorkspace" resultType="int">
@@ -30,6 +31,22 @@
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
                 AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+                AND (a.person_id IS NULL OR EXISTS (
+                    SELECT 1 FROM person processable
+                    WHERE processable.id = a.person_id
+                      AND processable.suspended_at IS NULL
+                      AND (processable.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                          SELECT 1 FROM person_share processable_share
+                          JOIN workspace viewer_workspace
+                            ON viewer_workspace.id = processable_share.workspace_id
+                          JOIN workspace owner_workspace
+                            ON owner_workspace.id = processable.workspace_id
+                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          WHERE processable_share.person_id = processable.id
+                            AND processable_share.workspace_id = #{workspaceId}
+                        ))
+                ))
                 AND (
                     a.person_id IN (SELECT p.id FROM person p WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
@@ -41,6 +58,7 @@
         SELECT DISTINCT p.company_id
         FROM person p
         WHERE p.workspace_id = #{workspaceId}
+          AND p.suspended_at IS NULL
           AND p.company_id IS NOT NULL
           AND p.id IN
           <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
@@ -48,8 +66,27 @@
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
                 AND a.created_by_id = #{userId}
+                AND (a.person_id IS NULL OR EXISTS (
+                    SELECT 1 FROM person processable
+                    WHERE processable.id = a.person_id
+                      AND processable.suspended_at IS NULL
+                      AND (processable.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                          SELECT 1 FROM person_share processable_share
+                          JOIN workspace viewer_workspace
+                            ON viewer_workspace.id = processable_share.workspace_id
+                          JOIN workspace owner_workspace
+                            ON owner_workspace.id = processable.workspace_id
+                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          WHERE processable_share.person_id = processable.id
+                            AND processable_share.workspace_id = #{workspaceId}
+                        ))
+                ))
                 AND (
-                    a.person_id IN (SELECT p2.id FROM person p2 WHERE p2.workspace_id = #{workspaceId} AND p2.company_id = p.company_id)
+                    a.person_id IN (SELECT p2.id FROM person p2
+                        WHERE p2.workspace_id = #{workspaceId}
+                          AND p2.company_id = p.company_id
+                          AND p2.suspended_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
                 )
           )
@@ -107,7 +144,8 @@
     </select>
 
     <select id="personIdsMatching" resultType="int">
-        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>

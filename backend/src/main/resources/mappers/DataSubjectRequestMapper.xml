@@ -97,7 +97,8 @@
     SELECT p.id, p.workspace_id, p.name, p.email, p.phone, p.title,
            CASE WHEN company_workspace.id IS NULL THEN NULL ELSE c.id END AS company_id,
            CASE WHEN company_workspace.id IS NULL THEN NULL ELSE c.name END AS company_name,
-           p.image_url, p.risk_excluded, p.intro_excluded, p.created_at, p.updated_at
+           p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
+           p.provision_ceased_at, p.created_at, p.updated_at
     FROM person p
     JOIN workspace subject_workspace
       ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}

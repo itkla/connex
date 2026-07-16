@@ -16,9 +16,11 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -45,6 +47,7 @@ public class IntroRationaleService {
     private final IntroductionService introductionService;
     private final AiOutputCacheStore aiOutputCacheStore;
     private final WorkspaceService workspaceService;
+    private final PersonMapper personMapper;
     private final Clock clock;
 
     /**
@@ -66,6 +69,10 @@ public class IntroRationaleService {
                 .findFirst()
                 .orElse(null);
         if (suggestion == null) {
+            return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+        }
+        if (isAiRestricted(personMapper.getPersonById(workspaceId, lo))
+                || isAiRestricted(personMapper.getPersonById(workspaceId, hi))) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
 
@@ -121,6 +128,10 @@ public class IntroRationaleService {
     private static String cacheFeature() {
         String language = LocaleContextHolder.getLocale().getLanguage();
         return FEATURE + ':' + (language.isBlank() ? "en" : language);
+    }
+
+    private static boolean isAiRestricted(Person person) {
+        return person == null || person.getSuspendedAt() != null || person.getProvisionCeasedAt() != null;
     }
 
     private static String truncate(String value, int maxCodePoints) {

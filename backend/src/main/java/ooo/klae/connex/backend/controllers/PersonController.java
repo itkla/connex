@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -210,6 +211,18 @@ public class PersonController {
     public PersonDto updateEvaluation(@PathVariable int id, @Valid @RequestBody PersonEvaluationDto dto) {
         return PersonDto.from(
             personService.updateEvaluationExclusions(id, dto.getRiskExcluded(), dto.getIntroExcluded()));
+    }
+
+    /**
+     * PUT endpoint to set the contact's processing and third-party-provision restrictions.
+     * @param id contact id
+     * @param dto requested restriction state
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/restrictions")
+    public PersonDto updateRestrictions(@PathVariable int id, @Valid @RequestBody PersonRestrictionsDto dto) {
+        return PersonDto.from(personService.updateProcessingRestrictions(
+            id, dto.getSuspended(), dto.getProvisionCeased()));
     }
 
     /**

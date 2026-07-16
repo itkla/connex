@@ -71,7 +71,7 @@ public class MapReplayService {
         long[] cutoffs = new long[dates.size()];
         for (int i = 0; i < dates.size(); i++) cutoffs[i] = Math.min(endOfDayMillis(dates.get(i)), now);
 
-        List<Person> persons = personMapper.getAllPersons(workspaceId);
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
         List<Company> companies = companyMapper.getAllCompanies(workspaceId);
         List<Deal> deals = dealMapper.getAllDeals(workspaceId);
         if ((long) dates.size() * (persons.size() + companies.size() + deals.size()) > MAX_ENTRIES) {
@@ -88,7 +88,9 @@ public class MapReplayService {
             if (d.getCompanyId() != null) dealCompany.put(d.getId(), d.getCompanyId());
         }
         ScoringService.ReplayBands bands = scoringService.replayBands(workspaceId, cutoffs,
-            (personId, epochMillis) -> employerAt(stints.get(personId), epochMillis), dealCompany);
+            (personId, epochMillis) -> employerAt(stints.get(personId), epochMillis),
+            persons.stream().map(Person::getId).collect(java.util.stream.Collectors.toUnmodifiableSet()),
+            dealCompany);
         List<Map<Integer, String>> contactBands = bands.contactFrames();
         List<Map<Integer, String>> companyBands = bands.companyFrames();
 

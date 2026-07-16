@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 public interface PersonMapper {
     List<Person> getAllPersons(int workspaceId);
+    List<Person> getProcessablePersons(int workspaceId);
     List<Person> getPersonsForNetworkReport(
             @Param("workspaceId") int workspaceId,
             @Param("limit") int limit);
@@ -30,7 +31,7 @@ public interface PersonMapper {
     List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Integer> getExistingPersonIds(@Param("workspaceId") int workspaceId,
+    List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
     List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,
@@ -71,6 +72,12 @@ public interface PersonMapper {
         @Param("id") int id,
         @Param("riskExcluded") Boolean riskExcluded,
         @Param("introExcluded") Boolean introExcluded
+    );
+    int updateProcessingRestrictions(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("suspended") boolean suspended,
+        @Param("provisionCeased") boolean provisionCeased
     );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

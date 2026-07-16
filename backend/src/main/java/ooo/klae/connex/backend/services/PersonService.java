@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Activity;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +41,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PersonService {
     private final PersonMapper personMapper;
+    private final ShareMapper shareMapper;
     private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
     private final DealMapper dealMapper;
@@ -56,6 +59,9 @@ public class PersonService {
         Set.of("name", "email", "phone", "title", "imageUrl");
 
     private static final Set<String> EVALUATION_AUDIT_FIELDS = Set.of("riskExcluded", "introExcluded");
+
+    private static final Set<String> RESTRICTION_AUDIT_FIELDS =
+        Set.of("suspendedAt", "provisionCeasedAt");
 
     private static final int MAX_MATCHING_IDS = 1000;
 
@@ -185,11 +191,12 @@ public class PersonService {
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
-        auditService.record("person.update", "person", id, person.getName(),
-            "Updated person " + person.getName(),
-            auditService.diff(before, person, AUDIT_FIELDS));
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.update", "person", id, after.getName(),
+            "Updated person " + after.getName(),
+            auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
-        return person;
+        return after;
     }
 
     /**
@@ -213,6 +220,34 @@ public class PersonService {
         auditService.record("person.updateEvaluation", "person", id, before.getName(),
             "Updated engine evaluation opt-outs for " + before.getName(),
             auditService.diff(before, after, EVALUATION_AUDIT_FIELDS));
+        return after;
+    }
+
+    /**
+     * Sets or clears the contact's processing and third-party-provision restrictions. Ceasing
+     * third-party provision also revokes every standing cross-workspace share of the contact —
+     * the restriction must stop provision already in flight, not just new grants.
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requireOwnedPerson(workspaceId, id);
+        personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
+        int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
+        Person after = requireOwnedPerson(workspaceId, id);
+        Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
+        if (diff != null || revokedShares > 0) {
+            Map<String, Object> changes = new LinkedHashMap<>();
+            if (diff != null) {
+                changes.putAll(diff);
+            }
+            if (revokedShares > 0) {
+                changes.put("revokedShares", revokedShares);
+            }
+            auditService.record("person.restrictions", "person", id, before.getName(),
+                "Updated processing restrictions for " + before.getName(), changes);
+        }
         return after;
     }
 
