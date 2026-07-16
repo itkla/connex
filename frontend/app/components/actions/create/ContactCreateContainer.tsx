@@ -45,6 +45,15 @@ export default function ContactCreateContainer({
     const creatingRef = useRef(false);
     const importRetryRequiredRef = useRef(false);
     const submissionPendingRef = useRef(false);
+    const closeTimerRef = useRef<number | null>(null);
+    const closeGenerationRef = useRef(0);
+
+    const invalidatePendingClose = useCallback(() => {
+        closeGenerationRef.current += 1;
+        if (closeTimerRef.current == null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
 
     const emitDismissLock = useCallback(() => {
         onDismissLockChange?.(
@@ -55,6 +64,7 @@ export default function ContactCreateContainer({
     }, [onDismissLockChange]);
 
     useEffect(() => {
+        invalidatePendingClose();
         if (!open) return;
         const raf = window.requestAnimationFrame(() => {
             setPayload({ ...EMPTY_DRAFT, companyId: defaults?.companyId });
@@ -66,7 +76,9 @@ export default function ContactCreateContainer({
             onDismissLockChange?.(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open, defaults?.companyId, onDismissLockChange]);
+    }, [open, defaults?.companyId, invalidatePendingClose, onDismissLockChange]);
+
+    useEffect(() => () => invalidatePendingClose(), [invalidatePendingClose]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && (
@@ -74,6 +86,7 @@ export default function ContactCreateContainer({
             || importRetryRequiredRef.current
             || submissionPendingRef.current
         )) return;
+        invalidatePendingClose();
         if (!next) onDismissLockChange?.(false);
         onOpenChange(next);
     };
@@ -118,7 +131,11 @@ export default function ContactCreateContainer({
                     publishRecordMutation('contact');
                     if (imported?.company) publishRecordMutation('company');
                     setSucceeded(true);
-                    setTimeout(() => {
+                    invalidatePendingClose();
+                    const closeGeneration = closeGenerationRef.current;
+                    closeTimerRef.current = window.setTimeout(() => {
+                        if (closeGenerationRef.current !== closeGeneration) return;
+                        closeTimerRef.current = null;
                         onOpenChange(false);
                         router.refresh();
                     }, 900);
@@ -137,7 +154,11 @@ export default function ContactCreateContainer({
         return (
             <NewContactForm
                 active
-                onCancel={onCancel ?? (() => onOpenChange(false))}
+                onCancel={() => {
+                    invalidatePendingClose();
+                    if (onCancel) onCancel();
+                    else onOpenChange(false);
+                }}
                 newContactPayload={payload}
                 setNewContactPayload={setPayload}
                 imageFile={imageFile}

@@ -234,7 +234,21 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(EMPTY_CONTACT_DRAFT);
     const [imageFile, setImageFile] = useState<File | null>(null);
+    const newContactCloseTimerRef = useRef<number | null>(null);
+    const newContactGenerationRef = useRef(0);
+    const invalidateNewContactClose = useCallback(() => {
+        newContactGenerationRef.current += 1;
+        if (newContactCloseTimerRef.current == null) return;
+        window.clearTimeout(newContactCloseTimerRef.current);
+        newContactCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewContactClose(), [invalidateNewContactClose]);
+    const openNewContactDialog = () => {
+        invalidateNewContactClose();
+        setNewContactDialogOpen(true);
+    };
     const closeNewContactDialog = (open: boolean) => {
+        invalidateNewContactClose();
         setNewContactDialogOpen(open);
         if (!open) {
             setNewContactPayload(EMPTY_CONTACT_DRAFT);
@@ -268,7 +282,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     finalized = true;
                     toastSuccess(t('toastContactCreated'));
                     setCreationSucceeded(true);
-                    setTimeout(() => {
+                    invalidateNewContactClose();
+                    const closeGeneration = newContactGenerationRef.current;
+                    newContactCloseTimerRef.current = window.setTimeout(() => {
+                        if (newContactGenerationRef.current !== closeGeneration) return;
+                        newContactCloseTimerRef.current = null;
                         closeNewContactDialog(false);
                         refresh();
                     }, 900);
@@ -545,7 +563,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         <div className="flex items-center gap-2">
                             <RecordsActions
                                 entity="persons"
-                                onNew={() => setNewContactDialogOpen(true)}
+                                onNew={openNewContactDialog}
                                 newLabel={t('new')}
                                 newAriaLabel={t('newAria')}
                                 onImported={refresh}

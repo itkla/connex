@@ -291,6 +291,15 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(EMPTY_COMPANY_DRAFT);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
+    const newCompanyCloseTimerRef = useRef<number | null>(null);
+    const newCompanyGenerationRef = useRef(0);
+    const invalidateNewCompanyClose = useCallback(() => {
+        newCompanyGenerationRef.current += 1;
+        if (newCompanyCloseTimerRef.current == null) return;
+        window.clearTimeout(newCompanyCloseTimerRef.current);
+        newCompanyCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewCompanyClose(), [invalidateNewCompanyClose]);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
@@ -359,6 +368,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     }, [metricsStatusByCompanyId, t]);
 
     const openNewDialog = () => {
+        invalidateNewCompanyClose();
         setNewPayload(EMPTY_COMPANY_DRAFT);
         setLogoFile(null);
         setPendingContacts([]);
@@ -367,6 +377,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     };
 
     const closeNewDialog = (open: boolean) => {
+        invalidateNewCompanyClose();
         setNewDialogOpen(open);
     };
 
@@ -397,7 +408,11 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             if (logoUploadFailed) toastError(t('toastLogoUploadFailed'));
             setIsCreating(false);
             setCreationSucceeded(true);
-            setTimeout(() => {
+            invalidateNewCompanyClose();
+            const closeGeneration = newCompanyGenerationRef.current;
+            newCompanyCloseTimerRef.current = window.setTimeout(() => {
+                if (newCompanyGenerationRef.current !== closeGeneration) return;
+                newCompanyCloseTimerRef.current = null;
                 closeNewDialog(false);
                 refresh();
             }, 850);

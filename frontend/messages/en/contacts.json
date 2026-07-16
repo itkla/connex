@@ -267,6 +267,7 @@
     "cardImportRecoveryFailed": "Connex could not safely check an earlier card import. Check your contacts before recreating that card. You can still create a different contact manually.",
     "cardImportRecoveryStorageUnavailable": "Business-card import is off because this browser cannot safely store a recovery key. You can still create a contact manually.",
     "cardImportRecoveryRetry": "Check again",
+    "cardImportRecoveryContinueManually": "Continue with a different contact",
     "cardImportCloseAndReconcile": "Close and reconcile later",
     "cardImportRecovered": "The contact from your earlier card import was created.",
     "cardImportRecoveryGone": "An earlier card import completed, but its result is no longer available. Connex will not resubmit that card.",

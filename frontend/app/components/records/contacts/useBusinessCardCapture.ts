@@ -19,7 +19,6 @@ import {
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,
-    isBusinessCardRecoveryStorageEvent,
     markBusinessCardImportAvatarCompleted,
     prepareBusinessCardImportRecovery,
     reconcileBusinessCardImportRecovery,
@@ -222,17 +221,6 @@ export function useBusinessCardCapture({
             controller.abort();
         };
     }, [active, recoveryAttempt]);
-
-    useEffect(() => {
-        if (!active) return;
-        const handleStorage = (event: StorageEvent) => {
-            if (!isBusinessCardRecoveryStorageEvent(event)) return;
-            setRecoveryStatus('checking');
-            setRecoveryAttempt((attempt) => attempt + 1);
-        };
-        window.addEventListener('storage', handleStorage);
-        return () => window.removeEventListener('storage', handleStorage);
-    }, [active]);
 
     useEffect(() => {
         if (!active) requiresExactImportRetryRef.current = false;
@@ -640,6 +628,11 @@ export function useBusinessCardCapture({
         onImportRetryRequiredChangeRef.current?.(false);
     };
 
+    const continueManually = () => {
+        deferImportRetry();
+        clearCard(true);
+    };
+
     const retryRecovery = useCallback(() => {
         setRecoveryStatus('checking');
         setRecoveryAttempt((attempt) => attempt + 1);
@@ -702,6 +695,7 @@ export function useBusinessCardCapture({
         resolveImportRetry,
         markImportAvatarCompleted,
         deferImportRetry,
+        continueManually,
         retryRecovery,
         acknowledgeRecoveredImport,
     };

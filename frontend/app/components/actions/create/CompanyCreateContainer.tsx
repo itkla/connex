@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -58,6 +58,15 @@ export default function CompanyCreateContainer({
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const closeTimerRef = useRef<number | null>(null);
+    const closeGenerationRef = useRef(0);
+
+    const invalidatePendingClose = useCallback(() => {
+        closeGenerationRef.current += 1;
+        if (closeTimerRef.current == null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
@@ -101,6 +110,7 @@ export default function CompanyCreateContainer({
     }, [open, loaded]);
 
     useEffect(() => {
+        invalidatePendingClose();
         if (!open) return;
         const raf = window.requestAnimationFrame(() => {
             setPayload(EMPTY_DRAFT);
@@ -109,10 +119,13 @@ export default function CompanyCreateContainer({
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open]);
+    }, [open, invalidatePendingClose]);
+
+    useEffect(() => () => invalidatePendingClose(), [invalidatePendingClose]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;
+        invalidatePendingClose();
         onOpenChange(next);
     };
 
@@ -148,7 +161,11 @@ export default function CompanyCreateContainer({
             if (logoUploadFailed) toastError(t('feedback.companyLogoUploadFailed'));
             setCreating(false);
             setSucceeded(true);
-            setTimeout(() => {
+            invalidatePendingClose();
+            const closeGeneration = closeGenerationRef.current;
+            closeTimerRef.current = window.setTimeout(() => {
+                if (closeGenerationRef.current !== closeGeneration) return;
+                closeTimerRef.current = null;
                 onOpenChange(false);
                 router.refresh();
             }, 900);
@@ -163,7 +180,11 @@ export default function CompanyCreateContainer({
         return (
             <NewCompanyForm
                 active={open}
-                onCancel={onCancel ?? (() => onOpenChange(false))}
+                onCancel={() => {
+                    invalidatePendingClose();
+                    if (onCancel) onCancel();
+                    else onOpenChange(false);
+                }}
                 payload={payload}
                 setPayload={setPayload}
                 logoFile={logoFile}

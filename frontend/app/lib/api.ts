@@ -195,24 +195,27 @@ async function currentClientRequestIdentity(): Promise<string | null> {
 export async function clientRecoveryScope(init: RequestInit = {}): Promise<string | null> {
     const workspaceId = clientWorkspaceId();
     if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
-    let response: Response;
+    let body: unknown;
     try {
-        response = await withBusinessCardRequestTimeout(
+        body = await withBusinessCardRequestTimeout(
             10_000,
             init.signal,
-            (signal) => fetch(`${API_BASE}/api/auth/me`, {
-                ...init,
-                credentials: "include",
-                cache: "no-store",
-                signal,
-            }),
+            async (signal) => {
+                const response = await fetch(`${API_BASE}/api/auth/me`, {
+                    ...init,
+                    credentials: "include",
+                    cache: "no-store",
+                    signal,
+                });
+                if (!response.ok) return null;
+                const responseBody: unknown = await response.json().catch(() => null);
+                return responseBody;
+            },
         );
     } catch (error) {
         if (init.signal?.aborted || error instanceof ApiError) throw error;
         return null;
     }
-    if (!response.ok) return null;
-    const body: unknown = await response.json().catch(() => null);
     if (typeof body !== "object" || body === null || !("id" in body)) return null;
     const userId = body.id;
     if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) return null;

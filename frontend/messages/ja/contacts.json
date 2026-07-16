@@ -267,6 +267,7 @@
     "cardImportRecoveryFailed": "以前の名刺登録結果を安全に確認できませんでした。同じ名刺を再登録する前にコンタクトを確認してください。別のコンタクトは手動で作成できます。",
     "cardImportRecoveryStorageUnavailable": "このブラウザでは復旧キーを安全に保存できないため、名刺登録は無効です。コンタクトは手動で作成できます。",
     "cardImportRecoveryRetry": "もう一度確認",
+    "cardImportRecoveryContinueManually": "別のコンタクトを手動で作成",
     "cardImportCloseAndReconcile": "閉じて後で確認",
     "cardImportRecovered": "以前の名刺登録からコンタクトが作成されていました。",
     "cardImportRecoveryGone": "以前の名刺登録は完了しましたが、結果はすでに利用できません。Connexがその名刺を再送信することはありません。",

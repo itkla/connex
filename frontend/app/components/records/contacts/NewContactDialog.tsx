@@ -200,6 +200,7 @@ export function NewContactForm({
     const [submissionPending, setSubmissionPending] = useState(false);
     const [imageSelectionPending, setImageSelectionPending] = useState(false);
     const [cardSelectionPending, setCardSelectionPending] = useState(false);
+    const [manualRecoveryOverride, setManualRecoveryOverride] = useState(false);
     const [prevActive, setPrevActive] = useState(active);
     const recoveredImportHandledRef = useRef<string | null>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -225,6 +226,9 @@ export function NewContactForm({
         ? `${recoveredImport.requestId}:${recoveredImport.revision ?? 'missing'}:${recoveredImport.terminal}`
         : null;
     const acknowledgeRecoveredImport = businessCard.acknowledgeRecoveredImport;
+    const recoveryDecisionRequired = !manualRecoveryOverride
+        && (businessCard.recoveryStatus === 'error'
+            || businessCard.recoveryStatus === 'storageUnavailable');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const companySearch = useCompanySearch(
         active,
@@ -337,7 +341,8 @@ export function NewContactForm({
             || cardSelectionPendingRef.current
             || businessCard.isScanning
             || businessCard.recoveryStatus === 'checking'
-            || businessCard.recoveryStatus === 'acknowledging') return;
+            || businessCard.recoveryStatus === 'acknowledging'
+            || recoveryDecisionRequired) return;
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         onSubmissionPendingChange?.(true);
@@ -363,6 +368,7 @@ export function NewContactForm({
             setSubmissionPending(false);
             setImageSelectionPending(false);
             setCardSelectionPending(false);
+            setManualRecoveryOverride(false);
             resetFieldErrors();
         }
     }
@@ -436,14 +442,25 @@ export function NewContactForm({
         }
     };
 
+    const continueManuallyAfterRecoveryFailure = () => {
+        businessCard.continueManually();
+        setManualRecoveryOverride(true);
+    };
+
+    const retryRecovery = () => {
+        setManualRecoveryOverride(false);
+        businessCard.retryRecovery();
+    };
+
     const hasErrors = Object.keys(fieldErrors).length > 0
         || businessCard.companyValidationError != null
         || businessCard.importError != null
-        || businessCard.recoveryStatus === 'error';
+        || (!manualRecoveryOverride && businessCard.recoveryStatus === 'error');
     const formPending = submissionPending || isCreating || imageSelectionPending || cardSelectionPending;
     const recoveryBlocked = businessCard.recoveryStatus === 'checking'
         || businessCard.recoveryStatus === 'acknowledging'
-        || recoveredImport != null;
+        || recoveredImport != null
+        || recoveryDecisionRequired;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
     const visibleImagePreview = imageFile ? imagePreview : null;
@@ -496,17 +513,17 @@ export function NewContactForm({
                     {businessCard.recoveryStatus === 'checking'
                         || businessCard.recoveryStatus === 'acknowledging' ? (
                         <BusinessCardRecoveryStatus />
-                    ) : businessCard.recoveryStatus === 'error' ? (
+                    ) : businessCard.recoveryStatus === 'error' && !manualRecoveryOverride ? (
                         <BusinessCardRecoveryError
-                            onRetry={businessCard.retryRecovery}
-                            onDiscard={businessCard.file ? businessCard.discardCardImage : undefined}
+                            onRetry={retryRecovery}
+                            onContinueManually={continueManuallyAfterRecoveryFailure}
                         />
-                    ) : businessCard.recoveryStatus === 'storageUnavailable' ? (
+                    ) : businessCard.recoveryStatus === 'storageUnavailable' && !manualRecoveryOverride ? (
                         <BusinessCardRecoveryStorageWarning
-                            onRetry={businessCard.retryRecovery}
-                            onDiscard={businessCard.file ? businessCard.discardCardImage : undefined}
+                            onRetry={retryRecovery}
+                            onContinueManually={continueManuallyAfterRecoveryFailure}
                         />
-                    ) : !businessCard.availabilityResolved ? (
+                    ) : manualRecoveryOverride ? null : !businessCard.availabilityResolved ? (
                         <BusinessCardAvailabilityPlaceholder />
                     ) : businessCard.available ? (
                         <BusinessCardCapture
@@ -596,10 +613,10 @@ function BusinessCardRecoveryStatus() {
 
 function BusinessCardRecoveryError({
     onRetry,
-    onDiscard,
+    onContinueManually,
 }: {
     onRetry: () => void;
-    onDiscard?: () => void;
+    onContinueManually: () => void;
 }) {
     const t = useTranslations('ContactsNewContactDialog');
 
@@ -613,11 +630,9 @@ function BusinessCardRecoveryError({
                     <ArrowPathIcon data-icon="inline-start" />
                     {t('cardImportRecoveryRetry')}
                 </Button>
-                {onDiscard && (
-                    <Button type="button" variant="outline" size="sm" onClick={onDiscard}>
-                        {t('continueWithoutCardImage')}
-                    </Button>
-                )}
+                <Button type="button" variant="outline" size="sm" onClick={onContinueManually}>
+                    {t('cardImportRecoveryContinueManually')}
+                </Button>
             </div>
         </section>
     );
@@ -625,10 +640,10 @@ function BusinessCardRecoveryError({
 
 function BusinessCardRecoveryStorageWarning({
     onRetry,
-    onDiscard,
+    onContinueManually,
 }: {
     onRetry: () => void;
-    onDiscard?: () => void;
+    onContinueManually: () => void;
 }) {
     const t = useTranslations('ContactsNewContactDialog');
 
@@ -642,11 +657,9 @@ function BusinessCardRecoveryStorageWarning({
                     <ArrowPathIcon data-icon="inline-start" />
                     {t('cardImportRecoveryRetry')}
                 </Button>
-                {onDiscard && (
-                    <Button type="button" variant="outline" size="sm" onClick={onDiscard}>
-                        {t('continueWithoutCardImage')}
-                    </Button>
-                )}
+                <Button type="button" variant="outline" size="sm" onClick={onContinueManually}>
+                    {t('cardImportRecoveryContinueManually')}
+                </Button>
             </div>
         </section>
     );

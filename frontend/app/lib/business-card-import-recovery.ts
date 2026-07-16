@@ -472,12 +472,6 @@ async function checkEntries(
     return { recovered: null, reusableRequestId, reusableRevision, pending };
 }
 
-/** Identifies cross-tab changes to durable business-card recovery state. */
-export function isBusinessCardRecoveryStorageEvent(event: StorageEvent): boolean {
-    return event.storageArea === window.localStorage
-        && (event.key === null || event.key.startsWith(STORAGE_PREFIX));
-}
-
 /** Reconciles opaque response-loss candidates without loading private draft data. */
 export async function reconcileBusinessCardImportRecovery(
     signal?: AbortSignal,
@@ -486,13 +480,16 @@ export async function reconcileBusinessCardImportRecovery(
     const scope = await recoveryScope(signal);
     for (let attempt = 0; attempt <= RECOVERY_POLL_DELAYS_MS.length; attempt += 1) {
         const entries = await withRecoveryLock(scope, () => readEntries(scope), signal);
-        if (inMemoryRequestId && !entries.some((entry) => entry.requestId === inMemoryRequestId)) {
+        const candidates = inMemoryRequestId
+            ? entries.filter((entry) => entry.requestId === inMemoryRequestId)
+            : entries.filter((entry) => entry.phase === 'submitted' || entry.phase === 'legacy');
+        if (inMemoryRequestId && candidates.length === 0) {
             return checkInMemoryRequest(inMemoryRequestId, signal);
         }
-        if (entries.length === 0) {
+        if (candidates.length === 0) {
             return { recovered: null, reusableRequestId: null, reusableRevision: null };
         }
-        const outcome = await checkEntries(scope, entries, signal);
+        const outcome = await checkEntries(scope, candidates, signal);
         if (outcome.recovered) {
             return {
                 recovered: outcome.recovered,
