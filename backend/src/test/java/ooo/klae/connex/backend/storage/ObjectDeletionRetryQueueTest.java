@@ -86,7 +86,7 @@ class ObjectDeletionRetryQueueTest {
             "workspaces/7/attachments/object.pdf",
             2,
             java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
-        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any(), any());
     }
 
     @Test
@@ -105,7 +105,7 @@ class ObjectDeletionRetryQueueTest {
             "users/9/profile-images/object.png",
             2,
             java.time.LocalDateTime.of(2026, 7, 14, 12, 1));
-        verify(transactionExecutor, never()).processUser(any(), any());
+        verify(transactionExecutor, never()).processUser(any(), any(), any());
     }
 
     @Test
@@ -119,16 +119,42 @@ class ObjectDeletionRetryQueueTest {
 
     @Test
     void deterministicTenantAdoptionCancelsTheMatchingTaskInTheCurrentTransaction() {
-        queue.cancelTenantInCurrentTransaction(7, "workspaces/7/attachments/object.pdf");
+        ObjectDeletionTombstone tombstone = new ObjectDeletionTombstone(
+            41, "workspaces/7/attachments/object.pdf");
+        when(tenantQueueMapper.deleteByIdentity(7, 41, tombstone.objectKey())).thenReturn(1);
 
-        verify(tenantQueueMapper).deleteByKey(7, "workspaces/7/attachments/object.pdf");
+        queue.cancelTenantInCurrentTransaction(7, tombstone);
+
+        verify(tenantQueueMapper).deleteByIdentity(7, 41, tombstone.objectKey());
     }
 
     @Test
     void deterministicUserAdoptionCancelsTheMatchingTaskInTheCurrentTransaction() {
-        queue.cancelUserInCurrentTransaction("users/9/profile-images/object.png");
+        ObjectDeletionTombstone tombstone = new ObjectDeletionTombstone(
+            42, "users/9/profile-images/object.png");
+        when(userQueueMapper.deleteByIdentity(42, tombstone.objectKey())).thenReturn(1);
 
-        verify(userQueueMapper).deleteByKey("users/9/profile-images/object.png");
+        queue.cancelUserInCurrentTransaction(tombstone);
+
+        verify(userQueueMapper).deleteByIdentity(42, tombstone.objectKey());
+    }
+
+    @Test
+    void cancellationFailsClosedWhenThePreparedIdentityChanged() {
+        ObjectDeletionTombstone tombstone = new ObjectDeletionTombstone(
+            41, "workspaces/7/attachments/object.pdf");
+
+        assertThrows(IllegalStateException.class,
+            () -> queue.cancelTenantInCurrentTransaction(7, tombstone));
+    }
+
+    @Test
+    void writeLockFailsClosedWhenThePreparedTombstoneWasReplaced() {
+        ObjectDeletionTombstone tombstone = new ObjectDeletionTombstone(
+            41, "workspaces/7/attachments/object.pdf");
+
+        assertThrows(ServiceUnavailableException.class,
+            () -> queue.lockTenantInCurrentTransaction(7, tombstone));
     }
 
     @Test
@@ -148,7 +174,8 @@ class ObjectDeletionRetryQueueTest {
         doAnswer(invocation -> {
             taskCatalog.set(tenantContext.getCatalog());
             return null;
-        }).when(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(task), any());
+        }).when(transactionExecutor).retryTenant(
+            org.mockito.ArgumentMatchers.eq(task), any(), any());
 
         queue.retryPending();
 
@@ -168,11 +195,13 @@ class ObjectDeletionRetryQueueTest {
         when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
             .thenReturn(List.of(first, second));
         doThrow(new IllegalStateException("database unavailable"))
-            .when(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(first), any());
+            .when(transactionExecutor).retryTenant(
+                org.mockito.ArgumentMatchers.eq(first), any(), any());
 
         queue.retryPending();
 
-        verify(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(second), any());
+        verify(transactionExecutor).retryTenant(
+            org.mockito.ArgumentMatchers.eq(second), any(), any());
     }
 
     @Test
@@ -185,7 +214,7 @@ class ObjectDeletionRetryQueueTest {
 
         queue.enqueueRollbackTombstoneTenant(7, key);
 
-        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any());
+        verify(transactionExecutor, never()).processTenant(anyInt(), any(), any(), any());
     }
 
     @Test

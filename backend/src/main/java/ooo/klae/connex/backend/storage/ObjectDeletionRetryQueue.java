@@ -43,12 +43,33 @@ public class ObjectDeletionRetryQueue {
         warnUserBacklog();
     }
 
-    public void cancelTenantInCurrentTransaction(int workspaceId, String key) {
-        tenantQueueMapper.deleteByKey(workspaceId, ObjectStorageKey.requireValid(key));
+    public void lockTenantInCurrentTransaction(
+            int workspaceId,
+            ObjectDeletionTombstone tombstone) {
+        ObjectDeletionTask locked = tenantQueueMapper.lockByIdentity(
+            workspaceId, tombstone.id(), tombstone.objectKey());
+        requireSameTombstone(locked, tombstone);
     }
 
-    public void cancelUserInCurrentTransaction(String key) {
-        userQueueMapper.deleteByKey(ObjectStorageKey.requireValid(key));
+    public void lockUserInCurrentTransaction(ObjectDeletionTombstone tombstone) {
+        ObjectDeletionTask locked = userQueueMapper.lockByIdentity(
+            tombstone.id(), tombstone.objectKey());
+        requireSameTombstone(locked, tombstone);
+    }
+
+    public void cancelTenantInCurrentTransaction(
+            int workspaceId,
+            ObjectDeletionTombstone tombstone) {
+        if (tenantQueueMapper.deleteByIdentity(
+                workspaceId, tombstone.id(), tombstone.objectKey()) != 1) {
+            throw new IllegalStateException("Prepared tenant object cleanup changed before cancellation");
+        }
+    }
+
+    public void cancelUserInCurrentTransaction(ObjectDeletionTombstone tombstone) {
+        if (userQueueMapper.deleteByIdentity(tombstone.id(), tombstone.objectKey()) != 1) {
+            throw new IllegalStateException("Prepared user object cleanup changed before cancellation");
+        }
     }
 
     public void requireTenantWriteAllowed(int workspaceId) {
@@ -59,13 +80,14 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
-    public void prepareTenantWrite(int workspaceId, String key) {
+    public ObjectDeletionTombstone prepareTenantWrite(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
-            tenantWorkScope.inWorkspace(workspaceId, () -> {
-                transactionExecutor.enqueueTenant(
+            return tenantWorkScope.inWorkspace(workspaceId, () -> {
+                ObjectDeletionTombstone tombstone = transactionExecutor.enqueueTenant(
                     workspaceId, validKey, 2, ambiguousWriteCleanupAt());
                 warnTenantBacklog(workspaceId);
+                return tombstone;
             });
         } catch (RuntimeException exception) {
             throw new ServiceUnavailableException(
@@ -73,13 +95,14 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
-    public void prepareUserWrite(String key) {
+    public ObjectDeletionTombstone prepareUserWrite(String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
-            tenantWorkScope.unrouted(() -> {
-                transactionExecutor.enqueueUser(validKey, 2, ambiguousWriteCleanupAt());
+            return tenantWorkScope.unrouted(() -> {
+                ObjectDeletionTombstone tombstone = transactionExecutor.enqueueUser(
+                    validKey, 2, ambiguousWriteCleanupAt());
                 warnUserBacklog();
-                return null;
+                return tombstone;
             });
         } catch (RuntimeException exception) {
             throw new ServiceUnavailableException(
@@ -125,7 +148,11 @@ public class ObjectDeletionRetryQueue {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.inWorkspace(workspaceId,
-                () -> transactionExecutor.processTenant(workspaceId, validKey, retryAt()));
+                () -> {
+                    LocalDateTime current = now();
+                    transactionExecutor.processTenant(
+                        workspaceId, validKey, current, retryAt(current));
+                });
         } catch (RuntimeException exception) {
             log.warn("Deferred tenant object deletion remains queued for workspace {}", workspaceId);
         }
@@ -135,7 +162,8 @@ public class ObjectDeletionRetryQueue {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.unrouted(() -> {
-                transactionExecutor.processUser(validKey, retryAt());
+                LocalDateTime current = now();
+                transactionExecutor.processUser(validKey, current, retryAt(current));
                 return null;
             });
         } catch (RuntimeException exception) {
@@ -168,7 +196,8 @@ public class ObjectDeletionRetryQueue {
                     now(), properties.getDeleteRetryBatchSize());
                 for (ObjectDeletionTask task : tasks) {
                     try {
-                        transactionExecutor.retryUser(task, retryAt());
+                        LocalDateTime current = now();
+                        transactionExecutor.retryUser(task, current, retryAt(current));
                     } catch (RuntimeException exception) {
                         log.warn("User object deletion task could not be finalized");
                     }
@@ -192,7 +221,8 @@ public class ObjectDeletionRetryQueue {
                 workspaceId, current, remaining);
             for (ObjectDeletionTask task : tasks) {
                 try {
-                    transactionExecutor.retryTenant(task, retryAt());
+                    LocalDateTime attemptAt = now();
+                    transactionExecutor.retryTenant(task, attemptAt, retryAt(attemptAt));
                 } catch (RuntimeException exception) {
                     log.warn("Tenant object deletion task could not be finalized for workspace {}",
                         task.workspaceId());
@@ -220,11 +250,22 @@ public class ObjectDeletionRetryQueue {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 
-    private LocalDateTime retryAt() {
-        return now().plusNanos(properties.getDeleteRetryDelayMs() * 1_000_000L);
+    private LocalDateTime retryAt(LocalDateTime current) {
+        return current.plusNanos(properties.getDeleteRetryDelayMs() * 1_000_000L);
     }
 
     private LocalDateTime ambiguousWriteCleanupAt() {
         return now().plusNanos(properties.getAmbiguousWriteCleanupDelayMs() * 1_000_000L);
+    }
+
+    private static void requireSameTombstone(
+            ObjectDeletionTask locked,
+            ObjectDeletionTombstone expected) {
+        if (locked == null
+                || locked.id() != expected.id()
+                || !locked.objectKey().equals(expected.objectKey())) {
+            throw new ServiceUnavailableException(
+                "Prepared private object cleanup changed before the write could start");
+        }
     }
 }

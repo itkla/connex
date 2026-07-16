@@ -48,6 +48,7 @@ public final class TablePlaneRegistry {
         "federated_identity",
         "notification_preference",
         "notification_recipient_state",
+        "object_storage_backend_identity",
         "org_allowed_domain",
         "org_member",
         "org_placement",

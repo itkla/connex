@@ -6,7 +6,6 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.SampleModel;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Locale;
@@ -21,7 +20,6 @@ import javax.imageio.ImageWriter;
 import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.imageio.stream.ImageInputStream;
-import javax.imageio.stream.ImageOutputStream;
 
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -34,6 +32,8 @@ import ooo.klae.connex.backend.exceptions.UnsupportedBusinessCardMediaTypeExcept
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
+import ooo.klae.connex.backend.storage.CappedImageOutputStream;
+import ooo.klae.connex.backend.storage.CappedImageOutputStream.LimitExceededException;
 
 /**
  * Verifies bounded raster inputs and emits orientation-normalized, metadata-free JPEG content.
@@ -252,11 +252,8 @@ public class BusinessCardImageValidator {
             throw unprocessable();
         }
         ImageWriter writer = writers.next();
-        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                ImageOutputStream output = ImageIO.createImageOutputStream(bytes)) {
-            if (output == null) {
-                throw unprocessable();
-            }
+        try (CappedImageOutputStream output =
+                new CappedImageOutputStream(properties.getMaxImageBytes())) {
             writer.setOutput(output);
             ImageWriteParam parameters = writer.getDefaultWriteParam();
             if (parameters.canWriteCompressed()) {
@@ -265,11 +262,9 @@ public class BusinessCardImageValidator {
             }
             writer.write(null, new IIOImage(image, null, null), parameters);
             output.flush();
-            byte[] encoded = bytes.toByteArray();
-            if (encoded.length > properties.getMaxImageBytes()) {
-                throw new RequestBodyTooLargeException(properties.getMaxImageBytes());
-            }
-            return encoded;
+            return output.toByteArray();
+        } catch (LimitExceededException exception) {
+            throw new RequestBodyTooLargeException(properties.getMaxImageBytes());
         } finally {
             writer.dispose();
         }

@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
@@ -103,6 +104,15 @@ class ImageUploadValidatorTest {
         assertThrows(
             BadRequestException.class,
             () -> validator.validate(source("portrait.png", "image/png", highDepth)));
+    }
+
+    @Test
+    void rejectsCanonicalEncodingAtTheConfiguredCeiling() throws IOException {
+        byte[] jpeg = image("jpg", BufferedImage.TYPE_INT_RGB, 240, 140);
+        properties.setMaxUploadBytes(jpeg.length);
+
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> validator.validate(source("card.jpg", "image/jpeg", jpeg)));
     }
 
     @Test

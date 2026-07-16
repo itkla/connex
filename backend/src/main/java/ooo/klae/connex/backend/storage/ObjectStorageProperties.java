@@ -30,6 +30,13 @@ public class ObjectStorageProperties {
     @Min(0)
     private long filesystemMinFreeBytes = 1024L * 1024L * 1024L;
 
+    @NotNull
+    private Duration filesystemTempRetention = Duration.ofHours(1);
+
+    @Min(1_000)
+    @Max(86_400_000)
+    private long filesystemTempCleanupDelayMs = 60_000;
+
     @Min(1)
     @Max(104_857_600)
     private long maxUploadBytes = 25L * 1024L * 1024L;
@@ -198,7 +205,11 @@ public class ObjectStorageProperties {
     @AssertTrue(message = "filesystem object storage requires a root directory")
     public boolean isFilesystemConfigurationValid() {
         return provider != Provider.FILESYSTEM
-            || (filesystemRoot != null && !filesystemRoot.isBlank());
+            || (filesystemRoot != null
+                && !filesystemRoot.isBlank()
+                && filesystemTempRetention != null
+                && !filesystemTempRetention.isZero()
+                && !filesystemTempRetention.isNegative());
     }
 
     @AssertTrue(message = "per-user object reads must not exceed the global read limit")

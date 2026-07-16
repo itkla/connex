@@ -80,7 +80,7 @@ class FlywayUpgradeIntegrationTest {
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
-        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("86")) >= 0);
+        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("88")) >= 0);
         try (Connection connection = connection()) {
             assertEquals(6, scalar(connection, """
                 SELECT COUNT(*)
@@ -118,20 +118,17 @@ class FlywayUpgradeIntegrationTest {
                 "SELECT delete_passes_remaining FROM object_deletion_queue WHERE workspace_id = 9101"));
             assertEquals(1, scalar(connection,
                 "SELECT delete_passes_remaining FROM user_object_deletion_queue WHERE object_key = 'users/9101/profile/old.jpg'"));
-            assertEquals(24, scalar(connection, """
-                SELECT TIMESTAMPDIFF(HOUR, created_at, expires_at)
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*)
                 FROM business_card_import_request
                 WHERE workspace_id = 9101
-                  AND idempotency_key = '11111111-1111-4111-8111-111111111111'
+                  AND created_by_user_id IS NULL
                 """));
-            assertEquals(1, scalar(connection, """
+            assertEquals(0, scalar(connection, """
                 SELECT COUNT(*)
                 FROM business_card_import_request
                 WHERE workspace_id = 9101
                   AND idempotency_key = '11111111-1111-4111-8111-111111111111'
-                  AND request_fingerprint IS NOT NULL
-                  AND submission_expires_at IS NULL
-                  AND reservation_slot IS NULL
                 """));
             assertEquals(0, scalar(connection, """
                 SELECT COUNT(*)
@@ -144,6 +141,19 @@ class FlywayUpgradeIntegrationTest {
                 connection,
                 "business_card_import_request",
                 "idx_business_card_import_request_workspace_expiry"));
+            assertEquals(0, scalar(connection, """
+                SELECT IS_NULLABLE = 'YES'
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'business_card_import_request'
+                  AND COLUMN_NAME = 'created_by_user_id'
+                """));
+            assertEquals(1, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'object_storage_backend_identity'
+                """));
             assertThrows(SQLException.class, () -> execute(connection, """
                 INSERT INTO business_card_import_request (
                     workspace_id, idempotency_key, created_by_user_id, request_fingerprint,

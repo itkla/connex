@@ -9,10 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,7 +26,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class ManagedObjectRollbackIntegrationTest {
-    private static final Path OBJECT_ROOT = temporaryRoot();
+    private static final Path OBJECT_ROOT = Path.of(
+        System.getProperty("java.io.tmpdir"), "connex-test-object-storage")
+        .toAbsolutePath()
+        .normalize();
 
     @Autowired private ManagedObjectService managedObjectService;
     @Autowired private ObjectStorage objectStorage;
@@ -41,18 +42,6 @@ class ManagedObjectRollbackIntegrationTest {
     static void storageProperties(DynamicPropertyRegistry registry) {
         registry.add("connex.object-storage.filesystem-root", OBJECT_ROOT::toString);
         registry.add("connex.object-storage.ambiguous-write-cleanup-delay-ms", () -> 300_000);
-    }
-
-    @AfterAll
-    static void removeTemporaryStorage() throws IOException {
-        if (!Files.exists(OBJECT_ROOT)) {
-            return;
-        }
-        try (var paths = Files.walk(OBJECT_ROOT)) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
     }
 
     @Test
@@ -100,14 +89,6 @@ class ManagedObjectRollbackIntegrationTest {
                         deletionQueueMapper.deleteByKey(workspaceId, key.get()));
                 });
             }
-        }
-    }
-
-    private static Path temporaryRoot() {
-        try {
-            return Files.createTempDirectory("connex-object-rollback-");
-        } catch (IOException exception) {
-            throw new ExceptionInInitializerError(exception);
         }
     }
 

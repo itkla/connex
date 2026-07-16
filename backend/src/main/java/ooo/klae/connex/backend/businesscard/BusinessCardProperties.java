@@ -33,7 +33,7 @@ public class BusinessCardProperties {
     private Duration idempotencyRetention = Duration.ofHours(24);
     private Duration reservationLease = Duration.ofMinutes(2);
     private int maxOutstandingReservations = 4;
-    private int idempotencyCleanupBatchSize = 1_000;
+    private int idempotencyCleanupPerWorkspaceBatchSize = 100;
 
     public boolean isEnabled() {
         return enabled;
@@ -192,13 +192,15 @@ public class BusinessCardProperties {
         this.maxOutstandingReservations = maxOutstandingReservations;
     }
 
-    public int getIdempotencyCleanupBatchSize() {
-        return idempotencyCleanupBatchSize;
+    public int getIdempotencyCleanupPerWorkspaceBatchSize() {
+        return idempotencyCleanupPerWorkspaceBatchSize;
     }
 
-    public void setIdempotencyCleanupBatchSize(int idempotencyCleanupBatchSize) {
-        this.idempotencyCleanupBatchSize = positive(
-                idempotencyCleanupBatchSize, "idempotencyCleanupBatchSize");
+    public void setIdempotencyCleanupPerWorkspaceBatchSize(
+            int idempotencyCleanupPerWorkspaceBatchSize) {
+        this.idempotencyCleanupPerWorkspaceBatchSize = positive(
+                idempotencyCleanupPerWorkspaceBatchSize,
+                "idempotencyCleanupPerWorkspaceBatchSize");
     }
 
     @PostConstruct

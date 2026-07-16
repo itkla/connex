@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
  * @param attachmentId retained card attachment identifier, once complete
  * @param companyId linked company identifier, when applicable
  * @param expiresAt earliest time at which the idempotency state may be retired
- * @param createdByUserId principal that created this claim, when recorded by a current version
+ * @param createdByUserId principal that created this claim; null is treated as unowned legacy state
  * @param submissionExpiresAt deadline for starting an import from an unbound reservation
  * @param reservationSlot bounded outstanding-reservation slot, released when the import binds
  */

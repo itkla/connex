@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.businesscard;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -35,8 +36,9 @@ class BusinessCardRateLimiterTest {
         properties.setRateLimitMaxKeys(3);
         User user = new User();
         user.setId(9);
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(authService.getCurrentUser()).thenReturn(user);
+        org.mockito.Mockito.lenient()
+            .when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        org.mockito.Mockito.lenient().when(authService.getCurrentUser()).thenReturn(user);
     }
 
     @Test
@@ -77,10 +79,34 @@ class BusinessCardRateLimiterTest {
 
         assertDoesNotThrow(limiter::requireScanAllowed);
         assertDoesNotThrow(limiter::requireImportAllowed);
-        assertDoesNotThrow(limiter::requireReservationAllowed);
+        assertDoesNotThrow(() -> limiter.requireReservationAllowed(9));
+        assertDoesNotThrow(() -> limiter.requireStatusAllowed(9));
         assertThrows(TooManyRequestsException.class, limiter::requireImportAllowed);
-        assertThrows(TooManyRequestsException.class, limiter::requireReservationAllowed);
+        assertThrows(TooManyRequestsException.class,
+            () -> limiter.requireReservationAllowed(9));
+        assertThrows(TooManyRequestsException.class,
+            () -> limiter.requireStatusAllowed(9));
         assertDoesNotThrow(limiter::requireScanAllowed);
+    }
+
+    @Test
+    void preMultipartAdmissionAndServiceImportBudgetsAreIndependent() {
+        BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
+
+        assertDoesNotThrow(() -> limiter.requireImportAdmissionAllowed(9));
+        assertThrows(TooManyRequestsException.class,
+            () -> limiter.requireImportAdmissionAllowed(9));
+        assertDoesNotThrow(limiter::requireImportAllowed);
+    }
+
+    @Test
+    void reservationAndStatusAdmissionUseTheProvidedPrincipalWithoutServices() {
+        BusinessCardRateLimiter limiter = limiterAt("2026-07-14T12:00:10Z");
+
+        assertDoesNotThrow(() -> limiter.requireReservationAllowed(9));
+        assertDoesNotThrow(() -> limiter.requireStatusAllowed(9));
+
+        verifyNoInteractions(workspaceService, authService);
     }
 
     @Test

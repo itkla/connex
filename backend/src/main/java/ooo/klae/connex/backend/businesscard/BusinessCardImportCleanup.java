@@ -30,8 +30,8 @@ public class BusinessCardImportCleanup {
     private final Clock clock;
 
     @Scheduled(
-        fixedDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1H}",
-        initialDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1H}")
+        fixedDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1M}",
+        initialDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1M}")
     public void deleteExpired() {
         LocalDateTime cutoff = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         for (String catalog : placementRegistry.activeCatalogs()) {
@@ -48,13 +48,10 @@ public class BusinessCardImportCleanup {
     }
 
     private void deleteExpiredInCatalog(LocalDateTime cutoff) {
-        int remaining = properties.getIdempotencyCleanupBatchSize();
-        List<Integer> workspaceIds = mapper.workspaceIdsWithExpired(cutoff, remaining);
+        int perWorkspace = properties.getIdempotencyCleanupPerWorkspaceBatchSize();
+        List<Integer> workspaceIds = mapper.workspaceIdsWithExpired(cutoff, perWorkspace);
         for (int workspaceId : workspaceIds) {
-            if (remaining <= 0) {
-                return;
-            }
-            remaining -= mapper.deleteExpired(workspaceId, cutoff, remaining);
+            mapper.deleteExpired(workspaceId, cutoff, perWorkspace);
         }
     }
 }

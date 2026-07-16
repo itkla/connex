@@ -18,12 +18,15 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -38,7 +41,8 @@ import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
  */
 @Service
 @RequiredArgsConstructor
-public class ManagedObjectService {
+@Order(Ordered.HIGHEST_PRECEDENCE + 2)
+public class ManagedObjectService implements ApplicationRunner {
     private static final String ATTACHMENT_URL_PREFIX = "/api/attachments/content/";
     private static final Pattern TOKEN = Pattern.compile(
         "^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\\.([a-z0-9]{1,10}))?$"
@@ -67,8 +71,8 @@ public class ManagedObjectService {
         return snapshot != null && snapshot.ready();
     }
 
-    @PostConstruct
-    private void warmReadiness() {
+    @Override
+    public void run(ApplicationArguments args) {
         refreshReadiness();
     }
 
@@ -223,15 +227,10 @@ public class ManagedObjectService {
         String objectToken = migrationToken(
             "user-image", 0, userId, legacyUrl, image.extension());
         String key = userImageKey(userId, objectToken);
-        writeAdmissionService.admit(() -> {
-            storeDeterministic(
-                key,
-                UploadSource.from(source.fileName(), image.contentType(), content),
-                image.contentType(),
-                () -> deletionRetryQueue.prepareUserWrite(key),
-                () -> deletionRetryQueue.cancelUserInCurrentTransaction(key));
-            return null;
-        });
+        storeUserDeterministic(
+            key,
+            UploadSource.from(source.fileName(), image.contentType(), content),
+            image.contentType());
         return new StoredMigratedImage(
             userImageUrl(userId, objectToken),
             content.length,
@@ -368,46 +367,29 @@ public class ManagedObjectService {
             .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
     }
 
-    private void store(
-            String key,
-            UploadSource source,
-            String contentType,
-            Runnable prepareCleanup,
-            Runnable cancelCleanup) {
+    private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
         byte[] checksum = sha256(source);
         requireTransactionSynchronization();
-        prepareCleanup.run();
-        try {
-            objectStorage.put(key, source, contentType, checksum);
-            cancelCleanup.run();
-        } catch (ObjectStorageException exception) {
-            markUnavailable();
-            throw new ServiceUnavailableException("Private object storage is unavailable");
-        }
-    }
-
-    private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
         writeAdmissionService.admit(() -> {
-            quotaService.reserve(workspaceId, key, source.contentLength());
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
-            store(
-                key,
-                source,
-                contentType,
-                () -> deletionRetryQueue.prepareTenantWrite(workspaceId, key),
-                () -> deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key));
+            ObjectDeletionTombstone tombstone = deletionRetryQueue.prepareTenantWrite(
+                workspaceId, key);
+            deletionRetryQueue.lockTenantInCurrentTransaction(workspaceId, tombstone);
+            quotaService.reserve(workspaceId, key, source.contentLength());
+            put(key, source, contentType, checksum);
+            deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, tombstone);
             return null;
         });
     }
 
     private void storeUser(String key, UploadSource source, String contentType) {
+        byte[] checksum = sha256(source);
+        requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
-            store(
-                key,
-                source,
-                contentType,
-                () -> deletionRetryQueue.prepareUserWrite(key),
-                () -> deletionRetryQueue.cancelUserInCurrentTransaction(key));
+            ObjectDeletionTombstone tombstone = deletionRetryQueue.prepareUserWrite(key);
+            deletionRetryQueue.lockUserInCurrentTransaction(tombstone);
+            put(key, source, contentType, checksum);
+            deletionRetryQueue.cancelUserInCurrentTransaction(tombstone);
             return null;
         });
     }
@@ -417,35 +399,46 @@ public class ManagedObjectService {
             String key,
             UploadSource source,
             String contentType) {
+        byte[] checksum = sha256(source);
+        requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
-            quotaService.reserve(workspaceId, key, source.contentLength());
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
-            storeDeterministic(
-                key,
-                source,
-                contentType,
-                () -> deletionRetryQueue.prepareTenantWrite(workspaceId, key),
-                () -> deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, key));
+            ObjectDeletionTombstone tombstone = deletionRetryQueue.prepareTenantWrite(
+                workspaceId, key);
+            deletionRetryQueue.lockTenantInCurrentTransaction(workspaceId, tombstone);
+            quotaService.reserve(workspaceId, key, source.contentLength());
+            if (!verifyChecksumIfPresent(key, source.contentLength(), checksum)) {
+                put(key, source, contentType, checksum);
+            }
+            deletionRetryQueue.cancelTenantInCurrentTransaction(workspaceId, tombstone);
             return null;
         });
     }
 
-    private void storeDeterministic(
+    private void storeUserDeterministic(
+            String key,
+            UploadSource source,
+            String contentType) {
+        byte[] checksum = sha256(source);
+        requireTransactionSynchronization();
+        writeAdmissionService.admit(() -> {
+            ObjectDeletionTombstone tombstone = deletionRetryQueue.prepareUserWrite(key);
+            deletionRetryQueue.lockUserInCurrentTransaction(tombstone);
+            if (!verifyChecksumIfPresent(key, source.contentLength(), checksum)) {
+                put(key, source, contentType, checksum);
+            }
+            deletionRetryQueue.cancelUserInCurrentTransaction(tombstone);
+            return null;
+        });
+    }
+
+    private void put(
             String key,
             UploadSource source,
             String contentType,
-            Runnable prepareCleanup,
-            Runnable cancelCleanup) {
-        byte[] checksum = sha256(source);
-        requireTransactionSynchronization();
-        if (verifyChecksumIfPresent(key, source.contentLength(), checksum)) {
-            cancelCleanup.run();
-            return;
-        }
-        prepareCleanup.run();
+            byte[] checksum) {
         try {
             objectStorage.put(key, source, contentType, checksum);
-            cancelCleanup.run();
         } catch (ObjectStorageException exception) {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");

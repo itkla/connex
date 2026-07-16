@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.businesscard;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
@@ -36,5 +37,11 @@ class BusinessCardPropertiesTest {
         properties.setReservationLease(Duration.ofSeconds(30));
 
         properties.validateRetentionWindows();
+    }
+
+    @Test
+    void cleanupDefaultsToOneHundredRowsPerWorkspace() {
+        assertEquals(100,
+            new BusinessCardProperties().getIdempotencyCleanupPerWorkspaceBatchSize());
     }
 }

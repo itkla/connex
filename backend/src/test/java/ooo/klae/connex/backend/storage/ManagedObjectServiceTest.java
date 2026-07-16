@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -56,6 +58,15 @@ class ManagedObjectServiceTest {
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
+        AtomicInteger tombstoneIds = new AtomicInteger(1);
+        org.mockito.Mockito.lenient()
+            .when(deletionRetryQueue.prepareTenantWrite(anyInt(), anyString()))
+            .thenAnswer(invocation -> new ObjectDeletionTombstone(
+                tombstoneIds.getAndIncrement(), invocation.getArgument(1)));
+        org.mockito.Mockito.lenient()
+            .when(deletionRetryQueue.prepareUserWrite(anyString()))
+            .thenAnswer(invocation -> new ObjectDeletionTombstone(
+                tombstoneIds.getAndIncrement(), invocation.getArgument(0)));
         UploadPolicy uploadPolicy = new UploadPolicy(properties);
         ImageUploadValidator imageValidator = new ImageUploadValidator(
             properties, uploadPolicy, new ImageDecodeAdmissionService(properties));
@@ -130,7 +141,7 @@ class ManagedObjectServiceTest {
             verify(deletionRetryQueue).prepareTenantWrite(
                 org.mockito.ArgumentMatchers.eq(17), anyString());
             verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
-                org.mockito.ArgumentMatchers.eq(17), anyString());
+                org.mockito.ArgumentMatchers.eq(17), any(ObjectDeletionTombstone.class));
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
@@ -154,7 +165,8 @@ class ManagedObjectServiceTest {
             verify(deletionRetryQueue).prepareTenantWrite(
                 17, "workspaces/17/attachments/" + token);
             verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
-                17, "workspaces/17/attachments/" + token);
+                org.mockito.ArgumentMatchers.eq(17),
+                withObjectKey("workspaces/17/attachments/" + token));
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
@@ -176,7 +188,7 @@ class ManagedObjectServiceTest {
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
             verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
                 org.mockito.ArgumentMatchers.eq(17),
-                org.mockito.ArgumentMatchers.anyString());
+                any(ObjectDeletionTombstone.class));
             verify(objectStorage, never()).put(
                 anyString(), any(UploadSource.class), anyString(), any(byte[].class));
         } finally {
@@ -200,7 +212,8 @@ class ManagedObjectServiceTest {
             String key = "workspaces/17/attachments/" + token;
 
             verify(quotaService).reserve(17, key, bytes.length);
-            verify(deletionRetryQueue).cancelTenantInCurrentTransaction(17, key);
+            verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(17), withObjectKey(key));
             verify(deletionRetryQueue).requireTenantWriteAllowed(17);
             verify(objectStorage, never()).put(
                 anyString(), any(UploadSource.class), anyString(), any(byte[].class));
@@ -271,14 +284,18 @@ class ManagedObjectServiceTest {
                 12, "card.pdf", "application/pdf", new byte[] {1, 2, 3});
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
             String key = "workspaces/12/attachments/" + token;
-            InOrder order = inOrder(deletionRetryQueue, objectStorage);
+            InOrder order = inOrder(deletionRetryQueue, quotaService, objectStorage);
             order.verify(deletionRetryQueue).prepareTenantWrite(12, key);
+            order.verify(deletionRetryQueue).lockTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(12), withObjectKey(key));
+            order.verify(quotaService).reserve(12, key, 3);
             order.verify(objectStorage).put(
                 org.mockito.ArgumentMatchers.eq(key),
                 any(UploadSource.class),
                 org.mockito.ArgumentMatchers.eq("application/pdf"),
                 any(byte[].class));
-            order.verify(deletionRetryQueue).cancelTenantInCurrentTransaction(12, key);
+            order.verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(12), withObjectKey(key));
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
@@ -308,7 +325,8 @@ class ManagedObjectServiceTest {
                 8, UploadSource.from("portrait.png", "image/png", png(10, 20)));
             verify(userImageAdmissionService).requireAllowed(8);
             verify(deletionRetryQueue).prepareUserWrite(anyString());
-            verify(deletionRetryQueue).cancelUserInCurrentTransaction(anyString());
+            verify(deletionRetryQueue).cancelUserInCurrentTransaction(
+                any(ObjectDeletionTombstone.class));
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
@@ -331,6 +349,28 @@ class ManagedObjectServiceTest {
     }
 
     @Test
+    void replacedTombstonePreventsQuotaReservationAndProviderWrite() {
+        doThrow(new ServiceUnavailableException("tombstone changed"))
+            .when(deletionRetryQueue).lockTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(12), any(ObjectDeletionTombstone.class));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(ServiceUnavailableException.class, () -> service.storeAttachment(
+                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}));
+
+            verify(quotaService, never()).reserve(
+                org.mockito.ArgumentMatchers.anyInt(), anyString(),
+                org.mockito.ArgumentMatchers.anyLong());
+            verify(objectStorage, never()).put(
+                anyString(), any(UploadSource.class), anyString(), any(byte[].class));
+            verify(deletionRetryQueue, never()).cancelTenantInCurrentTransaction(
+                org.mockito.ArgumentMatchers.eq(12), any(ObjectDeletionTombstone.class));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void providerThatPersistsThenThrowsStillHasKnownKeyRollbackCleanup() {
         java.util.concurrent.atomic.AtomicReference<String> persistedKey =
             new java.util.concurrent.atomic.AtomicReference<>();
@@ -346,7 +386,7 @@ class ManagedObjectServiceTest {
 
             verify(deletionRetryQueue).prepareTenantWrite(12, persistedKey.get());
             verify(deletionRetryQueue, never()).cancelTenantInCurrentTransaction(
-                12, persistedKey.get());
+                org.mockito.ArgumentMatchers.eq(12), any(ObjectDeletionTombstone.class));
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
@@ -510,6 +550,10 @@ class ManagedObjectServiceTest {
                 : TransactionSynchronizationManager.getSynchronizations()) {
             synchronization.afterCompletion(status);
         }
+    }
+
+    private static ObjectDeletionTombstone withObjectKey(String key) {
+        return argThat(tombstone -> tombstone != null && key.equals(tombstone.objectKey()));
     }
 
     private static byte[] png(int width, int height) throws Exception {

@@ -104,18 +104,22 @@ distinguish `unsupported_cpu_architecture`, `cpu_capabilities_unreadable`, `avx_
 The backend applies a process-wide budget of five scans per minute and a cross-workspace principal
 budget of three scans per minute by default (`CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE` and
 `CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE`), leaving capacity that one principal cannot consume.
-Imports remain limited to 12 per user and workspace per minute
-(`CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE`). These limits are maintained in each backend process;
+Imports remain limited to 12 per authenticated principal per minute before multipart parsing and
+again to 12 per user and workspace in the import service
+(`CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE`). Malformed `Idempotency-Key` values and principals
+over the pre-multipart window are rejected before the card body is parsed. Reservation and status
+lookups have independent principal windows that run before database access. These limits are maintained in each backend process;
 deployments with multiple backend replicas should enforce equivalent aggregate limits at their
 trusted ingress or replace this local limiter with a shared admission service.
 Before a browser sends private multipart data, it receives a two-minute submission lease
 (`CONNEX_BUSINESS_CARD_RESERVATION_LEASE`). Each user may hold at most four unsubmitted leases per
 workspace (`CONNEX_BUSINESS_CARD_MAX_OUTSTANDING_RESERVATIONS`); expired leases are reclaimed on the
 next reservation and by the scheduled sweep. Completed idempotency claims use a 24-hour replay
-horizon (`CONNEX_BUSINESS_CARD_IDEMPOTENCY_RETENTION`). A catalog-aware sweep removes up to 1,000
-expired claims per workspace pass by default
-(`CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_BATCH_SIZE`) without loading private import drafts into
-the control plane. Keep the submission lease shorter than the replay horizon.
+horizon (`CONNEX_BUSINESS_CARD_IDEMPOTENCY_RETENTION`). Every minute by default, a catalog-aware
+sweep gives each selected workspace its own bounded batch of up to 100 expired claims
+(`CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_DELAY=1m` and
+`CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE=100`) without loading private
+import drafts into the control plane. Keep the submission lease shorter than the replay horizon.
 
 `CONNEX_DEPLOYMENT_PROFILE` drives fail-closed posture enforcement (issue #497): `saas` forbids the
 internal-access opt-ins (bootstrap, private SSO issuer hosts, internal AI/SMTP hosts); `silo` and
@@ -174,10 +178,21 @@ trusted service under the Spring `dev` profile; startup rejects plain HTTP in ev
 The attempt timeout must be positive and no greater than the total API-call timeout. The ambiguous
 write cleanup delay must exceed the total call timeout so a timed-out write cannot finish after its
 compensating delete; the default waits 60 seconds before the first of two successful delete passes.
-The provider selection is immutable after the first managed write. Do not switch between
-`filesystem` and `s3` by configuration or copy the filesystem tree verbatim: filesystem files have
-an implementation suffix that S3 keys do not. A provider cutover requires a checksummed,
-key-translating migration, read verification, rollback point, and retained source copy.
+The normalized backend identity is persisted in the control plane on the first startup after this
+version: provider plus absolute filesystem root, or S3 bucket, region, normalized endpoint, and
+path-style mode. Every later startup compares configuration to that immutable row and aborts on any
+mismatch, including a changed filesystem root or S3 addressing coordinate. Concurrent first
+startups converge through the singleton row. Do not switch between `filesystem` and `s3` by
+configuration or copy the filesystem tree verbatim: filesystem files have an implementation suffix
+that S3 keys do not. A provider cutover requires a separately implemented checksummed,
+key-translating migration that deliberately updates this identity, read verification, rollback
+point, and retained source copy.
+
+The filesystem provider reconciles abandoned `.connex-object-*.tmp` files at startup and every
+minute without following symbolic links. It removes only files older than
+`CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_RETENTION=1h`; the schedule is configurable with
+`CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_CLEANUP_DELAY_MS=60000`. Cleanup failures are logged for
+operator investigation and never expose object paths.
 
 The default per-file limit is 25 MiB
 (`CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES=26214400`), with a 27 MiB multipart request envelope
@@ -206,7 +221,12 @@ catalog's `object_deletion_queue`; control-plane user-profile objects use
 `user_object_deletion_queue`. The metadata update and deletion intent commit atomically. The backend
 retries due rows every 60 seconds. Before every provider write, Connex commits a delayed two-pass
 tombstone in an isolated transaction; the metadata transaction cancels it only after the write is
-confirmed. A rollback, process exit, database cancellation failure, or ambiguous provider response
+confirmed. The metadata transaction locks and revalidates that exact tombstone identity before
+quota reservation and holds it across provider I/O and cancellation. Retry workers likewise reload
+the selected row by id and key under lock, so a stale selection cannot delete bytes committed by a
+later writer. Managed writes acquire deletion-queue locks before quota; business-card entity and
+audit writes follow binary storage, preserving deletion-queue, quota, then audit order. A rollback,
+process exit, database cancellation failure, or ambiguous provider response
 therefore leaves durable cleanup intent. The first successful delete is rescheduled for confirmation,
 and only the second successful delete finalizes the row. Provider writes are admitted without waiting,
 so saturated storage cannot accumulate transactions holding database connections; a workspace stops

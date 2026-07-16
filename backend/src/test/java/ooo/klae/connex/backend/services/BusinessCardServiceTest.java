@@ -9,9 +9,11 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -25,9 +27,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
@@ -42,6 +48,8 @@ import ooo.klae.connex.backend.businesscard.BusinessCardProperties;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.businesscard.OcrLine;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
@@ -53,6 +61,7 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.BusinessCardImportResultGoneException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -77,6 +86,7 @@ class BusinessCardServiceTest {
     @Mock private AuthService authService;
     @Mock private BusinessCardImportRequestMapper importRequestMapper;
     @Mock private BusinessCardRateLimiter rateLimiter;
+    @Mock private CapabilityEntitlement capabilityEntitlement;
 
     private BusinessCardProperties properties;
     private BusinessCardService service;
@@ -102,6 +112,7 @@ class BusinessCardServiceTest {
                 authService,
                 importRequestMapper,
                 rateLimiter,
+                capabilityEntitlement,
                 clock);
         image = new MockMultipartFile("image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
         validated = new ValidatedBusinessCardImage(
@@ -112,6 +123,7 @@ class BusinessCardServiceTest {
         currentUser.setId(9);
         lenient().when(authService.getCurrentUser()).thenReturn(currentUser);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        lenient().when(capabilityEntitlement.isEntitled(any())).thenReturn(true);
         BusinessCardImportRecord reservation = activeReservation();
         lenient().when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(reservation);
         lenient().when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY)).thenReturn(reservation);
@@ -200,6 +212,13 @@ class BusinessCardServiceTest {
         assertEquals(31, response.contact().getId());
         assertEquals(41, response.attachment().getId());
         assertEquals(17, response.company().getId());
+        InOrder persistenceOrder = inOrder(
+            binaryStore, companyService, personService, attachmentService);
+        persistenceOrder.verify(binaryStore).store(
+            5, "business-card.jpg", "image/jpeg", validated.content());
+        persistenceOrder.verify(companyService).getCompanyById(17);
+        persistenceOrder.verify(personService).create(any());
+        persistenceOrder.verify(attachmentService).createManaged(any());
         verify(importRequestMapper).complete(5, IDEMPOTENCY_KEY, 31, 41, 17);
         verify(rateLimiter).requireImportAllowed();
     }
@@ -215,8 +234,11 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
-        verify(rateLimiter, never()).requireImportAllowed();
+        verify(rateLimiter).requireImportAllowed();
         verify(importRequestMapper, never()).getForUpdate(5, IDEMPOTENCY_KEY);
+        InOrder order = inOrder(rateLimiter, importRequestMapper);
+        order.verify(rateLimiter).requireImportAllowed();
+        order.verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
     }
 
     @Test
@@ -258,17 +280,7 @@ class BusinessCardServiceTest {
     @Test
     void reservationPersistsBeforeReturningItsServerExpiry() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY)).thenReturn(null);
-        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
-                .thenReturn(new BusinessCardImportRecord(
-                        null,
-                        null,
-                        null,
-                        null,
-                        EXPIRY,
-                        9,
-                        LocalDateTime.parse("2026-07-15T00:02:00"),
-                        1));
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(null);
         when(importRequestMapper.reserve(
                 5,
                 9,
@@ -280,20 +292,29 @@ class BusinessCardServiceTest {
         BusinessCardImportReservationResponse response = service.reserveImport(IDEMPOTENCY_KEY);
 
         assertEquals(Instant.parse("2026-07-16T00:00:00Z"), response.expiresAt());
-        verify(rateLimiter).requireReservationAllowed();
         verify(importRequestMapper).reserve(
-                5,
-                9,
-                IDEMPOTENCY_KEY,
-                1,
-                LocalDateTime.parse("2026-07-15T00:02:00"),
-                EXPIRY);
+            5,
+            9,
+            IDEMPOTENCY_KEY,
+            1,
+            LocalDateTime.parse("2026-07-15T00:02:00"),
+            EXPIRY);
     }
 
     @Test
-    void existingReservationIsIdempotentWithoutConsumingAdmissionAgain() {
+    void reservationUsesAnIndependentReadCommittedTransaction() throws Exception {
+        Transactional transaction = BusinessCardService.class
+            .getMethod("reserveImport", String.class)
+            .getAnnotation(Transactional.class);
+
+        assertEquals(Propagation.REQUIRES_NEW, transaction.propagation());
+        assertEquals(Isolation.READ_COMMITTED, transaction.isolation());
+    }
+
+    @Test
+    void existingReservationIsIdempotentAfterAdmissionAndWithoutGapLocking() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
                 .thenReturn(new BusinessCardImportRecord(
                         null,
                         null,
@@ -313,14 +334,14 @@ class BusinessCardServiceTest {
         BusinessCardImportReservationResponse response = service.reserveImport(IDEMPOTENCY_KEY);
 
         assertEquals(Instant.parse("2026-07-16T00:00:00Z"), response.expiresAt());
-        verify(rateLimiter, never()).requireReservationAllowed();
+        verify(importRequestMapper, never()).getForUpdate(anyInt(), anyString());
         verify(importRequestMapper, never()).reserve(
                 anyInt(), anyInt(), anyString(), anyInt(), any(), any());
     }
 
     @Test
     void reservationReclaimsExpiredPendingRowsBeforeAllocatingASlot() {
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY)).thenReturn(null);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(null);
         when(importRequestMapper.reserve(
                 5,
                 9,
@@ -328,7 +349,6 @@ class BusinessCardServiceTest {
                 1,
                 LocalDateTime.parse("2026-07-15T00:02:00"),
                 EXPIRY)).thenReturn(1);
-        when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(activeReservation());
 
         service.reserveImport(IDEMPOTENCY_KEY);
 
@@ -338,7 +358,7 @@ class BusinessCardServiceTest {
 
     @Test
     void reservationRejectsWhenEveryPendingSlotIsOccupied() {
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY)).thenReturn(null);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(null);
 
         assertThrows(TooManyRequestsException.class,
                 () -> service.reserveImport(IDEMPOTENCY_KEY));
@@ -348,13 +368,33 @@ class BusinessCardServiceTest {
     }
 
     @Test
-    void reservationRejectsLegacyUnownedPendingState() {
+    void reservationResolvesAConcurrentDuplicateInsertWithoutGapLocking() {
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(null, activeReservation());
+        when(importRequestMapper.renewReservation(
+            5,
+            9,
+            IDEMPOTENCY_KEY,
+            LocalDateTime.parse("2026-07-15T00:02:00"),
+            LocalDateTime.parse("2026-07-15T00:00:00"))).thenReturn(1);
+
+        BusinessCardImportReservationResponse response = service.reserveImport(IDEMPOTENCY_KEY);
+
+        assertEquals(Instant.parse("2026-07-16T00:00:00Z"), response.expiresAt());
+        verify(importRequestMapper, times(4)).reserve(
+            eq(5), eq(9), eq(IDEMPOTENCY_KEY), anyInt(), any(), eq(EXPIRY));
+        verify(importRequestMapper, times(2)).get(5, IDEMPOTENCY_KEY);
+        verify(importRequestMapper, never()).getForUpdate(anyInt(), anyString());
+    }
+
+    @Test
+    void reservationFailsClosedForAnUnownedPendingState() {
         BusinessCardImportRecord legacyReservation = new BusinessCardImportRecord(
                 null, null, null, null, EXPIRY);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
                 .thenReturn(legacyReservation);
 
-        assertThrows(BusinessCardImportResultGoneException.class,
+        assertThrows(ResourceNotFoundException.class,
                 () -> service.reserveImport(IDEMPOTENCY_KEY));
 
         verify(importRequestMapper, never()).renewReservation(
@@ -381,7 +421,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
-        verify(rateLimiter, never()).requireImportAllowed();
+        verify(rateLimiter).requireImportAllowed();
     }
 
     @Test
@@ -403,7 +443,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
-        verify(rateLimiter, never()).requireImportAllowed();
+        verify(rateLimiter).requireImportAllowed();
     }
 
     @Test
@@ -460,7 +500,6 @@ class BusinessCardServiceTest {
         BusinessCardContactRequest contact = new BusinessCardContactRequest(
                 "Ada Lovelace", null, null, null, null);
         when(imageValidator.validate(image)).thenReturn(validated);
-        when(personService.create(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
         when(binaryStore.store(eq(5), any(), any(), any()))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
@@ -550,7 +589,7 @@ class BusinessCardServiceTest {
                 "Ada Lovelace", null, null, null, null);
         when(imageValidator.validate(image)).thenReturn(validated);
         BusinessCardImportRecord completed = new BusinessCardImportRecord(
-                new byte[32], 31, 41, null, EXPIRY);
+                new byte[32], 31, 41, null, EXPIRY, 9, null, null);
         when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(completed);
         when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
                 .thenReturn(completed);
@@ -576,10 +615,39 @@ class BusinessCardServiceTest {
     }
 
     @Test
+    void scanningEntitlementDenialPrecedesPermissionsAndImageProcessing() {
+        when(capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_SCANNING))
+            .thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> service.scan(image));
+
+        verify(workspaceService, never()).requirePermission(any());
+        verify(rateLimiter, never()).requireScanAllowed();
+        verifyNoInteractions(imageValidator);
+    }
+
+    @Test
+    void importEntitlementDenialPrecedesAdmissionAndPersistenceForEveryImportOperation() {
+        when(capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_IMPORT))
+            .thenReturn(false);
+        BusinessCardContactRequest contact = new BusinessCardContactRequest(
+            "Ada Lovelace", null, null, null, null);
+
+        assertThrows(ForbiddenException.class, () -> service.reserveImport(IDEMPOTENCY_KEY));
+        assertThrows(ForbiddenException.class, () -> service.importCard(
+            image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+        assertThrows(ForbiddenException.class, () -> service.importStatus(IDEMPOTENCY_KEY));
+
+        verify(rateLimiter, never()).requireImportAllowed();
+        verifyNoInteractions(importRequestMapper, imageValidator);
+    }
+
+    @Test
     void importStatusReturnsTheCompletedTenantScopedResult() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
-            .thenReturn(new BusinessCardImportRecord(new byte[32], 31, 41, null, EXPIRY));
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportRecord(
+                new byte[32], 31, 41, null, EXPIRY, 9, null, null));
         Person person = new Person();
         person.setId(31);
         Attachment attachment = new Attachment();
@@ -592,37 +660,39 @@ class BusinessCardServiceTest {
         assertEquals(31, response.contact().getId());
         assertEquals(41, response.attachment().getId());
         verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
-        verify(importRequestMapper).getForUpdate(5, IDEMPOTENCY_KEY);
+        verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
+        verify(importRequestMapper, never()).getForUpdate(anyInt(), anyString());
     }
 
     @Test
     void importStatusDoesNotExposeAnotherWorkspace() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
-        when(importRequestMapper.getForUpdate(9, IDEMPOTENCY_KEY)).thenReturn(null);
+        when(importRequestMapper.get(9, IDEMPOTENCY_KEY)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class,
             () -> service.importStatus(IDEMPOTENCY_KEY));
 
-        verify(importRequestMapper).getForUpdate(9, IDEMPOTENCY_KEY);
+        verify(importRequestMapper).get(9, IDEMPOTENCY_KEY);
         verify(personService, never()).getPersonById(anyInt());
     }
 
     @Test
     void importStatusReportsAnIncompleteClaimAsInProgress() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
-            .thenReturn(new BusinessCardImportRecord(new byte[32], null, null, null, EXPIRY));
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportRecord(
+                new byte[32], null, null, null, EXPIRY, 9, null, null));
 
         assertThrows(ConflictException.class,
             () -> service.importStatus(IDEMPOTENCY_KEY));
 
-        verify(importRequestMapper).getForUpdate(5, IDEMPOTENCY_KEY);
+        verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
         verify(personService, never()).getPersonById(anyInt());
     }
 
     @Test
     void importStatusReportsAnActiveReservationAsInProgress() {
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
                 .thenReturn(activeReservation());
 
         assertThrows(ConflictException.class,
@@ -633,7 +703,7 @@ class BusinessCardServiceTest {
 
     @Test
     void importStatusReportsAnExpiredReservationAsTerminallyGone() {
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
                 .thenReturn(new BusinessCardImportRecord(
                         null,
                         null,
@@ -652,7 +722,7 @@ class BusinessCardServiceTest {
 
     @Test
     void importStatusDoesNotExposeAnotherUsersResult() {
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
                 .thenReturn(new BusinessCardImportRecord(
                         new byte[32], 31, 41, null, EXPIRY, 10, null, null));
 
@@ -663,10 +733,23 @@ class BusinessCardServiceTest {
     }
 
     @Test
+    void importStatusFailsClosedForLegacyNullOwnership() {
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(new BusinessCardImportRecord(
+                new byte[32], 31, 41, null, EXPIRY));
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.importStatus(IDEMPOTENCY_KEY));
+
+        verify(personService, never()).getPersonById(anyInt());
+    }
+
+    @Test
     void importStatusReportsADeletedMutableResultAsTerminallyGone() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
-                .thenReturn(new BusinessCardImportRecord(new byte[32], 31, 41, null, EXPIRY));
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+                .thenReturn(new BusinessCardImportRecord(
+                    new byte[32], 31, 41, null, EXPIRY, 9, null, null));
         Person person = new Person();
         person.setId(31);
         when(personService.getPersonById(31)).thenReturn(person);

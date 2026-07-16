@@ -24,9 +24,28 @@ public interface UserObjectDeletionQueueMapper {
         @Param("now") LocalDateTime now,
         @Param("limit") int limit);
 
+    ObjectDeletionTask lockByKey(@Param("objectKey") String objectKey);
+
+    ObjectDeletionTask lockByIdentity(
+        @Param("id") long id,
+        @Param("objectKey") String objectKey);
+
+    ObjectDeletionTask lockDueByKey(
+        @Param("objectKey") String objectKey,
+        @Param("now") LocalDateTime now);
+
+    ObjectDeletionTask lockDueByIdentity(
+        @Param("id") long id,
+        @Param("objectKey") String objectKey,
+        @Param("now") LocalDateTime now);
+
     int deleteById(@Param("id") long id);
 
     int deleteByKey(@Param("objectKey") String objectKey);
+
+    int deleteByIdentity(
+        @Param("id") long id,
+        @Param("objectKey") String objectKey);
 
     int reschedule(
         @Param("id") long id,

@@ -49,6 +49,43 @@
     LIMIT #{limit}
   </select>
 
+  <select id="lockByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId}
+      AND object_key = #{objectKey}
+      AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND object_key = #{objectKey}
+      AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
   <delete id="deleteById">
     DELETE FROM object_deletion_queue WHERE workspace_id = #{workspaceId} AND id = #{id}
   </delete>
@@ -56,6 +93,11 @@
   <delete id="deleteByKey">
     DELETE FROM object_deletion_queue
     WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+  </delete>
+
+  <delete id="deleteByIdentity">
+    DELETE FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND object_key = #{objectKey}
   </delete>
 
   <update id="reschedule">

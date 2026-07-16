@@ -34,4 +34,16 @@ class ObjectStoragePropertiesTest {
 
         assertTrue(properties.isReadConcurrencyConfigurationValid());
     }
+
+    @Test
+    void filesystemTemporaryRetentionMustBePositive() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        properties.setFilesystemTempRetention(Duration.ZERO);
+
+        assertFalse(properties.isFilesystemConfigurationValid());
+
+        properties.setFilesystemTempRetention(Duration.ofMinutes(5));
+
+        assertTrue(properties.isFilesystemConfigurationValid());
+    }
 }

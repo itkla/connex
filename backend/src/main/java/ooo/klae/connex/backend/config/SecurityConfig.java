@@ -48,6 +48,9 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 import jakarta.servlet.http.HttpServletResponse;
 
+import ooo.klae.connex.backend.businesscard.BusinessCardImportAdmissionFilter;
+import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
+import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -141,11 +144,17 @@ public class SecurityConfig {
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             SessionSecurityService sessionSecurityService,
+            BusinessCardRateLimiter businessCardRateLimiter,
+            CapabilityEntitlement capabilityEntitlement,
             WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
+        http.addFilterAfter(
+            new BusinessCardImportAdmissionFilter(
+                businessCardRateLimiter, capabilityEntitlement),
+            AbsoluteSessionTimeoutFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from

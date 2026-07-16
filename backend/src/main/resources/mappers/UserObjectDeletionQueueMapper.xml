@@ -40,12 +40,48 @@
     LIMIT #{limit}
   </select>
 
+  <select id="lockByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE id = #{id} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE object_key = #{objectKey} AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE id = #{id} AND object_key = #{objectKey} AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
   <delete id="deleteById">
     DELETE FROM user_object_deletion_queue WHERE id = #{id}
   </delete>
 
   <delete id="deleteByKey">
     DELETE FROM user_object_deletion_queue WHERE object_key = #{objectKey}
+  </delete>
+
+  <delete id="deleteByIdentity">
+    DELETE FROM user_object_deletion_queue WHERE id = #{id} AND object_key = #{objectKey}
   </delete>
 
   <update id="reschedule">

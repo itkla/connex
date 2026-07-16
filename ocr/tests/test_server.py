@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 from ocr_service.config import ServiceConfig
+from ocr_service.engine import ImageRejected
 from ocr_service.server import create_server
 
 
@@ -39,6 +40,11 @@ class BlockingEngine(FakeEngine):
 class FailingEngine(FakeEngine):
     def recognize(self, content: bytes, content_type: str) -> list[dict[str, object]]:
         raise RuntimeError("native worker failed")
+
+
+class RejectingEngine(FakeEngine):
+    def recognize(self, content: bytes, content_type: str) -> list[dict[str, object]]:
+        raise ImageRejected(422, "OCR result contains too many lines")
 
 
 class ServerTest(unittest.TestCase):
@@ -378,6 +384,52 @@ class InferenceDeadlineTest(unittest.TestCase):
 
 
 class InferenceFailureTest(unittest.TestCase):
+    def test_image_rejection_returns_422_without_restarting_the_process(self) -> None:
+        token = "test-service-token-0000000000000000"
+        fatal_failure = threading.Event()
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token=token,
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=2,
+        )
+        server = create_server(config, RejectingEngine(), fatal_failure.set)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        request = urllib.request.Request(
+            base_url + "/v1/ocr",
+            data=b"image",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "image/jpeg",
+            },
+            method="POST",
+        )
+
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request, timeout=2)
+            self.assertEqual(422, raised.exception.code)
+            self.assertEqual(
+                {"error": "OCR result contains too many lines"},
+                json.load(raised.exception),
+            )
+            self.assertFalse(fatal_failure.wait(0.1))
+            with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
+                self.assertEqual(
+                    {"ready": True, "active": False, "generation": None},
+                    json.load(response),
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
+
     def test_marks_unready_and_invokes_fatal_handler_on_unexpected_failure(self) -> None:
         token = "test-service-token-0000000000000000"
         fatal_failure = threading.Event()

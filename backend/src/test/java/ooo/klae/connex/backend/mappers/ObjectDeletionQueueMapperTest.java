@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
@@ -79,6 +80,25 @@ class ObjectDeletionQueueMapperTest extends AbstractMapperTest {
             workspace.getId(), delayed.plusSeconds(1), 10).isEmpty());
         assertEquals(1, objectDeletionQueueMapper.findDue(
             workspace.getId(), recheck.plusSeconds(1), 10).getFirst().deletePassesRemaining());
+    }
+
+    @Test
+    void staleSelectedIdentityCannotLockAReplacementTombstoneForTheSameKey() {
+        LocalDateTime now = LocalDateTime.of(2026, 7, 14, 12, 0);
+        String key = "workspaces/" + workspace.getId() + "/attachments/replaced.pdf";
+        objectDeletionQueueMapper.enqueue(workspace.getId(), key, 1, now);
+        ObjectDeletionTask selected = objectDeletionQueueMapper.lockByKey(workspace.getId(), key);
+        assertEquals(1, objectDeletionQueueMapper.deleteByIdentity(
+            workspace.getId(), selected.id(), key));
+
+        objectDeletionQueueMapper.enqueue(workspace.getId(), key, 2, now.plusMinutes(1));
+        ObjectDeletionTask replacement = objectDeletionQueueMapper.lockByKey(workspace.getId(), key);
+
+        assertTrue(replacement.id() != selected.id());
+        assertNull(objectDeletionQueueMapper.lockDueByIdentity(
+            workspace.getId(), selected.id(), key, now.plusMinutes(2)));
+        assertEquals(replacement.id(), objectDeletionQueueMapper.lockByIdentity(
+            workspace.getId(), replacement.id(), key).id());
     }
 
     private Workspace newWorkspaceInSameOrg() {

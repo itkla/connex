@@ -24,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
 import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
+import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
@@ -71,6 +73,8 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private RequestBodySizeProperties requestBodySizeProperties;
     @MockitoBean private SessionSecurityService sessionSecurityService;
+    @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
+    @MockitoBean private CapabilityEntitlement capabilityEntitlement;
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;

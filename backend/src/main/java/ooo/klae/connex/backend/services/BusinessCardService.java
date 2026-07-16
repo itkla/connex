@@ -11,9 +11,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,12 +25,15 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.businesscard.BusinessCardBinaryStore;
 import ooo.klae.connex.backend.businesscard.BusinessCardExtractor;
 import ooo.klae.connex.backend.businesscard.BusinessCardImageValidator;
+import ooo.klae.connex.backend.businesscard.BusinessCardIdempotencyKey;
 import ooo.klae.connex.backend.businesscard.BusinessCardImportRecord;
 import ooo.klae.connex.backend.businesscard.BusinessCardOcrClient;
 import ooo.klae.connex.backend.businesscard.BusinessCardProperties;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.dto.AttachmentDto;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
@@ -43,6 +46,7 @@ import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.BusinessCardImportResultGoneException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -68,6 +72,7 @@ public class BusinessCardService {
     private final AuthService authService;
     private final BusinessCardImportRequestMapper importRequestMapper;
     private final BusinessCardRateLimiter rateLimiter;
+    private final CapabilityEntitlement capabilityEntitlement;
     private final Clock clock;
 
     public BusinessCardService(
@@ -83,6 +88,7 @@ public class BusinessCardService {
             AuthService authService,
             BusinessCardImportRequestMapper importRequestMapper,
             BusinessCardRateLimiter rateLimiter,
+            CapabilityEntitlement capabilityEntitlement,
             Clock clock) {
         this.properties = properties;
         this.imageValidator = imageValidator;
@@ -96,6 +102,7 @@ public class BusinessCardService {
         this.authService = authService;
         this.importRequestMapper = importRequestMapper;
         this.rateLimiter = rateLimiter;
+        this.capabilityEntitlement = capabilityEntitlement;
         this.clock = clock;
     }
 
@@ -125,6 +132,7 @@ public class BusinessCardService {
      */
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardScanResponse scan(MultipartFile image) {
+        requireEntitled(Capability.BUSINESS_CARD_SCANNING);
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         rateLimiter.requireScanAllowed();
         requireScanningReady();
@@ -152,8 +160,10 @@ public class BusinessCardService {
             String idempotencyKey) {
         Objects.requireNonNull(contact, "contact");
         Objects.requireNonNull(companyAction, "companyAction");
+        requireEntitled(Capability.BUSINESS_CARD_IMPORT);
+        String requestId = BusinessCardIdempotencyKey.canonicalize(idempotencyKey);
+        rateLimiter.requireImportAllowed();
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
-        String requestId = canonicalIdempotencyKey(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = currentUserId();
         BusinessCardImportRecord snapshot = importRequestMapper.get(workspaceId, requestId);
@@ -162,7 +172,6 @@ public class BusinessCardService {
         }
         requireOwnedByCurrentUser(snapshot, userId);
         requireCurrentImportState(snapshot, userId, utc(clock.instant()));
-        rateLimiter.requireImportAllowed();
         ValidatedBusinessCardImage validated = imageValidator.validate(image);
         ReviewedImport reviewed = normalizeRequest(contact, companyAction);
         byte[] content = validated.content();
@@ -187,12 +196,12 @@ public class BusinessCardService {
             return replay(existing, requestFingerprint);
         }
         requireBinaryStorageReady();
-        Company company = resolveCompany(reviewed);
-        Person person = personService.create(toPerson(reviewed, company));
         String fileName = "business-card." + validated.extension();
         BusinessCardBinaryStore.StoredBusinessCard stored = binaryStore.store(
                 workspaceId, fileName, validated.contentType(), content);
         requireStored(stored, content.length);
+        Company company = resolveCompany(reviewed);
+        Person person = personService.create(toPerson(reviewed, company));
         Attachment attachment = attachment(validated, stored, fileName, person.getId());
         Attachment createdAttachment = attachmentService.createManaged(attachment);
         int completed = importRequestMapper.complete(
@@ -216,49 +225,27 @@ public class BusinessCardService {
      * @param idempotencyKey caller-generated UUID retained across retries
      * @return the server-defined retention boundary
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportReservationResponse reserveImport(String idempotencyKey) {
+        requireEntitled(Capability.BUSINESS_CARD_IMPORT);
+        String requestId = BusinessCardIdempotencyKey.canonicalize(idempotencyKey);
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
-        String requestId = canonicalIdempotencyKey(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = currentUserId();
         Instant currentInstant = clock.instant();
         LocalDateTime now = utc(currentInstant);
         importRequestMapper.deleteAbandonedReservations(workspaceId, userId, now);
-        BusinessCardImportRecord existing = importRequestMapper.getForUpdate(workspaceId, requestId);
+        BusinessCardImportRecord existing = importRequestMapper.get(workspaceId, requestId);
         if (existing != null) {
-            requireOwnedByCurrentUser(existing, userId);
-            if (existing.expiresAt() == null || !existing.expiresAt().isAfter(now)) {
-                throw new BusinessCardImportResultGoneException(
-                        "Business-card import reservation is no longer available");
-            }
-            if (existing.requestFingerprint() == null) {
-                if (existing.createdByUserId() == null
-                        || existing.reservationSlot() == null
-                        || existing.submissionExpiresAt() == null) {
-                    throw new BusinessCardImportResultGoneException(
-                            "Business-card import reservation is no longer available");
-                }
-                LocalDateTime submissionExpiresAt = utc(
-                        currentInstant.plus(properties.getReservationLease()));
-                if (importRequestMapper.renewReservation(
-                        workspaceId,
-                        userId,
-                        requestId,
-                        submissionExpiresAt,
-                        now) != 1) {
-                    throw new BusinessCardImportResultGoneException(
-                            "Business-card import reservation is no longer available");
-                }
-            }
-            return reservation(existing.expiresAt());
+            return renewOrResolveReservation(
+                existing, workspaceId, userId, requestId, currentInstant, now);
         }
-        rateLimiter.requireReservationAllowed();
         Instant expiration = currentInstant.plus(properties.getIdempotencyRetention());
         LocalDateTime submissionExpiresAt = utc(
                 currentInstant.plus(properties.getReservationLease()));
-        boolean reserved = false;
         for (int slot = 1; slot <= properties.getMaxOutstandingReservations(); slot += 1) {
             if (importRequestMapper.reserve(
                     workspaceId,
@@ -267,20 +254,16 @@ public class BusinessCardService {
                     slot,
                     submissionExpiresAt,
                     utc(expiration)) == 1) {
-                reserved = true;
-                break;
+                return reservation(utc(expiration));
             }
         }
-        if (!reserved) {
-            throw new TooManyRequestsException(
-                    "Too many pending business-card imports; retry after an earlier request expires");
-        }
         BusinessCardImportRecord record = importRequestMapper.get(workspaceId, requestId);
-        if (record == null || record.expiresAt() == null) {
-            throw new IllegalStateException("Business-card import reservation was not recorded");
+        if (record != null) {
+            return renewOrResolveReservation(
+                record, workspaceId, userId, requestId, currentInstant, now);
         }
-        requireOwnedByCurrentUser(record, userId);
-        return reservation(record.expiresAt());
+        throw new TooManyRequestsException(
+                "Too many pending business-card imports; retry after an earlier request expires");
     }
 
     /**
@@ -289,14 +272,15 @@ public class BusinessCardService {
      * @param idempotencyKey caller-generated UUID retained by the client
      * @return the completed import result
      */
-    @Transactional
+    @Transactional(readOnly = true)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importStatus(String idempotencyKey) {
+        requireEntitled(Capability.BUSINESS_CARD_IMPORT);
+        String requestId = BusinessCardIdempotencyKey.canonicalize(idempotencyKey);
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
-        String requestId = canonicalIdempotencyKey(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = currentUserId();
-        BusinessCardImportRecord record = importRequestMapper.getForUpdate(workspaceId, requestId);
+        BusinessCardImportRecord record = importRequestMapper.get(workspaceId, requestId);
         if (record == null) {
             throw new ResourceNotFoundException("Completed business-card import was not found");
         }
@@ -484,21 +468,6 @@ public class BusinessCardService {
         }
     }
 
-    private static String canonicalIdempotencyKey(String value) {
-        if (value == null || value.length() != 36) {
-            throw new BadRequestException("Idempotency-Key must be a UUID");
-        }
-        try {
-            String canonical = UUID.fromString(value).toString();
-            if (!canonical.equalsIgnoreCase(value)) {
-                throw new BadRequestException("Idempotency-Key must be a UUID");
-            }
-            return canonical;
-        } catch (IllegalArgumentException exception) {
-            throw new BadRequestException("Idempotency-Key must be a UUID");
-        }
-    }
-
     private static LocalDateTime utc(Instant instant) {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
@@ -516,10 +485,65 @@ public class BusinessCardService {
     }
 
     private static void requireOwnedByCurrentUser(BusinessCardImportRecord record, int userId) {
-        if (record != null
-                && record.createdByUserId() != null
-                && record.createdByUserId() != userId) {
+        if (record == null
+                || record.createdByUserId() == null
+                || record.createdByUserId() != userId) {
             throw new ResourceNotFoundException("Business-card import was not found");
+        }
+    }
+
+    private BusinessCardImportReservationResponse renewOrResolveReservation(
+            BusinessCardImportRecord record,
+            int workspaceId,
+            int userId,
+            String requestId,
+            Instant currentInstant,
+            LocalDateTime now) {
+        requireOwnedByCurrentUser(record, userId);
+        if (record.expiresAt() == null || !record.expiresAt().isAfter(now)) {
+            throw new BusinessCardImportResultGoneException(
+                    "Business-card import reservation is no longer available");
+        }
+        if (record.requestFingerprint() != null) {
+            return reservation(record.expiresAt());
+        }
+        if (record.reservationSlot() == null || record.submissionExpiresAt() == null) {
+            throw new BusinessCardImportResultGoneException(
+                    "Business-card import reservation is no longer available");
+        }
+        LocalDateTime submissionExpiresAt = utc(
+                currentInstant.plus(properties.getReservationLease()));
+        if (importRequestMapper.renewReservation(
+                workspaceId,
+                userId,
+                requestId,
+                submissionExpiresAt,
+                now) == 1) {
+            return reservation(record.expiresAt());
+        }
+        BusinessCardImportRecord current = importRequestMapper.get(workspaceId, requestId);
+        if (current == null) {
+            throw new BusinessCardImportResultGoneException(
+                    "Business-card import reservation is no longer available");
+        }
+        requireOwnedByCurrentUser(current, userId);
+        if (current.expiresAt() == null || !current.expiresAt().isAfter(now)) {
+            throw new BusinessCardImportResultGoneException(
+                    "Business-card import reservation is no longer available");
+        }
+        if (current.requestFingerprint() == null
+                && (current.reservationSlot() == null
+                    || current.submissionExpiresAt() == null
+                    || !current.submissionExpiresAt().isAfter(now))) {
+            throw new BusinessCardImportResultGoneException(
+                    "Business-card import reservation is no longer available");
+        }
+        return reservation(current.expiresAt());
+    }
+
+    private void requireEntitled(Capability capability) {
+        if (!capabilityEntitlement.isEntitled(capability)) {
+            throw new ForbiddenException("This business-card capability is not entitled");
         }
     }
 

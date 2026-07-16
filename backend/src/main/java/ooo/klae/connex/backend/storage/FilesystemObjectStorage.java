@@ -15,6 +15,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.DigestInputStream;
@@ -26,7 +28,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -36,13 +45,15 @@ import lombok.RequiredArgsConstructor;
  */
 @Component
 @RequiredArgsConstructor
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 @ConditionalOnProperty(
     prefix = "connex.object-storage",
     name = "provider",
     havingValue = "filesystem",
     matchIfMissing = true
 )
-public class FilesystemObjectStorage implements ObjectStorage {
+public class FilesystemObjectStorage implements ObjectStorage, ApplicationRunner {
+    private static final Logger log = LoggerFactory.getLogger(FilesystemObjectStorage.class);
     private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS =
         PosixFilePermissions.fromString("rwx------");
     private static final Set<PosixFilePermission> FILE_PERMISSIONS =
@@ -51,6 +62,7 @@ public class FilesystemObjectStorage implements ObjectStorage {
     private final ObjectStorageProperties properties;
     private final AtomicLong reservedBytes = new AtomicLong();
     private final ConcurrentHashMap<Path, PathLease> pathLeases = new ConcurrentHashMap<>();
+    private final Set<Path> activeTemporaryFiles = ConcurrentHashMap.newKeySet();
     private final Object directoryMutationLock = new Object();
 
     @Override
@@ -71,6 +83,7 @@ public class FilesystemObjectStorage implements ObjectStorage {
                 capacityReserved = true;
                 temporary = Files.createTempFile(target.getParent(), ".connex-object-", ".tmp");
                 restrictFile(temporary);
+                activeTemporaryFiles.add(temporary);
             }
             MessageDigest digest = sha256();
             long copied;
@@ -99,9 +112,11 @@ public class FilesystemObjectStorage implements ObjectStorage {
                 reservedBytes.addAndGet(-reservation);
             }
             if (temporary != null) {
+                activeTemporaryFiles.remove(temporary);
                 try {
                     Files.deleteIfExists(temporary);
-                } catch (IOException ignored) {
+                } catch (IOException exception) {
+                    log.warn("Filesystem object write left a temporary file for scheduled reconciliation");
                 }
             }
             lease.lock.writeLock().unlock();
@@ -196,9 +211,61 @@ public class FilesystemObjectStorage implements ObjectStorage {
             if (probe != null) {
                 try {
                     Files.deleteIfExists(probe);
-                } catch (IOException ignored) {
+                } catch (IOException exception) {
+                    log.warn("Filesystem object readiness probe cleanup failed");
                 }
             }
+        }
+    }
+
+    @Override
+    public void run(ApplicationArguments arguments) {
+        reconcileTemporaryFilesAtStartup();
+    }
+
+    void reconcileTemporaryFilesAtStartup() {
+        reconcileTemporaryFiles();
+    }
+
+    @Scheduled(
+        fixedDelayString = "${connex.object-storage.filesystem-temp-cleanup-delay-ms:60000}",
+        initialDelayString = "${connex.object-storage.filesystem-temp-cleanup-delay-ms:60000}")
+    void reconcileTemporaryFilesOnSchedule() {
+        reconcileTemporaryFiles();
+    }
+
+    void reconcileTemporaryFiles() {
+        try {
+            reconcileTemporaryFilesWithinRoot();
+        } catch (RuntimeException exception) {
+            log.warn("Filesystem object temporary-file cleanup failed before completion");
+        }
+    }
+
+    private void reconcileTemporaryFilesWithinRoot() {
+        Path storageRoot = root();
+        if (!Files.exists(storageRoot, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (Files.isSymbolicLink(storageRoot)
+                || !Files.isDirectory(storageRoot, LinkOption.NOFOLLOW_LINKS)) {
+            log.warn("Filesystem object temporary-file cleanup refused an unsafe storage root");
+            return;
+        }
+        FileTime cutoff = FileTime.from(
+            java.time.Instant.now().minus(properties.getFilesystemTempRetention()));
+        TemporaryFileCleanupVisitor visitor = new TemporaryFileCleanupVisitor(
+            cutoff, activeTemporaryFiles);
+        try {
+            synchronized (directoryMutationLock) {
+                Files.walkFileTree(storageRoot, visitor);
+            }
+        } catch (IOException exception) {
+            visitor.recordFailure();
+        }
+        if (visitor.failures() > 0) {
+            log.warn("Filesystem object temporary-file cleanup failed for {} entries",
+                visitor.failures());
         }
     }
 
@@ -407,5 +474,69 @@ public class FilesystemObjectStorage implements ObjectStorage {
     private static final class PathLease {
         private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
         private int references;
+    }
+
+    private static final class TemporaryFileCleanupVisitor
+            extends java.nio.file.SimpleFileVisitor<Path> {
+        private final FileTime cutoff;
+        private final Set<Path> activeTemporaryFiles;
+        private int failures;
+
+        private TemporaryFileCleanupVisitor(
+                FileTime cutoff,
+                Set<Path> activeTemporaryFiles) {
+            this.cutoff = cutoff;
+            this.activeTemporaryFiles = activeTemporaryFiles;
+        }
+
+        @Override
+        public java.nio.file.FileVisitResult visitFile(
+                Path file,
+                BasicFileAttributes attributes) {
+            if (!attributes.isRegularFile()
+                    || attributes.isSymbolicLink()
+                    || attributes.lastModifiedTime().compareTo(cutoff) > 0
+                    || activeTemporaryFiles.contains(file)
+                    || !temporaryName(file)) {
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException | RuntimeException exception) {
+                failures += 1;
+            }
+            return java.nio.file.FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public java.nio.file.FileVisitResult visitFileFailed(
+                Path file,
+                IOException exception) {
+            failures += 1;
+            return java.nio.file.FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public java.nio.file.FileVisitResult postVisitDirectory(
+                Path directory,
+                IOException exception) {
+            if (exception != null) {
+                failures += 1;
+            }
+            return java.nio.file.FileVisitResult.CONTINUE;
+        }
+
+        private void recordFailure() {
+            failures += 1;
+        }
+
+        private int failures() {
+            return failures;
+        }
+
+        private static boolean temporaryName(Path file) {
+            String name = file.getFileName().toString();
+            return name.startsWith(".connex-object-") && name.endsWith(".tmp");
+        }
     }
 }

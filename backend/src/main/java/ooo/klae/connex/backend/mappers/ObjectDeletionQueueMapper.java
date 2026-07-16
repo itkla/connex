@@ -30,12 +30,37 @@ public interface ObjectDeletionQueueMapper {
         @Param("now") LocalDateTime now,
         @Param("limit") int limit);
 
+    ObjectDeletionTask lockByKey(
+        @Param("workspaceId") int workspaceId,
+        @Param("objectKey") String objectKey);
+
+    ObjectDeletionTask lockByIdentity(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("objectKey") String objectKey);
+
+    ObjectDeletionTask lockDueByKey(
+        @Param("workspaceId") int workspaceId,
+        @Param("objectKey") String objectKey,
+        @Param("now") LocalDateTime now);
+
+    ObjectDeletionTask lockDueByIdentity(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("objectKey") String objectKey,
+        @Param("now") LocalDateTime now);
+
     int deleteById(
         @Param("workspaceId") int workspaceId,
         @Param("id") long id);
 
     int deleteByKey(
         @Param("workspaceId") int workspaceId,
+        @Param("objectKey") String objectKey);
+
+    int deleteByIdentity(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
         @Param("objectKey") String objectKey);
 
     int reschedule(

@@ -2,7 +2,7 @@ import io
 import unittest
 
 from ocr_service.config import ServiceConfig
-from ocr_service.engine import PaddleEngine, _extract_lines
+from ocr_service.engine import ImageRejected, PaddleEngine, _extract_lines
 
 
 class Result:
@@ -61,6 +61,19 @@ class EngineResultTest(unittest.TestCase):
         self.assertEqual([
             {"text": "Ada Lovelace", "confidence": 0.98, "box": [10, 20, 210, 60]}
         ], _extract_lines(results))
+
+    def test_rejects_excess_recognized_lines_as_a_client_image_error(self) -> None:
+        results = [Result({
+            "rec_texts": [f"Line {index}" for index in range(257)],
+            "rec_scores": [0.9] * 257,
+            "rec_boxes": [[0, index, 10, index + 1] for index in range(257)],
+        })]
+
+        with self.assertRaises(ImageRejected) as raised:
+            _extract_lines(results)
+
+        self.assertEqual(422, raised.exception.status)
+        self.assertEqual("OCR result contains too many lines", raised.exception.message)
 
 
 class ImageOrientationTest(unittest.TestCase):

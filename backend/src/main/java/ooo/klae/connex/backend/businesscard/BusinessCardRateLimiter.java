@@ -45,12 +45,39 @@ public class BusinessCardRateLimiter {
         requireAllowed(Operation.IMPORT, properties.getMaxImportsPerMinute());
     }
 
-    public void requireReservationAllowed() {
-        requireAllowed(Operation.RESERVATION, properties.getMaxImportsPerMinute());
+    public void requireImportAdmissionAllowed(int userId) {
+        if (userId <= 0) {
+            throw new IllegalStateException("Business-card rate-limit principal is unavailable");
+        }
+        requireAllowed(
+            new Identity(0, userId),
+            Operation.IMPORT_ADMISSION,
+            properties.getMaxImportsPerMinute());
     }
 
-    private synchronized void requireAllowed(Operation operation, int limit) {
-        Identity identity = identity();
+    public void requireReservationAllowed(int userId) {
+        requirePrincipalAllowed(userId, Operation.RESERVATION);
+    }
+
+    public void requireStatusAllowed(int userId) {
+        requirePrincipalAllowed(userId, Operation.STATUS);
+    }
+
+    private void requireAllowed(Operation operation, int limit) {
+        requireAllowed(identity(), operation, limit);
+    }
+
+    private void requirePrincipalAllowed(int userId, Operation operation) {
+        if (userId <= 0) {
+            throw new IllegalStateException("Business-card rate-limit principal is unavailable");
+        }
+        requireAllowed(
+            new Identity(0, userId),
+            operation,
+            properties.getMaxImportsPerMinute());
+    }
+
+    private synchronized void requireAllowed(Identity identity, Operation operation, int limit) {
         long minute = minute();
         RateKey key = new RateKey(identity.workspaceId(), identity.userId(), operation);
         Window current = current(windows.get(key), minute);
@@ -97,7 +124,9 @@ public class BusinessCardRateLimiter {
     private enum Operation {
         SCAN,
         IMPORT,
-        RESERVATION
+        IMPORT_ADMISSION,
+        RESERVATION,
+        STATUS
     }
 
     private record RateKey(int workspaceId, int userId, Operation operation) {}

@@ -43,7 +43,10 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 class LegacyUploadMigrationIntegrationTest {
     private static final Path ROOT = temporaryRoot();
     private static final Path LEGACY_ROOT = ROOT.resolve("legacy");
-    private static final Path OBJECT_ROOT = ROOT.resolve("objects");
+    private static final Path OBJECT_ROOT = Path.of(
+        System.getProperty("java.io.tmpdir"), "connex-test-object-storage")
+        .toAbsolutePath()
+        .normalize();
 
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;

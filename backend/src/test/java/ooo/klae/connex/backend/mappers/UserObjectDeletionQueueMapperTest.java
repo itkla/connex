@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
@@ -60,6 +61,24 @@ class UserObjectDeletionQueueMapperTest extends AbstractMapperTest {
         assertEquals(1, mapper.confirmDeletePass(task.id(), recheck));
         assertTrue(mapper.findDue(delayed.plusSeconds(1), 10).stream()
             .noneMatch(candidate -> candidate.objectKey().equals(key)));
+    }
+
+    @Test
+    void staleSelectedIdentityCannotLockAReplacementTombstoneForTheSameKey() {
+        int userId = ThreadLocalRandom.current().nextInt(1_000_000, 2_000_000);
+        String key = key(userId, "550e8400-e29b-41d4-a716-446655440004.jpg");
+        LocalDateTime now = LocalDateTime.of(2026, 7, 14, 12, 0);
+        keys.add(key);
+        mapper.enqueue(key, 1, now);
+        ObjectDeletionTask selected = mapper.lockByKey(key);
+        assertEquals(1, mapper.deleteByIdentity(selected.id(), key));
+
+        mapper.enqueue(key, 2, now.plusMinutes(1));
+        ObjectDeletionTask replacement = mapper.lockByKey(key);
+
+        assertTrue(replacement.id() != selected.id());
+        assertNull(mapper.lockDueByIdentity(selected.id(), key, now.plusMinutes(2)));
+        assertEquals(replacement.id(), mapper.lockByIdentity(replacement.id(), key).id());
     }
 
     private void enqueue(String key) {

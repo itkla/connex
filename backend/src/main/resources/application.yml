@@ -138,6 +138,8 @@ connex:
         provider: ${CONNEX_OBJECT_STORAGE_PROVIDER:filesystem}
         filesystem-root: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT:${user.home}/.connex/object-storage}
         filesystem-min-free-bytes: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_MIN_FREE_BYTES:1073741824}
+        filesystem-temp-retention: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_RETENTION:1h}
+        filesystem-temp-cleanup-delay-ms: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_CLEANUP_DELAY_MS:60000}
         max-upload-bytes: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:26214400}
         max-image-pixels: ${CONNEX_OBJECT_STORAGE_MAX_IMAGE_PIXELS:40000000}
         max-image-working-bytes: ${CONNEX_OBJECT_STORAGE_MAX_IMAGE_WORKING_BYTES:268435456}
@@ -189,7 +191,8 @@ connex:
         idempotency-retention: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_RETENTION:24h}
         reservation-lease: ${CONNEX_BUSINESS_CARD_RESERVATION_LEASE:2m}
         max-outstanding-reservations: ${CONNEX_BUSINESS_CARD_MAX_OUTSTANDING_RESERVATIONS:4}
-        idempotency-cleanup-batch-size: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_BATCH_SIZE:1000}
+        idempotency-cleanup-delay: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_DELAY:1m}
+        idempotency-cleanup-per-workspace-batch-size: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE:100}
     login:
         # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
         # per-IP or per-username failure cap is hit within the window, further attempts are

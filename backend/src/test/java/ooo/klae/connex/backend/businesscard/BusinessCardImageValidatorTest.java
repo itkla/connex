@@ -166,6 +166,16 @@ class BusinessCardImageValidatorTest {
     }
 
     @Test
+    void rejectsCanonicalEncodingAtTheConfiguredCeiling() throws IOException {
+        byte[] content = image("png", BufferedImage.TYPE_INT_RGB, 240, 140);
+        properties.setMaxImageBytes(content.length);
+
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> validator.validate(new MockMultipartFile(
+                "image", "card.png", "image/png", content)));
+    }
+
+    @Test
     void appliesExifOrientationAndRemovesMetadata() throws IOException {
         properties.setMaxWidth(30);
         properties.setMaxHeight(50);

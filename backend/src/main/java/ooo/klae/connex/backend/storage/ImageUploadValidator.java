@@ -7,7 +7,6 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.SampleModel;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
@@ -24,7 +23,6 @@ import javax.imageio.ImageWriter;
 import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.imageio.stream.ImageInputStream;
-import javax.imageio.stream.ImageOutputStream;
 
 import org.springframework.stereotype.Component;
 import org.w3c.dom.NamedNodeMap;
@@ -157,9 +155,6 @@ public class ImageUploadValidator {
                 }
                 BufferedImage normalized = normalize(decoded, orientation, alpha);
                 EncodedImage encoded = encode(normalized, alpha);
-                if (encoded.content().length > properties.getMaxUploadBytes()) {
-                    throw new RequestBodyTooLargeException(properties.getMaxUploadBytes());
-                }
                 return new ValidatedImage(
                     encoded.content(), encoded.contentType(), encoded.extension());
             } finally {
@@ -242,18 +237,15 @@ public class ImageUploadValidator {
         return normalized;
     }
 
-    private static EncodedImage encode(BufferedImage image, boolean alpha) throws IOException {
+    private EncodedImage encode(BufferedImage image, boolean alpha) throws IOException {
         String format = alpha ? "png" : "jpeg";
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName(format);
         if (!writers.hasNext()) {
             throw malformed();
         }
         ImageWriter writer = writers.next();
-        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                ImageOutputStream output = ImageIO.createImageOutputStream(bytes)) {
-            if (output == null) {
-                throw malformed();
-            }
+        try (CappedImageOutputStream output =
+                new CappedImageOutputStream(properties.getMaxUploadBytes())) {
             writer.setOutput(output);
             ImageWriteParam parameters = writer.getDefaultWriteParam();
             if (!alpha && parameters.canWriteCompressed()) {
@@ -263,7 +255,9 @@ public class ImageUploadValidator {
             writer.write(null, new IIOImage(image, null, null), parameters);
             output.flush();
             return new EncodedImage(
-                bytes.toByteArray(), alpha ? "image/png" : "image/jpeg", alpha ? "png" : "jpg");
+                output.toByteArray(), alpha ? "image/png" : "image/jpeg", alpha ? "png" : "jpg");
+        } catch (CappedImageOutputStream.LimitExceededException exception) {
+            throw new RequestBodyTooLargeException(properties.getMaxUploadBytes());
         } finally {
             writer.dispose();
         }

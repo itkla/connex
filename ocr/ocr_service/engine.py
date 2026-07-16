@@ -129,8 +129,10 @@ def _extract_lines(results: object) -> list[dict[str, object]]:
             if line is not None:
                 lines.append(line)
             if len(lines) > 256:
-                raise RuntimeError("OCR result contains too many lines")
+                raise ImageRejected(422, "OCR result contains too many lines")
     return lines
+
+
 def _result_payload(result: object) -> Mapping[str, object]:
     value = getattr(result, "json", result)
     if callable(value):
