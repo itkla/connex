@@ -57,6 +57,11 @@ class DeliveryProviderRouterTest {
         public DeliveryCapabilities capabilities() {
             return SYNC_CAPS;
         }
+
+        @Override
+        public AudiencePushResult pushAudience(ResolvedDeliveryProvider target, AudiencePush push) {
+            return new AudiencePushResult(push.members().size(), 0, "ok");
+        }
     }
 
     @Test
@@ -92,5 +97,14 @@ class DeliveryProviderRouterTest {
         DeliveryProviderRouter router = new DeliveryProviderRouter(List.of(new FakeSyncOnly()));
         assertEquals("sync", router.adapterFor("sync").providerId());
         assertThrows(DeliveryProviderException.class, () -> router.dispatcherFor("sync"));
+    }
+
+    @Test
+    void connectorForResolvesAConnectorAndFailsClosedForANonConnector() {
+        DeliveryProviderRouter router =
+                new DeliveryProviderRouter(List.of(new FakeDispatcher("smtp"), new FakeSyncOnly()));
+        assertEquals("sync", router.connectorFor("sync").providerId());
+        assertThrows(DeliveryProviderException.class, () -> router.connectorFor("smtp"));
+        assertThrows(DeliveryProviderException.class, () -> router.connectorFor("nope"));
     }
 }

@@ -241,6 +241,7 @@ class EncryptionGuardrailArchTest {
     private static final Map<String, Integer> APPROVED_CREDENTIAL_STORAGE_REFERENCES = Map.ofEntries(
         Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/config/SecretStoreStartupValidator.java#SecretStore", 1),
+        Map.entry("ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/mail/MailConfigResolver.java#SecretCipher", 1),
         Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#SecretStore", 2),
@@ -260,6 +261,7 @@ class EncryptionGuardrailArchTest {
 
     private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.of(
         "ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3,
+        "ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 3,
         "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL", 3,
         "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3,
         "ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3,
@@ -270,6 +272,7 @@ class EncryptionGuardrailArchTest {
         "WORKSPACE_SMTP_PASSWORD",
         "WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL",
         "WORKSPACE_DELIVERY_WEBHOOK_SECRET",
+        "WORKSPACE_CONNECTOR_CREDENTIAL",
         "ORG_SSO_OIDC_CLIENT_SECRET",
         "ORG_SSO_SAML_SP_PRIVATE_KEY",
         "ORG_AI_PROVIDER_CREDENTIAL");
@@ -279,6 +282,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#sessionToken",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#serviceAccountJson",
+        "ooo/klae/connex/backend/dto/ConnectorConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
         "ooo/klae/connex/backend/dto/EmailChangeConfirmDto.java#token",

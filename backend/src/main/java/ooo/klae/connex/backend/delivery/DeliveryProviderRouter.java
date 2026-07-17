@@ -67,6 +67,20 @@ public class DeliveryProviderRouter {
     }
 
     /**
+     * Returns the audience-sync connector installed for a provider id.
+     * @param provider provider id
+     * @return installed audience-sync connector
+     * @throws DeliveryProviderException when no adapter is installed or it cannot sync audiences
+     */
+    public AudienceSyncConnector connectorFor(String provider) {
+        DeliveryProvider adapter = adapterFor(provider);
+        if (!(adapter instanceof AudienceSyncConnector connector)) {
+            throw new DeliveryProviderException("Provider " + provider + " cannot sync audiences");
+        }
+        return connector;
+    }
+
+    /**
      * Returns the event source installed for a provider id.
      * @param provider provider id
      * @return installed provider event source

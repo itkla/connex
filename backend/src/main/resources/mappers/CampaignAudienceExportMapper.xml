@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper">
+
+  <resultMap id="CampaignAudienceExportResult" type="CampaignAudienceExport">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="campaignId" column="campaign_id"/>
+    <result property="snapshotId" column="snapshot_id"/>
+    <result property="connector" column="connector"/>
+    <result property="externalListId" column="external_list_id"/>
+    <result property="status" column="status"/>
+    <result property="totalMembers" column="total_members"/>
+    <result property="pushedCount" column="pushed_count"/>
+    <result property="failedCount" column="failed_count"/>
+    <result property="createdById" column="created_by_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="columns">
+    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,
+    total_members, pushed_count, failed_count, created_by_id, created_at, updated_at
+  </sql>
+
+  <select id="getByCampaign" resultMap="CampaignAudienceExportResult">
+    SELECT <include refid="columns"/>
+    FROM campaign_audience_export
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+    ORDER BY id DESC
+  </select>
+
+  <select id="getExport" resultMap="CampaignAudienceExportResult">
+    SELECT <include refid="columns"/>
+    FROM campaign_audience_export
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insertExport" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_audience_export
+      (workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,
+       total_members, pushed_count, failed_count, created_by_id)
+    VALUES
+      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{connector}, #{externalListId}, #{status},
+       #{totalMembers}, #{pushedCount}, #{failedCount}, #{createdById})
+  </insert>
+
+  <update id="updateOutcome">
+    UPDATE campaign_audience_export
+    SET status = #{status},
+        total_members = #{totalMembers},
+        pushed_count = #{pushedCount},
+        failed_count = #{failedCount}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+</mapper>
