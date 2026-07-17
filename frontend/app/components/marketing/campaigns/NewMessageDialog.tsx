@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { type CampaignChannel, type CampaignMessagePayload } from "@/app/lib/types";
 import { isFieldError } from "@/app/lib/api";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
-import { EnvelopeIcon, InboxStackIcon } from "@heroicons/react/24/outline";
+import { DevicePhoneMobileIcon, EnvelopeIcon, InboxStackIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -34,7 +34,7 @@ const inputError = "ring-2 ring-destructive focus:ring-destructive";
 const leadIcon =
     "pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand";
 
-const CHANNELS: CampaignChannel[] = ["email"];
+const CHANNELS: CampaignChannel[] = ["email", "sms"];
 
 type Props = {
     open: boolean;
@@ -61,6 +61,7 @@ export default function NewMessageDialog({
 }: Props) {
     const t = useTranslations("CampaignMessages");
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const ChannelIcon = payload.channel === "sms" ? DevicePhoneMobileIcon : EnvelopeIcon;
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const status: "idle" | "loading" | "success" | "error" = isCreating
@@ -148,7 +149,7 @@ export default function NewMessageDialog({
                         <div className="grid gap-1.5">
                             <Label htmlFor="message-channel">{t("channel")}</Label>
                             <div className="group relative">
-                                <EnvelopeIcon className={leadIcon} />
+                                <ChannelIcon className={leadIcon} />
                                 <Select
                                     value={payload.channel}
                                     onValueChange={(value) =>

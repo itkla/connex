@@ -2,8 +2,10 @@ package ooo.klae.connex.backend.services;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -11,7 +13,11 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 
 /**
  * Session-free classification of person eligibility for a marketing channel. Extracted from
@@ -37,6 +43,7 @@ public class AudienceEligibilityService {
     private static final int SQL_BATCH_SIZE = 500;
 
     private final CampaignMapper campaignMapper;
+    private final PersonMapper personMapper;
 
     /**
      * The subset of the given people whose processing is restricted.
@@ -51,16 +58,40 @@ public class AudienceEligibilityService {
     }
 
     /**
-     * The subset of the given people suppressed on the channel by their email address.
+     * The subset of the given people suppressed on the channel, matched on the address that channel
+     * would actually contact them at. The candidates' addresses are resolved and canonicalized with
+     * {@link ChannelAddressNormalizer} and then checked against the same
+     * {@link #suppressedAddresses(int, String, List)} query the dispatch re-check uses, so a snapshot
+     * and a dispatch of the same audience cannot disagree: an SMS audience is matched on phone
+     * numbers rather than on email addresses, and a suppression stored in a different but equivalent
+     * format still matches. A person with no address the channel can reach is not suppression-matched
+     * here; materialization skips them as {@code no_address}.
      * @param workspaceId the workspace
      * @param personIds candidate person ids
-     * @param channel the delivery channel
+     * @param channel the delivery channel token
      * @return the suppressed person ids
      */
     public Set<Integer> suppressedIds(int workspaceId, List<Integer> personIds, String channel) {
+        if (personIds.isEmpty()) {
+            return Set.of();
+        }
+        DeliveryChannel deliveryChannel = DeliveryChannel.fromToken(channel);
+        Map<String, List<Integer>> idsByAddress = new LinkedHashMap<>();
+        forEachBatch(personIds, batch -> {
+            for (Person person : personMapper.getByIds(workspaceId, batch)) {
+                String address = ChannelAddressNormalizer.addressFor(deliveryChannel, person);
+                if (address != null) {
+                    idsByAddress.computeIfAbsent(address, key -> new ArrayList<>()).add(person.getId());
+                }
+            }
+        });
+        if (idsByAddress.isEmpty()) {
+            return Set.of();
+        }
         Set<Integer> result = new HashSet<>();
-        forEachBatch(personIds, batch -> result.addAll(
-                campaignMapper.suppressedPersonIds(workspaceId, batch, channel)));
+        for (String address : suppressedAddresses(workspaceId, channel, new ArrayList<>(idsByAddress.keySet()))) {
+            result.addAll(idsByAddress.getOrDefault(address, List.of()));
+        }
         return result;
     }
 

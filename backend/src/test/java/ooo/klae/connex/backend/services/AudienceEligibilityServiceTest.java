@@ -21,7 +21,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AudienceEligibilityServiceTest {
@@ -31,13 +33,25 @@ class AudienceEligibilityServiceTest {
     private static final String PURPOSE = "marketing";
 
     @Mock private CampaignMapper campaignMapper;
+    @Mock private PersonMapper personMapper;
     @InjectMocks private AudienceEligibilityService service;
+
+    private static Person person(int id) {
+        Person person = new Person();
+        person.setId(id);
+        person.setEmail("person" + id + "@example.com");
+        person.setPhone("+8190000000" + id);
+        return person;
+    }
 
     @Test
     void classifyAppliesRestrictedThenSuppressedThenRevokedConsentPrecedence() {
         List<Integer> candidates = List.of(1, 2, 3, 4);
         when(campaignMapper.restrictedPersonIds(eq(WORKSPACE), anyList())).thenReturn(List.of(1));
-        when(campaignMapper.suppressedPersonIds(eq(WORKSPACE), anyList(), eq(CHANNEL))).thenReturn(List.of(2));
+        when(personMapper.getByIds(eq(WORKSPACE), anyList()))
+                .thenReturn(List.of(person(2), person(3), person(4)));
+        when(campaignMapper.suppressedAddresses(eq(WORKSPACE), eq(CHANNEL), anyList()))
+                .thenReturn(List.of("person2@example.com"));
         when(campaignMapper.revokedConsentPersonIds(eq(WORKSPACE), anyList(), eq(CHANNEL), eq(PURPOSE)))
                 .thenReturn(List.of(3));
 
@@ -57,7 +71,8 @@ class AudienceEligibilityServiceTest {
     @Test
     void classifyUnderOptOutIncludesPeopleWithNoConsentRecordAtAll() {
         when(campaignMapper.restrictedPersonIds(eq(WORKSPACE), anyList())).thenReturn(List.of());
-        when(campaignMapper.suppressedPersonIds(eq(WORKSPACE), anyList(), eq(CHANNEL))).thenReturn(List.of());
+        when(personMapper.getByIds(eq(WORKSPACE), anyList())).thenReturn(List.of(person(1), person(2)));
+        when(campaignMapper.suppressedAddresses(eq(WORKSPACE), eq(CHANNEL), anyList())).thenReturn(List.of());
         when(campaignMapper.revokedConsentPersonIds(eq(WORKSPACE), anyList(), eq(CHANNEL), eq(PURPOSE)))
                 .thenReturn(List.of());
 
@@ -89,5 +104,7 @@ class AudienceEligibilityServiceTest {
         assertTrue(result.includedIds().isEmpty());
         assertTrue(result.suppressed().isEmpty());
         assertTrue(result.consentBlocked().isEmpty());
+        verify(personMapper, never()).getByIds(anyInt(), anyList());
+        verify(campaignMapper, never()).suppressedAddresses(anyInt(), anyString(), anyList());
     }
 }

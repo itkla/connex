@@ -312,7 +312,7 @@ public class CampaignSendService {
         }
         Map<Integer, String> addresses = new HashMap<>();
         for (Person person : personMapper.getByIds(workspaceId, personIds)) {
-            String address = ChannelAddressNormalizer.normalize(channel, contactAddress(channel, person));
+            String address = ChannelAddressNormalizer.addressFor(channel, person);
             if (address != null) {
                 addresses.put(person.getId(), address);
             }
@@ -332,15 +332,6 @@ public class CampaignSendService {
             deliveries.add(delivery);
         }
         return deliveries;
-    }
-
-    /** The raw person field a channel addresses, before normalization. */
-    private static String contactAddress(DeliveryChannel channel, Person person) {
-        return switch (channel) {
-            case EMAIL -> person.getEmail();
-            case SMS -> person.getPhone();
-            default -> null;
-        };
     }
 
     private Campaign requireCampaign(int workspaceId, int campaignId) {

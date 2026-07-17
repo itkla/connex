@@ -124,7 +124,13 @@ export default function CampaignDelivery({
         [snapshots, sendSnapshot],
     );
 
-    const channelLabel = (channel: string) => (channel === "email" ? t("channels.email") : channel);
+    const channelLabel = (channel: string) => {
+        if (channel === "email") return t("channels.email");
+        if (channel === "sms") return t("channels.sms");
+        return channel;
+    };
+
+    const isSmsMessage = selectedMessage?.channel === "sms";
 
     const openMessageDialog = () => {
         setMessagePayload(EMPTY_MESSAGE_PAYLOAD);
@@ -158,12 +164,23 @@ export default function CampaignDelivery({
         if (!selectedMessage) return;
         setIsSavingRevision(true);
         try {
-            const updated = await addCampaignMessageRevision(campaignId, selectedMessage.id, {
-                locale: revision.locale,
-                subject: revision.subject.trim(),
-                bodyHtml: revision.bodyHtml,
-                bodyText: revision.bodyText.trim() ? revision.bodyText : null,
-            });
+            const updated = await addCampaignMessageRevision(
+                campaignId,
+                selectedMessage.id,
+                selectedMessage.channel === "sms"
+                    ? {
+                          locale: revision.locale,
+                          subject: null,
+                          bodyHtml: null,
+                          bodyText: revision.bodyText.trim(),
+                      }
+                    : {
+                          locale: revision.locale,
+                          subject: revision.subject.trim(),
+                          bodyHtml: revision.bodyHtml,
+                          bodyText: revision.bodyText.trim() ? revision.bodyText : null,
+                      },
+            );
             setMessages((prev) =>
                 prev.map((message) => (message.id === updated.id ? updated : message)),
             );
@@ -359,42 +376,50 @@ export default function CampaignDelivery({
                                                     </SelectContent>
                                                 </Select>
                                             </div>
+                                            {!isSmsMessage && (
+                                                <div className="grid gap-1.5">
+                                                    <Label htmlFor="revision-subject">{t("subject")}</Label>
+                                                    <input
+                                                        id="revision-subject"
+                                                        type="text"
+                                                        value={revision.subject}
+                                                        onChange={(e) =>
+                                                            setRevision((prev) => ({
+                                                                ...prev,
+                                                                subject: e.target.value,
+                                                            }))
+                                                        }
+                                                        className={inputBase}
+                                                        placeholder={t("subjectPlaceholder")}
+                                                        maxLength={255}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                        {!isSmsMessage && (
                                             <div className="grid gap-1.5">
-                                                <Label htmlFor="revision-subject">{t("subject")}</Label>
-                                                <input
-                                                    id="revision-subject"
-                                                    type="text"
-                                                    value={revision.subject}
+                                                <Label htmlFor="revision-body-html">{t("bodyHtml")}</Label>
+                                                <textarea
+                                                    id="revision-body-html"
+                                                    value={revision.bodyHtml}
                                                     onChange={(e) =>
                                                         setRevision((prev) => ({
                                                             ...prev,
-                                                            subject: e.target.value,
+                                                            bodyHtml: e.target.value,
                                                         }))
                                                     }
-                                                    className={inputBase}
-                                                    placeholder={t("subjectPlaceholder")}
-                                                    maxLength={255}
+                                                    className={cn(inputBase, "min-h-40 resize-y font-mono")}
+                                                    placeholder={t("bodyHtmlPlaceholder")}
                                                 />
+                                                <p className="text-xs text-muted-foreground">
+                                                    {t("unsubscribeHint")}
+                                                </p>
                                             </div>
-                                        </div>
+                                        )}
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor="revision-body-html">{t("bodyHtml")}</Label>
-                                            <textarea
-                                                id="revision-body-html"
-                                                value={revision.bodyHtml}
-                                                onChange={(e) =>
-                                                    setRevision((prev) => ({
-                                                        ...prev,
-                                                        bodyHtml: e.target.value,
-                                                    }))
-                                                }
-                                                className={cn(inputBase, "min-h-40 resize-y font-mono")}
-                                                placeholder={t("bodyHtmlPlaceholder")}
-                                            />
-                                            <p className="text-xs text-muted-foreground">{t("unsubscribeHint")}</p>
-                                        </div>
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor="revision-body-text">{t("bodyText")}</Label>
+                                            <Label htmlFor="revision-body-text">
+                                                {isSmsMessage ? t("smsBody") : t("bodyText")}
+                                            </Label>
                                             <textarea
                                                 id="revision-body-text"
                                                 value={revision.bodyText}
@@ -405,8 +430,15 @@ export default function CampaignDelivery({
                                                     }))
                                                 }
                                                 className={cn(inputBase, "min-h-24 resize-y")}
-                                                placeholder={t("bodyTextPlaceholder")}
+                                                placeholder={
+                                                    isSmsMessage
+                                                        ? t("smsBodyPlaceholder")
+                                                        : t("bodyTextPlaceholder")
+                                                }
                                             />
+                                            {isSmsMessage && (
+                                                <p className="text-xs text-muted-foreground">{t("smsHint")}</p>
+                                            )}
                                         </div>
                                         <div className="flex justify-end">
                                             <Button
@@ -415,8 +447,10 @@ export default function CampaignDelivery({
                                                 onClick={saveRevision}
                                                 disabled={
                                                     isSavingRevision ||
-                                                    !revision.subject.trim() ||
-                                                    !revision.bodyHtml.trim()
+                                                    (isSmsMessage
+                                                        ? !revision.bodyText.trim()
+                                                        : !revision.subject.trim() ||
+                                                          !revision.bodyHtml.trim())
                                                 }
                                             >
                                                 {isSavingRevision ? (
@@ -453,7 +487,7 @@ export default function CampaignDelivery({
                                                             {rev.locale}
                                                         </span>
                                                         <span className="truncate text-sm text-foreground">
-                                                            {rev.subject}
+                                                            {isSmsMessage ? (rev.bodyText ?? "") : rev.subject}
                                                         </span>
                                                     </div>
                                                     <span className="shrink-0 text-xs text-muted-foreground">

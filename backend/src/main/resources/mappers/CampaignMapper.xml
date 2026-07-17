@@ -137,19 +137,6 @@
       AND (suspended_at IS NOT NULL OR provision_ceased_at IS NOT NULL)
   </select>
 
-  <select id="suppressedPersonIds" resultType="int">
-    SELECT p.id FROM person p
-    WHERE p.workspace_id = #{workspaceId}
-      AND p.id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
-      AND p.email IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM suppression_entry suppression
-        WHERE suppression.workspace_id = #{workspaceId}
-          AND suppression.channel = #{channel}
-          AND suppression.address = LOWER(TRIM(p.email)) COLLATE utf8mb4_bin
-      )
-  </select>
-
   <select id="grantedConsentPersonIds" resultType="int">
     SELECT person_id FROM contact_channel_consent
     WHERE workspace_id = #{workspaceId}

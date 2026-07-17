@@ -55,11 +55,6 @@ public interface CampaignMapper {
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
 
-    List<Integer> suppressedPersonIds(
-            @Param("workspaceId") int workspaceId,
-            @Param("ids") List<Integer> ids,
-            @Param("channel") String channel);
-
     List<Integer> grantedConsentPersonIds(
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids,

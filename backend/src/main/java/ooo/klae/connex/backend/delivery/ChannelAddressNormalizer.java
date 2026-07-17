@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.delivery;
 
 import java.util.Locale;
 
+import ooo.klae.connex.backend.beans.Person;
+
 /**
  * The single normalization of a contact address for a delivery channel. Every write and every read of
  * a channel address goes through this class so a stored suppression and a materialized delivery are
@@ -40,6 +42,30 @@ public final class ChannelAddressNormalizer {
         return switch (channel) {
             case SMS -> normalizeSms(raw);
             case EMAIL, LINE, WHATSAPP -> raw.trim().toLowerCase(Locale.ROOT);
+        };
+    }
+
+    /**
+     * Resolves the canonical address a channel reaches a person at, selecting the person field that
+     * channel addresses and normalizing it. Suppression matching and delivery materialization both
+     * resolve through here so a snapshot cannot classify a person against a different field, or a
+     * different form of the same field, than the one dispatch will actually contact.
+     * @param channel the delivery channel the person would be contacted on
+     * @param person the person to resolve an address for
+     * @return the canonical address, or null when the person has no address the channel can reach
+     */
+    public static String addressFor(DeliveryChannel channel, Person person) {
+        if (channel == null || person == null) {
+            return null;
+        }
+        return normalize(channel, contactAddress(channel, person));
+    }
+
+    private static String contactAddress(DeliveryChannel channel, Person person) {
+        return switch (channel) {
+            case EMAIL -> person.getEmail();
+            case SMS -> person.getPhone();
+            case LINE, WHATSAPP -> null;
         };
     }
 

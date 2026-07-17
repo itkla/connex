@@ -6,9 +6,10 @@ import { useTranslations } from "next-intl";
 import type {
     ConnectorConfig,
     ConnectorConfigPayload,
-    DeliveryProvider,
+    DeliveryEmailProvider,
     DeliveryProviderConfig,
     DeliveryProviderConfigPayload,
+    DeliverySmsProvider,
     DeliveryWebhookToken,
 } from "@/app/lib/types";
 import {
@@ -42,10 +43,12 @@ import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 const CHANNEL = "email";
+const SMS_CHANNEL = "sms";
+const SMS_PROVIDER: DeliverySmsProvider = "sms_http";
 const CONNECTOR = "http_list";
 
 type FormState = {
-    provider: DeliveryProvider;
+    provider: DeliveryEmailProvider;
     endpoint: string;
     fromAddress: string;
     fromName: string;
@@ -64,7 +67,7 @@ const EMPTY: FormState = {
 
 function toForm(config: DeliveryProviderConfig): FormState {
     return {
-        provider: config.provider,
+        provider: normalizeProvider(config.provider),
         endpoint: config.endpoint ?? "",
         fromAddress: config.fromAddress ?? "",
         fromName: config.fromName ?? "",
@@ -73,7 +76,7 @@ function toForm(config: DeliveryProviderConfig): FormState {
     };
 }
 
-function normalizeProvider(value: string): DeliveryProvider {
+function normalizeProvider(value: string): DeliveryEmailProvider {
     return value === "http_esp" ? "http_esp" : "smtp";
 }
 
@@ -88,7 +91,7 @@ export default function DeliveryPanel() {
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState>(EMPTY);
-    const [savedProvider, setSavedProvider] = useState<DeliveryProvider>("smtp");
+    const [savedProvider, setSavedProvider] = useState<DeliveryEmailProvider>("smtp");
     const [hasCredential, setHasCredential] = useState(false);
     const [credentialLast4, setCredentialLast4] = useState<string | null>(null);
     const [webhookConfigured, setWebhookConfigured] = useState(false);
@@ -115,7 +118,7 @@ export default function DeliveryPanel() {
                 const config = providers.find((entry) => entry.channel === CHANNEL) ?? null;
                 if (config) {
                     setForm(toForm(config));
-                    setSavedProvider(config.provider);
+                    setSavedProvider(normalizeProvider(config.provider));
                     setHasCredential(config.hasCredential);
                     setCredentialLast4(config.credentialLast4);
                     setWebhookConfigured(config.webhookConfigured);
@@ -151,7 +154,7 @@ export default function DeliveryPanel() {
 
     const applyConfig = (config: DeliveryProviderConfig) => {
         setForm(toForm(config));
-        setSavedProvider(config.provider);
+        setSavedProvider(normalizeProvider(config.provider));
         setHasCredential(config.hasCredential);
         setCredentialLast4(config.credentialLast4);
         setWebhookConfigured(config.webhookConfigured);
@@ -447,8 +450,272 @@ export default function DeliveryPanel() {
                 </div>
             )}
 
+            <SmsSection />
+
             <ConnectorsSection />
         </Rise>
+    );
+}
+
+type SmsFormState = {
+    endpoint: string;
+    fromAddress: string;
+    apiKey: string;
+    enabled: boolean;
+};
+
+const EMPTY_SMS: SmsFormState = {
+    endpoint: "",
+    fromAddress: "",
+    apiKey: "",
+    enabled: false,
+};
+
+function toSmsForm(config: DeliveryProviderConfig): SmsFormState {
+    return {
+        endpoint: config.endpoint ?? "",
+        fromAddress: config.fromAddress ?? "",
+        apiKey: "",
+        enabled: config.enabled,
+    };
+}
+
+/**
+ * Workspace campaign-delivery provider configuration for the SMS channel. Mirrors the HTTP ESP block:
+ * an enable toggle gates the gateway fields and a write-only credential is stored encrypted and never
+ * shown. The only SMS provider is the HTTP gateway, so the provider select has a single option.
+ */
+function SmsSection() {
+    const t = useTranslations("WorkspaceDelivery");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const { activeWorkspaceId } = useWorkspace();
+
+    const [form, setForm] = useState<SmsFormState>(EMPTY_SMS);
+    const [hasCredential, setHasCredential] = useState(false);
+    const [credentialLast4, setCredentialLast4] = useState<string | null>(null);
+    const [configured, setConfigured] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+    const [forbidden, setForbidden] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+
+    useEffect(() => {
+        if (activeWorkspaceId == null) return;
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setError(false);
+            setForbidden(false);
+            try {
+                const providers = await getDeliveryProviders();
+                if (cancelled) return;
+                const config = providers.find((entry) => entry.channel === SMS_CHANNEL) ?? null;
+                if (config) {
+                    setForm(toSmsForm(config));
+                    setHasCredential(config.hasCredential);
+                    setCredentialLast4(config.credentialLast4);
+                    setConfigured(true);
+                } else {
+                    setForm(EMPTY_SMS);
+                    setHasCredential(false);
+                    setCredentialLast4(null);
+                    setConfigured(false);
+                }
+            } catch (err) {
+                if (cancelled) return;
+                if (err instanceof ApiError && err.status === 403) {
+                    setForbidden(true);
+                } else {
+                    setError(true);
+                    toastError(t("loadFailed"));
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeWorkspaceId, t, reloadKey]);
+
+    const set = <K extends keyof SmsFormState>(key: K, value: SmsFormState[K]) =>
+        setForm((prev) => ({ ...prev, [key]: value }));
+
+    const applyConfig = (config: DeliveryProviderConfig) => {
+        setForm(toSmsForm(config));
+        setHasCredential(config.hasCredential);
+        setCredentialLast4(config.credentialLast4);
+        setConfigured(true);
+    };
+
+    const buildPayload = (): DeliveryProviderConfigPayload => ({
+        channel: SMS_CHANNEL,
+        provider: SMS_PROVIDER,
+        endpoint: form.endpoint.trim() || null,
+        fromAddress: form.fromAddress.trim() || null,
+        fromName: null,
+        apiKey: form.apiKey ? form.apiKey : null,
+        enabled: form.enabled,
+    });
+
+    const save = async () => {
+        if (activeWorkspaceId == null) return;
+        setSaving(true);
+        try {
+            const saved = await saveDeliveryProvider(buildPayload());
+            applyConfig(saved);
+            toastSuccess(t("saved"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const remove = async () => {
+        if (activeWorkspaceId == null) return;
+        setSaving(true);
+        try {
+            await deleteDeliveryProvider(SMS_CHANNEL);
+            setForm(EMPTY_SMS);
+            setHasCredential(false);
+            setCredentialLast4(null);
+            setConfigured(false);
+            toastSuccess(t("removed"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <SectionHeader title={t("smsTitle")} />
+                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("smsSubtitle")}</p>
+            </div>
+
+            {forbidden ? (
+                <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
+                    <p className="text-sm font-medium text-foreground">{t("forbiddenTitle")}</p>
+                    <p className="max-w-prose text-sm text-muted-foreground">{t("forbiddenBody")}</p>
+                </div>
+            ) : error ? (
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => setReloadKey((key) => key + 1)}>
+                        {t("retry")}
+                    </Button>
+                </div>
+            ) : (
+                <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-4">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">{t("smsEnableTitle")}</p>
+                            <p className="text-sm text-muted-foreground">{t("smsEnableDescription")}</p>
+                        </div>
+                        {loading ? (
+                            <Skeleton className="h-[18.4px] w-8 shrink-0 rounded-full" />
+                        ) : (
+                            <Switch
+                                checked={form.enabled}
+                                disabled={saving}
+                                onCheckedChange={(value) => set("enabled", value)}
+                                aria-label={t("smsEnableTitle")}
+                            />
+                        )}
+                    </div>
+
+                    {loading ? (
+                        <div className="space-y-3 pt-2">
+                            <Skeleton className="h-9 w-full rounded-md" />
+                            <Skeleton className="h-9 w-full rounded-md" />
+                            <Skeleton className="h-9 w-full rounded-md" />
+                        </div>
+                    ) : (
+                        <fieldset
+                            disabled={!form.enabled || saving}
+                            className="space-y-4 border-t border-border pt-4 transition-opacity disabled:opacity-50"
+                        >
+                            <div className="space-y-1.5">
+                                <Label htmlFor="sms-provider">{t("provider")}</Label>
+                                <Select value={SMS_PROVIDER}>
+                                    <SelectTrigger id="sms-provider" className="w-full">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value={SMS_PROVIDER}>{t("providerSmsHttp")}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="sms-endpoint">{t("endpoint")}</Label>
+                                <Input
+                                    id="sms-endpoint"
+                                    value={form.endpoint}
+                                    placeholder="https://api.sms.example.com/v1/messages"
+                                    onChange={(e) => set("endpoint", e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="sms-sender-id">{t("smsSenderId")}</Label>
+                                <Input
+                                    id="sms-sender-id"
+                                    value={form.fromAddress}
+                                    placeholder="Connex"
+                                    onChange={(e) => set("fromAddress", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">{t("smsSenderIdHint")}</p>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="sms-api-key">{t("apiKey")}</Label>
+                                <Input
+                                    id="sms-api-key"
+                                    type="password"
+                                    autoComplete="new-password"
+                                    value={form.apiKey}
+                                    placeholder={
+                                        hasCredential && credentialLast4
+                                            ? t("apiKeyConfigured", { last4: credentialLast4 })
+                                            : ""
+                                    }
+                                    onChange={(e) => set("apiKey", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">{t("apiKeyHint")}</p>
+                            </div>
+                        </fieldset>
+                    )}
+
+                    {!loading && (
+                        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+                            <Button onClick={save} disabled={saving}>
+                                {t("save")}
+                            </Button>
+                            {configured && (
+                                <Button
+                                    variant="ghost"
+                                    className="ml-auto text-destructive hover:text-destructive"
+                                    onClick={remove}
+                                    disabled={saving}
+                                >
+                                    {t("remove")}
+                                </Button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 
