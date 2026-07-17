@@ -1943,8 +1943,11 @@ export function getDealFacets(init: RequestInit = {}) {
  * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
  * applies the viewer's historical offset rules when bucketing realized revenue.
  */
-export function getDealRevenueTimeseries(currency?: string, timezone?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, timezone })}`, init);
+export function getDealRevenueTimeseries(
+    currency?: string, timezone?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealRevenueSeries>(
+        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
@@ -1953,8 +1956,10 @@ const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: 
  * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
  * Replaces the client-side KPI/win-rate math over a bounded page slice.
  */
-export function getDealKpis(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, init);
+export function getDealKpis(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1962,8 +1967,11 @@ export function getDealKpisFromCookie(cookie: string | null, currency?: string, 
 }
 
 /** Server-computed per-pipeline won-in-range + open rollup. */
-export function getDealPipelineValue(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealPipelineValue[]>(`/api/deals/pipeline-value${buildQuery({ currency, range })}`, init);
+export function getDealPipelineValue(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealPipelineValue[]>(
+        `/api/deals/pipeline-value${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1971,8 +1979,8 @@ export function getDealPipelineValueFromCookie(cookie: string | null, currency?:
 }
 
 /** Server-computed per-stage open-deal age buckets. */
-export function getDealAging(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency })}`, init);
+export function getDealAging(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealAgingFromCookie(cookie: string | null, currency?: string) {
@@ -1980,8 +1988,8 @@ export function getDealAgingFromCookie(cookie: string | null, currency?: string)
 }
 
 /** Server-computed top open/won deals, optionally scoped to a currency. */
-export function getDealTop(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, init);
+export function getDealTop(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealTopFromCookie(cookie: string | null, currency?: string) {
@@ -2002,8 +2010,8 @@ export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, li
 }
 
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
-export function getActivityVolume(range?: string, init: RequestInit = {}) {
-    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, init);
+export function getActivityVolume(range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range, ...scope })}`, init);
 }
 
 export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
@@ -2029,8 +2037,8 @@ export function getUpcomingActivityCountFromCookie(cookie: string | null, days?:
 }
 
 /** Server-computed task status + due-window counts over ALL tasks. */
-export function getTaskSummary(init: RequestInit = {}) {
-    return getJson<Types.TaskSummary>(`/api/tasks/summary`, init);
+export function getTaskSummary(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.TaskSummary>(`/api/tasks/summary${buildQuery({ ...scope })}`, init);
 }
 
 export function getTaskSummaryFromCookie(cookie: string | null) {
@@ -2055,8 +2063,11 @@ export function getRelationshipDashboardFromCookie(cookie: string | null) {
  * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
  * Feeds the deals page stage-distribution chart.
  */
-export function getDealStageDistribution(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealStageDistribution[]>(`/api/deals/stage-distribution${buildQuery({ currency })}`, init);
+export function getDealStageDistribution(
+    currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealStageDistribution[]>(
+        `/api/deals/stage-distribution${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealFacetsFromCookie(cookie: string | null) {
@@ -2106,6 +2117,11 @@ export function getDealRisksFromCookie(cookie: string | null, ids: number[]) {
 
 export function getDealRiskAnalyticsFromCookie(cookie: string | null) {
     return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics`, withCookie(cookie));
+}
+
+/** Server-computed compact per-currency deal-risk analytics, optionally scoped to a member. */
+export function getDealRiskAnalytics(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics${buildQuery({ ...scope })}`, init);
 }
 
 /**
