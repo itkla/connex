@@ -233,7 +233,7 @@ export default function QuickCreateLauncher() {
                     <DrawerContent
                         showCloseButton={false}
                         className={cn(
-                            'gap-0 p-0 transition-[max-height,width,margin,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                            'gap-0 p-0 transition-[transform,max-height,width,margin,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
                             expanded
                                 ? 'h-[100dvh] max-h-[100dvh] w-full rounded-t-2xl'
                                 : 'mb-3 max-h-[82dvh] w-[calc(100%-1.5rem)] rounded-3xl',
