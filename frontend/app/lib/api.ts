@@ -1714,6 +1714,32 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
     return postJson<void>(`/api/introductions/dismiss`, payload, init);
 }
 
+/*
+* == Warm paths (the "receive side" of the graph, #614)
+*/
+
+export function getWarmPaths(init: RequestInit = {}, limit?: number) {
+    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+}
+
+/**
+ * Failure-aware warm-paths fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as an error state instead of an empty feed.
+ */
+export function getWarmPathsResultFromCookie(cookie: string | null, limit?: number) {
+    return resultWithCookie<Types.WarmPath[]>((init) => getWarmPaths(init, limit), cookie);
+}
+
+/** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
+export function acceptWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/introductions/paths/accept`, payload, init);
+}
+
+/** Dismisses one avenue when {@code bridgePersonId} is set, otherwise every path to the target. */
+export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/introductions/paths/dismiss`, payload, init);
+}
+
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }
