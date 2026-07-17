@@ -119,6 +119,32 @@ public class SegmentCatalog {
             new PredicateSpec("has_note", Set.of("person", "deal"), false, 0, 0, 0));
         predicates.put("has_attachment",
             new PredicateSpec("has_attachment", Set.of("company", "person", "deal"), false, 0, 0, 0));
+        predicates.put("warmth_hot",
+            new PredicateSpec("warmth_hot", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_warm",
+            new PredicateSpec("warmth_warm", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_cool",
+            new PredicateSpec("warmth_cool", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_cold",
+            new PredicateSpec("warmth_cold", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_rising",
+            new PredicateSpec("warmth_rising", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("going_cold",
+            new PredicateSpec("going_cold", Set.of("company", "person"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("at_risk",
+            new PredicateSpec("at_risk", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_high",
+            new PredicateSpec("risk_high", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_close_overdue",
+            new PredicateSpec("risk_close_overdue", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_closing_soon",
+            new PredicateSpec("risk_closing_soon", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_stalled",
+            new PredicateSpec("risk_stalled", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_stakeholder_cold",
+            new PredicateSpec("risk_stakeholder_cold", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_no_stakeholders",
+            new PredicateSpec("risk_no_stakeholders", Set.of("deal"), false, 0, 0, 0));
         return Collections.unmodifiableMap(predicates);
     }
 

@@ -133,6 +133,71 @@
       "label": "Has an attachment",
       "labelNot": "No attachments",
       "description": "At least one file is attached."
+    },
+    "warmth_hot": {
+      "label": "Hot",
+      "labelNot": "Not hot",
+      "description": "Relationship warmth is hot."
+    },
+    "warmth_warm": {
+      "label": "Warm",
+      "labelNot": "Not warm",
+      "description": "Relationship warmth is warm."
+    },
+    "warmth_cool": {
+      "label": "Cool",
+      "labelNot": "Not cool",
+      "description": "Relationship warmth is cool."
+    },
+    "warmth_cold": {
+      "label": "Cold",
+      "labelNot": "Not cold",
+      "description": "Relationship warmth is cold."
+    },
+    "warmth_rising": {
+      "label": "Warming up",
+      "labelNot": "Not warming up",
+      "description": "Relationship warmth is trending up."
+    },
+    "going_cold": {
+      "label": "Going cold soon",
+      "labelNot": "Not going cold soon",
+      "description": "Predicted to reach cold within the chosen window."
+    },
+    "at_risk": {
+      "label": "At risk",
+      "labelNot": "Not at risk",
+      "description": "Deal risk is high or medium."
+    },
+    "risk_high": {
+      "label": "High risk",
+      "labelNot": "Not high risk",
+      "description": "Deal risk level is high."
+    },
+    "risk_close_overdue": {
+      "label": "Close date overdue",
+      "labelNot": "Close date not overdue",
+      "description": "The expected close date has passed."
+    },
+    "risk_closing_soon": {
+      "label": "Closing soon but quiet",
+      "labelNot": "Not closing-soon-quiet",
+      "description": "Closing soon with no recent activity."
+    },
+    "risk_stalled": {
+      "label": "Stalled",
+      "labelNot": "Not stalled",
+      "description": "No recent activity on the deal."
+    },
+    "risk_stakeholder_cold": {
+      "label": "Stakeholder cold",
+      "labelNot": "No cold stakeholder",
+      "description": "A key stakeholder has gone cold."
+    },
+    "risk_no_stakeholders": {
+      "label": "No stakeholders",
+      "labelNot": "Has stakeholders",
+      "description": "No contacts are linked to the deal."
     }
   },
   "SavedViews": {
