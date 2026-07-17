@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -9,9 +9,11 @@ import {
     ArrowPathIcon,
     ClockIcon,
     DocumentTextIcon,
+    ExclamationCircleIcon,
     PencilSquareIcon,
     PhotoIcon,
     PrinterIcon,
+    SparklesIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
 
@@ -46,6 +48,26 @@ type DocumentState =
     | { status: 'error' }
     | { status: 'ready'; document: ReportDocument };
 
+type NarrativeState = 'idle' | 'generating' | 'error';
+
+const FIGURES_TIMEOUT_MS = 30_000;
+const NARRATIVE_TIMEOUT_MS = 90_000;
+
+/**
+ * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
+ * running (its result is cached server-side), so a timeout simply surfaces a retry affordance
+ * instead of leaving the view spinning indefinitely.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), ms);
+        promise.then(
+            (value) => { clearTimeout(timer); resolve(value); },
+            (error) => { clearTimeout(timer); reject(error); },
+        );
+    });
+}
+
 function isValidAttainmentRange(start: string, end: string, cadence: ReportDefinition['cadence']): boolean {
     const match = /^(\d{4})-(\d{2})-01$/.exec(start);
     if (!match || end < start) return false;
@@ -71,6 +93,7 @@ export default function ReportDocumentBoard({
     const t = useTranslations('Reports');
     const locale = useLocale();
     const [state, setState] = useState<DocumentState>({ status: 'loading' });
+    const [narrativeState, setNarrativeState] = useState<NarrativeState>('idle');
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
     const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(null);
     const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(null);
@@ -83,6 +106,7 @@ export default function ReportDocumentBoard({
     const [exportingPng, setExportingPng] = useState(false);
     const generationInputRef = useRef<ReportGenerateInput>({});
     const snapshotRequestRef = useRef(0);
+    const generationRef = useRef(0);
     const paperRef = useRef<HTMLElement>(null);
     const hasAttainment = definition.config.widgets.some((widget) => widget.measure === 'attainment');
 
@@ -90,22 +114,51 @@ export default function ReportDocumentBoard({
         ? activeSnapshot?.computedResult ?? null
         : state.status === 'ready' ? state.document : null;
 
+    const runNarrative = useCallback(async (generationId: number) => {
+        setNarrativeState('generating');
+        try {
+            const full = await withTimeout(
+                generateReport(definition.id, generationInputRef.current, 'full'),
+                NARRATIVE_TIMEOUT_MS,
+            );
+            if (generationRef.current !== generationId) return;
+            setState({ status: 'ready', document: full });
+            setNarrativeState('idle');
+        } catch {
+            if (generationRef.current !== generationId) return;
+            setNarrativeState('error');
+        }
+    }, [definition.id]);
+
     useEffect(() => {
-        let cancelled = false;
-        generateReport(definition.id, generationInputRef.current)
-            .then((generated) => {
-                if (cancelled) return;
-                setState({ status: 'ready', document: generated });
-                setStart(generated.periodStart);
-                setEnd(generated.periodEnd);
-            })
-            .catch(() => {
-                if (!cancelled) setState({ status: 'error' });
-            });
+        const generationId = (generationRef.current += 1);
+        (async () => {
+            let figures: ReportDocument;
+            try {
+                figures = await withTimeout(
+                    generateReport(definition.id, generationInputRef.current, 'cached'),
+                    FIGURES_TIMEOUT_MS,
+                );
+            } catch {
+                if (generationRef.current === generationId) setState({ status: 'error' });
+                return;
+            }
+            if (generationRef.current !== generationId) return;
+            setState({ status: 'ready', document: figures });
+            setStart(figures.periodStart);
+            setEnd(figures.periodEnd);
+            if (figures.narrative.reason === 'not_cached') {
+                void runNarrative(generationId);
+            }
+        })();
         return () => {
-            cancelled = true;
+            generationRef.current += 1;
         };
-    }, [definition.id, refreshKey]);
+    }, [definition.id, refreshKey, runNarrative]);
+
+    const retryNarrative = () => {
+        void runNarrative(generationRef.current);
+    };
 
     const generationInput = (): ReportGenerateInput | null => {
         if ((start && !end) || (!start && end)) {
@@ -127,6 +180,7 @@ export default function ReportDocumentBoard({
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
         setState({ status: 'loading' });
+        setNarrativeState('idle');
         setRefreshKey((key) => key + 1);
     };
 
@@ -330,7 +384,21 @@ export default function ReportDocumentBoard({
                         </Button>
                     </div>
                 ) : document ? (
-                    <ReportPaper document={document} snapshot={activeSnapshot} paperRef={paperRef} />
+                    <ReportPaper
+                        document={document}
+                        snapshot={activeSnapshot}
+                        paperRef={paperRef}
+                        narrativePhase={activeSnapshot != null
+                            ? null
+                            : narrativeState === 'generating'
+                                ? 'generating'
+                                : narrativeState === 'error'
+                                    || document.narrative.reason === 'rate_limited'
+                                    || document.narrative.reason === 'provider_error'
+                                    ? 'error'
+                                    : null}
+                        onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
+                    />
                 ) : null}
             </div>
         </div>
@@ -341,10 +409,14 @@ function ReportPaper({
     document,
     snapshot,
     paperRef,
+    narrativePhase,
+    onRetryNarrative,
 }: {
     document: ReportDocument;
     snapshot: ReportSnapshot | null;
     paperRef: RefObject<HTMLElement | null>;
+    narrativePhase: 'generating' | 'error' | null;
+    onRetryNarrative?: () => void;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -484,6 +556,34 @@ function ReportPaper({
                                 ))}
                             </div>
                         </aside>
+                    </div>
+                ) : narrativePhase === 'generating' ? (
+                    <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed border-border px-5 py-8">
+                        <SparklesIcon className="mt-0.5 size-5 shrink-0 animate-pulse text-brand-dark motion-reduce:animate-none" aria-hidden />
+                        <div>
+                            <p className="text-sm font-medium text-foreground">{t('document.narrativeGenerating')}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('document.narrativeGeneratingBody')}</p>
+                        </div>
+                    </div>
+                ) : narrativePhase === 'error' ? (
+                    <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">
+                        <div className="flex items-start gap-3">
+                            <ExclamationCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+                            <div>
+                                <p className="text-sm font-medium text-foreground">{t('document.narrativeErrorTitle')}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    {document.narrative.reason === 'rate_limited'
+                                        ? t('document.narrativeRateLimitedBody')
+                                        : t('document.narrativeErrorBody')}
+                                </p>
+                            </div>
+                        </div>
+                        {onRetryNarrative ? (
+                            <Button className="mt-4" size="sm" variant="outline" onClick={onRetryNarrative}>
+                                <ArrowPathIcon />
+                                {t('common.retry')}
+                            </Button>
+                        ) : null}
                     </div>
                 ) : (
                     <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">

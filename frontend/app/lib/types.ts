@@ -1399,6 +1399,8 @@ export type ReportGenerateInput = {
     end?: string | null;
 };
 
+export type ReportNarrativeMode = "cached" | "full";
+
 export type ReportDataPoint = {
     key: string;
     label: string;
