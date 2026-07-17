@@ -23,6 +23,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
 
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
+    @Autowired DealService dealService;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -160,6 +161,45 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         r.setQuantity(BigDecimal.ONE);
 
         assertThrows(BadRequestException.class, () -> lineItemService.create(deal.getId(), r));
+    }
+
+    @Test
+    void updatePreservesSnapshotWhenRequestOmitsCatalogFields() {
+        Deal deal = jpyDeal();
+        Product product = catalogProduct("JPY", "100.00", "10.000", "one_time");
+        String originalName = product.getName();
+        DealLineItemsResponse added = lineItemService.create(deal.getId(), line(product.getId(), "1"));
+        int itemId = added.items().get(0).getId();
+
+        product.setName("Renamed");
+        product.setUnitPrice(new BigDecimal("999.00"));
+        productService.update(product.getId(), product);
+
+        DealLineItemRequest bare = new DealLineItemRequest();
+        bare.setProductId(product.getId());
+        bare.setQuantity(new BigDecimal("3"));
+        DealLineItemDto updated = lineItemService.update(deal.getId(), itemId, bare).items().get(0);
+
+        assertEquals(originalName, updated.getName());
+        eq("100.00", updated.getUnitPrice());
+        eq("300.00", updated.getLineSubtotal());
+    }
+
+    @Test
+    void blocksDealCurrencyChangeWhileLineItemsExist() {
+        Deal deal = jpyDeal();
+        Product product = catalogProduct("JPY", "100.00", null, "one_time");
+        lineItemService.create(deal.getId(), line(product.getId(), "1"));
+
+        Deal edit = new Deal();
+        edit.setName(deal.getName());
+        edit.setCurrency("USD");
+        edit.setPipelineId(deal.getPipelineId());
+        edit.setStageId(deal.getStageId());
+        edit.setCompanyId(deal.getCompanyId());
+        edit.setValue(deal.getValue());
+
+        assertThrows(BadRequestException.class, () -> dealService.update(deal.getId(), edit));
     }
 
     @Test

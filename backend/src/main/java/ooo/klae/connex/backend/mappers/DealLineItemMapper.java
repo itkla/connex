@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.DealLineItem;
  */
 public interface DealLineItemMapper {
     List<DealLineItem> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    int countByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     DealLineItem getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(DealLineItem item);
     int update(DealLineItem item);

@@ -59,7 +59,7 @@ public class DealLineItemService {
         DealLineItem item = new DealLineItem();
         item.setWorkspaceId(workspaceId);
         item.setDealId(deal.getId());
-        applyRequest(workspaceId, deal, item, request);
+        applyRequest(workspaceId, deal, item, request, true);
         compute(item);
         lineItemMapper.insert(item);
         auditService.record("deal.line_item.create", "deal", deal.getId(), deal.getName(),
@@ -73,7 +73,7 @@ public class DealLineItemService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
-        applyRequest(workspaceId, deal, item, request);
+        applyRequest(workspaceId, deal, item, request, false);
         compute(item);
         lineItemMapper.update(item);
         auditService.record("deal.line_item.update", "deal", deal.getId(), deal.getName(),
@@ -94,12 +94,16 @@ public class DealLineItemService {
     }
 
     /**
-     * Populates a line item from the request, snapshotting catalog values when a product is named and
-     * applying any explicit overrides on top. The line currency is always the deal currency.
+     * Populates a line item from the request. On create, catalog values are snapshotted from the
+     * product (currency-checked against the deal) or taken from the ad-hoc fields. On update, the
+     * stored snapshot ({@code name}/{@code sku}/{@code unit}/{@code unitPrice}/{@code taxRate}/
+     * {@code billingFrequency}/{@code productId}) is preserved and the product is never re-read, so a
+     * later catalog edit can never leak into an existing line — explicit request fields still
+     * override. The line currency is always the deal currency.
      */
-    private void applyRequest(int workspaceId, Deal deal, DealLineItem item, DealLineItemRequest request) {
+    private void applyRequest(int workspaceId, Deal deal, DealLineItem item, DealLineItemRequest request, boolean creating) {
         String dealCurrency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
-        if (request.getProductId() != null) {
+        if (creating && request.getProductId() != null) {
             Product product = productMapper.getById(workspaceId, request.getProductId());
             if (product == null) throw new ResourceNotFoundException("Product not found with id: " + request.getProductId());
             String productCurrency = product.getCurrency() == null ? "USD" : product.getCurrency();
@@ -114,7 +118,7 @@ public class DealLineItemService {
             item.setTaxRate(request.getTaxRate() != null ? request.getTaxRate() : product.getTaxRate());
             item.setBillingFrequency(normalizeFrequency(
                 request.getBillingFrequency() != null ? request.getBillingFrequency() : product.getBillingFrequency()));
-        } else {
+        } else if (creating) {
             if (request.getName() == null || request.getName().isBlank()) {
                 throw new BadRequestException("name is required for an ad-hoc line item");
             }
@@ -128,6 +132,15 @@ public class DealLineItemService {
             item.setUnitPrice(request.getUnitPrice());
             item.setTaxRate(request.getTaxRate());
             item.setBillingFrequency(normalizeFrequency(request.getBillingFrequency()));
+        } else {
+            if (request.getName() != null) item.setName(request.getName());
+            if (request.getSku() != null) item.setSku(request.getSku());
+            if (request.getUnit() != null) item.setUnit(request.getUnit());
+            if (request.getUnitPrice() != null) item.setUnitPrice(request.getUnitPrice());
+            if (request.getTaxRate() != null) item.setTaxRate(request.getTaxRate());
+            if (request.getBillingFrequency() != null) {
+                item.setBillingFrequency(normalizeFrequency(request.getBillingFrequency()));
+            }
         }
         item.setQuantity(request.getQuantity() == null ? BigDecimal.ONE : request.getQuantity());
         item.setDiscountType(request.getDiscountType());
