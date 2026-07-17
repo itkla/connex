@@ -80,7 +80,9 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
         "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",
         "ooo.klae.connex.backend.mappers.ActivityMapper.countCreatedAnywhere",
-        "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere"
+        "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignSendMapper.workspaceIdsWithQueuedSends",
+        "ooo.klae.connex.backend.mappers.CampaignDeliveryMapper.getByToken"
     );
 
     /**
