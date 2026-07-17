@@ -130,17 +130,19 @@ public class AiReportNarrativeService {
                     return ReportNarrativeDto.unavailable(RATE_LIMITED);
                 }
                 try {
-                    AiStructuredOutcome<AiReportNarrativeContent> outcome = aiInvocationService.completeStructured(
+                    AiStructuredOutcome<AiReportNarrativeSelection> outcome = aiInvocationService.completeStructured(
                             new AiInvocation(FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE),
-                            AiReportNarrativeContent.class);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)) {
+                            AiReportNarrativeSelection.class);
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeSelection> parsed)) {
                         return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                     }
-                    Optional<AiReportNarrativeContent> validated =
-                            AiReportNarrativeValidator.validate(parsed.value(), reportContext);
-                    if (validated.isEmpty()) {
+                    Optional<AiReportNarrativeContent> resolved =
+                            AiReportSelectionResolver.resolve(parsed.value(), reportContext);
+                    if (resolved.isEmpty()) {
                         return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
                     }
+                    AiReportNarrativeContent content = resolved.get();
+                    int warnings = parsed.demaskWarnings();
                     String generatedAt = Instant.now(clock).toString();
                     aiOutputCacheStore.save(
                             workspaceId,
@@ -148,10 +150,10 @@ public class AiReportNarrativeService {
                             reportId,
                             AiOutputCacheStore.NO_SUBJECT,
                             contentHash,
-                            validated.get(),
-                            parsed.demaskWarnings(),
+                            content,
+                            warnings,
                             generatedAt);
-                    return toDto(validated.get(), generatedAt, parsed.demaskWarnings());
+                    return toDto(content, generatedAt, warnings);
                 } catch (MaskingLeakException | AiProviderException exception) {
                     return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                 } catch (ForbiddenException exception) {
@@ -268,6 +270,6 @@ public class AiReportNarrativeService {
     private static String cacheFeature() {
         Locale locale = LocaleContextHolder.getLocale();
         String language = locale.getLanguage();
-        return FEATURE + ":v2:" + (language.isBlank() ? Locale.ENGLISH.getLanguage() : language);
+        return FEATURE + ":v3:" + (language.isBlank() ? Locale.ENGLISH.getLanguage() : language);
     }
 }
