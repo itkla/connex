@@ -28,6 +28,7 @@ import {
     generateReport,
     getReportSnapshot,
 } from '@/app/lib/api';
+import { recoverAiResult } from '@/app/lib/aiRecovery';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     ReportCitation,
@@ -52,12 +53,6 @@ type NarrativeState = 'idle' | 'generating' | 'error';
 
 const FIGURES_TIMEOUT_MS = 30_000;
 const NARRATIVE_TIMEOUT_MS = 90_000;
-const RECOVERY_POLL_INTERVAL_MS = 6_000;
-const RECOVERY_DEADLINE_MS = 60_000;
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
@@ -143,23 +138,15 @@ export default function ReportDocumentBoard({
         } catch {
             if (generationRef.current !== generationId) return;
         }
-        const deadline = Date.now() + RECOVERY_DEADLINE_MS;
-        while (Date.now() < deadline) {
-            await sleep(RECOVERY_POLL_INTERVAL_MS);
-            if (generationRef.current !== generationId) return;
-            try {
-                const recovered = await generateReport(
-                    definition.id, generationInputRef.current, 'cached');
-                if (generationRef.current !== generationId) return;
-                if (recovered.narrative.available) {
-                    apply(recovered);
-                    return;
-                }
-            } catch {
-                continue;
-            }
-        }
-        if (generationRef.current === generationId) {
+        const recovered = await recoverAiResult(
+            () => generateReport(definition.id, generationInputRef.current, 'cached'),
+            (document) => document.narrative.available,
+            () => generationRef.current !== generationId,
+        );
+        if (generationRef.current !== generationId) return;
+        if (recovered) {
+            apply(recovered);
+        } else {
             setNarrativeState('error');
         }
     }, [definition.id]);
