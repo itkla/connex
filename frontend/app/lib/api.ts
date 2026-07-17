@@ -1722,6 +1722,29 @@ export function getWarmPaths(init: RequestInit = {}, limit?: number) {
     return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
 }
 
+/** The combined introductions feed — suggestions + warm paths from one backend warmth pass. */
+export function getIntroOverview(init: RequestInit = {}, suggestions?: number, paths?: number) {
+    return getJson<Types.IntroOverview>(
+        `/api/introductions/overview${buildQuery({ suggestions, paths })}`,
+        init,
+    );
+}
+
+/**
+ * Failure-aware overview fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as error states instead of an empty page.
+ */
+export function getIntroOverviewResultFromCookie(
+    cookie: string | null,
+    suggestions?: number,
+    paths?: number,
+) {
+    return resultWithCookie<Types.IntroOverview>(
+        (init) => getIntroOverview(init, suggestions, paths),
+        cookie,
+    );
+}
+
 /**
  * Failure-aware warm-paths fetch for the introductions page (see {@link resultWithCookie}), so a
  * backend fault renders as an error state instead of an empty feed.

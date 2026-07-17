@@ -451,6 +451,12 @@ export type WarmPathPayload = {
     taskDescription?: string;
 };
 
+/** Combined introductions feed — suggestions + warm paths from one backend warmth pass (#630). */
+export type IntroOverview = {
+    suggestions: IntroSuggestion[];
+    paths: WarmPath[];
+};
+
 export type User = {
     id: number;
     username: string;
