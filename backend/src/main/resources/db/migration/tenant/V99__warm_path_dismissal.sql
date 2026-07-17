@@ -18,8 +18,6 @@ CREATE TABLE warm_path_dismissal (
     CONSTRAINT chk_warm_path_dismissal_status CHECK (status IN ('dismissed', 'accepted')),
     CONSTRAINT chk_warm_path_dismissal_distinct
         CHECK (bridge_person_id IS NULL OR bridge_person_id <> target_person_id),
-    CONSTRAINT fk_warm_path_dismissal_workspace
-        FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
     CONSTRAINT fk_warm_path_dismissal_target
         FOREIGN KEY (target_person_id) REFERENCES person(id) ON DELETE CASCADE,
     CONSTRAINT fk_warm_path_dismissal_bridge
