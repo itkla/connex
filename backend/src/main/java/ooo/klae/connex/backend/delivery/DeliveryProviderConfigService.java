@@ -345,7 +345,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new BadRequestException("Invalid delivery channel");
         }
         if (channel != DeliveryChannel.EMAIL) {
-            throw new BadRequestException("Delivery channel " + channel.token() + " is not supported yet");
+            throw new BadRequestException("Delivery channel " + channel + " is not supported yet");
         }
         return channel;
     }

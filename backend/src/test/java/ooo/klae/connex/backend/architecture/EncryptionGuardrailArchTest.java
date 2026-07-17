@@ -230,7 +230,8 @@ class EncryptionGuardrailArchTest {
         "secret_value.ciphertext",
         "workspace_mail_config.password_enc",
         "sso_connection.oidc_client_secret_enc",
-        "sso_connection.saml_sp_private_key_enc");
+        "sso_connection.saml_sp_private_key_enc",
+        "delivery_provider_config.webhook_secret_ref");
 
     private static final Set<String> EXPECTED_APPROVED_CIPHER_SITES = Set.of(
         "ooo/klae/connex/backend/secrets/SecretStoreCrypto.java",
@@ -240,6 +241,7 @@ class EncryptionGuardrailArchTest {
     private static final Map<String, Integer> APPROVED_CREDENTIAL_STORAGE_REFERENCES = Map.ofEntries(
         Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/config/SecretStoreStartupValidator.java#SecretStore", 1),
+        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/mail/MailConfigResolver.java#SecretCipher", 1),
         Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#SecretStore", 2),
         Map.entry("ooo/klae/connex/backend/secrets/LegacySecretRewrapRunner.java#SecretCipher", 1),
@@ -258,12 +260,16 @@ class EncryptionGuardrailArchTest {
 
     private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.of(
         "ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3,
+        "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL", 3,
+        "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3,
         "ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3,
         "ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_OIDC_CLIENT_SECRET", 3,
         "ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_SAML_SP_PRIVATE_KEY", 3);
 
     private static final Set<String> APPROVED_SECRET_PURPOSES = Set.of(
         "WORKSPACE_SMTP_PASSWORD",
+        "WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL",
+        "WORKSPACE_DELIVERY_WEBHOOK_SECRET",
         "ORG_SSO_OIDC_CLIENT_SECRET",
         "ORG_SSO_SAML_SP_PRIVATE_KEY",
         "ORG_AI_PROVIDER_CREDENTIAL");
@@ -273,6 +279,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#sessionToken",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#serviceAccountJson",
+        "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
         "ooo/klae/connex/backend/dto/EmailChangeConfirmDto.java#token",
         "ooo/klae/connex/backend/dto/LoginDto.java#password",
@@ -288,6 +295,7 @@ class EncryptionGuardrailArchTest {
 
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
         "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
+        "ooo/klae/connex/backend/dto/DeliveryWebhookTokenDto.java#token",
         "ooo/klae/connex/backend/dto/InviteDto.java#token",
         "ooo/klae/connex/backend/dto/InviteLinkDto.java#token",
         "ooo/klae/connex/backend/dto/MailConfigDto.java#hasPassword",
