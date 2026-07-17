@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.dto.DashboardDealRiskResult;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.DealRiskFactorCountDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -201,15 +202,15 @@ public class DealRiskService {
             int workspaceId,
             Map<Integer, RelationshipTemperatureDto> warmth,
             int limit) {
-        RiskCandidateBatch candidates = riskCandidates(workspaceId);
+        RiskCandidateBatch candidates = riskCandidates(workspaceId, MemberScope.allTeam());
         List<DealRiskDto> items = assessDeals(workspaceId, candidates.ids(), warmth)
             .stream().limit(limit).toList();
         return new DashboardDealRiskResult(items, candidates.truncated());
     }
 
     /** Returns compact per-currency analytics over a fixed interactive candidate ceiling. */
-    public DealRiskAnalyticsDto analytics(int workspaceId) {
-        RiskCandidateBatch candidates = riskCandidates(workspaceId);
+    public DealRiskAnalyticsDto analytics(int workspaceId, MemberScope memberScope) {
+        RiskCandidateBatch candidates = riskCandidates(workspaceId, memberScope);
         Map<String, List<DealRiskDto>> byCurrency = new HashMap<>();
         for (DealRiskDto risk : assessDeals(workspaceId, candidates.ids())) {
             String currency = risk.getCurrency() == null || risk.getCurrency().isBlank()
@@ -224,9 +225,9 @@ public class DealRiskService {
         return new DealRiskAnalyticsDto(currencies, candidates.truncated());
     }
 
-    private RiskCandidateBatch riskCandidates(int workspaceId) {
+    private RiskCandidateBatch riskCandidates(int workspaceId, MemberScope memberScope) {
         List<Integer> ids = dealMapper.getRiskCandidateIds(
-            workspaceId, MAX_INTERACTIVE_CANDIDATES + 1);
+            workspaceId, memberScope, MAX_INTERACTIVE_CANDIDATES + 1);
         boolean truncated = ids.size() > MAX_INTERACTIVE_CANDIDATES;
         return new RiskCandidateBatch(
             truncated ? ids.subList(0, MAX_INTERACTIVE_CANDIDATES) : ids,

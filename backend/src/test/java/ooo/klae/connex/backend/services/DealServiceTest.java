@@ -203,10 +203,10 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setWon(true);
         dealMapper.insert(foreign);
 
-        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null);
-        List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null);
-        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null);
-        List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY");
+        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null, MemberScope.allTeam());
+        List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null, MemberScope.allTeam());
+        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam());
+        List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY", MemberScope.allTeam());
 
         assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),
             monthTotals(series.closed()));
@@ -245,13 +245,13 @@ class DealServiceTest extends AbstractServiceTest {
         updateChartDeal(newDeal(pipeline, stage, company),
             20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
 
-        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC");
-        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York");
+        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC", MemberScope.allTeam());
+        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York", MemberScope.allTeam());
 
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0), monthTotals(utc.closed()));
         assertEquals(Map.of("2025-12", 90.0, "2026-6", 10.0), monthTotals(newYork.closed()));
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0),
-            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00").closed()));
+            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00", MemberScope.allTeam()).closed()));
     }
 
     @Test
@@ -286,10 +286,10 @@ class DealServiceTest extends AbstractServiceTest {
         analyticsDeal(otherWorkspace, otherPipeline, otherStage, otherCompany, "Foreign Open",
             6000.0, 0.0, "JPY", null, 3, null, 61);
 
-        DealKpisDto kpis = dealService.getDealKpis("JPY", 30);
-        List<DealPipelineValueDto> pipelineValues = dealService.getDealPipelineValue("JPY", 30);
-        List<DealAgingDto> aging = dealService.getDealAging("JPY");
-        DealTopDto top = dealService.getTopDeals("JPY");
+        DealKpisDto kpis = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
+        List<DealPipelineValueDto> pipelineValues = dealService.getDealPipelineValue("JPY", 30, MemberScope.allTeam());
+        List<DealAgingDto> aging = dealService.getDealAging("JPY", MemberScope.allTeam());
+        DealTopDto top = dealService.getTopDeals("JPY", MemberScope.allTeam());
 
         assertEquals(80.0, kpis.wonRevenue(), 0.0001);
         assertEquals(40.0, kpis.wonRevenuePrev(), 0.0001);
@@ -333,7 +333,7 @@ class DealServiceTest extends AbstractServiceTest {
         workspace = emptyWorkspace;
         authenticateAs(currentUser, workspace.getId());
 
-        DealKpisDto kpis = dealService.getDealKpis("JPY", 90);
+        DealKpisDto kpis = dealService.getDealKpis("JPY", 90, MemberScope.allTeam());
 
         assertEquals(0.0, kpis.wonRevenue(), 0.0001);
         assertEquals(0.0, kpis.newPipeline(), 0.0001);
@@ -362,7 +362,7 @@ class DealServiceTest extends AbstractServiceTest {
         analyticsDeal(workspace, pipeline, stage, company, "Previous Zero Lost",
             0.0, 0.0, "JPY", false, 45, 40, 1);
 
-        DealKpisDto lostOnly = dealService.getDealKpis("JPY", 30);
+        DealKpisDto lostOnly = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
 
         assertNull(lostOnly.wonRevenuePrev());
         assertNull(lostOnly.avgCycleDaysPrev());
@@ -372,7 +372,7 @@ class DealServiceTest extends AbstractServiceTest {
 
         analyticsDeal(workspace, pipeline, stage, company, "Previous Zero Won",
             0.0, 0.0, "JPY", true, 50, 40, 1);
-        DealKpisDto withWon = dealService.getDealKpis("JPY", 30);
+        DealKpisDto withWon = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
 
         assertEquals(0.0, withWon.wonRevenuePrev(), 0.0001);
         assertEquals(10.0, withWon.avgCycleDaysPrev(), 0.0001);

@@ -67,6 +67,14 @@
     </if>
   </select>
 
+  <sql id="activityMemberScope">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">AND a.created_by_id = #{memberScope.userId}</when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">AND a.created_by_id IN <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach></when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">AND a.created_by_id IS NULL</when>
+    </choose>
+  </sql>
+
   <select id="activityVolume" resultType="ooo.klae.connex.backend.dto.ActivityVolumeBucketDto">
     SELECT
       <choose>
@@ -86,6 +94,7 @@
       COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`
     FROM activity a
     WHERE a.workspace_id = #{workspaceId}
+    <include refid="activityMemberScope"/>
       AND a.timestamp &lt;= NOW()
     <choose>
       <when test="days == 365">

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
 import java.time.LocalDate;
@@ -20,7 +21,8 @@ public interface TaskMapper {
     long countTasks(int workspaceId);
     TaskSummaryDto taskSummary(
         @Param("workspaceId") int workspaceId,
-        @Param("today") LocalDate today
+        @Param("today") LocalDate today,
+        @Param("memberScope") MemberScope memberScope
     );
     List<Task> getUpcomingOpenTasks(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
     List<Task> getTasksByAssignedToId(
