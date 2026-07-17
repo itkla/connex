@@ -470,9 +470,11 @@ public class WarmPathService {
     }
 
     /**
-     * The follow-up task text: the caller's localized copy when supplied, otherwise a default in
-     * the request locale (mirroring the frontend's {@code acceptTaskDescription} strings) built
-     * from mention tokens so the task links both contacts.
+     * The follow-up task text: the caller's localized copy when supplied (the frontend always
+     * sends it, localized from its own locale cookie), otherwise a default built from mention
+     * tokens so the task links both contacts. The default's language follows the request's
+     * {@code Accept-Language} (the only locale signal API callers carry), which may differ from
+     * the web app's cookie-selected locale.
      */
     private String resolveTaskDescription(
             int workspaceId, int targetPersonId, int bridgePersonId, String taskDescription) {

@@ -218,9 +218,22 @@ export default function IntroductionsBoard({
 
     const mention = (name: string, id: number) => `[${name}](person:${id})`;
 
+    const removePathRow = (targetId: number) => {
+        setPaths((current) => current.filter((p) => p.targetId !== targetId));
+    };
+
+    const restorePathRow = (path: WarmPath, index: number) => {
+        setPaths((current) => {
+            if (current.some((p) => p.targetId === path.targetId)) return current;
+            const next = [...current];
+            next.splice(Math.min(Math.max(index, 0), next.length), 0, path);
+            return next;
+        });
+    };
+
     const askIntro = async (path: WarmPath, bridge: WarmPathBridge) => {
-        const previous = paths;
-        setPaths((current) => current.filter((p) => p.targetId !== path.targetId));
+        const index = paths.findIndex((p) => p.targetId === path.targetId);
+        removePathRow(path.targetId);
         try {
             await acceptWarmPath({
                 targetPersonId: path.targetId,
@@ -232,26 +245,43 @@ export default function IntroductionsBoard({
             });
             toastSuccess(t('acceptToast', { name: path.targetName }));
         } catch (err) {
-            setPaths(previous);
+            restorePathRow(path, index);
             toastError(err instanceof Error ? err.message : t('acceptFailed'));
             throw err;
         }
     };
 
     const dismissTarget = async (path: WarmPath) => {
-        const previous = paths;
-        setPaths((current) => current.filter((p) => p.targetId !== path.targetId));
+        const index = paths.findIndex((p) => p.targetId === path.targetId);
+        removePathRow(path.targetId);
         try {
             await dismissWarmPath({ targetPersonId: path.targetId });
         } catch (err) {
-            setPaths(previous);
+            restorePathRow(path, index);
             toastError(err instanceof Error ? err.message : t('dismissFailed'));
             throw err;
         }
     };
 
+    const restoreAvenue = (path: WarmPath, rowIndex: number, bridge: WarmPathBridge, bridgeIndex: number) => {
+        setPaths((current) => {
+            const existing = current.find((p) => p.targetId === path.targetId);
+            if (!existing) {
+                const next = [...current];
+                next.splice(Math.min(Math.max(rowIndex, 0), next.length), 0, path);
+                return next;
+            }
+            if (existing.bridges.some((b) => b.personId === bridge.personId)) return current;
+            const at = Math.min(Math.max(bridgeIndex, 0), existing.bridges.length);
+            return current.map((p) => p.targetId === path.targetId
+                ? { ...p, bridges: [...p.bridges.slice(0, at), bridge, ...p.bridges.slice(at)] }
+                : p);
+        });
+    };
+
     const dismissAvenue = async (path: WarmPath, bridge: WarmPathBridge) => {
-        const previous = paths;
+        const rowIndex = paths.findIndex((p) => p.targetId === path.targetId);
+        const bridgeIndex = path.bridges.findIndex((b) => b.personId === bridge.personId);
         setPaths((current) => current
             .map((p) => p.targetId === path.targetId
                 ? { ...p, bridges: p.bridges.filter((b) => b.personId !== bridge.personId) }
@@ -260,7 +290,7 @@ export default function IntroductionsBoard({
         try {
             await dismissWarmPath({ targetPersonId: path.targetId, bridgePersonId: bridge.personId });
         } catch (err) {
-            setPaths(previous);
+            restoreAvenue(path, rowIndex, bridge, bridgeIndex);
             toastError(err instanceof Error ? err.message : t('dismissFailed'));
             throw err;
         }

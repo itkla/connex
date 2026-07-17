@@ -10,6 +10,8 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -105,6 +107,11 @@ export default function WarmPathRow({
     const tw = useTranslations('Temperature');
     const [busy, setBusy] = useState(false);
     const [bridgeIndex, setBridgeIndex] = useState(0);
+    const [bridgeCount, setBridgeCount] = useState(path.bridges.length);
+    if (bridgeCount !== path.bridges.length) {
+        setBridgeCount(path.bridges.length);
+        setBridgeIndex(0);
+    }
 
     const bridge = path.bridges[Math.min(bridgeIndex, path.bridges.length - 1)];
     const otherBridges = path.bridges.length - 1;
@@ -135,30 +142,38 @@ export default function WarmPathRow({
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
-                                aria-label={t('chooseBridgeAria', { count: path.bridges.length })}
-                                className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground aria-expanded:border-foreground/20 aria-expanded:text-foreground"
+                                disabled={busy}
+                                className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground aria-expanded:border-foreground/20 aria-expanded:text-foreground disabled:pointer-events-none disabled:opacity-50"
                             >
                                 {t('morePaths', { count: otherBridges })}
+                                <span className="sr-only">{t('chooseBridgeAria', { count: path.bridges.length })}</span>
                                 <ChevronDownIcon className="size-3" aria-hidden />
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-64">
-                            {path.bridges.map((candidate, index) => (
-                                <DropdownMenuItem
-                                    key={candidate.personId}
-                                    onClick={() => setBridgeIndex(index)}
-                                    className={cn(index === bridgeIndex && 'bg-muted')}
-                                >
-                                    <span className="min-w-0">
-                                        <span className="block truncate text-sm font-medium text-foreground">
-                                            {candidate.name}
+                            <DropdownMenuRadioGroup
+                                value={String(bridge.personId)}
+                                onValueChange={(value) => {
+                                    const index = path.bridges.findIndex((b) => String(b.personId) === value);
+                                    if (index >= 0) setBridgeIndex(index);
+                                }}
+                            >
+                                {path.bridges.map((candidate) => (
+                                    <DropdownMenuRadioItem
+                                        key={candidate.personId}
+                                        value={String(candidate.personId)}
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-sm font-medium text-foreground">
+                                                {candidate.name}
+                                            </span>
+                                            <span className="block truncate text-xs text-muted-foreground">
+                                                {evidenceLabel(candidate, t)}
+                                            </span>
                                         </span>
-                                        <span className="block truncate text-xs text-muted-foreground">
-                                            {evidenceLabel(candidate, t)}
-                                        </span>
-                                    </span>
-                                </DropdownMenuItem>
-                            ))}
+                                    </DropdownMenuRadioItem>
+                                ))}
+                            </DropdownMenuRadioGroup>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : null}
