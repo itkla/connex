@@ -80,13 +80,13 @@ class SegmentCatalogTest {
     }
 
     @Test
-    void operatorsPerKindMatchTheCatalog() {
-        assertEquals(Set.of("equals", "contains", "starts_with", "is_set"), catalog.operatorsFor(Kind.STRING));
-        assertEquals(Set.of("equals", "gt", "gte", "lt", "lte"), catalog.operatorsFor(Kind.NUMBER));
-        assertEquals(Set.of("is", "in"), catalog.operatorsFor(Kind.ID));
-        assertEquals(Set.of("is"), catalog.operatorsFor(Kind.ENUM));
-        assertEquals(Set.of("has"), catalog.operatorsFor(Kind.TAG));
-        assertEquals(Set.of("before", "after", "within_days", "is_set"), catalog.operatorsFor(Kind.DATE));
+    void operatorsPerKindMatchTheCatalogInOrder() {
+        assertEquals(List.of("equals", "contains", "starts_with", "is_set"), catalog.operatorsFor(Kind.STRING));
+        assertEquals(List.of("equals", "gt", "gte", "lt", "lte"), catalog.operatorsFor(Kind.NUMBER));
+        assertEquals(List.of("is", "in"), catalog.operatorsFor(Kind.ID));
+        assertEquals(List.of("is"), catalog.operatorsFor(Kind.ENUM));
+        assertEquals(List.of("has"), catalog.operatorsFor(Kind.TAG));
+        assertEquals(List.of("before", "after", "within_days", "is_set"), catalog.operatorsFor(Kind.DATE));
     }
 
     @Test
@@ -122,6 +122,8 @@ class SegmentCatalogTest {
     @Test
     void statusValuesAreOpenWonLost() {
         assertEquals(Set.of("open", "won", "lost"), catalog.statusValues());
+        assertEquals(List.of("open", "won", "lost"), catalog.enumOptions("status"));
+        assertTrue(catalog.enumOptions("unknown").isEmpty());
     }
 
     @Test

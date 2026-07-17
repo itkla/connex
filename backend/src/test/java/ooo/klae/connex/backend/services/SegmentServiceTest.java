@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +22,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
@@ -399,5 +402,57 @@ class SegmentServiceTest extends AbstractServiceTest {
             many[i] = field("name", "contains", "x" + i);
         }
         assertThrows(BadRequestException.class, () -> evaluate(def("all", many)));
+    }
+
+    @Test
+    void catalog_company_exposesFieldsPredicatesAndLimits() {
+        SegmentCatalogDto dto = segmentService.catalog("company");
+
+        assertEquals("company", dto.recordType());
+        assertEquals(List.of("industry", "name", "tag"),
+            dto.fields().stream().map(SegmentCatalogDto.CatalogField::field).toList());
+        SegmentCatalogDto.CatalogField industry = dto.fields().stream()
+            .filter(f -> f.field().equals("industry")).findFirst().orElseThrow();
+        assertEquals("string", industry.kind());
+        assertEquals("industries", industry.valueSource());
+        assertEquals(List.of("equals", "contains", "starts_with", "is_set"), industry.operators());
+        assertEquals(List.of("warm_intro_available", "open_deal", "cooling", "no_activity"),
+            dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
+        SegmentCatalogDto.CatalogPredicate noActivity = dto.predicates().stream()
+            .filter(p -> p.key().equals("no_activity")).findFirst().orElseThrow();
+        assertTrue(noActivity.acceptsDays());
+        assertEquals(30, noActivity.defaultDays());
+        assertEquals(3650, noActivity.maxDays());
+        assertFalse(dto.predicates().stream().filter(p -> p.key().equals("open_deal"))
+            .findFirst().orElseThrow().acceptsDays());
+        assertNotNull(dto.limits());
+        assertEquals(32, dto.limits().maxConditions());
+        assertEquals(4, dto.limits().maxDepth());
+    }
+
+    @Test
+    void catalog_deal_hasStatusEnumOptionsAndNoPredicates() {
+        SegmentCatalogDto dto = segmentService.catalog("deal");
+
+        assertTrue(dto.predicates().isEmpty());
+        assertEquals(List.of("open", "won", "lost"), dto.enumOptions().get("status"));
+        SegmentCatalogDto.CatalogField stage = dto.fields().stream()
+            .filter(f -> f.field().equals("stage")).findFirst().orElseThrow();
+        assertEquals("id", stage.kind());
+        assertEquals("stages", stage.valueSource());
+        assertEquals(List.of("is", "in"), stage.operators());
+    }
+
+    @Test
+    void catalog_person_hasNoPredicatesAndNoEnumOptions() {
+        SegmentCatalogDto dto = segmentService.catalog("person");
+
+        assertTrue(dto.predicates().isEmpty());
+        assertTrue(dto.enumOptions().isEmpty());
+    }
+
+    @Test
+    void catalog_unsupportedRecordType_throws() {
+        assertThrows(BadRequestException.class, () -> segmentService.catalog("task"));
     }
 }

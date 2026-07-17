@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
@@ -121,6 +123,44 @@ public class SegmentService {
         List<TagDto> tags = tagMapper.getAllTags(workspaceId).stream().map(TagDto::from).toList();
         List<String> industries = "company".equals(type) ? segmentMapper.distinctIndustries(workspaceId) : List.of();
         return new SegmentFieldsDto(industries, tags);
+    }
+
+    /**
+     * The static, workspace-independent shape of the builder for a record type: its fields (kind,
+     * value source, legal operators), the predicates that apply to it, the enum option sets, and the
+     * definition shape limits. Carries no workspace data, so it is safe to cache; the client renders
+     * the builder generically from it and pairs it with the workspace value options from
+     * {@link #fields(String)}.
+     */
+    public SegmentCatalogDto catalog(String recordType) {
+        String type = requireSupported(recordType);
+        List<SegmentCatalogDto.CatalogField> fields = new ArrayList<>();
+        Map<String, List<String>> enums = new LinkedHashMap<>();
+        for (SegmentCatalog.FieldSpec spec : catalog.fields(type)) {
+            fields.add(new SegmentCatalogDto.CatalogField(
+                spec.field(),
+                spec.kind().name().toLowerCase(),
+                spec.valueSource().name().toLowerCase(),
+                catalog.operatorsFor(spec.kind())));
+            if (spec.kind() == SegmentCatalog.Kind.ENUM) {
+                enums.put(spec.field(), catalog.enumOptions(spec.field()));
+            }
+        }
+        List<SegmentCatalogDto.CatalogPredicate> predicates = new ArrayList<>();
+        for (SegmentCatalog.PredicateSpec spec : catalog.predicates()) {
+            if (spec.recordTypes().contains(type)) {
+                predicates.add(new SegmentCatalogDto.CatalogPredicate(
+                    spec.key(),
+                    List.copyOf(spec.recordTypes()),
+                    spec.acceptsDays(),
+                    spec.acceptsDays() ? spec.defaultDays() : null,
+                    spec.acceptsDays() ? spec.minDays() : null,
+                    spec.acceptsDays() ? spec.maxDays() : null));
+            }
+        }
+        SegmentCatalogDto.CatalogLimits limits = new SegmentCatalogDto.CatalogLimits(
+            catalog.maxConditions(), catalog.maxGroupConditions(), catalog.maxGroups(), catalog.maxDepth());
+        return new SegmentCatalogDto(type, fields, predicates, enums, limits);
     }
 
     /** id + display label for a bounded set of records of {@code recordType}, for a preview sample. */

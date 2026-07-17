@@ -52,15 +52,16 @@ public class SegmentCatalog {
     private static final int MIN_DAYS = 1;
     private static final int MAX_DAYS = 3650;
 
-    private static final Map<Kind, Set<String>> OPERATORS = Map.of(
-        Kind.STRING, Set.of("equals", "contains", "starts_with", "is_set"),
-        Kind.NUMBER, Set.of("equals", "gt", "gte", "lt", "lte"),
-        Kind.ID, Set.of("is", "in"),
-        Kind.ENUM, Set.of("is"),
-        Kind.TAG, Set.of("has"),
-        Kind.DATE, Set.of("before", "after", "within_days", "is_set"));
+    private static final Map<Kind, List<String>> OPERATORS = Map.of(
+        Kind.STRING, List.of("equals", "contains", "starts_with", "is_set"),
+        Kind.NUMBER, List.of("equals", "gt", "gte", "lt", "lte"),
+        Kind.ID, List.of("is", "in"),
+        Kind.ENUM, List.of("is"),
+        Kind.TAG, List.of("has"),
+        Kind.DATE, List.of("before", "after", "within_days", "is_set"));
 
-    private static final Set<String> STATUS_VALUES = Set.of("open", "won", "lost");
+    private static final Map<String, List<String>> ENUM_OPTIONS = Map.of(
+        "status", List.of("open", "won", "lost"));
 
     private static final Map<String, List<FieldSpec>> FIELDS = buildFields();
     private static final Map<String, PredicateSpec> PREDICATES = buildPredicates();
@@ -138,10 +139,10 @@ public class SegmentCatalog {
 
     /**
      * @param kind a field kind
-     * @return the operator tokens legal for the kind
+     * @return the operator tokens legal for the kind, in display order
      */
-    public Set<String> operatorsFor(Kind kind) {
-        return OPERATORS.getOrDefault(kind, Set.of());
+    public List<String> operatorsFor(Kind kind) {
+        return OPERATORS.getOrDefault(kind, List.of());
     }
 
     /** @return the predicate catalog, in catalog order */
@@ -190,7 +191,15 @@ public class SegmentCatalog {
 
     /** @return the closed set of deal status values */
     public Set<String> statusValues() {
-        return STATUS_VALUES;
+        return Set.copyOf(ENUM_OPTIONS.getOrDefault("status", List.of()));
+    }
+
+    /**
+     * @param field an enum-kind field key
+     * @return the field's ordered option values, or an empty list when the field has no option set
+     */
+    public List<String> enumOptions(String field) {
+        return ENUM_OPTIONS.getOrDefault(field, List.of());
     }
 
     /** @return the maximum number of conditions a definition may reference across all groups */
