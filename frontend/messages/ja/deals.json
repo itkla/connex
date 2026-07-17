@@ -360,5 +360,27 @@
     "firstPlace": "1位",
     "secondPlace": "2位",
     "thirdPlace": "3位"
+  },
+  "DealsLineItems": {
+    "title": "明細",
+    "addFromCatalog": "カタログから追加",
+    "addLine": "明細を追加",
+    "noProducts": "一致する商品がありません",
+    "empty": "明細がありません。商品またはカスタム明細を追加してください。",
+    "newLineName": "新規項目",
+    "columnItem": "項目",
+    "columnQty": "数量",
+    "columnUnitPrice": "単価",
+    "columnDiscount": "割引",
+    "columnLineTotal": "金額",
+    "oneTime": "一括",
+    "recurring": "継続",
+    "remove": "明細を削除",
+    "subtotal": "小計",
+    "tax": "税",
+    "oneTimeTotal": "一括",
+    "recurringTotal": "継続",
+    "grandTotal": "合計",
+    "saveFailed": "明細を保存できませんでした"
   }
 }

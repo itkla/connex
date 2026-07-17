@@ -17,6 +17,7 @@ import {
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
+    getDealLineItemsFromCookie,
     getDealCollaborators,
     getDealPeople,
     getDealRisk,
@@ -67,6 +68,7 @@ import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
 import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
+import DealLineItems from '@/app/components/records/deals/DealLineItems';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
@@ -108,6 +110,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     if (!currentUser) redirect('/auth/login');
 
     const peopleRefs = peopleRaw as DealPersonRef[];
+
+    const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
+        .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
 
     const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null
@@ -348,6 +353,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             <DealActivityBreakdown activities={activities} />
                         </div>
                     </section>
+                </Rise>
+
+                <Rise delay={0.21}>
+                    <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">

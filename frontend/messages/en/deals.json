@@ -362,5 +362,27 @@
     "firstPlace": "1st place",
     "secondPlace": "2nd place",
     "thirdPlace": "3rd place"
+  },
+  "DealsLineItems": {
+    "title": "Line items",
+    "addFromCatalog": "Add from catalog",
+    "addLine": "Add line",
+    "noProducts": "No matching products",
+    "empty": "No line items. Add products or a custom line.",
+    "newLineName": "New item",
+    "columnItem": "Item",
+    "columnQty": "Qty",
+    "columnUnitPrice": "Unit price",
+    "columnDiscount": "Discount",
+    "columnLineTotal": "Total",
+    "oneTime": "One-time",
+    "recurring": "Recurring",
+    "remove": "Remove line",
+    "subtotal": "Subtotal",
+    "tax": "Tax",
+    "oneTimeTotal": "One-time",
+    "recurringTotal": "Recurring",
+    "grandTotal": "Total",
+    "saveFailed": "Couldn't save the line item"
   }
 }

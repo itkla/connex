@@ -2481,6 +2481,53 @@ export function deleteTag(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/tags/${id}`, init);
 }
 
+export function getProducts(init: RequestInit = {}) {
+    return getJson<Types.Product[]>(`/api/products`, init);
+}
+
+export function getProductsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Product>((init) => getProducts(init), cookie);
+}
+
+export function getProductById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Product>(`/api/products/${id}`, init);
+}
+
+export function createProduct(payload: Types.CreateProductPayload) {
+    return postJson<Types.Product>(`/api/products`, payload);
+}
+
+export function updateProduct(id: number, payload: Types.UpdateProductPayload) {
+    return putJson<Types.Product>(`/api/products/${id}`, payload);
+}
+
+export function deleteProduct(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/products/${id}`, init);
+}
+
+export function getDealLineItems(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
+}
+
+export function getDealLineItemsFromCookie(dealId: number, cookie: string | null) {
+    return getJson<Types.DealLineItemsResponse>(
+        `/api/deals/${dealId}/line-items`,
+        cookie ? { headers: { cookie }, cache: 'no-store' } : {},
+    );
+}
+
+export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload) {
+    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload);
+}
+
+export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload) {
+    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload);
+}
+
+export function deleteDealLineItem(dealId: number, itemId: number, init: RequestInit = {}) {
+    return deleteJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, init);
+}
+
 export function getPeopleForTag(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact[]>(`/api/tags/${id}/people`, init);
 }

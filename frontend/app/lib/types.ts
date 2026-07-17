@@ -1026,6 +1026,105 @@ export type UpdateTagPayload = {
     color?: string;
 };
 
+export type BillingFrequency = 'one_time' | 'recurring';
+export type LineDiscountType = 'amount' | 'percent';
+
+/** A workspace-scoped catalog product/service. Money fields are server-authoritative. */
+export type Product = {
+    id: number;
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateProductPayload = {
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active?: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+};
+
+export type UpdateProductPayload = Partial<CreateProductPayload>;
+
+/**
+ * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
+ * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
+ * server-computed (BigDecimal) — the client never does money arithmetic.
+ */
+export type DealLineItem = {
+    id: number;
+    dealId: number;
+    productId?: number | null;
+    name: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position: number;
+    currency: string;
+    lineSubtotal: number;
+    lineTax: number;
+    lineTotal: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** Server-computed deal roll-up; recurring vs one-time kept separate to avoid double-counting. */
+export type DealLineItemTotals = {
+    currency: string;
+    subtotal: number;
+    tax: number;
+    oneTimeTotal: number;
+    recurringTotal: number;
+    grandTotal: number;
+};
+
+export type DealLineItemsResponse = {
+    items: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+export type DealLineItemPayload = {
+    productId?: number | null;
+    name?: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice?: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency?: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position?: number;
+};
+
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';
 
 export type CustomFieldType =
