@@ -38,16 +38,18 @@ class WarmPathServiceTest extends AbstractServiceTest {
     @Autowired private IntroductionMapper introductionMapper;
 
     @Test
-    void surfacesPathAndAcceptCreatesTaskAndRetiresTheAvenue() {
+    void surfacesPathAndAcceptCreatesTaskAndRetiresTheTarget() {
         Person bridge = engagedPerson(newCompany());
+        Person otherBridge = engagedPerson(newCompany());
         Person target = newPerson(newCompany());
         connect(bridge.getId(), target.getId());
+        connect(otherBridge.getId(), target.getId());
 
         List<WarmPathDto> paths = warmPathService.getPaths(50);
         WarmPathDto row = findTarget(paths, target.getId());
         assertNotNull(row, "an untouched import bridged by a warm contact must surface");
         assertEquals(WarmPathService.REACH_NEW, row.getReachType());
-        assertEquals(bridge.getId(), row.getBridges().get(0).getPersonId());
+        assertEquals(2, row.getBridges().size());
         assertEquals(WarmPathService.EVIDENCE_CONNECTION, row.getBridges().get(0).getEvidenceType());
 
         Task created = warmPathService.acceptPath(target.getId(), bridge.getId(), null);
@@ -112,7 +114,8 @@ class WarmPathServiceTest extends AbstractServiceTest {
             introductionMapper.findWarmPathDismissals(workspace.getId()).stream()
                 .filter(row -> row.getTargetPersonId() == target.getId())
                 .toList();
-        assertEquals(2, rows.size(), "the accepted avenue row must survive a whole-target dismissal");
+        assertEquals(3, rows.size(),
+            "the accepted avenue and target rows must survive a whole-target dismissal");
         assertTrue(rows.stream().anyMatch(row -> row.getBridgePersonId() == null));
         assertTrue(rows.stream().anyMatch(row ->
             row.getBridgePersonId() != null && row.getBridgePersonId() == bridge.getId()));

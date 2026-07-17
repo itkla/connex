@@ -16,7 +16,7 @@ import PartyAvatar from './PartyAvatar';
 type PathTranslator = (key: string, values?: Record<string, string | number>) => string;
 
 /** The labeled evidence tier behind a bridge, e.g. "Colleagues at Acme" or a dated overlap. */
-export function evidenceLabel(bridge: WarmPathBridge, t: PathTranslator): string {
+function evidenceLabel(bridge: WarmPathBridge, t: PathTranslator): string {
     if (bridge.evidenceType === 'connection') {
         return t('evidenceConnection');
     }
@@ -89,17 +89,17 @@ export default function WarmPathRow({
     onDismiss,
 }: {
     path: WarmPath;
-    onAsk: () => void;
-    onDismiss: () => void;
+    onAsk: () => Promise<void>;
+    onDismiss: () => Promise<void>;
 }) {
     const t = useTranslations('Introductions');
     const tw = useTranslations('Temperature');
     const [acted, setActed] = useState(false);
 
-    const act = (fn: () => void) => {
+    const act = (fn: () => Promise<void>) => {
         if (acted) return;
         setActed(true);
-        fn();
+        fn().catch(() => setActed(false));
     };
 
     const bridge = path.bridges[0];

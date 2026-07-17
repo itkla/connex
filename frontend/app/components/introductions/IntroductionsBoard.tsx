@@ -146,7 +146,7 @@ export default function IntroductionsBoard({
     };
     const [lineage, setLineage] = useState(initialLineage);
     const [madeTotal, setMadeTotal] = useState(initialLineageTotal);
-    const [paths, setPaths] = useState(initialPaths);
+    const [paths, setPaths] = useState(() => initialPaths.filter((p) => p.bridges.length > 0));
     const [pathFilter, setPathFilter] = useState<'all' | WarmPathReachType>('all');
 
     const strongCount = useMemo(
@@ -247,6 +247,7 @@ export default function IntroductionsBoard({
         } catch (err) {
             restorePath(path, index);
             toastError(err instanceof Error ? err.message : t('acceptFailed'));
+            throw err;
         }
     };
 
@@ -258,6 +259,7 @@ export default function IntroductionsBoard({
         } catch (err) {
             restorePath(path, index);
             toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            throw err;
         }
     };
 
@@ -443,8 +445,8 @@ export default function IntroductionsBoard({
                                     >
                                         <WarmPathRow
                                             path={path}
-                                            onAsk={() => void askIntro(path)}
-                                            onDismiss={() => void dismissPath(path)}
+                                            onAsk={() => askIntro(path)}
+                                            onDismiss={() => dismissPath(path)}
                                         />
                                     </motion.div>
                                 ))}

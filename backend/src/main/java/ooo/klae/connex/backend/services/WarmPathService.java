@@ -202,26 +202,29 @@ public class WarmPathService {
                 .thenComparingInt(WarmPathBridgeDto::getPersonId));
             rows.add(row(byId.get(entry.getKey()), temperatures, ranked));
         }
-        rows.sort(Comparator
-            .comparingInt(WarmPathDto::getScore).reversed()
-            .thenComparing(WarmPathDto::getReachType, Comparator.reverseOrder())
-            .thenComparingInt(WarmPathDto::getTargetId));
+        rows.sort(ROW_ORDER);
 
-        return capBridgeFatigue(rows, limit);
+        List<WarmPathDto> capped = capBridgeFatigue(rows);
+        capped.sort(ROW_ORDER);
+        return capped.size() > limit ? new ArrayList<>(capped.subList(0, limit)) : capped;
     }
 
+    private static final Comparator<WarmPathDto> ROW_ORDER = Comparator
+        .comparingInt(WarmPathDto::getScore).reversed()
+        .thenComparing(WarmPathDto::getReachType, Comparator.reverseOrder())
+        .thenComparingInt(WarmPathDto::getTargetId);
+
     /**
-     * Enforces the per-bridge fatigue cap over the already-ranked rows: each bridge may appear in
-     * at most {@link #MAX_ROWS_PER_BRIDGE} rows, a row keeps at most
+     * Enforces the per-bridge fatigue cap over the ranked rows: each bridge may appear in at most
+     * {@link #MAX_ROWS_PER_BRIDGE} rows (allocated strongest-row-first), a row keeps at most
      * {@link #MAX_BRIDGES_PER_TARGET} bridges, and a row that loses every bridge is dropped.
+     * Capping can lower a row's score (its best bridge may have been used up), so the caller
+     * re-sorts before applying the row limit.
      */
-    private static List<WarmPathDto> capBridgeFatigue(List<WarmPathDto> rows, int limit) {
+    private static List<WarmPathDto> capBridgeFatigue(List<WarmPathDto> rows) {
         Map<Integer, Integer> bridgeUse = new HashMap<>();
         List<WarmPathDto> out = new ArrayList<>();
         for (WarmPathDto candidateRow : rows) {
-            if (out.size() >= limit) {
-                break;
-            }
             List<WarmPathBridgeDto> kept = new ArrayList<>();
             for (WarmPathBridgeDto bridge : candidateRow.getBridges()) {
                 if (kept.size() >= MAX_BRIDGES_PER_TARGET) {
@@ -324,11 +327,9 @@ public class WarmPathService {
                 Evidence::strongest);
         }
 
-        Map<Integer, Integer> currentCompany = new HashMap<>();
         Map<Integer, List<IntroCandidatePerson>> byCompany = new HashMap<>();
         for (IntroCandidatePerson candidate : candidates) {
             if (candidate.getCompanyId() != null) {
-                currentCompany.put(candidate.getId(), candidate.getCompanyId());
                 byCompany.computeIfAbsent(candidate.getCompanyId(), key -> new ArrayList<>()).add(candidate);
             }
         }
@@ -337,11 +338,9 @@ public class WarmPathService {
                 continue;
             }
             group.sort(Comparator.comparingInt(IntroCandidatePerson::getId));
+            String company = groupCompanyName(group);
             for (int i = 0; i < group.size(); i++) {
                 for (int j = i + 1; j < group.size(); j++) {
-                    String company = notBlank(group.get(i).getCompanyName())
-                        ? group.get(i).getCompanyName().trim()
-                        : (notBlank(group.get(j).getCompanyName()) ? group.get(j).getCompanyName().trim() : null);
                     evidence.merge(pairKey(group.get(i).getId(), group.get(j).getId()),
                         new Evidence(EVIDENCE_COLLEAGUES, CONF_COLLEAGUES, company, null, null),
                         Evidence::strongest);
@@ -373,9 +372,6 @@ public class WarmPathService {
             people.sort(Comparator.naturalOrder());
             for (int i = 0; i < people.size(); i++) {
                 for (int j = i + 1; j < people.size(); j++) {
-                    if (sameCurrentEmployer(currentCompany, people.get(i), people.get(j))) {
-                        continue;
-                    }
                     Evidence overlap = firstOverlap(group.get(people.get(i)), group.get(people.get(j)));
                     if (overlap != null) {
                         evidence.merge(pairKey(people.get(i), people.get(j)), overlap, Evidence::strongest);
@@ -384,6 +380,16 @@ public class WarmPathService {
             }
         }
         return evidence;
+    }
+
+    /** The display name for a current-employer group: the first member with a non-blank name. */
+    private static String groupCompanyName(List<IntroCandidatePerson> group) {
+        for (IntroCandidatePerson member : group) {
+            if (notBlank(member.getCompanyName())) {
+                return member.getCompanyName().trim();
+            }
+        }
+        return null;
     }
 
     /** The first overlapping stint pair between two people at a shared employer, or {@code null}. */
@@ -425,9 +431,11 @@ public class WarmPathService {
 
     /**
      * Accepts a warm path: creates the follow-up task asking the bridge for the introduction
-     * (assigned to the acting user, linked to the target contact) and retires the avenue as
-     * {@code accepted}. The caller may supply localized task text; the server composes a default
-     * with mention tokens when it is absent.
+     * (assigned to the acting user, linked to the target contact), records the accepted avenue,
+     * and retires the whole target from the feed — the intro is now in flight, so the remaining
+     * avenues would be noise. The caller may supply localized task text; the server composes a
+     * default with mention tokens when it is absent. Requires {@code TASK_CREATE} in addition to
+     * {@code PERSON_UPDATE}, enforced by the task service.
      */
     @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
@@ -450,6 +458,9 @@ public class WarmPathService {
 
         introductionMapper.recordWarmPathDismissal(
             workspaceId, targetPersonId, bridgePersonId, STATUS_ACCEPTED, actor.getId());
+        introductionMapper.deleteWarmPathDismissals(workspaceId, targetPersonId);
+        introductionMapper.recordWarmPathTargetDismissal(
+            workspaceId, targetPersonId, STATUS_ACCEPTED, actor.getId());
         return created;
     }
 
@@ -488,12 +499,16 @@ public class WarmPathService {
         }
         boolean coldEnough = !BAND_HOT.equals(temperature.getBand())
             && !BAND_WARM.equals(temperature.getBand());
-        Integer daysSinceTouch = temperature.getDaysSinceTouch();
-        return coldEnough && (daysSinceTouch == null || daysSinceTouch >= MIN_DORMANT_DAYS);
+        return coldEnough && temperature.getDaysSinceTouch() >= MIN_DORMANT_DAYS;
     }
 
+    /**
+     * Whether the team has never touched this contact. Detected by the absence of a last touch —
+     * NOT by {@code touchCount}, which only counts touches inside the scorer's recent window and
+     * is 0 for any relationship that has merely gone quiet.
+     */
     private static boolean neverEngaged(RelationshipTemperatureDto temperature) {
-        return temperature == null || temperature.getTouchCount() == 0;
+        return temperature == null || temperature.getDaysSinceTouch() == null;
     }
 
     private static double edgeConfidence(int strength) {
@@ -503,15 +518,11 @@ public class WarmPathService {
         return strength <= 1 ? CONF_EDGE_WEAK : CONF_EDGE_DEFAULT;
     }
 
-    private static boolean sameCurrentEmployer(Map<Integer, Integer> currentCompany, int personA, int personB) {
-        Integer companyA = currentCompany.get(personA);
-        return companyA != null && companyA.equals(currentCompany.get(personB));
-    }
-
     /**
      * Whether two stints overlap in time. MySQL datetime strings order lexicographically, so no
      * parsing is needed; a {@code null} end is a current employment (open-ended) and a
-     * {@code null} start is treated as reaching arbitrarily far back.
+     * {@code null} start is treated as reaching arbitrarily far back. The comparison is strict:
+     * one stint starting the instant the other ends is a handoff, not an overlap.
      */
     private static boolean overlaps(IntroEmploymentRow a, IntroEmploymentRow b) {
         return startsBeforeEnd(a.getStartedAt(), b.getEndedAt())
@@ -519,7 +530,7 @@ public class WarmPathService {
     }
 
     private static boolean startsBeforeEnd(String start, String end) {
-        return start == null || end == null || start.compareTo(end) <= 0;
+        return start == null || end == null || start.compareTo(end) < 0;
     }
 
     private static Integer overlapStartYear(IntroEmploymentRow a, IntroEmploymentRow b) {

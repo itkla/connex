@@ -187,6 +187,21 @@ class WarmPathRankingTest {
     }
 
     @Test
+    void quietWarmContactIsNotMistakenForNeverEngaged() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Bridge", 100, "Acme"),
+            person(2, "QuietButWarm", 200, "Globex"));
+        Map<Integer, RelationshipTemperatureDto> temps = new HashMap<>();
+        temps.put(1, temp(1, 60, "hot", 5, 8));
+        temps.put(2, temp(2, 43, "warm", 25, 0));
+
+        List<WarmPathDto> rows = rank(candidates, List.of(edge(1, 2, 2)), List.of(), List.of(), temps);
+
+        assertTrue(rows.isEmpty(),
+            "a warm contact whose touches merely aged out of the recent window is not a reach target");
+    }
+
+    @Test
     void coolBridgeIsExcluded() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "CoolBridge", 100, "Acme"),

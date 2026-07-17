@@ -13,15 +13,15 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
-import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.IntroductionRequestDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.WarmPathAcceptRequestDto;
 import ooo.klae.connex.backend.dto.WarmPathDto;
 import ooo.klae.connex.backend.dto.WarmPathRequestDto;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.WarmPathService;
 
@@ -94,15 +94,12 @@ public class IntroductionController {
 
     /**
      * POST accepts a warm path: creates the follow-up task asking the bridge for the
-     * introduction and retires the avenue.
+     * introduction and retires the target from the feed.
      */
     @PostMapping("/paths/accept")
-    public Task acceptPath(@Valid @RequestBody WarmPathRequestDto request) {
-        if (request.getBridgePersonId() == null) {
-            throw new BadRequestException("A bridge contact is required to accept a warm path");
-        }
-        return warmPathService.acceptPath(
-            request.getTargetPersonId(), request.getBridgePersonId(), request.getTaskDescription());
+    public TaskDto acceptPath(@Valid @RequestBody WarmPathAcceptRequestDto request) {
+        return TaskDto.from(warmPathService.acceptPath(
+            request.getTargetPersonId(), request.getBridgePersonId(), request.getTaskDescription()));
     }
 
     /**
