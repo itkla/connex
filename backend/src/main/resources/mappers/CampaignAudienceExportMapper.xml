@@ -37,6 +37,18 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="existsActiveForSnapshotConnector" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM campaign_audience_export
+      WHERE workspace_id = #{workspaceId}
+        AND campaign_id = #{campaignId}
+        AND snapshot_id = #{snapshotId}
+        AND connector = #{connector}
+        AND status IN ('draft', 'running', 'completed')
+    )
+  </select>
+
   <insert id="insertExport" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_audience_export
       (workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,

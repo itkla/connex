@@ -17,6 +17,12 @@ public interface CampaignAudienceExportMapper {
 
     CampaignAudienceExport getExport(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    boolean existsActiveForSnapshotConnector(
+            @Param("workspaceId") int workspaceId,
+            @Param("campaignId") int campaignId,
+            @Param("snapshotId") int snapshotId,
+            @Param("connector") String connector);
+
     void insertExport(CampaignAudienceExport export);
 
     int updateOutcome(CampaignAudienceExport export);

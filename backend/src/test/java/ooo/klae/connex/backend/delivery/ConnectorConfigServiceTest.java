@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.beans.ConnectorConfig;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.delivery.provider.list.HttpListConnector;
 import ooo.klae.connex.backend.dto.ConnectorConfigRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ConnectorConfigMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -79,6 +82,7 @@ class ConnectorConfigServiceTest {
         config.setEndpoint(ENDPOINT);
         config.setExternalListId(LIST_ID);
         config.setCredentialRef("secret:v1:55");
+        config.setCreatedById(ACTOR);
         config.setEnabled(true);
         return config;
     }
@@ -110,6 +114,36 @@ class ConnectorConfigServiceTest {
         request.setApiKey(null);
 
         assertThrows(RuntimeException.class, () -> service().save(request));
+    }
+
+    @Test
+    void save_repointingEndpointToANewHostWithoutReenteringCredential_isRejected() {
+        currentWorkspaceAndActor();
+        when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(enabledConnector());
+        when(endpointValidator.isFetchable("evil.example.com", false)).thenReturn(true);
+        ConnectorConfigRequest request = request();
+        request.setApiKey(null);
+        request.setEndpoint("https://evil.example.com/v1/lists/add");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_updatingSameHostWithoutReenteringCredential_preservesTheStoredCredential() {
+        currentWorkspaceAndActor();
+        when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list"))
+                .thenReturn(enabledConnector(), enabledConnector());
+        when(endpointValidator.isFetchable("lists.example.com", false)).thenReturn(true);
+        ConnectorConfigRequest request = request();
+        request.setApiKey(null);
+        request.setEndpoint("https://lists.example.com/v2/lists/add");
+
+        service().save(request);
+
+        ArgumentCaptor<ConnectorConfig> captor = ArgumentCaptor.forClass(ConnectorConfig.class);
+        verify(mapper).upsert(captor.capture());
+        assertEquals("secret:v1:55", captor.getValue().getCredentialRef());
     }
 
     @Test

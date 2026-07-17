@@ -97,6 +97,10 @@ public class AudienceExportService {
         if (!connectorConfigService.isReady(workspaceId, connector)) {
             throw new BadRequestException("The connector is not configured for audience sync");
         }
+        if (campaignAudienceExportMapper.existsActiveForSnapshotConnector(
+                workspaceId, campaignId, snapshot.getId(), connector)) {
+            throw new BadRequestException("An export for this snapshot and connector already exists");
+        }
 
         List<AudienceMember> members = eligibleMembers(workspaceId, snapshot.getId());
         String externalListId = connectorConfigService.activeExternalListId(workspaceId, connector);

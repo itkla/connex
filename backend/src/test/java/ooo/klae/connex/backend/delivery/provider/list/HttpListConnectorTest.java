@@ -94,6 +94,23 @@ class HttpListConnectorTest {
     }
 
     @Test
+    void pushAudience_recordsFailedWhenA2xxBodyIsUnparseable() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        HttpListConnector connector = new HttpListConnector(builder.build(), 1024, objectMapper);
+        server.expect(requestTo(ENDPOINT))
+                .andRespond(withSuccess("not json", MediaType.APPLICATION_JSON));
+
+        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
+            AudiencePushResult result = connector.pushAudience(connectorTarget(), push());
+
+            assertEquals(0, result.pushedCount());
+            assertEquals(2, result.failedCount());
+            server.verify();
+        }
+    }
+
+    @Test
     void pushAudience_reportsPartialFailuresFromTheResponse() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

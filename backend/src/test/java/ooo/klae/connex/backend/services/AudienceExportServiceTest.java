@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
 import ooo.klae.connex.backend.dto.CampaignAudienceExportDto;
 import ooo.klae.connex.backend.dto.CampaignAudienceExportRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
@@ -162,6 +164,26 @@ class AudienceExportServiceTest {
         assertEquals(2, outcomeCaptor.getValue().getFailedCount());
         assertEquals(0, outcomeCaptor.getValue().getPushedCount());
         assertEquals("failed", dto.status());
+    }
+
+    @Test
+    void createExport_rejectsADuplicateActiveExportForTheSameSnapshotAndConnector() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE);
+        Campaign campaign = new Campaign();
+        campaign.setId(CAMPAIGN);
+        campaign.setName("Q3");
+        when(campaignMapper.getCampaign(WORKSPACE, CAMPAIGN)).thenReturn(campaign);
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        CampaignAudienceSnapshot snapshot = new CampaignAudienceSnapshot();
+        snapshot.setId(SNAPSHOT);
+        snapshot.setRecordType("person");
+        when(campaignMapper.getSnapshot(WORKSPACE, CAMPAIGN, VERSION)).thenReturn(snapshot);
+        when(connectorConfigService.isReady(WORKSPACE, CONNECTOR)).thenReturn(true);
+        when(exportMapper.existsActiveForSnapshotConnector(WORKSPACE, CAMPAIGN, SNAPSHOT, CONNECTOR))
+                .thenReturn(true);
+
+        assertThrows(BadRequestException.class, () -> service().createExport(CAMPAIGN, request()));
+        verify(exportMapper, never()).insertExport(any());
     }
 
     @Test

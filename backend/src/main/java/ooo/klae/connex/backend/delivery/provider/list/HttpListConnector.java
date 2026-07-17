@@ -178,9 +178,13 @@ public class HttpListConnector implements AudienceSyncConnector {
                 return new AudiencePushResult(clamp(added, memberCount), clamp(failed, memberCount), "connector accepted");
             }
         } catch (RuntimeException exception) {
-            return new AudiencePushResult(memberCount, 0, "connector accepted");
+            return unconfirmed(memberCount);
         }
-        return new AudiencePushResult(memberCount, 0, "connector accepted");
+        return unconfirmed(memberCount);
+    }
+
+    private static AudiencePushResult unconfirmed(int memberCount) {
+        return new AudiencePushResult(0, memberCount, "provider returned an unparseable response");
     }
 
     private ListResponse send(URI endpoint, String apiKey, byte[] body) {

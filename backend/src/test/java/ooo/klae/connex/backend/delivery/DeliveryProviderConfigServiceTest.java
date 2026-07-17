@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +28,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigRequest;
 import ooo.klae.connex.backend.dto.DeliveryWebhookTokenDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
@@ -108,6 +111,19 @@ class DeliveryProviderConfigServiceTest {
         request.setApiKey(null);
 
         assertThrows(RuntimeException.class, () -> service().save(request));
+    }
+
+    @Test
+    void save_repointingEspEndpointToANewHostWithoutReenteringCredential_isRejected() {
+        currentWorkspaceAndActor();
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+        when(endpointValidator.isFetchable("evil.example.com", false)).thenReturn(true);
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setApiKey(null);
+        request.setEndpoint("https://evil.example.com/v1/send");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+        verify(mapper, never()).upsert(any());
     }
 
     @Test
@@ -206,6 +222,7 @@ class DeliveryProviderConfigServiceTest {
         config.setEndpoint(ENDPOINT);
         config.setFromAddress("no-reply@sender.test");
         config.setCredentialRef("secret:v1:55");
+        config.setCreatedById(ACTOR);
         config.setEnabled(true);
         return config;
     }

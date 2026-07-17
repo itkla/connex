@@ -161,6 +161,10 @@ public class ConnectorConfigService {
         config.setExternalListId(requireExternalListId(request.getExternalListId()));
 
         String newCredential = extractCredential(request.getApiKey(), config);
+        if (existing != null && !isBlank(existing.getCredentialRef()) && newCredential == null
+                && endpointHostChanged(existing.getEndpoint(), config.getEndpoint())) {
+            throw new BadRequestException("Re-enter the credential to change the endpoint");
+        }
         boolean hasCredential = newCredential != null || !isBlank(config.getCredentialRef());
         if (request.isEnabled() && !hasCredential) {
             throw new BadRequestException("A stored push credential is required before enabling this connector");
@@ -262,6 +266,27 @@ public class ConnectorConfigService {
             throw new BadRequestException("Unsupported connector");
         }
         return connector;
+    }
+
+    private static boolean endpointHostChanged(String storedEndpoint, String newEndpoint) {
+        String storedHost = hostOf(storedEndpoint);
+        String newHost = hostOf(newEndpoint);
+        if (storedHost == null || newHost == null) {
+            return !java.util.Objects.equals(storedHost, newHost);
+        }
+        return !storedHost.equals(newHost);
+    }
+
+    private static String hostOf(String endpoint) {
+        if (isBlank(endpoint)) {
+            return null;
+        }
+        try {
+            String host = URI.create(endpoint.trim()).getHost();
+            return host == null ? null : host.toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private static URI parseHttpsEndpoint(String endpoint) {
