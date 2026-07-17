@@ -181,6 +181,10 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             default -> throw new BadRequestException("Unsupported delivery provider");
         };
 
+        if (sameProvider && !isBlank(existing.getCredentialRef()) && newCredential == null
+                && endpointHostChanged(existing.getEndpoint(), config.getEndpoint())) {
+            throw new BadRequestException("Re-enter the credential to change the endpoint");
+        }
         boolean hasCredential = newCredential != null || !isBlank(config.getCredentialRef());
         if (request.isEnabled() && requiresCredential(provider) && !hasCredential) {
             throw new BadRequestException("A stored API credential is required before enabling this provider");
@@ -371,6 +375,27 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new BadRequestException("A valid from address is required");
         }
         return value;
+    }
+
+    private static boolean endpointHostChanged(String storedEndpoint, String newEndpoint) {
+        String storedHost = hostOf(storedEndpoint);
+        String newHost = hostOf(newEndpoint);
+        if (storedHost == null || newHost == null) {
+            return !java.util.Objects.equals(storedHost, newHost);
+        }
+        return !storedHost.equals(newHost);
+    }
+
+    private static String hostOf(String endpoint) {
+        if (isBlank(endpoint)) {
+            return null;
+        }
+        try {
+            String host = URI.create(endpoint.trim()).getHost();
+            return host == null ? null : host.toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private static URI parseHttpsEndpoint(String endpoint) {
