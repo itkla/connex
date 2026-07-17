@@ -411,7 +411,7 @@ class SegmentServiceTest extends AbstractServiceTest {
         SegmentCatalogDto dto = segmentService.catalog("company");
 
         assertEquals("company", dto.recordType());
-        assertEquals(List.of("industry", "name", "website", "phone", "tag", "created", "updated"),
+        assertEquals(List.of("industry", "name", "website", "phone", "owner", "tag", "created", "updated"),
             dto.fields().stream().map(SegmentCatalogDto.CatalogField::field).toList());
         SegmentCatalogDto.CatalogField industry = dto.fields().stream()
             .filter(f -> f.field().equals("industry")).findFirst().orElseThrow();

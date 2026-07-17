@@ -66,6 +66,12 @@ public class SegmentCatalog {
     private static final Map<String, List<FieldSpec>> FIELDS = buildFields();
     private static final Map<String, PredicateSpec> PREDICATES = buildPredicates();
 
+    /**
+     * The field catalog per record type. The {@code owner} field matches on the record's
+     * <em>current</em> {@code owner_id} (company/person/deal), consistent with the report
+     * {@code ownerIds} filter and the browser member scope. There is no owner-at-event history in
+     * this epic — historical attribution is deferred to workstream 5 (#40) and must not be implied.
+     */
     private static Map<String, List<FieldSpec>> buildFields() {
         Map<String, List<FieldSpec>> fields = new LinkedHashMap<>();
         fields.put("company", List.of(
@@ -73,6 +79,7 @@ public class SegmentCatalog {
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("website", Kind.STRING, ValueSource.NONE),
             new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
             new FieldSpec("created", Kind.DATE, ValueSource.NONE),
             new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
@@ -82,6 +89,7 @@ public class SegmentCatalog {
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
             new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
+            new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
             new FieldSpec("created", Kind.DATE, ValueSource.NONE),
             new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
