@@ -31,7 +31,14 @@
     "openCount": "未完了{count}件",
     "notesCount": "メモ{count}件",
     "timeline": "タイムライン",
-    "emptyActivity": "まだアクティビティはありません"
+    "emptyActivity": "まだアクティビティはありません",
+    "performance": "パフォーマンス",
+    "performanceWindow": "過去90日間",
+    "wonDeals": "成約した商談",
+    "winRate": "成約率",
+    "openDeals": "進行中の商談",
+    "openTasks": "未完了のタスク",
+    "viewFullAnalytics": "分析の詳細を表示"
   },
   "UsersNewUserDialog": {
     "new": "新規",
