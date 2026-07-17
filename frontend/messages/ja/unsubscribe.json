@@ -1,0 +1,21 @@
+{
+    "Unsubscribe": {
+        "title": "配信停止",
+        "description": "これらのメッセージの受信を停止することを確認してください。",
+        "channelLabel": "チャネル",
+        "addressLabel": "アドレス",
+        "channels": {
+            "email": "メール"
+        },
+        "confirm": "配信を停止する",
+        "confirming": "停止しています…",
+        "alreadyTitle": "配信は停止済みです",
+        "alreadyBody": "このアドレスはすでに解除されています。今後メッセージは送信されません。",
+        "doneTitle": "配信を停止しました",
+        "doneBody": "このアドレスを解除しました。今後メッセージは届きません。",
+        "invalidTitle": "リンクを利用できません",
+        "invalidBody": "この配信停止リンクは無効か、有効期限が切れています。メッセージが届き続ける場合は送信者にお問い合わせください。",
+        "error": "問題が発生しました。もう一度お試しください。",
+        "footer": "Connex で送信"
+    }
+}

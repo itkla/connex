@@ -816,6 +816,33 @@ async function getApiError(res: Response): Promise<ApiError> {
     }
 }
 
+/**
+ * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
+ * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
+ * @param path the API path to request
+ * @param method the HTTP method
+ * @param init optional fetch overrides
+ * @returns the parsed JSON body, or {@code undefined} for an empty response
+ * @throws ApiError when the response status is not ok
+ */
+async function publicJson<T>(
+    path: string,
+    method: "GET" | "POST",
+    init: RequestInit = {},
+): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+        cache: "no-store",
+        ...init,
+        method,
+        headers: { Accept: "application/json", ...init.headers },
+    });
+    if (!res.ok) {
+        throw await getApiError(res);
+    }
+    const text = await res.text();
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
 
 /**
  * Logs in a user with the provided credentials.
@@ -3303,6 +3330,78 @@ export function getCampaignSnapshot(id: number, version: number, init: RequestIn
         `/api/campaigns/${id}/audience/snapshots/${version}`,
         init,
     );
+}
+
+export function getCampaignMessages(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignMessage[]>(`/api/campaigns/${id}/messages`, init);
+}
+
+export function createCampaignMessage(id: number, payload: Types.CampaignMessagePayload) {
+    return postJson<Types.CampaignMessage>(`/api/campaigns/${id}/messages`, payload);
+}
+
+export function getCampaignMessage(id: number, messageId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignMessage>(`/api/campaigns/${id}/messages/${messageId}`, init);
+}
+
+export function addCampaignMessageRevision(
+    id: number,
+    messageId: number,
+    payload: Types.CampaignMessageRevisionPayload,
+) {
+    return postJson<Types.CampaignMessage>(
+        `/api/campaigns/${id}/messages/${messageId}/revisions`,
+        payload,
+    );
+}
+
+export function getCampaignSends(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignSend[]>(`/api/campaigns/${id}/sends`, init);
+}
+
+export function createCampaignSend(id: number, payload: Types.CampaignSendPayload) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends`, payload);
+}
+
+export function getCampaignSend(id: number, sendId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}`, init);
+}
+
+export function queueCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/queue`, {});
+}
+
+export function pauseCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/pause`, {});
+}
+
+export function cancelCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/cancel`, {});
+}
+
+/**
+ * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
+ * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
+ * @param token the 64-character hex delivery token from the unsubscribe link
+ * @param init optional fetch overrides (used by SSR to disable caching)
+ * @returns the masked address, channel, and current suppression state
+ */
+export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
+    return publicJson<Types.DeliveryUnsubscribeInfo>(
+        `/api/delivery/unsubscribe/${token}`,
+        "GET",
+        init,
+    );
+}
+
+/**
+ * Confirms an unsubscribe for a delivery token, suppressing the resolved address. Public and
+ * idempotent: repeat confirmations return the already-unsubscribed state without error.
+ * @param token the 64-character hex delivery token from the unsubscribe link
+ * @returns the masked address, channel, and resulting suppression state
+ */
+export function confirmUnsubscribe(token: string) {
+    return publicJson<Types.DeliveryUnsubscribeInfo>(`/api/delivery/unsubscribe/${token}`, "POST");
 }
 
 export function getPersonConsent(personId: number, init: RequestInit = {}) {

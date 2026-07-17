@@ -1161,6 +1161,94 @@ export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
     members: CampaignAudienceMember[];
 };
 
+export type CampaignChannel = "email";
+
+export type CampaignMessageStatus = "draft" | "final";
+
+export type CampaignMessageLocale = "en" | "ja";
+
+/** One immutable, locale-scoped revision of a campaign message. */
+export type CampaignMessageRevision = {
+    version: number;
+    locale: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText: string | null;
+    createdAt: string;
+};
+
+/** A campaign message and its append-only revisions, newest first. */
+export type CampaignMessage = {
+    id: number;
+    campaignId: number;
+    channel: string;
+    name: string;
+    status: CampaignMessageStatus;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+    revisions: CampaignMessageRevision[];
+};
+
+export type CampaignMessagePayload = {
+    name: string;
+    channel: CampaignChannel;
+};
+
+export type CampaignMessageRevisionPayload = {
+    locale: CampaignMessageLocale;
+    subject: string;
+    bodyHtml: string;
+    bodyText?: string | null;
+};
+
+export type CampaignSendStatus =
+    | "draft"
+    | "queued"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+/** A campaign send bound to a frozen audience snapshot and a message revision. */
+export type CampaignSend = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    messageId: number;
+    messageVersion: number;
+    channel: string;
+    purpose: string;
+    providerId: string | null;
+    status: CampaignSendStatus;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    totalRecipients: number;
+    dispatchedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignSendPayload = {
+    snapshotVersion: number;
+    messageId: number;
+    messageVersion: number;
+    purpose?: string | null;
+    scheduledAt?: string | null;
+};
+
+/** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+export type DeliveryUnsubscribeInfo = {
+    channel: string;
+    address: string;
+    unsubscribed: boolean;
+};
+
 export type ContactChannelConsent = {
     id: number;
     personId: number;
