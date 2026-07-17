@@ -10,9 +10,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -60,6 +62,23 @@ class WarmPathServiceTest extends AbstractServiceTest {
         assertEquals(target.getId(), created.getPerson().getId());
 
         assertTarget(warmPathService.getPaths(50), target.getId(), false);
+    }
+
+    @Test
+    void acceptComposesTheDefaultTaskTextInTheRequestLocale() {
+        Person bridge = engagedPerson(newCompany());
+        Person target = newPerson(newCompany());
+        connect(bridge.getId(), target.getId());
+
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        try {
+            Task created = warmPathService.acceptPath(target.getId(), bridge.getId(), null);
+            assertTrue(created.getDescription().endsWith("への紹介を依頼する"),
+                "a Japanese request locale must produce the Japanese default task text");
+            assertTrue(created.getDescription().contains("(person:" + bridge.getId() + ")"));
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     @Test

@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -94,8 +95,12 @@ public class WarmPathService {
 
     /** Ranked warm introduction paths for the active workspace. */
     public List<WarmPathDto> getPaths(int limit) {
-        int resolved = limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
-        return computePaths(workspaceService.getCurrentWorkspaceId(), resolved);
+        return computePaths(workspaceService.getCurrentWorkspaceId(), resolveLimit(limit));
+    }
+
+    /** Clamps a requested row limit to the feed's default/maximum bounds. */
+    static int resolveLimit(int limit) {
+        return limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
     }
 
     /**
@@ -464,6 +469,11 @@ public class WarmPathService {
         return created;
     }
 
+    /**
+     * The follow-up task text: the caller's localized copy when supplied, otherwise a default in
+     * the request locale (mirroring the frontend's {@code acceptTaskDescription} strings) built
+     * from mention tokens so the task links both contacts.
+     */
     private String resolveTaskDescription(
             int workspaceId, int targetPersonId, int bridgePersonId, String taskDescription) {
         if (taskDescription != null && !taskDescription.isBlank()) {
@@ -471,8 +481,12 @@ public class WarmPathService {
         }
         Person bridge = personMapper.getPersonById(workspaceId, bridgePersonId);
         Person target = personMapper.getPersonById(workspaceId, targetPersonId);
-        return "Ask " + mentionToken(bridge, bridgePersonId)
-            + " to introduce you to " + mentionToken(target, targetPersonId);
+        String bridgeToken = mentionToken(bridge, bridgePersonId);
+        String targetToken = mentionToken(target, targetPersonId);
+        if ("ja".equals(LocaleContextHolder.getLocale().getLanguage())) {
+            return bridgeToken + " に " + targetToken + " への紹介を依頼する";
+        }
+        return "Ask " + bridgeToken + " to introduce you to " + targetToken;
     }
 
     private static String mentionToken(Person person, int personId) {
