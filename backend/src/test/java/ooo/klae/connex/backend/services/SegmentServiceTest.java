@@ -409,7 +409,7 @@ class SegmentServiceTest extends AbstractServiceTest {
         SegmentCatalogDto dto = segmentService.catalog("company");
 
         assertEquals("company", dto.recordType());
-        assertEquals(List.of("industry", "name", "tag"),
+        assertEquals(List.of("industry", "name", "website", "phone", "tag", "created", "updated"),
             dto.fields().stream().map(SegmentCatalogDto.CatalogField::field).toList());
         SegmentCatalogDto.CatalogField industry = dto.fields().stream()
             .filter(f -> f.field().equals("industry")).findFirst().orElseThrow();
@@ -454,5 +454,52 @@ class SegmentServiceTest extends AbstractServiceTest {
     @Test
     void catalog_unsupportedRecordType_throws() {
         assertThrows(BadRequestException.class, () -> segmentService.catalog("task"));
+    }
+
+    @Test
+    void companyField_websiteContains_matches() {
+        Company withSite = new Company();
+        withSite.setName("Site Co " + unique());
+        withSite.setWebsite("https://acme.example.com");
+        withSite.setWorkspaceId(workspace.getId());
+        companyMapper.insert(withSite);
+        Company noSite = companyWithIndustry("No Site " + unique(), "misc");
+
+        List<Integer> ids = segmentService.evaluate("company", def("all", field("website", "contains", "acme")));
+
+        assertTrue(ids.contains(withSite.getId()));
+        assertFalse(ids.contains(noSite.getId()));
+    }
+
+    @Test
+    void companyField_createdBeforeAndAfter_boundsOnCreatedAt() {
+        Company company = companyWithIndustry("Dated " + unique(), "misc");
+
+        assertTrue(segmentService.evaluate("company", def("all", field("created", "before", "2999-01-01"))).contains(company.getId()));
+        assertFalse(segmentService.evaluate("company", def("all", field("created", "after", "2999-01-01"))).contains(company.getId()));
+    }
+
+    @Test
+    void dealField_actualValueGte_matches() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal big = new Deal();
+        big.setName("Big " + unique());
+        big.setWorkspaceId(workspace.getId());
+        big.setOwnerId(currentUser.getId());
+        big.setValue(0.0);
+        big.setActualValue(900.0);
+        big.setCurrency("JPY");
+        big.setPipelineId(pipeline.getId());
+        big.setStageId(stage.getId());
+        big.setCompanyId(company.getId());
+        dealMapper.insert(big);
+        Deal small = dealWith(pipeline, stage, company, 0.0, null);
+
+        List<Integer> ids = segmentService.evaluate("deal", def("all", field("actual_value", "gte", "500")));
+
+        assertTrue(ids.contains(big.getId()));
+        assertFalse(ids.contains(small.getId()));
     }
 }

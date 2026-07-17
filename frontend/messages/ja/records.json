@@ -40,7 +40,12 @@
       "stage": "ステージ",
       "owner": "担当者",
       "status": "ステータス",
-      "close_date": "完了予定日"
+      "close_date": "完了予定日",
+      "website": "ウェブサイト",
+      "phone": "電話番号",
+      "created": "作成日",
+      "updated": "更新日",
+      "actual_value": "実績金額"
     },
     "op": {
       "is": "である",

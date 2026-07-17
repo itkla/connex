@@ -40,7 +40,12 @@
       "stage": "Stage",
       "owner": "Owner",
       "status": "Status",
-      "close_date": "Close date"
+      "close_date": "Close date",
+      "website": "Website",
+      "phone": "Phone",
+      "created": "Created",
+      "updated": "Updated",
+      "actual_value": "Actual value"
     },
     "op": {
       "is": "is",

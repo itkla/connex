@@ -71,21 +71,31 @@ public class SegmentCatalog {
         fields.put("company", List.of(
             new FieldSpec("industry", Kind.STRING, ValueSource.INDUSTRIES),
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("website", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         fields.put("person", List.of(
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("title", Kind.STRING, ValueSource.NONE),
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         fields.put("deal", List.of(
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("value", Kind.NUMBER, ValueSource.NONE),
+            new FieldSpec("actual_value", Kind.NUMBER, ValueSource.NONE),
             new FieldSpec("stage", Kind.ID, ValueSource.STAGES),
             new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("status", Kind.ENUM, ValueSource.NONE),
             new FieldSpec("close_date", Kind.DATE, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         return Collections.unmodifiableMap(fields);
     }
 
