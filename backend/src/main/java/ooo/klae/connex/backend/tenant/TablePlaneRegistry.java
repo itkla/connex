@@ -100,6 +100,7 @@ public final class TablePlaneRegistry {
         "deal_person",
         "deal_stage_history",
         "deal_tag",
+        "delivery_provider_config",
         "entity_reference",
         "introduction",
         "managed_object_usage",

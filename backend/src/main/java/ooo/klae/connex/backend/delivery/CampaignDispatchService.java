@@ -137,7 +137,8 @@ public class CampaignDispatchService {
                 "send:" + send.getId() + ":" + deliveryId);
         DispatchReceipt receipt = dispatcher.dispatch(target, request);
         if (receipt.status() == DispatchStatus.SENT) {
-            campaignDeliveryMapper.markDispatched(workspaceId, deliveryId, receipt.providerMessageId());
+            campaignDeliveryMapper.markDispatched(
+                    workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
             appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
         } else {
             campaignDeliveryMapper.markFailed(workspaceId, deliveryId, bounded(receipt.detail()));

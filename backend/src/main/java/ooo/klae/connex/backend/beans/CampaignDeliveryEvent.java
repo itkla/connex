@@ -14,5 +14,7 @@ public class CampaignDeliveryEvent {
     private int deliveryId;
     private String eventType;
     private String detail;
+    private String providerId;
+    private String providerEventId;
     private LocalDateTime createdAt;
 }

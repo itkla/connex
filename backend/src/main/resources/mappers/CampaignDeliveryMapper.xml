@@ -5,7 +5,7 @@
 
   <sql id="deliveryColumns">
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
-    attempt_count, last_error, unsubscribe_token, created_at, updated_at
+    provider_id, attempt_count, last_error, unsubscribe_token, created_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
@@ -28,6 +28,13 @@
     WHERE unsubscribe_token = #{token}
   </select>
 
+  <select id="findByProviderMessage" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId}
+      AND provider_id = #{providerId}
+      AND provider_message_id = #{providerMessageId}
+  </select>
+
   <select id="pendingDeliveryIds" resultType="int">
     SELECT id FROM campaign_delivery
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
@@ -47,9 +54,19 @@
 
   <update id="markDispatched">
     UPDATE campaign_delivery
-    SET status = 'dispatched', skip_reason = NULL, provider_message_id = #{providerMessageId},
-        last_error = NULL
+    SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
+        provider_message_id = #{providerMessageId}, last_error = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="applyProviderStatus">
+    UPDATE campaign_delivery
+    SET status = #{toStatus}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND status IN
+      <foreach item="from" collection="fromStatuses" open="(" separator="," close=")">
+        #{from}
+      </foreach>
   </update>
 
   <update id="markSkipped">
@@ -77,9 +94,9 @@
 
   <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_delivery_event
-      (workspace_id, delivery_id, event_type, detail)
+      (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)
     VALUES
-      (#{workspaceId}, #{deliveryId}, #{eventType}, #{detail})
+      (#{workspaceId}, #{deliveryId}, #{eventType}, #{detail}, #{providerId}, #{providerEventId})
   </insert>
 
   <select id="hasEvent" resultType="boolean">

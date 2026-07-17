@@ -21,4 +21,13 @@ public class DeliveryProperties {
 
     /** Absolute base URL used to build recipient-facing unsubscribe links; empty yields a relative path. */
     private String publicBaseUrl = "";
+
+    /** TCP connect timeout, in milliseconds, for outbound HTTP ESP dispatch. */
+    private long espConnectTimeoutMs = 3000;
+
+    /** Socket read timeout, in milliseconds, for outbound HTTP ESP dispatch. */
+    private long espRequestTimeoutMs = 15000;
+
+    /** Maximum bytes read from an HTTP ESP response before the send is rejected. */
+    private int espMaxResponseBytes = 65536;
 }

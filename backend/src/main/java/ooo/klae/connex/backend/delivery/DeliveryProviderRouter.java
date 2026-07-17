@@ -65,4 +65,18 @@ public class DeliveryProviderRouter {
         }
         return dispatcher;
     }
+
+    /**
+     * Returns the event source installed for a provider id.
+     * @param provider provider id
+     * @return installed provider event source
+     * @throws DeliveryProviderException when no adapter is installed or it emits no provider events
+     */
+    public ProviderEventSource eventSourceFor(String provider) {
+        DeliveryProvider adapter = adapterFor(provider);
+        if (!(adapter instanceof ProviderEventSource eventSource)) {
+            throw new DeliveryProviderException("Provider " + provider + " emits no delivery events");
+        }
+        return eventSource;
+    }
 }

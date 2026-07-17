@@ -19,6 +19,11 @@ public interface CampaignDeliveryMapper {
 
     CampaignDelivery getByToken(@Param("token") String token);
 
+    CampaignDelivery findByProviderMessage(
+            @Param("workspaceId") int workspaceId,
+            @Param("providerId") String providerId,
+            @Param("providerMessageId") String providerMessageId);
+
     List<Integer> pendingDeliveryIds(
             @Param("workspaceId") int workspaceId,
             @Param("sendId") int sendId);
@@ -30,7 +35,14 @@ public interface CampaignDeliveryMapper {
     int markDispatched(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
+            @Param("providerId") String providerId,
             @Param("providerMessageId") String providerMessageId);
+
+    int applyProviderStatus(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("toStatus") String toStatus,
+            @Param("fromStatuses") List<String> fromStatuses);
 
     int markSkipped(
             @Param("workspaceId") int workspaceId,

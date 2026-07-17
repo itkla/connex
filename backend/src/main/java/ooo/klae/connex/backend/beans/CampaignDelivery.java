@@ -17,6 +17,7 @@ public class CampaignDelivery {
     private String status;
     private String skipReason;
     private String providerMessageId;
+    private String providerId;
     private int attemptCount;
     private String lastError;
     private String unsubscribeToken;

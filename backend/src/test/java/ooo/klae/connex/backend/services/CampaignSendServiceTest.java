@@ -74,7 +74,7 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         lenient().when(deliveryProviderConfigService.isReady(anyInt(), eq(DeliveryChannel.EMAIL)))
                 .thenReturn(true);
         lenient().when(deliveryProviderConfigService.resolveForWorkspace(anyInt(), eq(DeliveryChannel.EMAIL)))
-                .thenAnswer(invocation -> new ResolvedDeliveryProvider(
+                .thenAnswer(invocation -> ResolvedDeliveryProvider.of(
                         FakeDispatcher.ID, DeliveryChannel.EMAIL, invocation.getArgument(0),
                         DeliveryCredentials.none()));
     }
