@@ -145,10 +145,13 @@ class RecordListControllerTest {
     @Test
     void personIdsWithoutFilterRequireFilter() {
         PersonController controller = personController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
-        assertThrows(BadRequestException.class, () -> controller.getPersonIds(null, null, null, false));
+        assertThrows(BadRequestException.class,
+            () -> controller.getPersonIds(null, null, null, false, null, null));
 
-        verify(personService, never()).getMatchingPersonIds(null, null, null, false);
+        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam());
     }
 
     @Test
@@ -247,22 +250,28 @@ class RecordListControllerTest {
     @Test
     void companyIdsWithoutFilterRequireFilter() {
         CompanyController controller = companyController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getCompanyIds(" ", List.of(), false, List.of()));
+            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null));
 
-        verify(companyService, never()).getMatchingCompanyIds(null, List.of(), false, List.of());
+        verify(companyService, never()).getMatchingCompanyIds(
+            null, List.of(), false, List.of(), MemberScope.allTeam());
     }
 
     @Test
     void companyIdsAcceptIdsAsTheOnlyFilter() {
         CompanyController controller = companyController();
         List<Integer> ids = List.of(3, 5);
-        when(companyService.getMatchingCompanyIds(null, null, false, ids)).thenReturn(ids);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
+        when(companyService.getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam()))
+            .thenReturn(ids);
 
-        assertSame(ids, controller.getCompanyIds(null, null, false, ids));
+        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null));
 
-        verify(companyService).getMatchingCompanyIds(null, null, false, ids);
+        verify(companyService).getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam());
     }
 
     @Test

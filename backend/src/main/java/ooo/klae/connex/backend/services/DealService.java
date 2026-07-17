@@ -316,6 +316,25 @@ public class DealService {
     }
 
     /**
+     * Returns the full filtered+scoped deal set for CSV export, applying the same server filter
+     * (including risk resolution and member scope) as the list page but without pagination.
+     */
+    public List<Deal> queryDealsForExport(String query, String currency, List<Integer> pipelineIds,
+            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<String> statuses, List<String> risks, MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> riskIds = resolveRiskCandidates(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, risks, memberScope);
+        if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
+            return List.of();
+        }
+        return dealMapper.getDealsFiltered(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, riskIds, memberScope);
+    }
+
+    /**
      * Returns currency metrics for the same complete server-representable filter used by the page.
      */
     public DealMetricsDto queryDealMetrics(String query, String currency, List<Integer> pipelineIds,

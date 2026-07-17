@@ -25,7 +25,7 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
@@ -107,6 +107,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
 
@@ -132,14 +133,17 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
-    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean }>(() => {
+    const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] }>(() => {
         const industryFilter = filterState.industry ?? [];
         const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
-        const params: { industry?: string[]; noIndustry?: boolean } = {};
+        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
         if (industries.length) params.industry = industries;
         if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
+        if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
+        if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         return params;
-    }, [filterState]);
+    }, [filterState, ownerScope]);
 
     const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
         if (!hasSegments) {
@@ -525,6 +529,13 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
     const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const ownerCounts = useMemo(
+        () => new Map(companyFacets?.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [companyFacets],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        setFilterState({ ...filterState, owner: values });
+    }, [filterState, setFilterState]);
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const applyBulkTag = useCallback((tagId: number) => {
@@ -608,8 +619,26 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
     );
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
         ...definition.conditions.flatMap((condition, index) =>
             condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
@@ -692,7 +721,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
                                 onImported={refresh}
-                                exportIds={companies.map((c) => c.id)}
+                                companiesFilter={{ ...filterParams, q: query || undefined }}
                             />
                         </div>
                     </div>
@@ -747,6 +776,12 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={filterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Company>
                             facets={facets}
                             filterState={filterState}

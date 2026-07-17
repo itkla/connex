@@ -349,6 +349,17 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="getDealsFiltered" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    ORDER BY d.id
+  </select>
+
   <select id="countDealsFiltered" resultType="long">
     SELECT COUNT(*)
     FROM deal d

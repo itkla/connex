@@ -16,12 +16,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { exportCompaniesCsv, exportContactsCsv, exportDealsCsv } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { ContactsPageParams, ImportEntity } from '@/app/lib/types';
+import type { CompaniesPageParams, ContactsPageParams, DealFilterParams, ImportEntity } from '@/app/lib/types';
 import ImportDialog from './ImportDialog';
 
 /**
  * Records list header actions rendered as a split button: the primary "New" action on the left, joined
- * to a dropdown holding Import and Export. Export downloads the current view as CSV; Import opens the
+ * to a dropdown holding Import and Export. Export downloads the current filtered+scoped view as CSV —
+ * the exported set equals the visible list, not just the loaded page. Import opens the
  * {@link ImportDialog} wizard and calls {@code onImported} after a successful commit.
  */
 export type RecordsActionsProps = {
@@ -31,7 +32,8 @@ export type RecordsActionsProps = {
     newAriaLabel: string;
     onImported: () => void;
     contactsFilter?: ContactsPageParams;
-    exportIds?: number[];
+    companiesFilter?: CompaniesPageParams;
+    dealsFilter?: DealFilterParams;
 };
 
 export default function RecordsActions({
@@ -41,7 +43,8 @@ export default function RecordsActions({
     newAriaLabel,
     onImported,
     contactsFilter,
-    exportIds,
+    companiesFilter,
+    dealsFilter,
 }: RecordsActionsProps) {
     const t = useTranslations('importExport');
     const [importOpen, setImportOpen] = useState(false);
@@ -50,8 +53,8 @@ export default function RecordsActions({
         const toastId = toast.loading(t('exporting'));
         try {
             if (entity === 'persons') await exportContactsCsv(contactsFilter);
-            else if (entity === 'companies') await exportCompaniesCsv(exportIds);
-            else await exportDealsCsv(exportIds);
+            else if (entity === 'companies') await exportCompaniesCsv(companiesFilter);
+            else await exportDealsCsv(dealsFilter);
             toastSuccess(t('exported'), { id: toastId });
         } catch {
             toastError(t('errorExport'), { id: toastId });

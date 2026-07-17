@@ -197,7 +197,7 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Test
     void getMatchingCompanyIdsRejectsRequestsWithoutFilters() {
         assertThrows(BadRequestException.class,
-            () -> companyService.getMatchingCompanyIds(null, null, false, null));
+            () -> companyService.getMatchingCompanyIds(null, null, false, null, MemberScope.allTeam()));
     }
 
     @Test
@@ -235,15 +235,17 @@ class CompanyServiceTest extends AbstractServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
             7, "%Target%", industry, true, requestedIds, MemberScope.allTeam())).thenReturn(1L);
-        when(mapper.getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0))
+        when(mapper.getCompanyIdsFiltered(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), 1000, 0))
             .thenReturn(matchingIds);
 
         assertEquals(matchingIds,
-            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds));
+            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds, MemberScope.allTeam()));
 
         verify(mapper).countCompanies(
             7, "%Target%", industry, true, requestedIds, MemberScope.allTeam());
-        verify(mapper).getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0);
+        verify(mapper).getCompanyIdsFiltered(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), 1000, 0);
     }
 
     @Test
@@ -256,9 +258,10 @@ class CompanyServiceTest extends AbstractServiceTest {
             7, "%Target%", null, false, null, MemberScope.allTeam())).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
-            () -> service.getMatchingCompanyIds("%Target%", null, false, null));
+            () -> service.getMatchingCompanyIds("%Target%", null, false, null, MemberScope.allTeam()));
 
-        verify(mapper, never()).getCompanyIdsFiltered(7, "%Target%", null, false, null, 1000, 0);
+        verify(mapper, never()).getCompanyIdsFiltered(
+            7, "%Target%", null, false, null, MemberScope.allTeam(), 1000, 0);
     }
 
     @Test

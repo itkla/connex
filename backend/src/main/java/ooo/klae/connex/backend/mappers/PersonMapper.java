@@ -54,14 +54,15 @@ public interface PersonMapper {
             @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany,
             @Param("memberScope") MemberScope memberScope);
-    /** All-team CSV export using the non-owner browser filters and excluding suspended contacts. */
+    /** CSV export using the browser filters and member scope, excluding suspended contacts. */
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany);
-    /** All-team ids using the browser's non-owner filters; backs "select all matching". */
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope);
+    /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany, @Param("limit") int limit);
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);

@@ -190,6 +190,35 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getDealsFilteredHonorsWorkspaceAndMemberScope() {
+        Workspace target = newWorkspace();
+        Pipeline pipeline = newPipelineIn(target);
+        Stage stage = newStageIn(target, pipeline, 0);
+        Deal mine = newDealIn(target, pipeline, stage);
+        Deal theirs = newDealIn(target, pipeline, stage);
+        Deal unassigned = newDealIn(target, pipeline, stage);
+        jdbcTemplate.update("UPDATE deal SET owner_id = ? WHERE id = ?", 7, mine.getId());
+        jdbcTemplate.update("UPDATE deal SET owner_id = ? WHERE id = ?", 9, theirs.getId());
+        Workspace foreign = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreign);
+        Stage foreignStage = newStageIn(foreign, foreignPipeline, 0);
+        newDealIn(foreign, foreignPipeline, foreignStage);
+
+        assertEquals(3, filteredDealIds(target, allTeamScope()).size());
+        assertEquals(List.of(mine.getId()),
+            filteredDealIds(target, MemberScope.fromRequest("me", null, 7)));
+        assertEquals(List.of(unassigned.getId()),
+            filteredDealIds(target, MemberScope.fromRequest("unassigned", null, 7)));
+        assertEquals(List.of(mine.getId(), theirs.getId()),
+            filteredDealIds(target, MemberScope.fromRequest("members", List.of(7, 9), 7)));
+    }
+
+    private List<Integer> filteredDealIds(Workspace ws, MemberScope scope) {
+        return dealMapper.getDealsFiltered(ws.getId(), null, null, null, null, null, false, null, null, scope)
+            .stream().map(Deal::getId).toList();
+    }
+
+    @Test
     void filteredRelatedNameSearchDoesNotTrustMismatchedStageWorkspace() {
         Workspace pipelineOwner = newWorkspace();
         Pipeline foreignPipeline = newPipelineIn(pipelineOwner);

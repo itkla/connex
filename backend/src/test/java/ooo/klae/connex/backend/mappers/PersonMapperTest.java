@@ -249,7 +249,7 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getPersonsFiltered(
-            workspace.getId(), null, null, null, false).stream()
+            workspace.getId(), null, null, null, false, allTeamScope()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
 
         assertNotNull(personMapper.getPersonById(workspace.getId(), suspended.getId()));
@@ -319,7 +319,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person foreign = newPerson(newCompany());
 
         List<Integer> ids = personMapper.getPersonIdsFiltered(
-            pageWorkspace.getId(), null, null, null, false, 2);
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), 2);
 
         assertEquals(List.of(first.getId(), second.getId()), ids);
         assertFalse(ids.contains(foreign.getId()));

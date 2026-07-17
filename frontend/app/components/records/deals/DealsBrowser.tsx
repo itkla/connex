@@ -995,7 +995,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 newLabel={t('newButton')}
                                 newAriaLabel={t('addDeal')}
                                 onImported={refreshRecords}
-                                exportIds={visibleDeals.map((d) => d.id)}
+                                dealsFilter={{ ...serverFilters, q: deferredQuery || undefined }}
                             />
                         </div>
                     </div>

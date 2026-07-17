@@ -1311,7 +1311,10 @@ export function getCompanyFacets(init: RequestInit = {}) {
 
 /** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
 export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids });
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
 
@@ -1440,17 +1443,27 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
 }
 
 export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
 }
 
-export function exportCompaniesCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}) {
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/companies${query}`, "companies.csv");
 }
 
-export function exportDealsCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+export function exportDealsCsv(params: Types.DealFilterParams = {}) {
+    const query = buildQuery({
+        q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
+        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv");
 }
 
@@ -1550,7 +1563,10 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
 

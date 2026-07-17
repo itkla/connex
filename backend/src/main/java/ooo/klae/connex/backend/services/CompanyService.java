@@ -287,26 +287,27 @@ public class CompanyService {
      * broad requests before loading the ids.
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
-            List<Integer> ids) {
-        if (!hasMatchingIdFilter(query, industry, noIndustry, ids)) {
+            List<Integer> ids, MemberScope memberScope) {
+        if (!hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = companyMapper.countCompanies(
-            workspaceId, query, industry, noIndustry, ids, MemberScope.allTeam());
+            workspaceId, query, industry, noIndustry, ids, memberScope);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
         return companyMapper.getCompanyIdsFiltered(
-            workspaceId, query, industry, noIndustry, ids, MAX_MATCHING_IDS, 0);
+            workspaceId, query, industry, noIndustry, ids, memberScope, MAX_MATCHING_IDS, 0);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,
-            List<Integer> ids) {
+            List<Integer> ids, MemberScope memberScope) {
         return query != null
             || (industry != null && !industry.isEmpty())
             || noIndustry
-            || (ids != null && !ids.isEmpty());
+            || (ids != null && !ids.isEmpty())
+            || (memberScope != null && memberScope.mode() != MemberScope.Mode.ALL_TEAM);
     }
 
     public List<String> distinctIndustries() {

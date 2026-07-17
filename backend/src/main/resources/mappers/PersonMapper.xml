@@ -297,6 +297,7 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     ORDER BY p.id
     LIMIT #{limit}
   </select>
@@ -314,6 +315,7 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     AND p.suspended_at IS NULL
     ORDER BY p.name
   </select>

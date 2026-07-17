@@ -15,25 +15,27 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.dto.MemberScope;
 
-/** Verifies company and contact member scopes render only on page and count queries. */
+/** Verifies company and contact member scopes render on the page, count, ids, and export queries. */
 class RecordOwnerMapperXmlTest {
 
     @Test
-    void companyPageAndCountRenderEveryOwnerScope() throws Exception {
+    void companyListCountIdsAndExportRenderEveryOwnerScope() throws Exception {
         Configuration configuration = configuration("mappers/CompanyMapper.xml");
 
         assertScopes(configuration, CompanyMapper.class, "getCompaniesPage", "c");
         assertScopes(configuration, CompanyMapper.class, "countCompanies", "c");
-        assertFalse(companySql(configuration, "getCompanyIdsFiltered", null).contains("c.owner_id"));
+        assertScopes(configuration, CompanyMapper.class, "getCompanyIdsFiltered", "c");
+        assertScopes(configuration, CompanyMapper.class, "getCompaniesFiltered", "c");
     }
 
     @Test
-    void personPageAndCountRenderEveryOwnerScopeButIdsStayAllTeam() throws Exception {
+    void personListCountIdsAndExportRenderEveryOwnerScope() throws Exception {
         Configuration configuration = configuration("mappers/PersonMapper.xml");
 
         assertScopes(configuration, PersonMapper.class, "getPersonsPage", "p");
         assertScopes(configuration, PersonMapper.class, "countPersons", "p");
-        assertFalse(personSql(configuration, "getPersonIdsFiltered", null).contains("p.owner_id"));
+        assertScopes(configuration, PersonMapper.class, "getPersonIdsFiltered", "p");
+        assertScopes(configuration, PersonMapper.class, "getPersonsFiltered", "p");
     }
 
     private static void assertScopes(Configuration configuration, Class<?> mapper,
