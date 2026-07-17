@@ -1220,6 +1220,48 @@ export type SegmentFields = {
     tags: SegmentTag[];
 };
 
+export type SegmentFieldKind = "string" | "number" | "id" | "enum" | "tag" | "date";
+
+export type SegmentValueSource =
+    | "none"
+    | "tags"
+    | "industries"
+    | "owners"
+    | "stages"
+    | "pipelines"
+    | "companies";
+
+export type SegmentCatalogField = {
+    field: string;
+    kind: SegmentFieldKind;
+    valueSource: SegmentValueSource;
+    operators: string[];
+};
+
+export type SegmentCatalogPredicate = {
+    key: string;
+    recordTypes: string[];
+    acceptsDays: boolean;
+    defaultDays: number | null;
+    minDays: number | null;
+    maxDays: number | null;
+};
+
+export type SegmentCatalogLimits = {
+    maxConditions: number;
+    maxGroupConditions: number;
+    maxGroups: number;
+    maxDepth: number;
+};
+
+export type SegmentCatalog = {
+    recordType: string;
+    fields: SegmentCatalogField[];
+    predicates: SegmentCatalogPredicate[];
+    enumOptions: Record<string, string[]>;
+    limits: SegmentCatalogLimits;
+};
+
 export type SavedView = {
     id: number;
     recordType: SavedViewRecordType;

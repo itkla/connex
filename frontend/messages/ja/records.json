@@ -101,7 +101,9 @@
     "pickStatus": "ステータスを選択",
     "pickOwner": "担当者を選択",
     "pickCompany": "会社を選択",
-    "pickStage": "ステージを選択"
+    "pickStage": "ステージを選択",
+    "catalogFailed": "セグメントビルダーを読み込めませんでした。",
+    "loading": "読み込み中…"
   },
   "SavedViews": {
     "all": "すべて",

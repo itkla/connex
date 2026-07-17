@@ -3166,6 +3166,10 @@ export function getSegmentFields(recordType: Types.SavedViewRecordType) {
     return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store" });
 }
 
+export function getSegmentCatalog(recordType: Types.SavedViewRecordType) {
+    return getJson<Types.SegmentCatalog>(`/api/segments/catalog?recordType=${recordType}`);
+}
+
 export function getShares(type: string, id: number, init: RequestInit = {}) {
     return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
 }
