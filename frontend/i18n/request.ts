@@ -23,6 +23,7 @@ const namespaces = [
     "deals",
     "pipelines",
     "products",
+    "document-templates",
     "campaigns",
     "users",
     "map",

@@ -1125,6 +1125,79 @@ export type DealLineItemPayload = {
     position?: number;
 };
 
+export type DocumentType = 'quote' | 'proposal' | 'order_form' | 'contract';
+
+/** A workspace-scoped commercial-document template. Sections may carry {{merge tokens}}. */
+export type DocumentTemplate = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    active: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateDocumentTemplatePayload = {
+    name: string;
+    type: DocumentType;
+    locale?: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    active?: boolean;
+};
+
+export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayload>;
+
+export type DocumentStatus = 'draft' | 'final' | 'superseded';
+
+/** A party rendered on a document (workspace, company, or owner). */
+export type DocumentParty = {
+    name: string;
+    address?: string | null;
+};
+
+/**
+ * The immutable, resolved snapshot stored on a generated document. Merge tokens are already
+ * substituted and the line items/totals frozen at generation — the client only renders this.
+ */
+export type DocumentContent = {
+    generatedAt: string;
+    workspace?: DocumentParty | null;
+    company?: DocumentParty | null;
+    owner?: DocumentParty | null;
+    deal: { name: string; currency: string };
+    sections: {
+        title?: string | null;
+        intro?: string | null;
+        terms?: string | null;
+        footer?: string | null;
+    };
+    lineItems: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+/** A generated, immutable, versioned commercial document on a deal. */
+export type DealDocument = {
+    id: number;
+    dealId: number;
+    templateId?: number | null;
+    type: DocumentType;
+    locale: string;
+    status: DocumentStatus;
+    version: number;
+    title?: string | null;
+    currency: string;
+    generatedAt: string;
+    content: DocumentContent;
+};
+
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';
 
 export type CustomFieldType =
