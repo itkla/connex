@@ -45,11 +45,11 @@ class AiReportSelectionResolverTest {
                                 item("metric.0.0", "fact")))),
                 List.of(item("metric.1.0", "recommendation")));
 
-        Optional<AiReportSelectionResolver.Resolved> resolved =
+        Optional<AiReportNarrativeContent> resolved =
                 AiReportSelectionResolver.resolve(selection, ctx);
 
         assertTrue(resolved.isPresent());
-        AiReportNarrativeContent content = resolved.get().content();
+        AiReportNarrativeContent content = resolved.get();
         assertEquals(1, content.sections().size());
         assertEquals("Executive summary", content.sections().getFirst().title());
         assertEquals(1, content.sections().getFirst().claims().size());
@@ -57,7 +57,6 @@ class AiReportSelectionResolverTest {
                 content.sections().getFirst().claims().getFirst().text());
         assertEquals(AiReportFacts.recommendation(ctx.sources().get(1)),
                 content.findings().getFirst().text());
-        assertEquals(2, resolved.get().droppedItems());
     }
 
     @Test

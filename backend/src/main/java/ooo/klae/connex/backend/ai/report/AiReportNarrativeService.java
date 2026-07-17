@@ -136,13 +136,13 @@ public class AiReportNarrativeService {
                     if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeSelection> parsed)) {
                         return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                     }
-                    Optional<AiReportSelectionResolver.Resolved> resolved =
+                    Optional<AiReportNarrativeContent> resolved =
                             AiReportSelectionResolver.resolve(parsed.value(), reportContext);
                     if (resolved.isEmpty()) {
                         return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
                     }
-                    AiReportNarrativeContent content = resolved.get().content();
-                    int warnings = parsed.demaskWarnings() + resolved.get().droppedItems();
+                    AiReportNarrativeContent content = resolved.get();
+                    int warnings = parsed.demaskWarnings();
                     String generatedAt = Instant.now(clock).toString();
                     aiOutputCacheStore.save(
                             workspaceId,
