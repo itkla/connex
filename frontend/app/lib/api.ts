@@ -3017,15 +3017,19 @@ export function deleteGoal(id: number) {
     return deleteJson<void>(`/api/goals/${id}`);
 }
 
-export async function generateReport(id: number, payload: Types.ReportGenerateInput = {}) {
+export async function generateReport(
+    id: number,
+    payload: Types.ReportGenerateInput = {},
+    mode: Types.ReportNarrativeMode = "cached",
+) {
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate`, payload);
+        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
     }
     const identity = await currentClientRequestIdentity();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate`;
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
