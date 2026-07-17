@@ -665,4 +665,66 @@ class SegmentServiceTest extends AbstractServiceTest {
         assertTrue(ids.contains(big.getId()));
         assertFalse(ids.contains(small.getId()));
     }
+
+    private void assertMatchAgrees(String recordType, SegmentDefinition definition, int entityId) {
+        boolean full = segmentService.evaluate(recordType, definition).contains(entityId);
+        boolean single = segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), recordType, definition, entityId);
+        assertEquals(full, single, "matchesEntity disagrees with full evaluation for entity " + entityId);
+    }
+
+    @Test
+    void matchesEntity_agreesWithFullEvaluation_acrossConditionTypes() {
+        Company fintech = companyWithIndustry("Acme " + unique(), "Fintech");
+        Company other = companyWithIndustry("Beta " + unique(), "Logistics");
+
+        SegmentCondition notHot = predicate("warmth_hot");
+        notHot.setNegate(true);
+
+        for (Company company : List.of(fintech, other)) {
+            int id = company.getId();
+            assertMatchAgrees("company", def("all", field("industry", "equals", "Fintech")), id);
+            assertMatchAgrees("company", def("all", predicate("warmth_cold")), id);
+            assertMatchAgrees("company", def("all", predicate("warmth_hot")), id);
+            assertMatchAgrees("company", def("all",
+                field("industry", "equals", "Fintech"), predicate("warmth_cold")), id);
+            assertMatchAgrees("company", def("any",
+                field("industry", "equals", "Fintech"), predicate("warmth_hot")), id);
+            assertMatchAgrees("company", def("all", notHot), id);
+        }
+    }
+
+    @Test
+    void matchesEntity_agreesWithFullEvaluation_forNestedGroups() {
+        Company fintech = companyWithIndustry("Nested " + unique(), "Fintech");
+
+        SegmentDefinition nested = def("all", field("industry", "equals", "Fintech"));
+        SegmentDefinition inner = new SegmentDefinition();
+        inner.setMatch("any");
+        inner.setConditions(List.of(predicate("warmth_cold"), predicate("warmth_hot")));
+        nested.setGroups(List.of(inner));
+
+        assertMatchAgrees("company", nested, fintech.getId());
+    }
+
+    @Test
+    void matchesEntity_computedPredicate_scoresSingleRecord() {
+        Company cold = newCompany();
+
+        assertTrue(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "company", def("all", predicate("warmth_cold")), cold.getId()));
+        assertFalse(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "company", def("all", predicate("warmth_hot")), cold.getId()));
+    }
+
+    @Test
+    void matchesEntity_dealRisk_agreesForOverdueDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
+
+        assertMatchAgrees("deal", def("all", predicate("at_risk")), overdue.getId());
+        assertTrue(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "deal", def("all", predicate("at_risk")), overdue.getId()));
+    }
 }

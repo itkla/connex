@@ -112,7 +112,7 @@ public class RuleEngineService {
             return true;
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition).contains(entityId);
+        return segmentService.matchesEntity(workspaceId, conditionActorId(rule), rule.getRecordType(), definition, entityId);
     }
 
     private List<Integer> scheduleMatches(Rule rule, int workspaceId) {
