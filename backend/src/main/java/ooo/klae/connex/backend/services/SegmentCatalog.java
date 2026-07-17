@@ -71,21 +71,31 @@ public class SegmentCatalog {
         fields.put("company", List.of(
             new FieldSpec("industry", Kind.STRING, ValueSource.INDUSTRIES),
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("website", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         fields.put("person", List.of(
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("title", Kind.STRING, ValueSource.NONE),
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         fields.put("deal", List.of(
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("value", Kind.NUMBER, ValueSource.NONE),
+            new FieldSpec("actual_value", Kind.NUMBER, ValueSource.NONE),
             new FieldSpec("stage", Kind.ID, ValueSource.STAGES),
             new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("status", Kind.ENUM, ValueSource.NONE),
             new FieldSpec("close_date", Kind.DATE, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)));
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
         return Collections.unmodifiableMap(fields);
     }
 
@@ -99,6 +109,16 @@ public class SegmentCatalog {
             new PredicateSpec("cooling", Set.of("company"), false, 0, 0, 0));
         predicates.put("no_activity",
             new PredicateSpec("no_activity", Set.of("company"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("has_open_task",
+            new PredicateSpec("has_open_task", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("overdue_task",
+            new PredicateSpec("overdue_task", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("recent_meeting",
+            new PredicateSpec("recent_meeting", Set.of("person", "deal"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("has_note",
+            new PredicateSpec("has_note", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("has_attachment",
+            new PredicateSpec("has_attachment", Set.of("company", "person", "deal"), false, 0, 0, 0));
         return Collections.unmodifiableMap(predicates);
     }
 

@@ -58,6 +58,22 @@ public interface SegmentMapper {
     /** Ids of deals matching one field condition; see {@link #companyIdsMatching}. */
     List<Integer> dealIdsMatching(Map<String, Object> params);
 
+    /**
+     * Ids of companies matching one existence {@code predicate} (whitelisted token in {@code params}).
+     * Company supports {@code has_attachment} only; other predicates yield no rows.
+     */
+    List<Integer> companyExistence(Map<String, Object> params);
+
+    /**
+     * Ids of people matching one existence {@code predicate} (whitelisted token): {@code has_open_task},
+     * {@code overdue_task}, {@code recent_meeting} ({@code days}-bound), {@code has_note}, or
+     * {@code has_attachment}. Excludes processing-restricted contacts unless {@code includeRestrictedPeople}.
+     */
+    List<Integer> personExistence(Map<String, Object> params);
+
+    /** Ids of deals matching one existence {@code predicate}; see {@link #personExistence}. */
+    List<Integer> dealExistence(Map<String, Object> params);
+
     /** Distinct non-blank industry values in the workspace, for the builder's value picker. */
     List<String> distinctIndustries(int workspaceId);
 

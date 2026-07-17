@@ -41,7 +41,11 @@ class SegmentCatalogTest {
         assertEquals(List.of(
             new FieldSpec("industry", Kind.STRING, ValueSource.INDUSTRIES),
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)),
+            new FieldSpec("website", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)),
             catalog.fields("company"));
     }
 
@@ -51,8 +55,11 @@ class SegmentCatalogTest {
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("title", Kind.STRING, ValueSource.NONE),
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)),
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)),
             catalog.fields("person"));
     }
 
@@ -61,11 +68,14 @@ class SegmentCatalogTest {
         assertEquals(List.of(
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("value", Kind.NUMBER, ValueSource.NONE),
+            new FieldSpec("actual_value", Kind.NUMBER, ValueSource.NONE),
             new FieldSpec("stage", Kind.ID, ValueSource.STAGES),
             new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("status", Kind.ENUM, ValueSource.NONE),
             new FieldSpec("close_date", Kind.DATE, ValueSource.NONE),
-            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS)),
+            new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
+            new FieldSpec("created", Kind.DATE, ValueSource.NONE),
+            new FieldSpec("updated", Kind.DATE, ValueSource.NONE)),
             catalog.fields("deal"));
     }
 
@@ -90,32 +100,46 @@ class SegmentCatalogTest {
     }
 
     @Test
-    void predicatesAreCompanyOnly() {
-        assertEquals(Set.of("warm_intro_available", "open_deal", "cooling", "no_activity"),
+    void predicateApplicabilityMatchesTheCatalog() {
+        assertEquals(Set.of("warm_intro_available", "open_deal", "cooling", "no_activity",
+                "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment"),
             catalog.predicates().stream().map(PredicateSpec::key).collect(Collectors.toSet()));
-        for (PredicateSpec spec : catalog.predicates()) {
-            assertEquals(Set.of("company"), spec.recordTypes(), spec.key());
-            assertTrue(catalog.predicateAppliesTo(spec.key(), "company"));
-            assertFalse(catalog.predicateAppliesTo(spec.key(), "person"));
-            assertFalse(catalog.predicateAppliesTo(spec.key(), "deal"));
+
+        for (String key : Set.of("warm_intro_available", "open_deal", "cooling", "no_activity")) {
+            assertEquals(Set.of("company"), catalog.predicate(key).recordTypes(), key);
         }
+        for (String key : Set.of("has_open_task", "overdue_task", "recent_meeting", "has_note")) {
+            assertEquals(Set.of("person", "deal"), catalog.predicate(key).recordTypes(), key);
+        }
+        assertEquals(Set.of("company", "person", "deal"), catalog.predicate("has_attachment").recordTypes());
+
+        assertTrue(catalog.predicateAppliesTo("open_deal", "company"));
+        assertFalse(catalog.predicateAppliesTo("open_deal", "person"));
+        assertTrue(catalog.predicateAppliesTo("has_open_task", "person"));
+        assertFalse(catalog.predicateAppliesTo("has_open_task", "company"));
+        assertTrue(catalog.predicateAppliesTo("has_attachment", "company"));
+
         assertTrue(catalog.recordTypeSupportsPredicates("company"));
-        assertFalse(catalog.recordTypeSupportsPredicates("person"));
-        assertFalse(catalog.recordTypeSupportsPredicates("deal"));
+        assertTrue(catalog.recordTypeSupportsPredicates("person"));
+        assertTrue(catalog.recordTypeSupportsPredicates("deal"));
         assertTrue(catalog.isPredicate("cooling"));
         assertFalse(catalog.isPredicate("unknown"));
     }
 
     @Test
-    void onlyNoActivityAcceptsDays() {
-        PredicateSpec noActivity = catalog.predicate("no_activity");
-        assertTrue(noActivity.acceptsDays());
-        assertEquals(30, noActivity.defaultDays());
-        assertEquals(1, noActivity.minDays());
-        assertEquals(3650, noActivity.maxDays());
+    void dayParameterizedPredicates() {
+        for (String key : Set.of("no_activity", "recent_meeting")) {
+            PredicateSpec spec = catalog.predicate(key);
+            assertTrue(spec.acceptsDays(), key);
+            assertEquals(30, spec.defaultDays(), key);
+            assertEquals(1, spec.minDays(), key);
+            assertEquals(3650, spec.maxDays(), key);
+        }
         assertFalse(catalog.predicate("open_deal").acceptsDays());
         assertFalse(catalog.predicate("cooling").acceptsDays());
         assertFalse(catalog.predicate("warm_intro_available").acceptsDays());
+        assertFalse(catalog.predicate("has_open_task").acceptsDays());
+        assertFalse(catalog.predicate("has_attachment").acceptsDays());
         assertNull(catalog.predicate("unknown"));
     }
 
