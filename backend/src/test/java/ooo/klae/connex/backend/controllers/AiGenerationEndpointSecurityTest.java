@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.WarmPathService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
@@ -74,6 +75,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private MemberScopeResolver memberScopeResolver;
     @MockitoBean private IntroductionService introductionService;
     @MockitoBean private IntroRationaleService introRationaleService;
+    @MockitoBean private WarmPathService warmPathService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
     @MockitoBean private DbRelyingPartyRegistrationRepository relyingPartyRegistrationRepository;

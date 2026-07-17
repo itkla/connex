@@ -18,12 +18,19 @@ import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.IntroductionRequestDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.WarmPathAcceptRequestDto;
+import ooo.klae.connex.backend.dto.WarmPathDto;
+import ooo.klae.connex.backend.dto.WarmPathRequestDto;
 import ooo.klae.connex.backend.services.IntroductionService;
+import ooo.klae.connex.backend.services.WarmPathService;
 
 /**
  * Reverse-introduction endpoints (issue #43): suggested pairs to introduce, recording an
- * introduction, dismissing a suggestion, and the lineage of introductions made.
- * Delegates to {@code IntroductionService}.
+ * introduction, dismissing a suggestion, and the lineage of introductions made. Also the warm
+ * introduction paths for the user (issue #614): ranked "reach this contact via that bridge"
+ * suggestions, with accept-into-a-task and dismissal.
+ * Delegates to {@code IntroductionService} and {@code WarmPathService}.
  */
 @RestController
 @RequestMapping("/api/introductions")
@@ -31,6 +38,7 @@ import ooo.klae.connex.backend.services.IntroductionService;
 public class IntroductionController {
     private final IntroductionService introductionService;
     private final IntroRationaleService introRationaleService;
+    private final WarmPathService warmPathService;
 
     /**
      * GET ranked reverse-introduction suggestions for the active workspace.
@@ -73,5 +81,33 @@ public class IntroductionController {
     @PostMapping("/dismiss")
     public void dismissSuggestion(@Valid @RequestBody IntroductionRequestDto request) {
         introductionService.dismissSuggestion(request.getPersonAId(), request.getPersonBId());
+    }
+
+    /**
+     * GET ranked warm introduction paths for the active workspace.
+     * @param limit maximum target rows to return
+     */
+    @GetMapping("/paths")
+    public List<WarmPathDto> getPaths(@RequestParam(defaultValue = "20") int limit) {
+        return warmPathService.getPaths(limit);
+    }
+
+    /**
+     * POST accepts a warm path: creates the follow-up task asking the bridge for the
+     * introduction and retires the target from the feed.
+     */
+    @PostMapping("/paths/accept")
+    public TaskDto acceptPath(@Valid @RequestBody WarmPathAcceptRequestDto request) {
+        return TaskDto.from(warmPathService.acceptPath(
+            request.getTargetPersonId(), request.getBridgePersonId(), request.getTaskDescription()));
+    }
+
+    /**
+     * POST dismisses a warm path — one avenue when a bridge is given, otherwise every path to
+     * the target.
+     */
+    @PostMapping("/paths/dismiss")
+    public void dismissPath(@Valid @RequestBody WarmPathRequestDto request) {
+        warmPathService.dismissPath(request.getTargetPersonId(), request.getBridgePersonId());
     }
 }
