@@ -15,6 +15,8 @@ import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
@@ -45,9 +47,13 @@ public class CampaignDispatchService {
     private final DeliveryProviderConfigService deliveryProviderConfigService;
     private final DeliveryProviderRouter deliveryProviderRouter;
     private final DeliveryProperties deliveryProperties;
+    private final CapabilityRegistry capabilityRegistry;
 
     /** Processes every queued send in the workspace. Never throws. */
     public void processWorkspace(int workspaceId) {
+        if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
+            return;
+        }
         for (int sendId : campaignSendMapper.queuedSendIds(workspaceId)) {
             try {
                 processSend(workspaceId, sendId);
@@ -60,6 +66,9 @@ public class CampaignDispatchService {
 
     /** Dispatches the pending deliveries of one send, claim-first. Never throws. */
     public void processSend(int workspaceId, int sendId) {
+        if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
+            return;
+        }
         CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
         if (send == null || !("queued".equals(send.getStatus()) || "running".equals(send.getStatus()))) {
             return;
@@ -88,14 +97,21 @@ public class CampaignDispatchService {
             return;
         }
         for (int deliveryId : campaignDeliveryMapper.pendingDeliveryIds(workspaceId, sendId)) {
+            CampaignSend current = campaignSendMapper.getSend(workspaceId, sendId);
+            if (current == null || !"running".equals(current.getStatus())) {
+                break;
+            }
             try {
                 dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
             } catch (Exception exception) {
+                campaignDeliveryMapper.markFailed(workspaceId, deliveryId, bounded(exception.getMessage()));
                 log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, exception.getMessage());
             }
         }
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-        if (campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
+        CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
+        if (settled != null && "running".equals(settled.getStatus())
+                && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
     }

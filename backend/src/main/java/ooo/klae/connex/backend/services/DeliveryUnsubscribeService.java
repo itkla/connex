@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.LocalDateTime;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -45,6 +46,7 @@ public class DeliveryUnsubscribeService {
     }
 
     /** Performs the unsubscribe: idempotent suppression, consent revocation, and an event. */
+    @Transactional
     public DeliveryUnsubscribeDto unsubscribe(String token) {
         CampaignDelivery delivery = requireDelivery(token);
         CampaignSend send = requireSend(delivery);
