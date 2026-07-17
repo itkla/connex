@@ -1207,6 +1207,117 @@ export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
     members: CampaignAudienceMember[];
 };
 
+export type CampaignChannel = "email";
+
+export type CampaignMessageStatus = "draft" | "final";
+
+export type CampaignMessageLocale = "en" | "ja";
+
+/** One immutable, locale-scoped revision of a campaign message. */
+export type CampaignMessageRevision = {
+    version: number;
+    locale: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText: string | null;
+    createdAt: string;
+};
+
+/** A campaign message and its append-only revisions, newest first. */
+export type CampaignMessage = {
+    id: number;
+    campaignId: number;
+    channel: string;
+    name: string;
+    status: CampaignMessageStatus;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+    revisions: CampaignMessageRevision[];
+};
+
+export type CampaignMessagePayload = {
+    name: string;
+    channel: CampaignChannel;
+};
+
+export type CampaignMessageRevisionPayload = {
+    locale: CampaignMessageLocale;
+    subject: string;
+    bodyHtml: string;
+    bodyText?: string | null;
+};
+
+export type CampaignSendStatus =
+    | "draft"
+    | "queued"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+/** A campaign send bound to a frozen audience snapshot and a message revision. */
+export type CampaignSend = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    messageId: number;
+    messageVersion: number;
+    channel: string;
+    purpose: string;
+    providerId: string | null;
+    status: CampaignSendStatus;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    totalRecipients: number;
+    dispatchedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignSendPayload = {
+    snapshotVersion: number;
+    messageId: number;
+    messageVersion: number;
+    purpose?: string | null;
+    scheduledAt?: string | null;
+};
+
+export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
+
+/** A campaign audience export bound to a frozen snapshot and an external connector. */
+export type CampaignAudienceExport = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    connector: string;
+    externalListId: string | null;
+    status: CampaignExportStatus;
+    totalMembers: number;
+    pushedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignAudienceExportPayload = {
+    snapshotVersion: number;
+    connector: string;
+};
+
+/** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+export type DeliveryUnsubscribeInfo = {
+    channel: string;
+    address: string;
+    unsubscribed: boolean;
+};
+
 export type ContactChannelConsent = {
     id: number;
     personId: number;
@@ -2228,6 +2339,55 @@ export type MailConfigRequest = {
 export type MailTestResult = {
     success: boolean;
     error: string | null;
+};
+
+export type DeliveryProvider = "smtp" | "http_esp";
+
+export type DeliveryProviderConfig = {
+    channel: string;
+    provider: DeliveryProvider;
+    endpoint: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    webhookConfigured: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type DeliveryProviderConfigPayload = {
+    channel: string;
+    provider: string;
+    endpoint?: string | null;
+    fromAddress?: string | null;
+    fromName?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
+export type DeliveryWebhookToken = {
+    token: string;
+    secret: string;
+    signatureHeader: string;
+};
+
+export type ConnectorConfig = {
+    connector: string;
+    endpoint: string | null;
+    externalListId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type ConnectorConfigPayload = {
+    connector: string;
+    endpoint?: string | null;
+    externalListId?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
 };
 
 export type InstanceCapabilities = {

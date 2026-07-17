@@ -66,6 +66,11 @@ public interface CampaignMapper {
             @Param("channel") String channel,
             @Param("purpose") String purpose);
 
+    List<String> suppressedAddresses(
+            @Param("workspaceId") int workspaceId,
+            @Param("channel") String channel,
+            @Param("addresses") List<String> addresses);
+
     int clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
 
     void clearCampaignUserReferencesAnywhere(@Param("userId") int userId);

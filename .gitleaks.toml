@@ -20,5 +20,8 @@ regexes = [
   '''spring\.datasource\.password", "x"''',
   '''TOKEN="(0123456789abcdef){4}"''',
   '''IDEMPOTENCY_KEY = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"''',
-  '''String token = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.[a-z]{3,4}";'''
+  '''String token = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.[a-z]{3,4}";''',
+  '''API_KEY = "esp_api_key_secret_1234"''',
+  '''API_KEY = "esp_api_key_123456"''',
+  '''WEBHOOK_SECRET = "whsec_abcdef0123456789"'''
 ]

@@ -17,7 +17,9 @@ import ooo.klae.connex.backend.tenant.Permission;
  * own workspace, so this grant never widens a real member's reach. The catalog is intentionally
  * limited to exactly what the automation actions need — {@code *_UPDATE} covers add/remove tag,
  * owner reassignment and stage changes; {@code TASK_CREATE}/{@code ACTIVITY_CREATE}/{@code NOTE_CREATE}
- * cover the record-creating actions. Management permissions are deliberately withheld.
+ * cover the record-creating actions. {@code CONSENT_MANAGE} lets the public unsubscribe path record a
+ * suppression and a consent revocation as the system actor. Management permissions are otherwise
+ * deliberately withheld.
  */
 @Component
 @RequiredArgsConstructor
@@ -27,7 +29,8 @@ public class SystemActor {
 
     private static final Set<Permission> PERMISSIONS = Set.of(
         Permission.TASK_CREATE, Permission.ACTIVITY_CREATE, Permission.NOTE_CREATE,
-        Permission.COMPANY_UPDATE, Permission.PERSON_UPDATE, Permission.DEAL_UPDATE);
+        Permission.COMPANY_UPDATE, Permission.PERSON_UPDATE, Permission.DEAL_UPDATE,
+        Permission.CONSENT_MANAGE);
 
     private final UserMapper userMapper;
     private volatile User cached;

@@ -4,8 +4,6 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Currency;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -54,6 +52,7 @@ public class CampaignService {
 
     private final CampaignMapper campaignMapper;
     private final SegmentService segmentService;
+    private final AudienceEligibilityService audienceEligibilityService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
@@ -237,29 +236,18 @@ public class CampaignService {
             return evaluation(audience.getRecordType(), records, 0, 0, 0);
         }
 
-        LinkedHashSet<Integer> remaining = new LinkedHashSet<>(candidateIds);
-        Set<Integer> restricted = restrictedIds(workspaceId, candidateIds);
-        remaining.removeAll(restricted);
-        Set<Integer> suppressed = suppressedIds(workspaceId, new ArrayList<>(remaining));
-        remaining.removeAll(suppressed);
-        Set<Integer> granted = grantedConsentIds(workspaceId, new ArrayList<>(remaining));
-        Set<Integer> consentMissing = new HashSet<>(remaining);
-        consentMissing.removeAll(granted);
-
+        AudienceEligibilityService.AudienceClassification classification =
+                audienceEligibilityService.classify(workspaceId, candidateIds, DEFAULT_CHANNEL, DEFAULT_PURPOSE);
         List<ClassifiedRecord> records = new ArrayList<>(candidateIds.size());
         for (int id : candidateIds) {
-            if (restricted.contains(id)) {
-                records.add(new ClassifiedRecord(id, "excluded", "restricted"));
-            } else if (suppressed.contains(id)) {
-                records.add(new ClassifiedRecord(id, "excluded", "suppressed"));
-            } else if (consentMissing.contains(id)) {
-                records.add(new ClassifiedRecord(id, "excluded", "consent_missing"));
-            } else {
-                records.add(new ClassifiedRecord(id, "included", null));
-            }
+            String reason = classification.reasonFor(id);
+            records.add(reason == null
+                    ? new ClassifiedRecord(id, "included", null)
+                    : new ClassifiedRecord(id, "excluded", reason));
         }
         return evaluation(audience.getRecordType(), records,
-                consentMissing.size(), suppressed.size(), restricted.size());
+                classification.consentMissing().size(), classification.suppressed().size(),
+                classification.restricted().size());
     }
 
     private AudienceEvaluation evaluation(
@@ -275,26 +263,6 @@ public class CampaignService {
                 List.copyOf(records), includedIds.size(), excludedConsent, excludedSuppressed,
                 excludedRestricted, excludedConsent + excludedSuppressed + excludedRestricted,
                 List.copyOf(sampleLabels));
-    }
-
-    private Set<Integer> restrictedIds(int workspaceId, List<Integer> ids) {
-        Set<Integer> result = new HashSet<>();
-        forEachBatch(ids, batch -> result.addAll(campaignMapper.restrictedPersonIds(workspaceId, batch)));
-        return result;
-    }
-
-    private Set<Integer> suppressedIds(int workspaceId, List<Integer> ids) {
-        Set<Integer> result = new HashSet<>();
-        forEachBatch(ids, batch -> result.addAll(
-                campaignMapper.suppressedPersonIds(workspaceId, batch, DEFAULT_CHANNEL)));
-        return result;
-    }
-
-    private Set<Integer> grantedConsentIds(int workspaceId, List<Integer> ids) {
-        Set<Integer> result = new HashSet<>();
-        forEachBatch(ids, batch -> result.addAll(campaignMapper.grantedConsentPersonIds(
-                workspaceId, batch, DEFAULT_CHANNEL, DEFAULT_PURPOSE)));
-        return result;
     }
 
     private void insertMembers(

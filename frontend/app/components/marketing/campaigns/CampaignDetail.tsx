@@ -27,12 +27,17 @@ import Panel from "@/app/components/overview/analytics/Panel";
 import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/SegmentBuilder";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
+import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
+import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
 import {
     type Campaign,
     type CampaignAudience,
     type CampaignAudienceEstimate,
+    type CampaignAudienceExport,
     type CampaignAudienceRecordType,
     type CampaignAudienceSnapshotSummary,
+    type CampaignMessage,
+    type CampaignSend,
     type SegmentDefinition,
     type SegmentFields,
 } from "@/app/lib/types";
@@ -62,10 +67,20 @@ export default function CampaignDetail({
     campaign,
     initialAudience,
     initialSnapshots,
+    initialMessages,
+    initialSends,
+    initialExports,
+    canManage,
+    canSend,
 }: {
     campaign: Campaign;
     initialAudience: CampaignAudience | null;
     initialSnapshots: CampaignAudienceSnapshotSummary[];
+    initialMessages: CampaignMessage[];
+    initialSends: CampaignSend[];
+    initialExports: CampaignAudienceExport[];
+    canManage: boolean;
+    canSend: boolean;
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
@@ -365,6 +380,22 @@ export default function CampaignDetail({
                         </Panel>
                     </div>
                 </div>
+
+                <CampaignDelivery
+                    campaignId={campaign.id}
+                    initialMessages={initialMessages}
+                    initialSends={initialSends}
+                    snapshots={snapshots}
+                    canManage={canManage}
+                    canSend={canSend}
+                />
+
+                <CampaignExportPanel
+                    campaignId={campaign.id}
+                    initialExports={initialExports}
+                    snapshots={snapshots}
+                    canManage={canManage}
+                />
             </div>
 
             <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>

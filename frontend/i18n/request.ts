@@ -33,6 +33,7 @@ const namespaces = [
     "importExport",
     "legal",
     "docs",
+    "unsubscribe",
 ] as const;
 
 async function loadMessages(locale: Locale) {
