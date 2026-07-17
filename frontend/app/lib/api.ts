@@ -2505,6 +2505,55 @@ export function deleteProduct(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/products/${id}`, init);
 }
 
+export function getDocumentTemplates(init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate[]>(`/api/document-templates`, init);
+}
+
+export function getDocumentTemplatesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DocumentTemplate>((init) => getDocumentTemplates(init), cookie);
+}
+
+export function getDocumentTemplateById(id: number, init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, init);
+}
+
+export function createDocumentTemplate(payload: Types.CreateDocumentTemplatePayload) {
+    return postJson<Types.DocumentTemplate>(`/api/document-templates`, payload);
+}
+
+export function updateDocumentTemplate(id: number, payload: Types.UpdateDocumentTemplatePayload) {
+    return putJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, payload);
+}
+
+export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/document-templates/${id}`, init);
+}
+
+export function getDealDocuments(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
+}
+
+export function getDealDocumentsFromCookie(dealId: number, cookie: string | null) {
+    return safeWithCookie<Types.DealDocument>(
+        (init) => getDealDocuments(dealId, init), cookie);
+}
+
+export function getDealDocumentById(dealId: number, documentId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
+export function generateDealDocument(dealId: number, templateId: number) {
+    return postJson<Types.DealDocument>(`/api/deals/${dealId}/documents`, { templateId });
+}
+
+export function updateDealDocumentStatus(dealId: number, documentId: number, status: Types.DocumentStatus) {
+    return putJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}/status`, { status });
+}
+
+export function deleteDealDocument(dealId: number, documentId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
 }

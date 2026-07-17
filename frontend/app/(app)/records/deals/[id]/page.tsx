@@ -18,6 +18,7 @@ import {
     getContextNotifications,
     getDealById,
     getDealLineItemsFromCookie,
+    getDealDocumentsFromCookie,
     getDealCollaborators,
     getDealPeople,
     getDealRisk,
@@ -69,6 +70,7 @@ import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleP
 import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import DealLineItems from '@/app/components/records/deals/DealLineItems';
+import DealDocuments from '@/app/components/records/deals/DealDocuments';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
@@ -113,6 +115,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
     const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
         .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
+
+    const documents = await getDealDocumentsFromCookie(deal.id, cookie).catch(() => []);
 
     const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null
@@ -359,8 +363,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
                 </Rise>
 
+                <Rise delay={0.24}>
+                    <DealDocuments dealId={deal.id} initial={documents} />
+                </Rise>
+
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                    <Rise delay={0.24}>
+                    <Rise delay={0.27}>
                         <aside>
                             <SectionHeader title={t('details')} />
                             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
