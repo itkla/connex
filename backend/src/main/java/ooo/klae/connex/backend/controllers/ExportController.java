@@ -21,9 +21,12 @@ import ooo.klae.connex.backend.util.LikePattern;
 
 /**
  * REST controller for CSV export of contacts, companies, and deals. Each endpoint returns a UTF-8
- * CSV (BOM-prefixed for spreadsheet compatibility) of the workspace's records, honoring the exact
- * same search, facet, and member-scope filters as the matching list endpoint so the export set
- * equals the visible filtered+scoped list. Delegates to {@code ExportService}.
+ * CSV (BOM-prefixed for spreadsheet compatibility) of the workspace's records, honoring the same
+ * search, facet, and member-scope filters as the matching list endpoint so the exported set tracks
+ * the visible filtered+scoped list rather than just the loaded page. Contacts under an APPI
+ * processing restriction ({@code suspended_at}) are the one deliberate exception: they remain
+ * visible and manageable in the browser but are never exported, since export is a data provision.
+ * Delegates to {@code ExportService}.
  */
 @RestController
 @RequestMapping("/api/exports")

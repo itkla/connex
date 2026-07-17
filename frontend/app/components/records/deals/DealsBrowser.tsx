@@ -48,6 +48,7 @@ import {
     getDealsPage,
     getDealMetrics,
     getDealFacets,
+    exportDealsCsv,
     getDealRevenueTimeseries,
     getDealStageDistribution,
     getPipelines,
@@ -995,7 +996,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 newLabel={t('newButton')}
                                 newAriaLabel={t('addDeal')}
                                 onImported={refreshRecords}
-                                dealsFilter={{ ...serverFilters, q: deferredQuery || undefined }}
+                                onExport={() => exportDealsCsv({ ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined })}
                             />
                         </div>
                     </div>

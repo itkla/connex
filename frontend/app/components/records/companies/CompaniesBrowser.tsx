@@ -36,7 +36,7 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -85,6 +85,8 @@ function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): Co
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
 const NO_ITEMS: Company[] = [];
+/** Impossible company id (ids are positive) used to force an empty scoped export when a segment matches nothing. */
+const NO_MATCH_COMPANY_ID = 0;
 const EMPTY_COMPANY_DRAFT: CreateCompanyPayload = {
     name: '',
     website: '',
@@ -285,6 +287,16 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
     }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
+
+    const exportCompanies = useCallback(async () => {
+        const params = { ...filterParams, q: query.trim() || undefined };
+        if (!hasSegments) {
+            await exportCompaniesCsv(params);
+            return;
+        }
+        const matched = await getCompanySegmentIds({ ...params, definition: evaluable });
+        await exportCompaniesCsv({ ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] });
+    }, [filterParams, query, hasSegments, evaluable]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -721,7 +733,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
                                 onImported={refresh}
-                                companiesFilter={{ ...filterParams, q: query || undefined }}
+                                onExport={exportCompanies}
                             />
                         </div>
                     </div>
