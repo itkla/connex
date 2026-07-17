@@ -101,7 +101,9 @@
     "pickStatus": "Choose a status",
     "pickOwner": "Choose an owner",
     "pickCompany": "Choose a company",
-    "pickStage": "Choose a stage"
+    "pickStage": "Choose a stage",
+    "catalogFailed": "Could not load the segment builder.",
+    "loading": "Loading…"
   },
   "SavedViews": {
     "all": "All",

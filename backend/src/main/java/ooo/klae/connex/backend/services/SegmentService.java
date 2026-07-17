@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
@@ -52,47 +54,9 @@ public class SegmentService {
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
+    private final SegmentCatalog catalog;
 
-    private static final int DEFAULT_DAYS = 30;
-    private static final int MAX_DAYS = 3650;
     private static final int STRONG_EDGE = 2;
-    private static final int MAX_CONDITIONS = 32;
-    private static final int MAX_DEPTH = 4;
-
-    private static final Set<String> SUPPORTED_RECORD_TYPES = Set.of("company", "person", "deal");
-    private static final Set<String> PREDICATE_KEYS =
-        Set.of("warm_intro_available", "open_deal", "cooling", "no_activity");
-    private static final Set<String> STATUS_VALUES = Set.of("open", "won", "lost");
-
-    private enum Kind { STRING, NUMBER, ID, ENUM, TAG, DATE }
-
-    private static final Map<String, Map<String, Kind>> FIELDS = Map.of(
-        "company", Map.of(
-            "industry", Kind.STRING,
-            "name", Kind.STRING,
-            "tag", Kind.TAG),
-        "person", Map.of(
-            "name", Kind.STRING,
-            "title", Kind.STRING,
-            "email", Kind.STRING,
-            "company", Kind.ID,
-            "tag", Kind.TAG),
-        "deal", Map.of(
-            "name", Kind.STRING,
-            "value", Kind.NUMBER,
-            "stage", Kind.ID,
-            "owner", Kind.ID,
-            "status", Kind.ENUM,
-            "close_date", Kind.DATE,
-            "tag", Kind.TAG));
-
-    private static final Map<Kind, Set<String>> OPS = Map.of(
-        Kind.STRING, Set.of("equals", "contains", "starts_with", "is_set"),
-        Kind.NUMBER, Set.of("equals", "gt", "gte", "lt", "lte"),
-        Kind.ID, Set.of("is", "in"),
-        Kind.ENUM, Set.of("is"),
-        Kind.TAG, Set.of("has"),
-        Kind.DATE, Set.of("before", "after", "within_days", "is_set"));
 
     /**
      * Returns the ids of records matching the definition, scoped to the active session's workspace
@@ -128,8 +92,8 @@ public class SegmentService {
             return List.of();
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
         EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
@@ -137,8 +101,8 @@ public class SegmentService {
     }
 
     private int countConditions(SegmentDefinition group, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         int count = group.getConditions() == null ? 0 : group.getConditions().size();
         if (group.getGroups() != null) {
@@ -159,6 +123,44 @@ public class SegmentService {
         List<TagDto> tags = tagMapper.getAllTags(workspaceId).stream().map(TagDto::from).toList();
         List<String> industries = "company".equals(type) ? segmentMapper.distinctIndustries(workspaceId) : List.of();
         return new SegmentFieldsDto(industries, tags);
+    }
+
+    /**
+     * The static, workspace-independent shape of the builder for a record type: its fields (kind,
+     * value source, legal operators), the predicates that apply to it, the enum option sets, and the
+     * definition shape limits. Carries no workspace data, so it is safe to cache; the client renders
+     * the builder generically from it and pairs it with the workspace value options from
+     * {@link #fields(String)}.
+     */
+    public SegmentCatalogDto catalog(String recordType) {
+        String type = requireSupported(recordType);
+        List<SegmentCatalogDto.CatalogField> fields = new ArrayList<>();
+        Map<String, List<String>> enums = new LinkedHashMap<>();
+        for (SegmentCatalog.FieldSpec spec : catalog.fields(type)) {
+            fields.add(new SegmentCatalogDto.CatalogField(
+                spec.field(),
+                spec.kind().name().toLowerCase(),
+                spec.valueSource().name().toLowerCase(),
+                catalog.operatorsFor(spec.kind())));
+            if (spec.kind() == SegmentCatalog.Kind.ENUM) {
+                enums.put(spec.field(), catalog.enumOptions(spec.field()));
+            }
+        }
+        List<SegmentCatalogDto.CatalogPredicate> predicates = new ArrayList<>();
+        for (SegmentCatalog.PredicateSpec spec : catalog.predicates()) {
+            if (spec.recordTypes().contains(type)) {
+                predicates.add(new SegmentCatalogDto.CatalogPredicate(
+                    spec.key(),
+                    List.copyOf(spec.recordTypes()),
+                    spec.acceptsDays(),
+                    spec.acceptsDays() ? spec.defaultDays() : null,
+                    spec.acceptsDays() ? spec.minDays() : null,
+                    spec.acceptsDays() ? spec.maxDays() : null));
+            }
+        }
+        SegmentCatalogDto.CatalogLimits limits = new SegmentCatalogDto.CatalogLimits(
+            catalog.maxConditions(), catalog.maxGroupConditions(), catalog.maxGroups(), catalog.maxDepth());
+        return new SegmentCatalogDto(type, fields, predicates, enums, limits);
     }
 
     /** id + display label for a bounded set of records of {@code recordType}, for a preview sample. */
@@ -186,8 +188,8 @@ public class SegmentService {
             return;
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
         validateGroup(definition, type);
     }
@@ -213,11 +215,11 @@ public class SegmentService {
     private void validateCondition(SegmentCondition condition, String recordType) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(recordType)) {
+            if (!catalog.recordTypeSupportsPredicates(recordType)) {
                 throw new BadRequestException("Predicates are only available for company records");
             }
             String key = normalize(condition.getKey());
-            if (key == null || !PREDICATE_KEYS.contains(key)) {
+            if (key == null || !catalog.isPredicate(key)) {
                 throw new BadRequestException("Unknown predicate: " + condition.getKey());
             }
             return;
@@ -228,8 +230,8 @@ public class SegmentService {
             if (field == null || op == null) {
                 throw new BadRequestException("Field condition requires 'field' and 'op'");
             }
-            Kind kind = fieldKind(recordType, field);
-            if (!OPS.get(kind).contains(op)) {
+            SegmentCatalog.Kind kind = fieldKind(recordType, field);
+            if (!catalog.operatorsFor(kind).contains(op)) {
                 throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
             }
             bindValue(kind, op, condition, new HashMap<>());
@@ -244,8 +246,8 @@ public class SegmentService {
     }
 
     private Set<Integer> combineMembers(SegmentDefinition group, EvalContext ctx, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         String match = normalize(group.getMatch());
         boolean any = "any".equals(match);
@@ -297,7 +299,7 @@ public class SegmentService {
     private Set<Integer> evaluateCondition(SegmentCondition condition, EvalContext ctx) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(ctx.recordType())) {
+            if (!catalog.recordTypeSupportsPredicates(ctx.recordType())) {
                 throw new BadRequestException("Predicates are only available for company records");
             }
             return evaluatePredicate(condition, ctx.workspaceId(), ctx.userId());
@@ -310,13 +312,13 @@ public class SegmentService {
 
     private Set<Integer> evaluatePredicate(SegmentCondition condition, int workspaceId, int userId) {
         String key = normalize(condition.getKey());
-        if (key == null || !PREDICATE_KEYS.contains(key)) {
+        if (key == null || !catalog.isPredicate(key)) {
             throw new BadRequestException("Unknown predicate: " + condition.getKey());
         }
         return switch (key) {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
-                workspaceId, resolveDays(condition.getDays())));
+                workspaceId, catalog.clampDays(condition.getDays())));
             case "cooling" -> coolingCompanyIds(workspaceId);
             case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, userId);
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
@@ -329,8 +331,8 @@ public class SegmentService {
         if (field == null || op == null) {
             throw new BadRequestException("Field condition requires 'field' and 'op'");
         }
-        Kind kind = fieldKind(ctx.recordType(), field);
-        if (!OPS.get(kind).contains(op)) {
+        SegmentCatalog.Kind kind = fieldKind(ctx.recordType(), field);
+        if (!catalog.operatorsFor(kind).contains(op)) {
             throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
         }
         Map<String, Object> params = new HashMap<>();
@@ -353,7 +355,7 @@ public class SegmentService {
         };
     }
 
-    private void bindValue(Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
+    private void bindValue(SegmentCatalog.Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
         switch (kind) {
             case STRING -> {
                 switch (op) {
@@ -379,7 +381,7 @@ public class SegmentService {
                     case "within_days" -> {
                         LocalDate today = LocalDate.now();
                         params.put("dateFrom", today.toString());
-                        params.put("dateTo", today.plusDays(resolveDays(condition.getDays())).toString());
+                        params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
                     }
                     default -> { }
                 }
@@ -393,9 +395,8 @@ public class SegmentService {
         return complement;
     }
 
-    private static Kind fieldKind(String recordType, String field) {
-        Map<String, Kind> catalog = FIELDS.get(recordType);
-        Kind kind = catalog == null ? null : catalog.get(field);
+    private SegmentCatalog.Kind fieldKind(String recordType, String field) {
+        SegmentCatalog.Kind kind = catalog.fieldKind(recordType, field);
         if (kind == null) {
             throw new BadRequestException("Unknown field for " + recordType + ": " + field);
         }
@@ -440,19 +441,12 @@ public class SegmentService {
             workspaceId, userId, new ArrayList<>(warmlyConnected)));
     }
 
-    private static String requireSupported(String recordType) {
+    private String requireSupported(String recordType) {
         String type = normalize(recordType);
-        if (type == null || !SUPPORTED_RECORD_TYPES.contains(type)) {
+        if (type == null || !catalog.supportsRecordType(type)) {
             throw new BadRequestException("Smart segments are not available for record type: " + recordType);
         }
         return type;
-    }
-
-    private static int resolveDays(Integer days) {
-        if (days == null) {
-            return DEFAULT_DAYS;
-        }
-        return Math.min(Math.max(days, 1), MAX_DAYS);
     }
 
     private static String requireValue(SegmentCondition condition) {
@@ -495,9 +489,9 @@ public class SegmentService {
         return ids;
     }
 
-    private static String requireStatus(SegmentCondition condition) {
+    private String requireStatus(SegmentCondition condition) {
         String value = normalize(requireValue(condition));
-        if (!STATUS_VALUES.contains(value)) {
+        if (!catalog.statusValues().contains(value)) {
             throw new BadRequestException("Status must be one of open, won, lost");
         }
         return value;
