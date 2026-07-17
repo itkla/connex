@@ -62,6 +62,9 @@ public class WarmPathService {
     /** Companies with more eligible contacts than this are too large for an inferred colleague
      *  tie to mean anything; their pairs are skipped (also bounds the pairwise work). */
     private static final int MAX_COMPANY_FANOUT = 40;
+    /** Stints considered per person per employer, bounding the overlap scan against contacts whose
+     *  employment history has churned through many rows at the same company. */
+    private static final int MAX_STINTS_PER_EMPLOYER = 5;
     /** Bridges shown per target row. */
     private static final int MAX_BRIDGES_PER_TARGET = 3;
     /** Rows a single bridge may appear in, so the feed never becomes "ask one person about everyone". */
@@ -346,43 +349,57 @@ public class WarmPathService {
             }
         }
 
-        Map<String, List<IntroEmploymentRow>> byEmployer = new HashMap<>();
+        Map<String, Map<Integer, List<IntroEmploymentRow>>> byEmployer = new HashMap<>();
         for (IntroEmploymentRow stint : employment) {
             if (!candidateIds.contains(stint.getPersonId())) {
                 continue;
             }
             String identity = employerIdentity(stint);
-            if (identity != null) {
-                byEmployer.computeIfAbsent(identity, key -> new ArrayList<>()).add(stint);
-            }
-        }
-        for (List<IntroEmploymentRow> stints : byEmployer.values()) {
-            Set<Integer> people = new HashSet<>();
-            for (IntroEmploymentRow stint : stints) {
-                people.add(stint.getPersonId());
-            }
-            if (people.size() < 2 || people.size() > MAX_COMPANY_FANOUT) {
+            if (identity == null) {
                 continue;
             }
-            for (int i = 0; i < stints.size(); i++) {
-                for (int j = i + 1; j < stints.size(); j++) {
-                    IntroEmploymentRow a = stints.get(i);
-                    IntroEmploymentRow b = stints.get(j);
-                    if (a.getPersonId() == b.getPersonId()
-                            || sameCurrentEmployer(currentCompany, a.getPersonId(), b.getPersonId())
-                            || !overlaps(a, b)) {
+            List<IntroEmploymentRow> stints = byEmployer
+                .computeIfAbsent(identity, key -> new HashMap<>())
+                .computeIfAbsent(stint.getPersonId(), key -> new ArrayList<>());
+            if (stints.size() < MAX_STINTS_PER_EMPLOYER) {
+                stints.add(stint);
+            }
+        }
+        for (Map<Integer, List<IntroEmploymentRow>> group : byEmployer.values()) {
+            if (group.size() < 2 || group.size() > MAX_COMPANY_FANOUT) {
+                continue;
+            }
+            List<Integer> people = new ArrayList<>(group.keySet());
+            people.sort(Comparator.naturalOrder());
+            for (int i = 0; i < people.size(); i++) {
+                for (int j = i + 1; j < people.size(); j++) {
+                    if (sameCurrentEmployer(currentCompany, people.get(i), people.get(j))) {
                         continue;
                     }
-                    String company = notBlank(a.getCompanyName()) ? a.getCompanyName().trim()
-                        : (notBlank(b.getCompanyName()) ? b.getCompanyName().trim() : null);
-                    evidence.merge(pairKey(a.getPersonId(), b.getPersonId()),
-                        new Evidence(EVIDENCE_FORMER_COLLEAGUES, CONF_FORMER_COLLEAGUES, company,
-                            overlapStartYear(a, b), overlapEndYear(a, b)),
-                        Evidence::strongest);
+                    Evidence overlap = firstOverlap(group.get(people.get(i)), group.get(people.get(j)));
+                    if (overlap != null) {
+                        evidence.merge(pairKey(people.get(i), people.get(j)), overlap, Evidence::strongest);
+                    }
                 }
             }
         }
         return evidence;
+    }
+
+    /** The first overlapping stint pair between two people at a shared employer, or {@code null}. */
+    private static Evidence firstOverlap(List<IntroEmploymentRow> stintsA, List<IntroEmploymentRow> stintsB) {
+        for (IntroEmploymentRow a : stintsA) {
+            for (IntroEmploymentRow b : stintsB) {
+                if (!overlaps(a, b)) {
+                    continue;
+                }
+                String company = notBlank(a.getCompanyName()) ? a.getCompanyName().trim()
+                    : (notBlank(b.getCompanyName()) ? b.getCompanyName().trim() : null);
+                return new Evidence(EVIDENCE_FORMER_COLLEAGUES, CONF_FORMER_COLLEAGUES, company,
+                    overlapStartYear(a, b), overlapEndYear(a, b));
+            }
+        }
+        return null;
     }
 
     /** Records a warm-path dismissal: per avenue with a bridge, or for every path to the target. */

@@ -107,6 +107,25 @@ class WarmPathRankingTest {
     }
 
     @Test
+    void stintChurnStaysBoundedAndStillFindsTheOverlap() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Bridge", 100, "Acme"),
+            person(2, "Target", 200, "Globex"));
+        List<IntroEmploymentRow> employment = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            employment.add(stint(1, 900, "Hooli",
+                "2019-01-01 00:00:0" + (i % 10), "2020-01-01 00:00:00"));
+        }
+        employment.add(stint(2, 900, "Hooli", "2019-06-01 00:00:00", "2021-01-01 00:00:00"));
+
+        List<WarmPathDto> rows = rank(candidates, List.of(), employment, List.of(), warmAndCold());
+
+        assertEquals(1, rows.size(), "capped stints must still yield the overlap evidence");
+        assertEquals(WarmPathService.EVIDENCE_FORMER_COLLEAGUES,
+            rows.get(0).getBridges().get(0).getEvidenceType());
+    }
+
+    @Test
     void disjointTenuresAtTheSameEmployerDoNotTie() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Bridge", 100, "Acme"),

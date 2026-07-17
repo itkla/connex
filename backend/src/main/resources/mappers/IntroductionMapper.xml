@@ -128,6 +128,7 @@
            ended_at     AS ended_at
     FROM person_employment
     WHERE workspace_id = #{workspaceId}
+    ORDER BY person_id, id
   </select>
 
   <select id="findWorkspaceEmploymentForReport"
@@ -201,13 +202,15 @@
   </select>
 
   <!-- Re-dismissing an existing pair refreshes it (row-alias upsert; VALUES() is removed in
-       MySQL 9). An 'accepted' row is never downgraded back to 'dismissed'. -->
+       MySQL 9). An 'accepted' row is never downgraded back to 'dismissed', and its acceptor
+       attribution is preserved against later dismiss attempts. -->
   <insert id="recordWarmPathDismissal">
     INSERT INTO warm_path_dismissal (workspace_id, target_person_id, bridge_person_id, status, dismissed_by_user_id)
     VALUES (#{workspaceId}, #{targetPersonId}, #{bridgePersonId}, #{status}, #{userId}) AS nd
     ON DUPLICATE KEY UPDATE
       status = IF(warm_path_dismissal.status = 'accepted', warm_path_dismissal.status, nd.status),
-      dismissed_by_user_id = nd.dismissed_by_user_id
+      dismissed_by_user_id = IF(warm_path_dismissal.status = 'accepted',
+        warm_path_dismissal.dismissed_by_user_id, nd.dismissed_by_user_id)
   </insert>
 
   <!-- The unique key treats NULL bridges as distinct, so whole-target rows cannot rely on the
@@ -217,10 +220,12 @@
     VALUES (#{workspaceId}, #{targetPersonId}, NULL, #{status}, #{userId})
   </insert>
 
+  <!-- Accepted rows are audit lineage and survive; the whole-target NULL row still hides them. -->
   <delete id="deleteWarmPathDismissals">
     DELETE FROM warm_path_dismissal
     WHERE workspace_id = #{workspaceId}
       AND target_person_id = #{targetPersonId}
+      AND status <![CDATA[<>]]> 'accepted'
   </delete>
 
 </mapper>

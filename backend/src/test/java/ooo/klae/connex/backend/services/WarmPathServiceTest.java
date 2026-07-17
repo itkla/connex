@@ -19,10 +19,12 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.WarmPathDismissal;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WarmPathDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 
 /**
@@ -33,6 +35,7 @@ class WarmPathServiceTest extends AbstractServiceTest {
 
     @Autowired private WarmPathService warmPathService;
     @Autowired private PersonEdgeMapper personEdgeMapper;
+    @Autowired private IntroductionMapper introductionMapper;
 
     @Test
     void surfacesPathAndAcceptCreatesTaskAndRetiresTheAvenue() {
@@ -94,6 +97,25 @@ class WarmPathServiceTest extends AbstractServiceTest {
         assertNotNull(row);
         assertEquals(1, row.getBridges().size());
         assertEquals(bridgeB.getId(), row.getBridges().get(0).getPersonId());
+    }
+
+    @Test
+    void wholeTargetDismissalPreservesAcceptedLineage() {
+        Person bridge = engagedPerson(newCompany());
+        Person target = newPerson(newCompany());
+        connect(bridge.getId(), target.getId());
+
+        warmPathService.acceptPath(target.getId(), bridge.getId(), null);
+        warmPathService.dismissPath(target.getId(), null);
+
+        List<WarmPathDismissal> rows =
+            introductionMapper.findWarmPathDismissals(workspace.getId()).stream()
+                .filter(row -> row.getTargetPersonId() == target.getId())
+                .toList();
+        assertEquals(2, rows.size(), "the accepted avenue row must survive a whole-target dismissal");
+        assertTrue(rows.stream().anyMatch(row -> row.getBridgePersonId() == null));
+        assertTrue(rows.stream().anyMatch(row ->
+            row.getBridgePersonId() != null && row.getBridgePersonId() == bridge.getId()));
     }
 
     @Test

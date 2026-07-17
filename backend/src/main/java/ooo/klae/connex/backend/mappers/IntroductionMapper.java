@@ -93,7 +93,8 @@ public interface IntroductionMapper {
         @Param("status") String status,
         @Param("userId") int userId);
 
-    /** Removes every dismissal row for a target; run before recording a whole-target dismissal. */
+    /** Removes a target's non-accepted dismissal rows before a whole-target dismissal is
+     *  recorded; accepted rows are audit lineage and survive. */
     int deleteWarmPathDismissals(
         @Param("workspaceId") int workspaceId,
         @Param("targetPersonId") int targetPersonId);
