@@ -39,6 +39,7 @@ public enum Permission {
     GOAL_MANAGE,
     PIPELINE_MANAGE,
     TAG_MANAGE,
+    PRODUCT_MANAGE,
     CUSTOM_FIELD_MANAGE,
     SHARE_MANAGE,
     MEMBER_MANAGE,

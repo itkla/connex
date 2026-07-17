@@ -126,7 +126,8 @@
     "languageEnglish": "英語",
     "languageJapanese": "日本語",
     "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
-    "profilePictureAlt": "{name}さんのプロフィール画像"
+    "profilePictureAlt": "{name}さんのプロフィール画像",
+    "navProducts": "商品"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",

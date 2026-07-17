@@ -42,6 +42,7 @@ class RbacEnforcementArchTest {
     private static final List<String> ENTITY_SERVICES = List.of(
         "CompanyService", "PersonService", "DealService", "ActivityService",
         "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
+        "ProductService", "DealLineItemService",
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
         "IntroductionService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
