@@ -246,7 +246,7 @@ public class CampaignService {
                     : new ClassifiedRecord(id, "excluded", reason));
         }
         return evaluation(audience.getRecordType(), records,
-                classification.consentMissing().size(), classification.suppressed().size(),
+                classification.consentBlocked().size(), classification.suppressed().size(),
                 classification.restricted().size());
     }
 

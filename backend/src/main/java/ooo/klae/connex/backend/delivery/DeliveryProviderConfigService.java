@@ -52,6 +52,10 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
     private static final int MAX_ENDPOINT_LENGTH = 2048;
     private static final Pattern API_KEY = Pattern.compile("^[\\x21-\\x7e]{1,512}$");
     private static final Pattern SMS_SENDER_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9 +._-]{0,31}$");
+    private static final Pattern EMAIL_ADDRESS = Pattern.compile(
+            "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+                    + "@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                    + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$");
 
     private final MailConfigResolver mailConfigResolver;
     private final DeliveryProviderConfigMapper deliveryProviderConfigMapper;
@@ -446,12 +450,17 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         return value;
     }
 
+    /**
+     * Validates an email envelope from-address to the same grade the DTO's {@code @Email} constraint
+     * gave before validation moved here per channel: a non-empty local part, a single {@code @}, and a
+     * dot-separated domain of label characters. A bare {@code a@} or {@code @host} is rejected.
+     */
     private static String requireFromAddress(String requested) {
         String value = trimToNull(requested);
         if (value == null) {
             throw new BadRequestException("A from address is required");
         }
-        if (value.length() > 320 || value.indexOf('@') <= 0) {
+        if (value.length() > 320 || !EMAIL_ADDRESS.matcher(value).matches()) {
             throw new BadRequestException("A valid from address is required");
         }
         return value;

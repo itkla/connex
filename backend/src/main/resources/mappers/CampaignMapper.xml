@@ -159,6 +159,15 @@
       AND status = 'granted'
   </select>
 
+  <select id="revokedConsentPersonIds" resultType="int">
+    SELECT person_id FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      AND channel = #{channel}
+      AND purpose = #{purpose}
+      AND status = 'revoked'
+  </select>
+
   <select id="suppressedAddresses" resultType="string">
     SELECT DISTINCT suppression.address FROM suppression_entry suppression
     WHERE suppression.workspace_id = #{workspaceId}

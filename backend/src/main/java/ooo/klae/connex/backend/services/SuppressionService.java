@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.SuppressionEntry;
+import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.dto.SuppressionEntryDto;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -19,7 +21,12 @@ import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
-/** Business logic for workspace-owned contact-channel suppression entries. */
+/**
+ * Business logic for workspace-owned contact-channel suppression entries. Addresses are stored in the
+ * canonical form {@link ChannelAddressNormalizer} defines for the entry's channel, which is the same
+ * form the send path materializes and re-checks, so a suppression matches regardless of how the
+ * address was formatted when it was captured.
+ */
 @Service
 @RequiredArgsConstructor
 public class SuppressionService {
@@ -61,7 +68,7 @@ public class SuppressionService {
         if (!REASONS.contains(reason)) {
             throw new BadRequestException("Suppression reason is invalid");
         }
-        String address = normalizeAddress(request.address());
+        String address = normalizeAddress(channel, request.address());
         if (request.personId() != null && !personMapper.existsOwned(workspaceId, request.personId())) {
             throw new ResourceNotFoundException("Person not found with id: " + request.personId());
         }
@@ -108,11 +115,14 @@ public class SuppressionService {
                 entry.getCreatedAt());
     }
 
-    private static String normalizeAddress(String value) {
+    private static String normalizeAddress(String channel, String value) {
         if (value == null || value.isBlank()) {
             throw new BadRequestException("Suppression address is required");
         }
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String normalized = ChannelAddressNormalizer.normalize(DeliveryChannel.fromToken(channel), value);
+        if (normalized == null || normalized.isBlank()) {
+            throw new BadRequestException("Suppression address is not valid for the " + channel + " channel");
+        }
         if (normalized.length() > 320) {
             throw new BadRequestException("Suppression address must not exceed 320 characters");
         }

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -136,6 +137,35 @@ class DeliveryProviderConfigServiceTest {
 
         assertThrows(BadRequestException.class, () -> service().save(request));
         verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_rejectsAMalformedEmailFromAddressOnTheEmailChannel() {
+        currentWorkspaceAndActor();
+        lenient().when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        for (String malformed : new String[] {"a@", "@sender.test", "no-reply", "a@b@c.test", "a@-bad.test"}) {
+            DeliveryProviderConfigRequest request = espRequest();
+            request.setFromAddress(malformed);
+            assertThrows(BadRequestException.class, () -> service().save(request),
+                    "expected " + malformed + " to be rejected as a from address");
+        }
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_acceptsAWellFormedEmailFromAddressOnTheEmailChannel() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:9");
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, enabledEsp());
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setFromAddress("no-reply+campaigns@mail.sender.test");
+
+        service().save(request);
+
+        ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
+        verify(mapper).upsert(captor.capture());
+        assertEquals("no-reply+campaigns@mail.sender.test", captor.getValue().getFromAddress());
     }
 
     @Test

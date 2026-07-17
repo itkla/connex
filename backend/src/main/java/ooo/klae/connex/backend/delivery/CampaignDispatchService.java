@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.delivery;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -29,6 +28,11 @@ import ooo.klae.connex.backend.services.AudienceEligibilityService;
  * the resolved provider. The dispatch policy is a fixed default for this slice: at most one message
  * per person per channel within {@link #FREQUENCY_WINDOW_HOURS} hours, and quiet hours disabled
  * ({@link #QUIET_START_HOUR} &lt; 0); a configurable per-workspace policy source arrives later.
+ *
+ * <p>The re-check is channel-generic: the address is normalized with {@link ChannelAddressNormalizer}
+ * under the send's own channel, so it is compared to suppressions in exactly the form
+ * {@code SuppressionService} stored them, and the consent verdict is delegated to
+ * {@link AudienceEligibilityService} so it cannot diverge from the snapshot classification.
  */
 @Service
 @RequiredArgsConstructor
@@ -131,7 +135,7 @@ public class CampaignDispatchService {
             campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason);
             return;
         }
-        RenderedMessage content = render(revision, delivery);
+        RenderedMessage content = render(channel, revision, delivery);
         DeliveryRequest request = new DeliveryRequest(
                 channel, delivery.getAddress(), content, delivery.getPersonId(),
                 "send:" + send.getId() + ":" + deliveryId);
@@ -157,16 +161,17 @@ public class CampaignDispatchService {
                 && !audienceEligibilityService.restrictedIds(workspaceId, List.of(personId)).isEmpty()) {
             return "restricted";
         }
-        String normalizedAddress = address.trim().toLowerCase(Locale.ROOT);
+        String normalizedAddress = ChannelAddressNormalizer.normalize(channel, address);
+        if (normalizedAddress == null) {
+            return "no_address";
+        }
         if (!audienceEligibilityService.suppressedAddresses(workspaceId, channelToken, List.of(normalizedAddress)).isEmpty()) {
             return "suppressed";
         }
-        if (personId == null || !audienceEligibilityService
-                .grantedConsentIds(workspaceId, List.of(personId), channelToken, send.getPurpose())
-                .contains(personId)) {
-            return "consent_missing";
+        if (audienceEligibilityService.consentBlocks(workspaceId, personId, channelToken, send.getPurpose())) {
+            return AudienceEligibilityService.CONSENT_POLICY.exclusionReason();
         }
-        if (FREQUENCY_WINDOW_HOURS > 0) {
+        if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
             LocalDateTime since = LocalDateTime.now().minusHours(FREQUENCY_WINDOW_HOURS);
             if (campaignDeliveryMapper.recentDispatchCount(
                     workspaceId, personId, channelToken, send.getId(), since) > 0) {
@@ -179,11 +184,19 @@ public class CampaignDispatchService {
         return null;
     }
 
-    private RenderedMessage render(CampaignMessageRevision revision, CampaignDelivery delivery) {
+    /**
+     * Renders the revision for one recipient under the send's channel. SMS is text-only — its revisions
+     * carry no subject or HTML body — so only the text body is rendered and handed to the adapter.
+     */
+    private RenderedMessage render(
+            DeliveryChannel channel, CampaignMessageRevision revision, CampaignDelivery delivery) {
         Map<String, String> tokens = Map.of("unsubscribe_url", unsubscribeUrl(delivery.getUnsubscribeToken()));
-        String subject = substitutePlain(revision.getSubject(), tokens);
-        String html = substituteHtml(revision.getBodyHtml(), tokens);
         String text = revision.getBodyText() == null ? null : substitutePlain(revision.getBodyText(), tokens);
+        if (channel == DeliveryChannel.SMS) {
+            return new RenderedMessage(null, null, text);
+        }
+        String subject = revision.getSubject() == null ? null : substitutePlain(revision.getSubject(), tokens);
+        String html = revision.getBodyHtml() == null ? null : substituteHtml(revision.getBodyHtml(), tokens);
         return new RenderedMessage(subject, html, text);
     }
 
