@@ -142,6 +142,33 @@ class DeliveryWebhookServiceTest {
     }
 
     @Test
+    void ingest_nullEventIdBounceDeduplicatesOnEventTypeAndDoesNotResuppress() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", null, DeliveryEventType.BOUNCED, null, "bounced")));
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        when(campaignDeliveryMapper.hasEvent(WORKSPACE_A, 500, "bounced")).thenReturn(true);
+
+        assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+
+        verify(campaignDeliveryMapper, never()).insertEvent(any());
+        verify(campaignDeliveryMapper, never()).applyProviderStatus(anyInt(), anyInt(), any(), any());
+        verifyNoInteractions(suppressionService, consentService);
+    }
+
+    @Test
+    void ingest_nullEventIdFirstDeliveryPassesTheEventTypeGateAndAdvancesStatus() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", null, DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        when(campaignDeliveryMapper.hasEvent(WORKSPACE_A, 500, "delivered")).thenReturn(false);
+
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+
+        verify(campaignDeliveryMapper).insertEvent(any(CampaignDeliveryEvent.class));
+        verify(campaignDeliveryMapper).applyProviderStatus(WORKSPACE_A, 500, "delivered", List.of("dispatched"));
+    }
+
+    @Test
     void ingest_resolvesWorkspaceFromTokenAndCannotTouchAnotherTenantsDelivery() {
         resolveTo(WORKSPACE_B, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_B, PROVIDER, "m1")).thenReturn(null);

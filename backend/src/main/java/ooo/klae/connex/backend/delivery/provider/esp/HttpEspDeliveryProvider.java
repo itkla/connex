@@ -3,8 +3,8 @@ package ooo.klae.connex.backend.delivery.provider.esp;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,13 +20,20 @@ import java.util.Set;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
 import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
@@ -91,29 +98,30 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
     private static final String BOUNCE_HARD = "hard";
 
     private final RestClient restClient;
+    private final Duration connectTimeout;
+    private final Duration requestTimeout;
     private final int maxResponseBytes;
     private final ObjectMapper objectMapper;
 
     /**
-     * Builds the adapter with a hardened JDK-backed {@link RestClient}.
+     * Builds the production adapter. Because the destination address is validated and pinned per
+     * send, the underlying HTTP client is constructed inside {@link #send} rather than here.
      * @param deliveryProperties the delivery transport tuning
      * @param objectMapper the shared JSON mapper
      */
     @Autowired
     public HttpEspDeliveryProvider(DeliveryProperties deliveryProperties, ObjectMapper objectMapper) {
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(duration(deliveryProperties.getEspConnectTimeoutMs(), "connect timeout"))
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(duration(deliveryProperties.getEspRequestTimeoutMs(), "request timeout"));
-        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        this.restClient = null;
+        this.connectTimeout = duration(deliveryProperties.getEspConnectTimeoutMs(), "connect timeout");
+        this.requestTimeout = duration(deliveryProperties.getEspRequestTimeoutMs(), "request timeout");
         this.maxResponseBytes = positiveInt(deliveryProperties.getEspMaxResponseBytes(), "max response bytes");
         this.objectMapper = objectMapper;
     }
 
     HttpEspDeliveryProvider(RestClient restClient, int maxResponseBytes, ObjectMapper objectMapper) {
         this.restClient = restClient;
+        this.connectTimeout = null;
+        this.requestTimeout = null;
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
         this.objectMapper = objectMapper;
     }
@@ -285,8 +293,23 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
     }
 
     private EspResponse send(URI endpoint, String apiKey, byte[] body) {
-        AiEgressGuard.requireFetchableHost(endpoint.getHost(), false);
-        return restClient.post()
+        String host = endpoint.getHost();
+        InetAddress pinnedAddress = AiEgressGuard.resolveFetchableHost(host, false);
+        if (restClient != null) {
+            return exchange(restClient, endpoint, apiKey, body);
+        }
+        try (CloseableHttpClient httpClient = pinnedHttpClient(host, pinnedAddress)) {
+            RestClient pinned = RestClient.builder()
+                    .requestFactory(new HttpComponentsClientHttpRequestFactory(httpClient))
+                    .build();
+            return exchange(pinned, endpoint, apiKey, body);
+        } catch (IOException exception) {
+            throw new DeliveryProviderException("ESP transport could not be closed");
+        }
+    }
+
+    private EspResponse exchange(RestClient client, URI endpoint, String apiKey, byte[] body) {
+        return client.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
@@ -294,6 +317,28 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
                 .body(body)
                 .exchange((httpRequest, httpResponse) -> new EspResponse(
                         httpResponse.getStatusCode().value(), readBounded(httpResponse.getBody())));
+    }
+
+    private CloseableHttpClient pinnedHttpClient(String host, InetAddress address) {
+        ConnectionConfig connectionConfig = ConnectionConfig.custom()
+                .setConnectTimeout(Timeout.of(connectTimeout))
+                .setSocketTimeout(Timeout.of(requestTimeout))
+                .build();
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setResponseTimeout(Timeout.of(requestTimeout))
+                .build();
+        PoolingHttpClientConnectionManagerBuilder connectionManager =
+                PoolingHttpClientConnectionManagerBuilder.create()
+                        .setDnsResolver(new PinnedHostDnsResolver(host, address))
+                        .setDefaultConnectionConfig(connectionConfig)
+                        .setMaxConnPerRoute(1)
+                        .setMaxConnTotal(1);
+        return HttpClients.custom()
+                .setConnectionManager(connectionManager.build())
+                .setDefaultRequestConfig(requestConfig)
+                .disableAutomaticRetries()
+                .disableRedirectHandling()
+                .build();
     }
 
     private byte[] readBounded(InputStream input) throws IOException {

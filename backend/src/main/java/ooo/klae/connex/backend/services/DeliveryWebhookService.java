@@ -100,13 +100,18 @@ public class DeliveryWebhookService {
     }
 
     private boolean recordEvent(int workspaceId, int deliveryId, String providerId, DeliveryEvent event) {
+        String providerEventId = event.providerEventId();
+        if ((providerEventId == null || providerEventId.isBlank())
+                && campaignDeliveryMapper.hasEvent(workspaceId, deliveryId, event.type().token())) {
+            return false;
+        }
         CampaignDeliveryEvent row = new CampaignDeliveryEvent();
         row.setWorkspaceId(workspaceId);
         row.setDeliveryId(deliveryId);
         row.setEventType(event.type().token());
         row.setDetail(bounded(event.detail()));
         row.setProviderId(providerId);
-        row.setProviderEventId(event.providerEventId());
+        row.setProviderEventId(providerEventId);
         try {
             campaignDeliveryMapper.insertEvent(row);
             return true;

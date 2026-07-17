@@ -76,7 +76,7 @@ class HttpEspDeliveryProviderTest {
 
             assertEquals(DispatchStatus.SENT, receipt.status());
             assertEquals("esp-777", receipt.providerMessageId());
-            guard.verify(() -> AiEgressGuard.requireFetchableHost("esp.example.com", false));
+            guard.verify(() -> AiEgressGuard.resolveFetchableHost("esp.example.com", false));
             server.verify();
         }
     }
