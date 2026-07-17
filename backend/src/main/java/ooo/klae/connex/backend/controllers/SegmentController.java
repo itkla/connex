@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentEvaluateRequest;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
 import ooo.klae.connex.backend.dto.SegmentResultDto;
@@ -35,5 +36,10 @@ public class SegmentController {
     @GetMapping("/fields")
     public SegmentFieldsDto fields(@RequestParam(defaultValue = "company") String recordType) {
         return segmentService.fields(recordType);
+    }
+
+    @GetMapping("/catalog")
+    public SegmentCatalogDto catalog(@RequestParam(defaultValue = "company") String recordType) {
+        return segmentService.catalog(recordType);
     }
 }

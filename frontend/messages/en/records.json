@@ -40,7 +40,12 @@
       "stage": "Stage",
       "owner": "Owner",
       "status": "Status",
-      "close_date": "Close date"
+      "close_date": "Close date",
+      "website": "Website",
+      "phone": "Phone",
+      "created": "Created",
+      "updated": "Updated",
+      "actual_value": "Actual value"
     },
     "op": {
       "is": "is",
@@ -101,7 +106,99 @@
     "pickStatus": "Choose a status",
     "pickOwner": "Choose an owner",
     "pickCompany": "Choose a company",
-    "pickStage": "Choose a stage"
+    "pickStage": "Choose a stage",
+    "catalogFailed": "Could not load the segment builder.",
+    "loading": "Loading…",
+    "has_open_task": {
+      "label": "Has an open task",
+      "labelNot": "No open task",
+      "description": "At least one task is still incomplete."
+    },
+    "overdue_task": {
+      "label": "Has an overdue task",
+      "labelNot": "No overdue task",
+      "description": "An incomplete task is past its due date."
+    },
+    "recent_meeting": {
+      "label": "Met recently",
+      "labelNot": "No recent meeting",
+      "description": "A meeting was logged in the last 30 days."
+    },
+    "has_note": {
+      "label": "Has a note",
+      "labelNot": "No notes",
+      "description": "At least one workspace-visible note exists."
+    },
+    "has_attachment": {
+      "label": "Has an attachment",
+      "labelNot": "No attachments",
+      "description": "At least one file is attached."
+    },
+    "warmth_hot": {
+      "label": "Hot",
+      "labelNot": "Not hot",
+      "description": "Relationship warmth is hot."
+    },
+    "warmth_warm": {
+      "label": "Warm",
+      "labelNot": "Not warm",
+      "description": "Relationship warmth is warm."
+    },
+    "warmth_cool": {
+      "label": "Cool",
+      "labelNot": "Not cool",
+      "description": "Relationship warmth is cool."
+    },
+    "warmth_cold": {
+      "label": "Cold",
+      "labelNot": "Not cold",
+      "description": "Relationship warmth is cold."
+    },
+    "warmth_rising": {
+      "label": "Warming up",
+      "labelNot": "Not warming up",
+      "description": "Relationship warmth is trending up."
+    },
+    "going_cold": {
+      "label": "Going cold soon",
+      "labelNot": "Not going cold soon",
+      "description": "Predicted to reach cold within the chosen window."
+    },
+    "at_risk": {
+      "label": "At risk",
+      "labelNot": "Not at risk",
+      "description": "Deal risk is high or medium."
+    },
+    "risk_high": {
+      "label": "High risk",
+      "labelNot": "Not high risk",
+      "description": "Deal risk level is high."
+    },
+    "risk_close_overdue": {
+      "label": "Close date overdue",
+      "labelNot": "Close date not overdue",
+      "description": "The expected close date has passed."
+    },
+    "risk_closing_soon": {
+      "label": "Closing soon but quiet",
+      "labelNot": "Not closing-soon-quiet",
+      "description": "Closing soon with no recent activity."
+    },
+    "risk_stalled": {
+      "label": "Stalled",
+      "labelNot": "Not stalled",
+      "description": "No recent activity on the deal."
+    },
+    "risk_stakeholder_cold": {
+      "label": "Stakeholder cold",
+      "labelNot": "No cold stakeholder",
+      "description": "A key stakeholder has gone cold."
+    },
+    "risk_no_stakeholders": {
+      "label": "No stakeholders",
+      "labelNot": "Has stakeholders",
+      "description": "No contacts are linked to the deal."
+    }
   },
   "SavedViews": {
     "all": "All",

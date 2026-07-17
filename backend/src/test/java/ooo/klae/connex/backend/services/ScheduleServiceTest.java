@@ -114,7 +114,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         ReportScheduleDto created = scheduleService.create(
                 reportId, request("weekly", List.of(manager.getId()), 9, true));
         ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
-        ReportDocumentDto document = reportService.generate(reportId, null);
+        ReportDocumentDto document = reportService.generate(reportId, null, ReportService.NarrativeMode.FULL);
 
         assertEquals(manager.getId(), created.runAsUserId());
         assertTrue(scheduleService.deliveryAccess(stored).allowed());
@@ -195,7 +195,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
                 workspace.getId(), currentUser.getId(), recipientRole.getId(), recipientRole.getName(),
                 List.of("REPORT_READ"));
         ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
-        ReportDocumentDto document = reportService.generate(reportId, null);
+        ReportDocumentDto document = reportService.generate(reportId, null, ReportService.NarrativeMode.FULL);
 
         assertEquals(
                 List.of(recipient.getId()),
@@ -210,7 +210,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         User replacement = newUser();
         scheduleService.create(reportId, request("monthly", List.of(removed.getId()), 9, true));
         ReportSchedule claimed = scheduleMapper.getByReport(workspace.getId(), reportId);
-        ReportDocumentDto document = reportService.generate(reportId, null);
+        ReportDocumentDto document = reportService.generate(reportId, null, ReportService.NarrativeMode.FULL);
 
         scheduleService.update(reportId, request("monthly", List.of(replacement.getId()), 9, true));
 

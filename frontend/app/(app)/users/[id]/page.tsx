@@ -27,6 +27,7 @@ import EmptyState from "@/app/components/me/EmptyState";
 import Attachments from "@/app/components/attachments/Attachments";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import UserPerformance from "@/app/components/users/UserPerformance";
 
 export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
@@ -111,6 +112,8 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                     </Rise>
 
                     <Rise delay={0.12}>
+                        <div className="flex flex-col gap-8">
+                        <UserPerformance userId={user.id} />
                         <section>
                             <SectionHeader title={t("theirActivity")} />
 
@@ -143,6 +146,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                 </div>
                             </div>
                         </section>
+                        </div>
                     </Rise>
                 </div>
             </div>

@@ -40,7 +40,12 @@
       "stage": "ステージ",
       "owner": "担当者",
       "status": "ステータス",
-      "close_date": "完了予定日"
+      "close_date": "完了予定日",
+      "website": "ウェブサイト",
+      "phone": "電話番号",
+      "created": "作成日",
+      "updated": "更新日",
+      "actual_value": "実績金額"
     },
     "op": {
       "is": "である",
@@ -101,7 +106,99 @@
     "pickStatus": "ステータスを選択",
     "pickOwner": "担当者を選択",
     "pickCompany": "会社を選択",
-    "pickStage": "ステージを選択"
+    "pickStage": "ステージを選択",
+    "catalogFailed": "セグメントビルダーを読み込めませんでした。",
+    "loading": "読み込み中…",
+    "has_open_task": {
+      "label": "未完了タスクあり",
+      "labelNot": "未完了タスクなし",
+      "description": "少なくとも1件のタスクが未完了です。"
+    },
+    "overdue_task": {
+      "label": "期限切れタスクあり",
+      "labelNot": "期限切れタスクなし",
+      "description": "未完了タスクが期限を過ぎています。"
+    },
+    "recent_meeting": {
+      "label": "最近ミーティングあり",
+      "labelNot": "最近ミーティングなし",
+      "description": "過去30日以内にミーティングが記録されています。"
+    },
+    "has_note": {
+      "label": "メモあり",
+      "labelNot": "メモなし",
+      "description": "ワークスペースに表示されるメモが少なくとも1件あります。"
+    },
+    "has_attachment": {
+      "label": "添付ファイルあり",
+      "labelNot": "添付ファイルなし",
+      "description": "少なくとも1件のファイルが添付されています。"
+    },
+    "warmth_hot": {
+      "label": "ホット",
+      "labelNot": "ホットでない",
+      "description": "関係の温度がホットです。"
+    },
+    "warmth_warm": {
+      "label": "ウォーム",
+      "labelNot": "ウォームでない",
+      "description": "関係の温度がウォームです。"
+    },
+    "warmth_cool": {
+      "label": "クール",
+      "labelNot": "クールでない",
+      "description": "関係の温度がクールです。"
+    },
+    "warmth_cold": {
+      "label": "コールド",
+      "labelNot": "コールドでない",
+      "description": "関係の温度がコールドです。"
+    },
+    "warmth_rising": {
+      "label": "上昇中",
+      "labelNot": "上昇していない",
+      "description": "関係の温度が上昇傾向です。"
+    },
+    "going_cold": {
+      "label": "まもなく冷却",
+      "labelNot": "まもなく冷却しない",
+      "description": "指定期間内にコールドになると予測されます。"
+    },
+    "at_risk": {
+      "label": "リスクあり",
+      "labelNot": "リスクなし",
+      "description": "取引リスクが高または中です。"
+    },
+    "risk_high": {
+      "label": "高リスク",
+      "labelNot": "高リスクでない",
+      "description": "取引リスクレベルが高です。"
+    },
+    "risk_close_overdue": {
+      "label": "完了予定日超過",
+      "labelNot": "完了予定日未超過",
+      "description": "完了予定日が過ぎています。"
+    },
+    "risk_closing_soon": {
+      "label": "まもなく完了だが停滞",
+      "labelNot": "該当なし",
+      "description": "まもなく完了予定ですが最近の活動がありません。"
+    },
+    "risk_stalled": {
+      "label": "停滞中",
+      "labelNot": "停滞していない",
+      "description": "取引に最近の活動がありません。"
+    },
+    "risk_stakeholder_cold": {
+      "label": "関係者が冷却",
+      "labelNot": "冷却した関係者なし",
+      "description": "主要な関係者の関係が冷え込んでいます。"
+    },
+    "risk_no_stakeholders": {
+      "label": "関係者なし",
+      "labelNot": "関係者あり",
+      "description": "取引に紐づく連絡先がありません。"
+    }
   },
   "SavedViews": {
     "all": "すべて",

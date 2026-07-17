@@ -14,6 +14,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -173,7 +174,8 @@ class ImportServiceTest extends AbstractServiceTest {
     void exportCompanies_byIdsReturnsOnlySelected() {
         Company a = newCompany();
         Company b = newCompany();
-        String csv = exportService.exportCompanies(null, List.of(a.getId()));
+        String csv = exportService.exportCompanies(
+            null, null, false, List.of(a.getId()), MemberScope.allTeam());
         assertTrue(csv.contains(a.getName()), "selected company present");
         assertTrue(!csv.contains(b.getName()), "unselected company absent");
     }
@@ -185,7 +187,7 @@ class ImportServiceTest extends AbstractServiceTest {
             List.of(Map.of("Name", "=SUM(A1:A2)", "Email", "danger@x.test")),
             "fill_empty"));
 
-        String csv = exportService.exportPersons(null, null, null, false);
+        String csv = exportService.exportPersons(null, null, null, false, MemberScope.allTeam());
 
         assertTrue(csv.startsWith("id,name,email"), "header present");
         assertTrue(csv.contains("'=SUM(A1:A2)"), "formula prefixed with apostrophe");

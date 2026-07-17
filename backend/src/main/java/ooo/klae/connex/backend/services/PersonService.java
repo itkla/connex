@@ -121,25 +121,27 @@ public class PersonService {
      * bulk action can target the whole filtered set, not just the loaded page.
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
-            boolean noCompany) {
-        if (!hasMatchingIdFilter(query, companies, titles, noCompany)) {
+            boolean noCompany, MemberScope memberScope) {
+        if (!hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = personMapper.countPersons(
-            workspaceId, query, companies, titles, noCompany, MemberScope.allTeam());
+            workspaceId, query, companies, titles, noCompany, memberScope);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
-        return personMapper.getPersonIdsFiltered(workspaceId, query, companies, titles, noCompany, MAX_MATCHING_IDS);
+        return personMapper.getPersonIdsFiltered(
+            workspaceId, query, companies, titles, noCompany, memberScope, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
-            boolean noCompany) {
+            boolean noCompany, MemberScope memberScope) {
         return query != null
             || (companies != null && !companies.isEmpty())
             || (titles != null && !titles.isEmpty())
-            || noCompany;
+            || noCompany
+            || (memberScope != null && memberScope.mode() != MemberScope.Mode.ALL_TEAM);
     }
 
     public List<String> distinctCompanies() {

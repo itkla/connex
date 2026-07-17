@@ -399,8 +399,17 @@
     SELECT c.id
     FROM company c
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     ORDER BY c.id
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getCompaniesFiltered" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+    ORDER BY c.name, c.id
   </select>
 
   <select id="distinctIndustries" resultType="string">

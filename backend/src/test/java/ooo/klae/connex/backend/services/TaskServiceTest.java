@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -158,6 +159,6 @@ class TaskServiceTest extends AbstractServiceTest {
         taskMapper.insert(foreign);
         jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
 
-        assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary());
+        assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary(MemberScope.allTeam()));
     }
 }

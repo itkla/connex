@@ -1338,7 +1338,10 @@ export function getCompanyFacets(init: RequestInit = {}) {
 
 /** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
 export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids });
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
 
@@ -1467,17 +1470,27 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
 }
 
 export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
 }
 
-export function exportCompaniesCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}) {
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/companies${query}`, "companies.csv");
 }
 
-export function exportDealsCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+export function exportDealsCsv(params: Types.DealFilterParams = {}) {
+    const query = buildQuery({
+        q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
+        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv");
 }
 
@@ -1577,7 +1590,10 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
 
@@ -1723,6 +1739,32 @@ export function recordIntroduction(payload: Types.IntroductionPayload, init: Req
 
 export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init: RequestInit = {}) {
     return postJson<void>(`/api/introductions/dismiss`, payload, init);
+}
+
+/*
+* == Warm paths (the "receive side" of the graph, #614)
+*/
+
+export function getWarmPaths(init: RequestInit = {}, limit?: number) {
+    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+}
+
+/**
+ * Failure-aware warm-paths fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as an error state instead of an empty feed.
+ */
+export function getWarmPathsResultFromCookie(cookie: string | null, limit?: number) {
+    return resultWithCookie<Types.WarmPath[]>((init) => getWarmPaths(init, limit), cookie);
+}
+
+/** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
+export function acceptWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/introductions/paths/accept`, payload, init);
+}
+
+/** Dismisses one avenue when {@code bridgePersonId} is set, otherwise every path to the target. */
+export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/introductions/paths/dismiss`, payload, init);
 }
 
 export function createContact(payload: Types.CreateContactPayload) {
@@ -1954,8 +1996,11 @@ export function getDealFacets(init: RequestInit = {}) {
  * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
  * applies the viewer's historical offset rules when bucketing realized revenue.
  */
-export function getDealRevenueTimeseries(currency?: string, timezone?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, timezone })}`, init);
+export function getDealRevenueTimeseries(
+    currency?: string, timezone?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealRevenueSeries>(
+        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
@@ -1964,8 +2009,10 @@ const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: 
  * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
  * Replaces the client-side KPI/win-rate math over a bounded page slice.
  */
-export function getDealKpis(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, init);
+export function getDealKpis(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1973,8 +2020,11 @@ export function getDealKpisFromCookie(cookie: string | null, currency?: string, 
 }
 
 /** Server-computed per-pipeline won-in-range + open rollup. */
-export function getDealPipelineValue(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealPipelineValue[]>(`/api/deals/pipeline-value${buildQuery({ currency, range })}`, init);
+export function getDealPipelineValue(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealPipelineValue[]>(
+        `/api/deals/pipeline-value${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1982,8 +2032,8 @@ export function getDealPipelineValueFromCookie(cookie: string | null, currency?:
 }
 
 /** Server-computed per-stage open-deal age buckets. */
-export function getDealAging(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency })}`, init);
+export function getDealAging(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealAgingFromCookie(cookie: string | null, currency?: string) {
@@ -1991,8 +2041,8 @@ export function getDealAgingFromCookie(cookie: string | null, currency?: string)
 }
 
 /** Server-computed top open/won deals, optionally scoped to a currency. */
-export function getDealTop(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, init);
+export function getDealTop(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealTopFromCookie(cookie: string | null, currency?: string) {
@@ -2013,8 +2063,8 @@ export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, li
 }
 
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
-export function getActivityVolume(range?: string, init: RequestInit = {}) {
-    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, init);
+export function getActivityVolume(range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range, ...scope })}`, init);
 }
 
 export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
@@ -2040,8 +2090,8 @@ export function getUpcomingActivityCountFromCookie(cookie: string | null, days?:
 }
 
 /** Server-computed task status + due-window counts over ALL tasks. */
-export function getTaskSummary(init: RequestInit = {}) {
-    return getJson<Types.TaskSummary>(`/api/tasks/summary`, init);
+export function getTaskSummary(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.TaskSummary>(`/api/tasks/summary${buildQuery({ ...scope })}`, init);
 }
 
 export function getTaskSummaryFromCookie(cookie: string | null) {
@@ -2066,8 +2116,11 @@ export function getRelationshipDashboardFromCookie(cookie: string | null) {
  * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
  * Feeds the deals page stage-distribution chart.
  */
-export function getDealStageDistribution(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealStageDistribution[]>(`/api/deals/stage-distribution${buildQuery({ currency })}`, init);
+export function getDealStageDistribution(
+    currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealStageDistribution[]>(
+        `/api/deals/stage-distribution${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealFacetsFromCookie(cookie: string | null) {
@@ -2117,6 +2170,11 @@ export function getDealRisksFromCookie(cookie: string | null, ids: number[]) {
 
 export function getDealRiskAnalyticsFromCookie(cookie: string | null) {
     return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics`, withCookie(cookie));
+}
+
+/** Server-computed compact per-currency deal-risk analytics, optionally scoped to a member. */
+export function getDealRiskAnalytics(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics${buildQuery({ ...scope })}`, init);
 }
 
 /**
@@ -3028,15 +3086,19 @@ export function deleteGoal(id: number) {
     return deleteJson<void>(`/api/goals/${id}`);
 }
 
-export async function generateReport(id: number, payload: Types.ReportGenerateInput = {}) {
+export async function generateReport(
+    id: number,
+    payload: Types.ReportGenerateInput = {},
+    mode: Types.ReportNarrativeMode = "cached",
+) {
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate`, payload);
+        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
     }
     const identity = await currentClientRequestIdentity();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate`;
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
@@ -3175,6 +3237,10 @@ export function evaluateSegments(recordType: Types.SavedViewRecordType, definiti
 
 export function getSegmentFields(recordType: Types.SavedViewRecordType) {
     return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store" });
+}
+
+export function getSegmentCatalog(recordType: Types.SavedViewRecordType) {
+    return getJson<Types.SegmentCatalog>(`/api/segments/catalog?recordType=${recordType}`);
 }
 
 export function getShares(type: string, id: number, init: RequestInit = {}) {

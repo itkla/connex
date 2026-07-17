@@ -15,13 +15,13 @@ export type PageParams = {
     dir?: 'asc' | 'desc';
 };
 
-export type ContactsPageParams = PageParams & {
+export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
 };
 
-export type CompaniesPageParams = PageParams & {
+export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
     noIndustry?: boolean;
     ids?: number[];
@@ -108,11 +108,13 @@ export type PersonFacets = {
     companies: string[];
     titles: string[];
     hasNoCompany: boolean;
+    owners: FacetCount[];
 };
 
 export type CompanyFacets = {
     industries: string[];
     hasNoIndustry: boolean;
+    owners: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -403,6 +405,50 @@ export type IntroductionPayload = {
     personAId: number;
     personBId: number;
     note?: string;
+};
+
+export type WarmPathEvidence = 'connection' | 'colleagues' | 'former_colleagues';
+
+export type WarmPathReachType = 'rewarm' | 'reach';
+
+/** One avenue to a warm-path target: a warm bridge contact plus the labeled evidence tier. */
+export type WarmPathBridge = {
+    personId: number;
+    name: string;
+    title?: string | null;
+    company?: string | null;
+    imageUrl?: string | null;
+    warmth?: TemperatureBand | null;
+    evidenceType: WarmPathEvidence;
+    evidenceCompany?: string | null;
+    overlapStartYear?: number | null;
+    overlapEndYear?: number | null;
+    score: number;
+};
+
+/**
+ * A warm introduction path surfaced to the user (the "receive side"): a target contact worth
+ * reaching — dormant ({@code rewarm}) or never engaged ({@code reach}) — plus the best bridges
+ * who can make the introduction, ordered by descending score.
+ */
+export type WarmPath = {
+    targetId: number;
+    targetName: string;
+    targetTitle?: string | null;
+    targetCompany?: string | null;
+    targetImageUrl?: string | null;
+    targetWarmth?: TemperatureBand | null;
+    targetDaysSinceTouch?: number | null;
+    reachType: WarmPathReachType;
+    score: number;
+    bridges: WarmPathBridge[];
+};
+
+/** Request body identifying the warm path an accept or dismiss targets. */
+export type WarmPathPayload = {
+    targetPersonId: number;
+    bridgePersonId?: number;
+    taskDescription?: string;
 };
 
 export type User = {
@@ -1329,6 +1375,48 @@ export type SegmentFields = {
     tags: SegmentTag[];
 };
 
+export type SegmentFieldKind = "string" | "number" | "id" | "enum" | "tag" | "date";
+
+export type SegmentValueSource =
+    | "none"
+    | "tags"
+    | "industries"
+    | "owners"
+    | "stages"
+    | "pipelines"
+    | "companies";
+
+export type SegmentCatalogField = {
+    field: string;
+    kind: SegmentFieldKind;
+    valueSource: SegmentValueSource;
+    operators: string[];
+};
+
+export type SegmentCatalogPredicate = {
+    key: string;
+    recordTypes: string[];
+    acceptsDays: boolean;
+    defaultDays: number | null;
+    minDays: number | null;
+    maxDays: number | null;
+};
+
+export type SegmentCatalogLimits = {
+    maxConditions: number;
+    maxGroupConditions: number;
+    maxGroups: number;
+    maxDepth: number;
+};
+
+export type SegmentCatalog = {
+    recordType: string;
+    fields: SegmentCatalogField[];
+    predicates: SegmentCatalogPredicate[];
+    enumOptions: Record<string, string[]>;
+    limits: SegmentCatalogLimits;
+};
+
 export type SavedView = {
     id: number;
     recordType: SavedViewRecordType;
@@ -1507,6 +1595,8 @@ export type ReportGenerateInput = {
     start?: string | null;
     end?: string | null;
 };
+
+export type ReportNarrativeMode = "cached" | "full";
 
 export type ReportDataPoint = {
     key: string;

@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 
 class ActivityMapperTest extends AbstractMapperTest {
@@ -321,7 +322,7 @@ class ActivityMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE activity SET timestamp = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?", foreign.getId());
 
         Map<Integer, ActivityVolumeBucketDto> volume = activityMapper
-            .activityVolume(target.getId(), 30, 6, 5.0).stream()
+            .activityVolume(target.getId(), 30, 6, 5.0, MemberScope.allTeam()).stream()
             .collect(Collectors.toMap(ActivityVolumeBucketDto::bucketIndex, bucket -> bucket));
 
         assertEquals(2, volume.size());
@@ -349,12 +350,52 @@ class ActivityMapperTest extends AbstractMapperTest {
             beforeRange.getId());
 
         Map<Integer, ActivityVolumeBucketDto> volume = activityMapper
-            .activityVolume(target.getId(), 365, 12, 365.0 / 12.0).stream()
+            .activityVolume(target.getId(), 365, 12, 365.0 / 12.0, MemberScope.allTeam()).stream()
             .collect(Collectors.toMap(ActivityVolumeBucketDto::bucketIndex, bucket -> bucket));
 
         assertEquals(2, volume.size());
         assertEquals(1, volume.get(11).call());
         assertEquals(1, volume.get(0).email());
+    }
+
+    @Test
+    void activityVolumeHonorsMemberScopeByCreator() {
+        Workspace target = newWorkspace();
+        User creator = newUser();
+        User other = newUser();
+        Activity mineCall = build("Call", "m1", null, null, creator);
+        mineCall.setWorkspaceId(target.getId());
+        activityMapper.insert(mineCall);
+        Activity mineEmail = build("Email", "m2", null, null, creator);
+        mineEmail.setWorkspaceId(target.getId());
+        activityMapper.insert(mineEmail);
+        Activity theirsCall = build("Call", "t1", null, null, other);
+        theirsCall.setWorkspaceId(target.getId());
+        activityMapper.insert(theirsCall);
+        Activity foreign = build("Call", "f1", null, null, creator);
+        activityMapper.insert(foreign);
+        jdbcTemplate.update("UPDATE activity SET timestamp = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id IN (?, ?, ?, ?)",
+            mineCall.getId(), mineEmail.getId(), theirsCall.getId(), foreign.getId());
+
+        MemberScope me = MemberScope.fromRequest("me", null, creator.getId());
+        MemberScope members = MemberScope.fromRequest(
+            "members", List.of(creator.getId(), other.getId()), creator.getId());
+        MemberScope unassigned = MemberScope.fromRequest("unassigned", null, creator.getId());
+
+        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0),
+            volumeBucket(target, MemberScope.allTeam(), 5));
+        assertEquals(new ActivityVolumeBucketDto(5, 1, 1, 0, 0, 0),
+            volumeBucket(target, me, 5));
+        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0),
+            volumeBucket(target, members, 5));
+        assertTrue(activityMapper.activityVolume(target.getId(), 30, 6, 5.0, unassigned).isEmpty());
+    }
+
+    private ActivityVolumeBucketDto volumeBucket(Workspace ws, MemberScope scope, int bucketIndex) {
+        return activityMapper.activityVolume(ws.getId(), 30, 6, 5.0, scope).stream()
+            .filter(bucket -> bucket.bucketIndex() == bucketIndex)
+            .findFirst()
+            .orElseThrow();
     }
 
     @Test

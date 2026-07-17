@@ -123,9 +123,12 @@
   <select id="findWorkspaceEmployment" resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
     SELECT person_id    AS person_id,
            company_id   AS company_id,
-           company_name AS company_name
+           company_name AS company_name,
+           started_at   AS started_at,
+           ended_at     AS ended_at
     FROM person_employment
     WHERE workspace_id = #{workspaceId}
+    ORDER BY person_id, id
   </select>
 
   <select id="findWorkspaceEmploymentForReport"
@@ -174,5 +177,55 @@
   <select id="countIntroducedAnywhere" resultType="int">
     SELECT COUNT(*) FROM introduction WHERE introducer_user_id = #{userId} FOR UPDATE
   </select>
+
+  <!-- Workspace-OWNED contacts eligible for the warm-path feed. Deliberately no engagement gate:
+       never-contacted imports are exactly the "reach" targets the feature exists to surface. -->
+  <select id="findWarmPathCandidates" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
+    SELECT p.id         AS id,
+           p.name       AS name,
+           p.title      AS title,
+           c.id         AS company_id,
+           c.name       AS company_name,
+           p.image_url  AS image_url
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCandidateCompany"/>
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = FALSE
+      AND p.suspended_at IS NULL
+  </select>
+
+  <select id="findWarmPathDismissals" resultType="ooo.klae.connex.backend.beans.WarmPathDismissal">
+    SELECT target_person_id AS target_person_id,
+           bridge_person_id AS bridge_person_id
+    FROM warm_path_dismissal
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <!-- Re-dismissing an existing pair refreshes it (row-alias upsert; VALUES() is removed in
+       MySQL 9). An 'accepted' row is never downgraded back to 'dismissed', and its acceptor
+       attribution is preserved against later dismiss attempts. -->
+  <insert id="recordWarmPathDismissal">
+    INSERT INTO warm_path_dismissal (workspace_id, target_person_id, bridge_person_id, status, dismissed_by_user_id)
+    VALUES (#{workspaceId}, #{targetPersonId}, #{bridgePersonId}, #{status}, #{userId}) AS nd
+    ON DUPLICATE KEY UPDATE
+      status = IF(warm_path_dismissal.status = 'accepted', warm_path_dismissal.status, nd.status),
+      dismissed_by_user_id = IF(warm_path_dismissal.status = 'accepted',
+        warm_path_dismissal.dismissed_by_user_id, nd.dismissed_by_user_id)
+  </insert>
+
+  <!-- The unique key treats NULL bridges as distinct, so whole-target rows cannot rely on the
+       upsert; the service deletes the target's rows first, making this a plain insert. -->
+  <insert id="recordWarmPathTargetDismissal">
+    INSERT INTO warm_path_dismissal (workspace_id, target_person_id, bridge_person_id, status, dismissed_by_user_id)
+    VALUES (#{workspaceId}, #{targetPersonId}, NULL, #{status}, #{userId})
+  </insert>
+
+  <!-- Accepted rows are audit lineage and survive; the whole-target NULL row still hides them. -->
+  <delete id="deleteWarmPathDismissals">
+    DELETE FROM warm_path_dismissal
+    WHERE workspace_id = #{workspaceId}
+      AND target_person_id = #{targetPersonId}
+      AND status <![CDATA[<>]]> 'accepted'
+  </delete>
 
 </mapper>

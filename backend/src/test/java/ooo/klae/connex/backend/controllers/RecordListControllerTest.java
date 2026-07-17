@@ -145,10 +145,13 @@ class RecordListControllerTest {
     @Test
     void personIdsWithoutFilterRequireFilter() {
         PersonController controller = personController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
-        assertThrows(BadRequestException.class, () -> controller.getPersonIds(null, null, null, false));
+        assertThrows(BadRequestException.class,
+            () -> controller.getPersonIds(null, null, null, false, null, null));
 
-        verify(personService, never()).getMatchingPersonIds(null, null, null, false);
+        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam());
     }
 
     @Test
@@ -247,22 +250,28 @@ class RecordListControllerTest {
     @Test
     void companyIdsWithoutFilterRequireFilter() {
         CompanyController controller = companyController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getCompanyIds(" ", List.of(), false, List.of()));
+            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null));
 
-        verify(companyService, never()).getMatchingCompanyIds(null, List.of(), false, List.of());
+        verify(companyService, never()).getMatchingCompanyIds(
+            null, List.of(), false, List.of(), MemberScope.allTeam());
     }
 
     @Test
     void companyIdsAcceptIdsAsTheOnlyFilter() {
         CompanyController controller = companyController();
         List<Integer> ids = List.of(3, 5);
-        when(companyService.getMatchingCompanyIds(null, null, false, ids)).thenReturn(ids);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
+        when(companyService.getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam()))
+            .thenReturn(ids);
 
-        assertSame(ids, controller.getCompanyIds(null, null, false, ids));
+        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null));
 
-        verify(companyService).getMatchingCompanyIds(null, null, false, ids);
+        verify(companyService).getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam());
     }
 
     @Test
@@ -496,30 +505,33 @@ class RecordListControllerTest {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY", "America/New_York")).thenReturn(series);
-        when(dealService.getRevenueTimeseries("JPY", "+09:00")).thenReturn(series);
-        when(dealService.getStageDistribution("JPY")).thenReturn(distribution);
+        when(dealService.getRevenueTimeseries("JPY", "America/New_York", allTeam)).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "+09:00", allTeam)).thenReturn(series);
+        when(dealService.getStageDistribution("JPY", allTeam)).thenReturn(distribution);
 
-        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null));
-        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00"));
-        assertSame(distribution, controller.getStageDistribution("JPY"));
+        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null, null, null));
+        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00", null, null));
+        assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
-        controller.getRevenueTimeseries("  ", null, null);
-        controller.getStageDistribution("");
+        controller.getRevenueTimeseries("  ", null, null, null, null);
+        controller.getStageDistribution("", null, null);
 
         assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00"));
+            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00", null, null));
         assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null));
+            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null, null, null));
 
-        verify(dealService).getRevenueTimeseries("JPY", "America/New_York");
-        verify(dealService).getRevenueTimeseries("JPY", "+09:00");
-        verify(dealService).getStageDistribution("JPY");
-        verify(dealService).getRevenueTimeseries(null, null);
-        verify(dealService).getStageDistribution(null);
+        verify(dealService).getRevenueTimeseries("JPY", "America/New_York", allTeam);
+        verify(dealService).getRevenueTimeseries("JPY", "+09:00", allTeam);
+        verify(dealService).getStageDistribution("JPY", allTeam);
+        verify(dealService).getRevenueTimeseries(null, null, allTeam);
+        verify(dealService).getStageDistribution(null, allTeam);
     }
 
     @Test
@@ -527,6 +539,9 @@ class RecordListControllerTest {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         DealKpisDto kpis = new DealKpisDto(
             0.0, null, 0.0, null, 0, 0, 0.0, 0.0, null, null, 0.0, null,
             List.of(), List.of(), List.of(), List.of());
@@ -534,23 +549,23 @@ class RecordListControllerTest {
             new DealPipelineValueDto(1, 2.0, 3.0, 4));
         List<DealAgingDto> aging = List.of(new DealAgingDto(1, 2, 3, 4, 5));
         DealTopDto top = new DealTopDto(List.of(), List.of());
-        when(dealService.getDealKpis("JPY", 30)).thenReturn(kpis);
-        when(dealService.getDealPipelineValue("JPY", 365)).thenReturn(pipelineValues);
-        when(dealService.getDealAging(null)).thenReturn(aging);
-        when(dealService.getTopDeals(null)).thenReturn(top);
+        when(dealService.getDealKpis("JPY", 30, allTeam)).thenReturn(kpis);
+        when(dealService.getDealPipelineValue("JPY", 365, allTeam)).thenReturn(pipelineValues);
+        when(dealService.getDealAging(null, allTeam)).thenReturn(aging);
+        when(dealService.getTopDeals(null, allTeam)).thenReturn(top);
 
-        assertSame(kpis, controller.getDealKpis("JPY", "30d"));
-        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m"));
-        assertSame(aging, controller.getDealAging("  "));
-        assertSame(top, controller.getTopDeals(""));
+        assertSame(kpis, controller.getDealKpis("JPY", "30d", null, null));
+        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m", null, null));
+        assertSame(aging, controller.getDealAging("  ", null, null));
+        assertSame(top, controller.getTopDeals("", null, null));
 
-        controller.getDealKpis(" ", null);
+        controller.getDealKpis(" ", null, null, null);
 
-        verify(dealService).getDealKpis("JPY", 30);
-        verify(dealService).getDealPipelineValue("JPY", 365);
-        verify(dealService).getDealAging(null);
-        verify(dealService).getTopDeals(null);
-        verify(dealService).getDealKpis(null, 90);
+        verify(dealService).getDealKpis("JPY", 30, allTeam);
+        verify(dealService).getDealPipelineValue("JPY", 365, allTeam);
+        verify(dealService).getDealAging(null, allTeam);
+        verify(dealService).getTopDeals(null, allTeam);
+        verify(dealService).getDealKpis(null, 90, allTeam);
     }
 
     @Test
@@ -559,11 +574,11 @@ class RecordListControllerTest {
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
 
-        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d"));
-        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all"));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all", null, null));
 
-        verify(dealService, never()).getDealKpis(any(), anyInt());
-        verify(dealService, never()).getDealPipelineValue(any(), anyInt());
+        verify(dealService, never()).getDealKpis(any(), anyInt(), any());
+        verify(dealService, never()).getDealPipelineValue(any(), anyInt(), any());
     }
 
     @Test
@@ -602,15 +617,18 @@ class RecordListControllerTest {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
         DealRiskAnalyticsDto analytics = new DealRiskAnalyticsDto(List.of(), false);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(dealRiskService.analytics(7)).thenReturn(analytics);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        when(dealRiskService.analytics(7, allTeam)).thenReturn(analytics);
 
         assertThrows(BadRequestException.class, () -> controller.getDealRisks(null));
-        assertSame(analytics, controller.getDealRiskAnalytics());
+        assertSame(analytics, controller.getDealRiskAnalytics(null, null));
 
         verify(dealRiskService, never()).assessWorkspace(anyInt());
-        verify(dealRiskService).analytics(7);
+        verify(dealRiskService).analytics(7, allTeam);
     }
 
     @Test
@@ -636,7 +654,7 @@ class RecordListControllerTest {
 
     @Test
     void tasksWithoutFilterRequirePageEndpoint() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getTasks(null, null, null));
 
@@ -645,7 +663,7 @@ class RecordListControllerTest {
 
     @Test
     void tasksPageClampsSize() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
         when(taskService.getTasksPage(100, 0)).thenReturn(List.of());
         when(taskService.countTasks()).thenReturn(0L);
 
@@ -657,16 +675,19 @@ class RecordListControllerTest {
 
     @Test
     void taskSummaryDelegatesToService() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         TaskSummaryDto summary = new TaskSummaryDto(1, 2, 3, 4, 5);
-        when(taskService.getTaskSummary()).thenReturn(summary);
+        when(taskService.getTaskSummary(allTeam)).thenReturn(summary);
 
-        assertSame(summary, controller.getTaskSummary());
+        assertSame(summary, controller.getTaskSummary(null, null));
     }
 
     @Test
     void upcomingTasksAreBoundedBeforeDelegation() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
         when(taskService.getUpcomingOpenTasks(4)).thenReturn(List.of());
 
         assertTrue(controller.getUpcomingTasks(4).isEmpty());
@@ -676,7 +697,8 @@ class RecordListControllerTest {
 
     @Test
     void activitiesWithoutFilterOrPaginationRequirePageEndpoint() {
-        ActivityController controller = new ActivityController(activityService);
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getActivities(null, null, null, null, null));
 
@@ -685,7 +707,8 @@ class RecordListControllerTest {
 
     @Test
     void activitiesPageClampsSize() {
-        ActivityController controller = new ActivityController(activityService);
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
         when(activityService.getActivitiesPage(null, null, null, 100, 0)).thenReturn(List.of());
         when(activityService.countActivities(null, null, null)).thenReturn(0L);
 
@@ -697,19 +720,23 @@ class RecordListControllerTest {
 
     @Test
     void activityAnalyticsRangesAndDaysAreValidatedBeforeDelegation() {
-        ActivityController controller = new ActivityController(activityService);
-        when(activityService.getActivityVolume(30)).thenReturn(List.of());
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        when(activityService.getActivityVolume(30, allTeam)).thenReturn(List.of());
         when(activityService.getTeamLeaderboard(365)).thenReturn(List.of());
         when(activityService.getUpcomingCount(7)).thenReturn(new CountDto(2));
 
-        assertTrue(controller.getActivityVolume("30d").isEmpty());
+        assertTrue(controller.getActivityVolume("30d", null, null).isEmpty());
         assertTrue(controller.getTeamLeaderboard("12m").isEmpty());
         assertEquals(2, controller.getUpcomingCount(7).count());
-        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d"));
+        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d", null, null));
         assertThrows(BadRequestException.class, () -> controller.getTeamLeaderboard("all"));
         assertThrows(BadRequestException.class, () -> controller.getUpcomingCount(0));
 
-        verify(activityService).getActivityVolume(30);
+        verify(activityService).getActivityVolume(30, allTeam);
         verify(activityService).getTeamLeaderboard(365);
         verify(activityService).getUpcomingCount(7);
     }

@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
 class TaskMapperTest extends AbstractMapperTest {
@@ -321,10 +322,39 @@ class TaskMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today.plusDays(8), farFuture.getId());
         jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today, foreign.getId());
 
-        TaskSummaryDto summary = taskMapper.taskSummary(target.getId(), today);
+        TaskSummaryDto summary = taskMapper.taskSummary(target.getId(), today, MemberScope.allTeam());
 
         assertEquals(new TaskSummaryDto(2, 1, 1, 1, 1), summary);
-        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1), taskMapper.taskSummary(foreignWorkspace.getId(), today));
+        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1),
+            taskMapper.taskSummary(foreignWorkspace.getId(), today, MemberScope.allTeam()));
+    }
+
+    @Test
+    void taskSummaryHonorsMemberScopeByAssignee() {
+        LocalDate today = LocalDate.of(2026, 7, 10);
+        Workspace target = newWorkspace();
+        User assignee = newUser();
+        User other = newUser();
+        Task mine = build("mine", assignee, null, null);
+        mine.setWorkspaceId(target.getId());
+        taskMapper.insert(mine);
+        Task theirs = build("theirs", other, null, null);
+        theirs.setWorkspaceId(target.getId());
+        taskMapper.insert(theirs);
+        Task nobody = build("nobody", assignee, null, null);
+        nobody.setWorkspaceId(target.getId());
+        taskMapper.insert(nobody);
+        jdbcTemplate.update("UPDATE task SET assigned_to_id = NULL WHERE id = ?", nobody.getId());
+
+        MemberScope me = MemberScope.fromRequest("me", null, assignee.getId());
+        MemberScope members = MemberScope.fromRequest(
+            "members", List.of(assignee.getId(), other.getId()), assignee.getId());
+        MemberScope unassigned = MemberScope.fromRequest("unassigned", null, assignee.getId());
+
+        assertEquals(3, taskMapper.taskSummary(target.getId(), today, MemberScope.allTeam()).todo());
+        assertEquals(1, taskMapper.taskSummary(target.getId(), today, me).todo());
+        assertEquals(2, taskMapper.taskSummary(target.getId(), today, members).todo());
+        assertEquals(1, taskMapper.taskSummary(target.getId(), today, unassigned).todo());
     }
 
     private Workspace newWorkspace() {

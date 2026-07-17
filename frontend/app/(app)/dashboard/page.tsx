@@ -249,10 +249,10 @@ export default async function Dashboard() {
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
         getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, user.timezone, init).catch(
+        getDealRevenueTimeseries(currency, user.timezone, {}, init).catch(
             () => ({ closed: [], projected: [] }) as DealRevenueSeries,
         ),
-        getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
+        getDealStageDistribution(currency, {}, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
     const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(

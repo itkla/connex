@@ -128,5 +128,6 @@ public final class TablePlaneRegistry {
         "suppression_entry",
         "tag",
         "task",
-        "user_dashboard");
+        "user_dashboard",
+        "warm_path_dismissal");
 }

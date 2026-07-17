@@ -416,6 +416,9 @@ class ReportIntegrationTest {
                         null,
                         "2026-02-01T00:00:00Z",
                         0));
+        when(aiReportNarrativeService.cachedNarrative(
+                anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList()))
+                .thenReturn(ReportNarrativeDto.unavailable("not_cached"));
     }
 
     @Test
@@ -462,6 +465,19 @@ class ReportIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.widgets[0].total").value(2))
             .andExpect(jsonPath("$.widgets[0].priorTotal").value(1))
+            .andExpect(jsonPath("$.appendix[0].sourceId").value("metric.0.0"))
+            .andExpect(jsonPath("$.narrative.available").value(false))
+            .andExpect(jsonPath("$.narrative.reason").value("not_cached"));
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .param("narrative", "full")
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(2))
             .andExpect(jsonPath("$.appendix[0].sourceId").value("metric.0.0"))
             .andExpect(jsonPath("$.narrative.available").value(true))
             .andExpect(jsonPath("$.citations[0].sourceId").value("metric.0.0"));
