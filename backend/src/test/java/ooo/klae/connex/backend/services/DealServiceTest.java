@@ -549,7 +549,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_recordsInitialStageHistory() {
+    void create_open_recordsConversionEligibleInitialHistory() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
@@ -567,6 +567,31 @@ class DealServiceTest extends AbstractServiceTest {
         List<DealStageHistory> history = dealService.getStageHistory(created.getId());
         assertEquals(1, history.size());
         assertEquals(stage.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
+    }
+
+    @Test
+    void create_closedAtIngest_recordsConversionIneligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        for (boolean won : new boolean[] {true, false}) {
+            Deal deal = new Deal();
+            deal.setName("Deal " + unique());
+            deal.setWorkspaceId(workspace.getId());
+            deal.setValue(1000.0);
+            deal.setCurrency("JPY");
+            deal.setPipelineId(pipeline.getId());
+            deal.setStageId(stage.getId());
+            deal.setCompanyId(newCompany().getId());
+            deal.setWon(won);
+            Deal created = dealService.create(deal);
+
+            List<DealStageHistory> history = dealService.getStageHistory(created.getId());
+            assertEquals(1, history.size());
+            assertFalse(history.get(0).isConversionEligible(),
+                "a deal created already " + (won ? "won" : "lost") + " never occupied the stage while open");
+        }
     }
 
     @Test

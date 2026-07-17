@@ -4,7 +4,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +16,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
@@ -33,6 +37,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
     @Autowired ExportService exportService;
+    @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
     @Autowired CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Autowired RoleService roleService;
@@ -148,6 +153,50 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportResult second = importService.commitDeals(req(mapping, rows, "fill_empty"));
         assertEquals(0, second.getCreated());
         assertEquals(1, second.getUpdated());
+    }
+
+    @Test
+    void dealImport_closedAtIngestStage_recordsConversionIneligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage wonStage = new Stage();
+        wonStage.setName("Won " + unique());
+        wonStage.setPipeline(pipeline);
+        wonStage.setPosition(0);
+        wonStage.setWorkspaceId(workspace.getId());
+        wonStage.setSuccess(true);
+        pipelineMapper.insertStage(wonStage);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of("Deal", "Closed Import " + unique(), "Pipe", pipeline.getName(), "Stage", wonStage.getName())),
+            "fill_empty"));
+        assertEquals(1, result.getCreated());
+
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertEquals(Boolean.TRUE, deals.get(0).getWon());
+        List<DealStageHistory> history = dealStageHistoryService.getHistory(deals.get(0).getId());
+        assertEquals(1, history.size());
+        assertFalse(history.get(0).isConversionEligible());
+    }
+
+    @Test
+    void dealImport_openStage_recordsConversionEligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of("Deal", "Open Import " + unique(), "Pipe", pipeline.getName(), "Stage", stage.getName())),
+            "fill_empty"));
+        assertEquals(1, result.getCreated());
+
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertNull(deals.get(0).getWon());
+        List<DealStageHistory> history = dealStageHistoryService.getHistory(deals.get(0).getId());
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).isConversionEligible());
     }
 
     @Test

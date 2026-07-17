@@ -708,8 +708,8 @@ public class DealService {
         }
         dealMapper.insert(deal);
         if (deal.getStageId() != null) {
-            dealStageHistoryService.recordTransition(
-                workspaceId, deal.getId(), deal.getStageId(), null, deal.getWon());
+            dealStageHistoryService.recordInitial(
+                workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
         }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
