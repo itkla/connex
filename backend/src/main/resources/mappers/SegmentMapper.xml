@@ -144,6 +144,7 @@
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'website'"><include refid="stringOp"><property name="col" value="website"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT company_id FROM company_tag WHERE tag_id = #{id})</when>
@@ -160,6 +161,7 @@
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
             <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
@@ -176,6 +178,7 @@
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
             <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
