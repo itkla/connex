@@ -55,6 +55,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class CampaignSendService {
 
     private static final String DEFAULT_CHANNEL = "email";
+    private static final Set<String> DISPATCHABLE_CHANNELS = Set.of("email", "sms");
     private static final String DEFAULT_PURPOSE = "marketing";
     private static final Set<String> LOCALES = Set.of("en", "ja");
     private static final int SQL_BATCH_SIZE = 500;
