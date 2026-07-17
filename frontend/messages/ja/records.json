@@ -133,6 +133,36 @@
       "label": "添付ファイルあり",
       "labelNot": "添付ファイルなし",
       "description": "少なくとも1件のファイルが添付されています。"
+    },
+    "warmth_hot": {
+      "label": "ホット",
+      "labelNot": "ホットでない",
+      "description": "関係の温度がホットです。"
+    },
+    "warmth_warm": {
+      "label": "ウォーム",
+      "labelNot": "ウォームでない",
+      "description": "関係の温度がウォームです。"
+    },
+    "warmth_cool": {
+      "label": "クール",
+      "labelNot": "クールでない",
+      "description": "関係の温度がクールです。"
+    },
+    "warmth_cold": {
+      "label": "コールド",
+      "labelNot": "コールドでない",
+      "description": "関係の温度がコールドです。"
+    },
+    "warmth_rising": {
+      "label": "上昇中",
+      "labelNot": "上昇していない",
+      "description": "関係の温度が上昇傾向です。"
+    },
+    "going_cold": {
+      "label": "まもなく冷却",
+      "labelNot": "まもなく冷却しない",
+      "description": "指定期間内にコールドになると予測されます。"
     }
   },
   "SavedViews": {

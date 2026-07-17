@@ -418,7 +418,8 @@ class SegmentServiceTest extends AbstractServiceTest {
         assertEquals("string", industry.kind());
         assertEquals("industries", industry.valueSource());
         assertEquals(List.of("equals", "contains", "starts_with", "is_set"), industry.operators());
-        assertEquals(List.of("warm_intro_available", "open_deal", "cooling", "no_activity", "has_attachment"),
+        assertEquals(List.of("warm_intro_available", "open_deal", "cooling", "no_activity", "has_attachment",
+                "warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold", "warmth_rising", "going_cold"),
             dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
         SegmentCatalogDto.CatalogPredicate noActivity = dto.predicates().stream()
             .filter(p -> p.key().equals("no_activity")).findFirst().orElseThrow();
@@ -450,7 +451,8 @@ class SegmentServiceTest extends AbstractServiceTest {
     void catalog_person_hasExistencePredicatesAndNoEnumOptions() {
         SegmentCatalogDto dto = segmentService.catalog("person");
 
-        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment"),
+        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment",
+                "warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold", "warmth_rising", "going_cold"),
             dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
         assertTrue(dto.enumOptions().isEmpty());
     }
@@ -561,6 +563,36 @@ class SegmentServiceTest extends AbstractServiceTest {
             () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
         assertThrows(BadRequestException.class,
             () -> segmentService.evaluate("company", def("all", predicate("has_open_task"))));
+        assertThrows(BadRequestException.class,
+            () -> segmentService.evaluate("deal", def("all", predicate("warmth_hot"))));
+    }
+
+    @Test
+    void companyPredicate_warmthCold_matchesUntouchedCompany() {
+        Company cold = newCompany();
+
+        assertTrue(evaluate(def("all", predicate("warmth_cold"))).contains(cold.getId()));
+        assertFalse(evaluate(def("all", predicate("warmth_hot"))).contains(cold.getId()));
+    }
+
+    @Test
+    void personPredicate_warmthCold_matchesUntouchedContact() {
+        Person cold = newPerson(newCompany());
+
+        List<Integer> coldIds = segmentService.evaluate("person", def("all", predicate("warmth_cold")));
+        List<Integer> hotIds = segmentService.evaluate("person", def("all", predicate("warmth_hot")));
+
+        assertTrue(coldIds.contains(cold.getId()));
+        assertFalse(hotIds.contains(cold.getId()));
+    }
+
+    @Test
+    void goingCold_excludesAlreadyColdRecords() {
+        Company cold = newCompany();
+
+        SegmentCondition goingCold = predicate("going_cold");
+        goingCold.setDays(90);
+        assertFalse(evaluate(def("all", goingCold)).contains(cold.getId()));
     }
 
     @Test

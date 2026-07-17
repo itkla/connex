@@ -119,6 +119,18 @@ public class SegmentCatalog {
             new PredicateSpec("has_note", Set.of("person", "deal"), false, 0, 0, 0));
         predicates.put("has_attachment",
             new PredicateSpec("has_attachment", Set.of("company", "person", "deal"), false, 0, 0, 0));
+        predicates.put("warmth_hot",
+            new PredicateSpec("warmth_hot", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_warm",
+            new PredicateSpec("warmth_warm", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_cool",
+            new PredicateSpec("warmth_cool", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_cold",
+            new PredicateSpec("warmth_cold", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("warmth_rising",
+            new PredicateSpec("warmth_rising", Set.of("company", "person"), false, 0, 0, 0));
+        predicates.put("going_cold",
+            new PredicateSpec("going_cold", Set.of("company", "person"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
         return Collections.unmodifiableMap(predicates);
     }
 

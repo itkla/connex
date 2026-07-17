@@ -133,6 +133,36 @@
       "label": "Has an attachment",
       "labelNot": "No attachments",
       "description": "At least one file is attached."
+    },
+    "warmth_hot": {
+      "label": "Hot",
+      "labelNot": "Not hot",
+      "description": "Relationship warmth is hot."
+    },
+    "warmth_warm": {
+      "label": "Warm",
+      "labelNot": "Not warm",
+      "description": "Relationship warmth is warm."
+    },
+    "warmth_cool": {
+      "label": "Cool",
+      "labelNot": "Not cool",
+      "description": "Relationship warmth is cool."
+    },
+    "warmth_cold": {
+      "label": "Cold",
+      "labelNot": "Not cold",
+      "description": "Relationship warmth is cold."
+    },
+    "warmth_rising": {
+      "label": "Warming up",
+      "labelNot": "Not warming up",
+      "description": "Relationship warmth is trending up."
+    },
+    "going_cold": {
+      "label": "Going cold soon",
+      "labelNot": "Not going cold soon",
+      "description": "Predicted to reach cold within the chosen window."
     }
   },
   "SavedViews": {

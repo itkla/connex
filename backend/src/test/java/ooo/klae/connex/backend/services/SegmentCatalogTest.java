@@ -102,7 +102,8 @@ class SegmentCatalogTest {
     @Test
     void predicateApplicabilityMatchesTheCatalog() {
         assertEquals(Set.of("warm_intro_available", "open_deal", "cooling", "no_activity",
-                "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment"),
+                "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment",
+                "warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold", "warmth_rising", "going_cold"),
             catalog.predicates().stream().map(PredicateSpec::key).collect(Collectors.toSet()));
 
         for (String key : Set.of("warm_intro_available", "open_deal", "cooling", "no_activity")) {
@@ -111,6 +112,10 @@ class SegmentCatalogTest {
         for (String key : Set.of("has_open_task", "overdue_task", "recent_meeting", "has_note")) {
             assertEquals(Set.of("person", "deal"), catalog.predicate(key).recordTypes(), key);
         }
+        for (String key : Set.of("warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold",
+                "warmth_rising", "going_cold")) {
+            assertEquals(Set.of("company", "person"), catalog.predicate(key).recordTypes(), key);
+        }
         assertEquals(Set.of("company", "person", "deal"), catalog.predicate("has_attachment").recordTypes());
 
         assertTrue(catalog.predicateAppliesTo("open_deal", "company"));
@@ -118,6 +123,8 @@ class SegmentCatalogTest {
         assertTrue(catalog.predicateAppliesTo("has_open_task", "person"));
         assertFalse(catalog.predicateAppliesTo("has_open_task", "company"));
         assertTrue(catalog.predicateAppliesTo("has_attachment", "company"));
+        assertTrue(catalog.predicateAppliesTo("warmth_hot", "person"));
+        assertFalse(catalog.predicateAppliesTo("warmth_hot", "deal"));
 
         assertTrue(catalog.recordTypeSupportsPredicates("company"));
         assertTrue(catalog.recordTypeSupportsPredicates("person"));
@@ -128,7 +135,7 @@ class SegmentCatalogTest {
 
     @Test
     void dayParameterizedPredicates() {
-        for (String key : Set.of("no_activity", "recent_meeting")) {
+        for (String key : Set.of("no_activity", "recent_meeting", "going_cold")) {
             PredicateSpec spec = catalog.predicate(key);
             assertTrue(spec.acceptsDays(), key);
             assertEquals(30, spec.defaultDays(), key);
@@ -140,6 +147,7 @@ class SegmentCatalogTest {
         assertFalse(catalog.predicate("warm_intro_available").acceptsDays());
         assertFalse(catalog.predicate("has_open_task").acceptsDays());
         assertFalse(catalog.predicate("has_attachment").acceptsDays());
+        assertFalse(catalog.predicate("warmth_hot").acceptsDays());
         assertNull(catalog.predicate("unknown"));
     }
 

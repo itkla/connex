@@ -38,10 +38,13 @@ import ooo.klae.connex.backend.util.LikePattern;
  *
  * <p>Field conditions are validated against a kind-typed catalog (string / number / id / enum / tag /
  * date) before any SQL runs, and dispatched to the per-record-type {@code *IdsMatching} statements;
- * negatives are expressed as a positive operator plus {@code negate}. Predicates
- * ({@code warm_intro_available}, {@code open_deal}, {@code cooling}, {@code no_activity}) remain
- * company-only, since they are graph- and temperature-derived; {@code cooling} reuses
- * {@link ScoringService}. This shared model is the rule engine's {@code WHEN}.
+ * negatives are expressed as a positive operator plus {@code negate}. Predicates declare their
+ * applicable record types in {@link SegmentCatalog} and dispatch per type: the graph/temperature
+ * signals ({@code warm_intro_available}, {@code open_deal}, {@code cooling}) are company-only, the
+ * existence signals ({@code has_open_task}, {@code recent_meeting}, …) apply to person/deal, and the
+ * warmth signals ({@code warmth_hot}…{@code going_cold}) apply to company/person via
+ * {@link ScoringService} (scored once per evaluation and reused across warmth conditions). This shared
+ * model is the rule engine's {@code WHEN}.
  */
 @Service
 @RequiredArgsConstructor
@@ -326,8 +329,48 @@ public class SegmentService {
             case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, ctx.userId());
             case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
                 existencePredicate(key, condition, ctx);
+            case "warmth_hot" -> warmthBand(ctx, "hot");
+            case "warmth_warm" -> warmthBand(ctx, "warm");
+            case "warmth_cool" -> warmthBand(ctx, "cool");
+            case "warmth_cold" -> warmthBand(ctx, "cold");
+            case "warmth_rising" -> warmthTrend(ctx, "rising");
+            case "going_cold" -> goingCold(ctx, catalog.clampDays(condition.getDays()));
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
         };
+    }
+
+    private Set<Integer> warmthBand(EvalContext ctx, String band) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (band.equals(temperature.getBand()) && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> warmthTrend(EvalContext ctx, String trend) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (trend.equals(temperature.getTrend()) && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> goingCold(EvalContext ctx, int days) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            Integer daysUntilCold = temperature.getDaysUntilCold();
+            if (daysUntilCold != null && daysUntilCold <= days && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
     }
 
     private Set<Integer> existencePredicate(String key, SegmentCondition condition, EvalContext ctx) {
@@ -541,6 +584,7 @@ public class SegmentService {
         private final String recordType;
         private final boolean includeRestrictedPeople;
         private Set<Integer> universe;
+        private List<RelationshipTemperatureDto> temperatures;
 
         private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople) {
             this.workspaceId = workspaceId;
@@ -577,6 +621,22 @@ public class SegmentService {
                 });
             }
             return universe;
+        }
+
+        /**
+         * The relationship temperatures for this record type, computed once per evaluation and reused
+         * across every warmth predicate in the definition. Company and person are scored via
+         * {@link ScoringService}; other record types have no temperature.
+         */
+        private List<RelationshipTemperatureDto> temperatures(ScoringService scoring) {
+            if (temperatures == null) {
+                temperatures = switch (recordType) {
+                    case "company" -> scoring.scoreCompanies(workspaceId);
+                    case "person" -> scoring.scoreContacts(workspaceId);
+                    default -> List.of();
+                };
+            }
+            return temperatures;
         }
     }
 }
