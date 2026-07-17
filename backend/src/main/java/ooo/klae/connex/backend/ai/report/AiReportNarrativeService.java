@@ -20,8 +20,6 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
-import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
@@ -154,10 +152,10 @@ public class AiReportNarrativeService {
                             warnings,
                             generatedAt);
                     return toDto(content, generatedAt, warnings);
-                } catch (MaskingLeakException | AiProviderException exception) {
-                    return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                 } catch (ForbiddenException exception) {
                     return ReportNarrativeDto.unavailable(NOT_CONFIGURED);
+                } catch (RuntimeException exception) {
+                    return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                 }
             }
         } finally {
