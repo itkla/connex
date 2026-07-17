@@ -20,5 +20,8 @@ public enum Capability {
     BUSINESS_CARD_SCANNING,
 
     /** Reviewed business-card import with durable private card retention. */
-    BUSINESS_CARD_IMPORT
+    BUSINESS_CARD_IMPORT,
+
+    /** Native email campaign delivery on an extensible channel/provider SPI. */
+    CAMPAIGN_DELIVERY
 }

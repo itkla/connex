@@ -159,6 +159,15 @@
       AND status = 'granted'
   </select>
 
+  <select id="suppressedAddresses" resultType="string">
+    SELECT DISTINCT suppression.address FROM suppression_entry suppression
+    WHERE suppression.workspace_id = #{workspaceId}
+      AND suppression.channel = #{channel}
+      AND suppression.address IN
+        <foreach item="address" collection="addresses" open="(" separator="," close=")">#{address}</foreach>
+        COLLATE utf8mb4_bin
+  </select>
+
   <update id="clearMemberOwnership">
     UPDATE campaign SET owner_user_id = NULL
     WHERE workspace_id = #{workspaceId} AND owner_user_id = #{userId}

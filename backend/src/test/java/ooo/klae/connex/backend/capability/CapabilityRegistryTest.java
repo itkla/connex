@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
@@ -30,6 +31,7 @@ class CapabilityRegistryTest {
     @Mock private MailProperties mailProperties;
     @Mock private BusinessCardService businessCardService;
     @Mock private DeploymentProperties deploymentProperties;
+    @Mock private DeliveryProperties deliveryProperties;
 
     private CapabilityRegistry capabilityRegistry;
 
@@ -37,7 +39,7 @@ class CapabilityRegistryTest {
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
                 socialLoginClientRegistrations, mailProperties, businessCardService,
-                deploymentProperties, capability -> true);
+                deploymentProperties, capability -> true, deliveryProperties);
     }
 
     @Test
@@ -81,6 +83,7 @@ class CapabilityRegistryTest {
                 businessCardService,
                 deploymentProperties,
                 capability -> true,
+                deliveryProperties,
                 Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
         when(deploymentProperties.isConfigured()).thenReturn(true);
         when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
@@ -100,7 +103,8 @@ class CapabilityRegistryTest {
                 managedMailProperties,
                 businessCardService,
                 new DeploymentProperties(),
-                capability -> capability != Capability.MANAGED_MAIL);
+                capability -> capability != Capability.MANAGED_MAIL,
+                new DeliveryProperties());
 
         assertFalse(restrictedRegistry.isAvailable(Capability.MANAGED_MAIL));
     }

@@ -48,6 +48,7 @@ public enum Permission {
     RULE_MANAGE,
     CAMPAIGN_VIEW,
     CAMPAIGN_MANAGE,
+    CAMPAIGN_SEND,
     CONSENT_MANAGE,
     /**
      * Permission to invoke AI-powered features (e.g. account/meeting briefs).

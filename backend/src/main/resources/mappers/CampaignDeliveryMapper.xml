@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignDeliveryMapper">
+
+  <sql id="deliveryColumns">
+    id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
+    attempt_count, last_error, unsubscribe_token, created_at, updated_at
+  </sql>
+
+  <insert id="insertDeliveries">
+    INSERT INTO campaign_delivery
+      (workspace_id, send_id, person_id, address, status, unsubscribe_token)
+    VALUES
+    <foreach item="delivery" collection="deliveries" separator=",">
+      (#{workspaceId}, #{delivery.sendId}, #{delivery.personId}, #{delivery.address},
+       #{delivery.status}, #{delivery.unsubscribeToken})
+    </foreach>
+  </insert>
+
+  <select id="getDelivery" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByToken" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE unsubscribe_token = #{token}
+  </select>
+
+  <select id="pendingDeliveryIds" resultType="int">
+    SELECT id FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+    ORDER BY id
+  </select>
+
+  <select id="countPending" resultType="int">
+    SELECT COUNT(*) FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+  </select>
+
+  <update id="claim">
+    UPDATE campaign_delivery
+    SET status = 'dispatching', attempt_count = attempt_count + 1
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
+  </update>
+
+  <update id="markDispatched">
+    UPDATE campaign_delivery
+    SET status = 'dispatched', skip_reason = NULL, provider_message_id = #{providerMessageId},
+        last_error = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="markSkipped">
+    UPDATE campaign_delivery
+    SET status = 'skipped', skip_reason = #{skipReason}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="markFailed">
+    UPDATE campaign_delivery
+    SET status = 'failed', skip_reason = NULL, last_error = #{lastError}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <select id="recentDispatchCount" resultType="int">
+    SELECT COUNT(*) FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.person_id = #{personId}
+      AND s.channel = #{channel}
+      AND d.send_id <> #{sendId}
+      AND d.status = 'dispatched'
+      AND d.updated_at >= #{since}
+  </select>
+
+  <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_delivery_event
+      (workspace_id, delivery_id, event_type, detail)
+    VALUES
+      (#{workspaceId}, #{deliveryId}, #{eventType}, #{detail})
+  </insert>
+
+  <select id="hasEvent" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM campaign_delivery_event
+      WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND event_type = #{eventType}
+    )
+  </select>
+
+</mapper>
