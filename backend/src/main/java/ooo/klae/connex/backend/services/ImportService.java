@@ -439,8 +439,8 @@ public class ImportService {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
                 if (bean.getStageId() != null) {
-                    dealStageHistoryService.recordTransition(
-                        workspaceId, bean.getId(), bean.getStageId(), null, bean.getWon());
+                    dealStageHistoryService.recordInitial(
+                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon());
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
