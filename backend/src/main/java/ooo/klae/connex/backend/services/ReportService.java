@@ -136,6 +136,18 @@ public class ReportService {
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
 
+    /**
+     * Controls how a generated document resolves its AI narrative. {@code NONE} skips it (exports),
+     * {@code CACHED} returns a cached narrative without ever calling the provider (interactive
+     * figures-first load), and {@code FULL} performs the blocking generation (client follow-up and
+     * snapshot freeze).
+     */
+    public enum NarrativeMode {
+        NONE,
+        CACHED,
+        FULL
+    }
+
     /** Returns all report definitions in the active workspace. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportDefinitionDto> list() {
@@ -274,17 +286,22 @@ public class ReportService {
                 "Deleted report " + definition.getName(), null);
     }
 
-    /** Generates deterministic figures and the optional grounded narrative. */
+    /**
+     * Generates deterministic figures and resolves the grounded narrative per the requested mode.
+     * {@link NarrativeMode#CACHED} never invokes the AI provider, so the figures return immediately
+     * and the client resolves a {@code not_cached} narrative with a follow-up {@link NarrativeMode#FULL}
+     * request.
+     */
     @RequirePermission(Permission.REPORT_READ)
-    public ReportDocumentDto generate(int id, ReportGenerateRequest request) {
-        return generateInternal(id, request, true);
+    public ReportDocumentDto generate(int id, ReportGenerateRequest request, NarrativeMode mode) {
+        return generateInternal(id, request, mode);
     }
 
     /** Freezes a generated report document as an immutable snapshot. */
     @RequirePermission(Permission.REPORT_CREATE)
     public ReportSnapshotDto createSnapshot(int id, ReportGenerateRequest request) {
         workspaceService.requirePermission(Permission.REPORT_READ);
-        ReportDocumentDto document = generateInternal(id, request, true);
+        ReportDocumentDto document = generateInternal(id, request, NarrativeMode.FULL);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String computedResult = serialize(document, MAX_SNAPSHOT_BYTES, "Report snapshot is too large");
         ReportSnapshot persisted = transactionTemplate.execute(status -> persistSnapshot(
@@ -366,7 +383,7 @@ public class ReportService {
     /** Exports a live report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportCsv(int id, ReportGenerateRequest request) {
-        return appendixCsv(generateInternal(id, request, false));
+        return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
@@ -375,7 +392,7 @@ public class ReportService {
         return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
     }
 
-    private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, boolean includeNarrative) {
+    private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, NarrativeMode mode) {
         ReportDefinition definition = requireDefinition(id);
         ReportConfig config = parseConfig(definition.getConfigJson());
         validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
@@ -383,10 +400,13 @@ public class ReportService {
         validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         GeneratedFigures figures = generateFigures(workspaceId, config, period);
-        ReportNarrativeDto narrative = includeNarrative
-                ? aiReportNarrativeService.generate(
-                        id, definition.getName(), period.start(), period.end(), figures.appendix())
-                : ReportNarrativeDto.unavailable("not_requested");
+        ReportNarrativeDto narrative = switch (mode) {
+            case NONE -> ReportNarrativeDto.unavailable("not_requested");
+            case CACHED -> aiReportNarrativeService.cachedNarrative(
+                    id, definition.getName(), period.start(), period.end(), figures.appendix());
+            case FULL -> aiReportNarrativeService.generate(
+                    id, definition.getName(), period.start(), period.end(), figures.appendix());
+        };
         List<ReportCitationDto> citations = citations(narrative, figures.appendix());
         return new ReportDocumentDto(
                 toDefinitionDto(definition), period.start(), period.end(), period.priorStart(), period.priorEnd(),

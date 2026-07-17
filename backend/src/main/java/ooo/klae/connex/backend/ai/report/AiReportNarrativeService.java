@@ -46,6 +46,7 @@ public class AiReportNarrativeService {
     private static final String PROVIDER_ERROR = "provider_error";
     private static final String INVALID_GROUNDING = "invalid_grounding";
     private static final String INSUFFICIENT_DATA = "insufficient_data";
+    private static final String NOT_CACHED = "not_cached";
     private static final String RATE_LIMITED = "rate_limited";
     private static final int MAX_CACHE_MISSES_PER_WINDOW = 10;
     private static final long RATE_WINDOW_MINUTES = 10;
@@ -59,6 +60,33 @@ public class AiReportNarrativeService {
     private final Clock clock;
     private final ConcurrentMap<String, Object> invocationLocks = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, ArrayDeque<Instant>> invocationWindows = new ConcurrentHashMap<>();
+
+    /**
+     * Returns a previously generated narrative for deterministic report sources without invoking the
+     * provider or consuming a rate-limit slot. Used by the interactive figures-first response so a
+     * report never blocks on the model call; a cache miss yields a {@code not_cached} result the
+     * client resolves with a follow-up full generation.
+     * @param reportId saved report definition id
+     * @param reportName report display name
+     * @param periodStart first included date
+     * @param periodEnd last included date
+     * @param sources deterministic appendix rows and citation registry
+     * @return cached grounded narrative, or an unavailable result (including {@code not_cached})
+     */
+    public ReportNarrativeDto cachedNarrative(
+            int reportId,
+            String reportName,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            List<ReportAppendixRowDto> sources) {
+        NarrativePrep prep = prepare(reportId, reportName, periodStart, periodEnd, sources);
+        if (prep.terminal() != null) {
+            return prep.terminal();
+        }
+        ReportNarrativeDto cached = cached(
+                prep.workspaceId(), prep.cacheFeature(), reportId, prep.contentHash(), prep.context());
+        return cached != null ? cached : ReportNarrativeDto.unavailable(NOT_CACHED);
+    }
 
     /**
      * Generates or reuses a narrative for deterministic report sources.
@@ -75,23 +103,15 @@ public class AiReportNarrativeService {
             LocalDate periodStart,
             LocalDate periodEnd,
             List<ReportAppendixRowDto> sources) {
-        if (reportId <= 0 || sources == null || sources.isEmpty()) {
-            return ReportNarrativeDto.unavailable(INSUFFICIENT_DATA);
+        NarrativePrep prep = prepare(reportId, reportName, periodStart, periodEnd, sources);
+        if (prep.terminal() != null) {
+            return prep.terminal();
         }
-        if (!aiFeatureGate.isAiUsable()) {
-            return ReportNarrativeDto.unavailable(NOT_CONFIGURED);
-        }
-
-        AiReportContext reportContext;
-        try {
-            reportContext = new AiReportContext(reportName, periodStart, periodEnd, sources);
-        } catch (IllegalArgumentException | NullPointerException exception) {
-            return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
-        }
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        AiReportAssembly assembly = aiReportAssembler.assemble(reportContext);
-        String cacheFeature = cacheFeature();
-        String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
+        int workspaceId = prep.workspaceId();
+        AiReportContext reportContext = prep.context();
+        AiReportAssembly assembly = prep.assembly();
+        String cacheFeature = prep.cacheFeature();
+        String contentHash = prep.contentHash();
         ReportNarrativeDto cached = cached(
                 workspaceId, cacheFeature, reportId, contentHash, reportContext);
         if (cached != null) {
@@ -140,6 +160,52 @@ public class AiReportNarrativeService {
             }
         } finally {
             invocationLocks.remove(invocationKey, invocationLock);
+        }
+    }
+
+    private NarrativePrep prepare(
+            int reportId,
+            String reportName,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            List<ReportAppendixRowDto> sources) {
+        if (reportId <= 0 || sources == null || sources.isEmpty()) {
+            return NarrativePrep.terminal(ReportNarrativeDto.unavailable(INSUFFICIENT_DATA));
+        }
+        if (!aiFeatureGate.isAiUsable()) {
+            return NarrativePrep.terminal(ReportNarrativeDto.unavailable(NOT_CONFIGURED));
+        }
+        AiReportContext reportContext;
+        try {
+            reportContext = new AiReportContext(reportName, periodStart, periodEnd, sources);
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            return NarrativePrep.terminal(ReportNarrativeDto.unavailable(INVALID_GROUNDING));
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        AiReportAssembly assembly = aiReportAssembler.assemble(reportContext);
+        String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
+        return NarrativePrep.ready(workspaceId, reportContext, assembly, cacheFeature(), contentHash);
+    }
+
+    private record NarrativePrep(
+            ReportNarrativeDto terminal,
+            int workspaceId,
+            AiReportContext context,
+            AiReportAssembly assembly,
+            String cacheFeature,
+            String contentHash) {
+
+        static NarrativePrep terminal(ReportNarrativeDto result) {
+            return new NarrativePrep(result, 0, null, null, null, null);
+        }
+
+        static NarrativePrep ready(
+                int workspaceId,
+                AiReportContext context,
+                AiReportAssembly assembly,
+                String cacheFeature,
+                String contentHash) {
+            return new NarrativePrep(null, workspaceId, context, assembly, cacheFeature, contentHash);
         }
     }
 

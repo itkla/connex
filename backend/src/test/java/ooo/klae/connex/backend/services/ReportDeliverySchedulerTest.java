@@ -92,14 +92,14 @@ class ReportDeliverySchedulerTest {
         stubAuditScope();
         ReportDocumentDto document = documentWithContent();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
-        verify(reportService).generate(REPORT_ID, null);
+        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
         verify(reportService, never()).createSnapshot(anyInt(), any());
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
         verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
@@ -125,7 +125,7 @@ class ReportDeliverySchedulerTest {
         stubAuditScope();
         ReportDocumentDto document = document();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
@@ -146,7 +146,7 @@ class ReportDeliverySchedulerTest {
         ReportDocumentDto document = document();
         User recipient = user(USER_ID, "recipient@example.com", "ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
@@ -174,7 +174,7 @@ class ReportDeliverySchedulerTest {
         User english = user(45, "english@example.com", "en");
         User japanese = user(46, "japanese@example.com", "ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(english, japanese));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(english, japanese));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
@@ -195,7 +195,7 @@ class ReportDeliverySchedulerTest {
         assertTrue(japaneseMessage.htmlBody().contains("$125,000"));
         assertTrue(englishMessage.htmlBody().contains("Revenue held above target."));
         assertTrue(japaneseMessage.htmlBody().contains("Revenue held above target."));
-        verify(reportService).generate(REPORT_ID, null);
+        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
         verify(auditService).recordScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
                 WORKSPACE_ID, 77, "Quota-safe report",
@@ -208,7 +208,7 @@ class ReportDeliverySchedulerTest {
         ReportDocumentDto document = document();
         User recipient = user(USER_ID, "recipient@example.com", "../../ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
@@ -230,7 +230,7 @@ class ReportDeliverySchedulerTest {
 
         scheduler.deliverDue();
 
-        verify(reportService, never()).generate(anyInt(), any());
+        verify(reportService, never()).generate(anyInt(), any(), any());
         verify(reportService, never()).createSnapshot(anyInt(), any());
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verify(auditService).recordFailureScoped(
@@ -244,14 +244,14 @@ class ReportDeliverySchedulerTest {
         stubAuditScope();
         ReportDocumentDto document = attainmentDocument();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
         when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(true);
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
-        verify(reportService).generate(REPORT_ID, null);
+        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
         verify(scheduleService).activeRecipientsForDocument(schedule, document);
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verify(auditService).recordFailureScoped(
@@ -264,7 +264,7 @@ class ReportDeliverySchedulerTest {
     void dueDeliveryCancellationAfterGenerationDoesNotRecordRecipientFailure() {
         ReportDocumentDto document = document();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
         when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
         when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(false);
 
