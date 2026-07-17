@@ -411,7 +411,7 @@ class SegmentServiceTest extends AbstractServiceTest {
         SegmentCatalogDto dto = segmentService.catalog("company");
 
         assertEquals("company", dto.recordType());
-        assertEquals(List.of("industry", "name", "website", "phone", "tag", "created", "updated"),
+        assertEquals(List.of("industry", "name", "website", "phone", "owner", "tag", "created", "updated"),
             dto.fields().stream().map(SegmentCatalogDto.CatalogField::field).toList());
         SegmentCatalogDto.CatalogField industry = dto.fields().stream()
             .filter(f -> f.field().equals("industry")).findFirst().orElseThrow();
@@ -617,6 +617,39 @@ class SegmentServiceTest extends AbstractServiceTest {
     @Test
     void dealRiskPredicate_notApplicableToCompany_throws() {
         assertThrows(BadRequestException.class, () -> evaluate(def("all", predicate("at_risk"))));
+    }
+
+    @Test
+    void companyField_ownerIs_matchesOwnedCompany() {
+        Company mine = new Company();
+        mine.setName("Mine " + unique());
+        mine.setWorkspaceId(workspace.getId());
+        mine.setOwnerId(currentUser.getId());
+        companyMapper.insert(mine);
+        Company unowned = newCompany();
+
+        List<Integer> ids = evaluate(def("all", field("owner", "is", String.valueOf(currentUser.getId()))));
+
+        assertTrue(ids.contains(mine.getId()));
+        assertFalse(ids.contains(unowned.getId()));
+    }
+
+    @Test
+    void personField_ownerIsNot_excludesOwnedContact() {
+        Person mine = new Person();
+        mine.setName("Owned " + unique());
+        mine.setEmail(unique() + ".owned@example.com");
+        mine.setWorkspaceId(workspace.getId());
+        mine.setOwnerId(currentUser.getId());
+        personMapper.insert(mine);
+        Person unowned = newPerson(newCompany());
+
+        SegmentCondition ownerIsNot = field("owner", "is", String.valueOf(currentUser.getId()));
+        ownerIsNot.setNegate(true);
+        List<Integer> ids = segmentService.evaluate("person", def("all", ownerIsNot));
+
+        assertFalse(ids.contains(mine.getId()));
+        assertTrue(ids.contains(unowned.getId()));
     }
 
     @Test

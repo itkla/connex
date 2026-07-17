@@ -40,7 +40,7 @@ import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag, type WorkspaceMember } from '@/app/lib/types';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type RuleBuilderOptions, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
@@ -631,6 +631,18 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
     );
+    const resolveOwnerName = useCallback(
+        (id: string) => memberById.get(Number(id))?.displayName ?? id,
+        [memberById],
+    );
+    const builderOptions = useMemo<RuleBuilderOptions>(
+        () => ({
+            stages: [],
+            owners: activeMembers.map((member) => ({ id: member.id, name: member.displayName || member.username })),
+            companies: [],
+        }),
+        [activeMembers],
+    );
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -656,7 +668,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
                 ? [{
                     id: `segment:${index}`,
-                    label: segmentConditionLabel(condition, tSeg, resolveTagName),
+                    label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
                     onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
                 }]
                 : [],
@@ -767,7 +779,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
+                                <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} options={builderOptions} />
                                 {displayMode === 'grid' && (
                                     <RecordsSortMenu
                                         columns={columns}

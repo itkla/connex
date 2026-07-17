@@ -249,6 +249,7 @@ export function segmentConditionLabel(
     condition: SegmentCondition,
     t: (key: string, values?: Record<string, string | number>) => string,
     resolveTagName: (id: string) => string,
+    resolveOwnerName?: (id: string) => string,
 ): string {
     if (condition.type === "predicate") {
         const key = condition.key ?? "";
@@ -263,7 +264,13 @@ export function segmentConditionLabel(
     if (condition.op === "is_set") {
         return `${field} ${op}`;
     }
-    const value = condition.field === "tag" ? resolveTagName(condition.value ?? "") : (condition.value ?? "");
+    const rawValue = condition.value ?? "";
+    let value = rawValue;
+    if (condition.field === "tag") {
+        value = resolveTagName(rawValue);
+    } else if (condition.field === "owner" && resolveOwnerName) {
+        value = resolveOwnerName(rawValue);
+    }
     return t("chipField", { field, op, value });
 }
 

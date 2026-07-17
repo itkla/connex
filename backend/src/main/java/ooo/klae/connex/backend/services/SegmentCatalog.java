@@ -73,6 +73,7 @@ public class SegmentCatalog {
             new FieldSpec("name", Kind.STRING, ValueSource.NONE),
             new FieldSpec("website", Kind.STRING, ValueSource.NONE),
             new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
             new FieldSpec("created", Kind.DATE, ValueSource.NONE),
             new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
@@ -82,6 +83,7 @@ public class SegmentCatalog {
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
             new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
+            new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),
             new FieldSpec("created", Kind.DATE, ValueSource.NONE),
             new FieldSpec("updated", Kind.DATE, ValueSource.NONE)));
