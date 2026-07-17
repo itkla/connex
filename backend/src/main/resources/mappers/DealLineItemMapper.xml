@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DealLineItemMapper">
+
+  <resultMap id="DealLineItemResult" type="DealLineItem">
+    <id     property="id"                 column="id"/>
+    <result property="workspaceId"        column="workspace_id"/>
+    <result property="dealId"             column="deal_id"/>
+    <result property="productId"          column="product_id"/>
+    <result property="name"               column="name"/>
+    <result property="sku"                column="sku"/>
+    <result property="unit"               column="unit"/>
+    <result property="unitPrice"          column="unit_price"/>
+    <result property="quantity"           column="quantity"/>
+    <result property="discountType"       column="discount_type"/>
+    <result property="discountValue"      column="discount_value"/>
+    <result property="taxRate"            column="tax_rate"/>
+    <result property="billingFrequency"   column="billing_frequency"/>
+    <result property="description"        column="description"/>
+    <result property="servicePeriodStart" column="service_period_start"/>
+    <result property="servicePeriodEnd"   column="service_period_end"/>
+    <result property="position"           column="position"/>
+    <result property="currency"           column="currency"/>
+    <result property="lineSubtotal"       column="line_subtotal"/>
+    <result property="lineTax"            column="line_tax"/>
+    <result property="lineTotal"          column="line_total"/>
+    <result property="createdAt"          column="created_at"/>
+    <result property="updatedAt"          column="updated_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, workspace_id, deal_id, product_id, name, sku, unit, unit_price, quantity,
+    discount_type, discount_value, tax_rate, billing_frequency, description,
+    service_period_start, service_period_end, position, currency,
+    line_subtotal, line_tax, line_total, created_at, updated_at
+  </sql>
+
+  <select id="getByDealId" resultMap="DealLineItemResult">
+    SELECT <include refid="cols"/> FROM deal_line_item
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+    ORDER BY position, id
+  </select>
+
+  <select id="getById" resultMap="DealLineItemResult">
+    SELECT <include refid="cols"/> FROM deal_line_item
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO deal_line_item (
+      workspace_id, deal_id, product_id, name, sku, unit, unit_price, quantity,
+      discount_type, discount_value, tax_rate, billing_frequency, description,
+      service_period_start, service_period_end, position, currency,
+      line_subtotal, line_tax, line_total
+    ) VALUES (
+      #{workspaceId}, #{dealId}, #{productId}, #{name}, #{sku}, #{unit}, #{unitPrice}, #{quantity},
+      #{discountType}, #{discountValue}, #{taxRate}, #{billingFrequency}, #{description},
+      #{servicePeriodStart}, #{servicePeriodEnd}, #{position}, #{currency},
+      #{lineSubtotal}, #{lineTax}, #{lineTotal}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE deal_line_item SET
+      product_id = #{productId}, name = #{name}, sku = #{sku}, unit = #{unit},
+      unit_price = #{unitPrice}, quantity = #{quantity}, discount_type = #{discountType},
+      discount_value = #{discountValue}, tax_rate = #{taxRate}, billing_frequency = #{billingFrequency},
+      description = #{description}, service_period_start = #{servicePeriodStart},
+      service_period_end = #{servicePeriodEnd}, position = #{position}, currency = #{currency},
+      line_subtotal = #{lineSubtotal}, line_tax = #{lineTax}, line_total = #{lineTotal}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM deal_line_item WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+</mapper>
