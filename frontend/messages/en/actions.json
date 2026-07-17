@@ -51,7 +51,10 @@
     },
     "utility": {
       "copyPageLink": "Copy link to this page",
-      "markAllNotificationsRead": "Mark all notifications read"
+      "markAllNotificationsRead": "Mark all notifications read",
+      "importCompanies": "Import companies",
+      "importContacts": "Import contacts",
+      "importDeals": "Import deals"
     },
     "feedback": {
       "linkCopied": "Link copied to clipboard",
@@ -85,6 +88,11 @@
       "workspace": {
         "theme": "theme, appearance, dark, light, mode",
         "language": "language, locale, translation, english, japanese, 日本語, 言語"
+      },
+      "utility": {
+        "importCompanies": "import companies, csv, upload, bulk",
+        "importContacts": "import contacts, people, persons, csv, upload, bulk",
+        "importDeals": "import deals, opportunities, csv, upload, bulk"
       }
     }
   }
