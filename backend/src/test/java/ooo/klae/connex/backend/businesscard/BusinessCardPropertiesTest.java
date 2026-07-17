@@ -15,6 +15,10 @@ class BusinessCardPropertiesTest {
         assertThrows(IllegalArgumentException.class,
                 () -> properties.setReadinessCache(Duration.ZERO));
         assertThrows(IllegalArgumentException.class,
+                () -> properties.setLocalFirstWait(Duration.ZERO));
+        assertThrows(IllegalArgumentException.class,
+                () -> properties.setLocalFirstWait(Duration.ofSeconds(11)));
+        assertThrows(IllegalArgumentException.class,
                 () -> properties.setMaxImageBytes(0));
         assertThrows(IllegalArgumentException.class,
                 () -> properties.setMaxPixels(-1));
@@ -43,5 +47,10 @@ class BusinessCardPropertiesTest {
     void cleanupDefaultsToOneHundredRowsPerWorkspace() {
         assertEquals(100,
             new BusinessCardProperties().getIdempotencyCleanupPerWorkspaceBatchSize());
+    }
+
+    @Test
+    void localFirstWaitDefaultsToTwoSeconds() {
+        assertEquals(Duration.ofSeconds(2), new BusinessCardProperties().getLocalFirstWait());
     }
 }

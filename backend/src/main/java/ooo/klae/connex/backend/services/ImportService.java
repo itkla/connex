@@ -135,6 +135,7 @@ public class ImportService {
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportResult commitPersons(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzePersons(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
@@ -159,6 +160,7 @@ public class ImportService {
             }
             Person bean = new Person();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));
@@ -270,6 +272,7 @@ public class ImportService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportResult commitCompanies(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzeCompanies(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
@@ -293,6 +296,7 @@ public class ImportService {
             }
             Company bean = new Company();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setWebsite(row.std.get("website"));
             bean.setIndustry(row.std.get("industry"));

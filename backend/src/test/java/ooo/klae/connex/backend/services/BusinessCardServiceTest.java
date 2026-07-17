@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.ai.businesscard.BusinessCardAiExtractionService;
 import ooo.klae.connex.backend.businesscard.BusinessCardBinaryStore;
 import ooo.klae.connex.backend.businesscard.BusinessCardExtractor;
 import ooo.klae.connex.backend.businesscard.BusinessCardImageValidator;
@@ -51,6 +53,7 @@ import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
@@ -65,6 +68,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.exceptions.UnprocessableBusinessCardException;
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
 import ooo.klae.connex.backend.services.CompanyService.NormalizedCompanyMatches;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -78,6 +82,7 @@ class BusinessCardServiceTest {
     @Mock private BusinessCardImageValidator imageValidator;
     @Mock private BusinessCardOcrClient ocrClient;
     @Mock private BusinessCardExtractor extractor;
+    @Mock private BusinessCardAiExtractionService aiExtractionService;
     @Mock private BusinessCardBinaryStore binaryStore;
     @Mock private CompanyService companyService;
     @Mock private PersonService personService;
@@ -104,6 +109,7 @@ class BusinessCardServiceTest {
                 imageValidator,
                 ocrClient,
                 extractor,
+                aiExtractionService,
                 binaryStore,
                 companyService,
                 personService,
@@ -119,6 +125,7 @@ class BusinessCardServiceTest {
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);
         lenient().when(binaryStore.isReady()).thenReturn(true);
         lenient().when(ocrClient.isReady()).thenReturn(true);
+        lenient().when(ocrClient.isReadyForScan()).thenReturn(true);
         User currentUser = new User();
         currentUser.setId(9);
         lenient().when(authService.getCurrentUser()).thenReturn(currentUser);
@@ -150,6 +157,127 @@ class BusinessCardServiceTest {
         assertTrue(response.warnings().isEmpty());
         verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
         verify(rateLimiter).requireScanAllowed();
+        InOrder scanOrder = inOrder(ocrClient, imageValidator);
+        scanOrder.verify(ocrClient).isReady();
+        scanOrder.verify(imageValidator).validate(image);
+        scanOrder.verify(ocrClient).isReadyForScan();
+        scanOrder.verify(ocrClient).recognize(validated);
+        verifyNoInteractions(aiExtractionService);
+    }
+
+    @Test
+    void scanUsesConfiguredAiWhenLocalScannerIsUnavailable() {
+        BusinessCardScanResponse draft = draft("Analytical Labs");
+        when(ocrClient.isReady()).thenReturn(false);
+        when(ocrClient.isReadyForScan()).thenReturn(false);
+        when(aiExtractionService.isAvailable()).thenReturn(true);
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(aiExtractionService.extract(validated)).thenReturn(Optional.of(draft));
+        when(companyService.findVisibleByNormalizedName("Analytical Labs"))
+                .thenReturn(new NormalizedCompanyMatches(List.of(), false));
+
+        BusinessCardScanResponse response = service.scan(image);
+
+        assertEquals("Analytical Labs", response.company().value());
+        InOrder scanOrder = inOrder(ocrClient, aiExtractionService, imageValidator);
+        scanOrder.verify(ocrClient).isReady();
+        scanOrder.verify(aiExtractionService).isAvailable();
+        scanOrder.verify(imageValidator).validate(image);
+        scanOrder.verify(ocrClient).isReadyForScan();
+        scanOrder.verify(aiExtractionService).extract(validated);
+        verify(ocrClient, times(1)).isReadyForScan();
+        verify(ocrClient, never()).recognize(any());
+        verifyNoInteractions(extractor);
+    }
+
+    @Test
+    void scanPrefersPaddleThatRecoversDuringImageValidation() {
+        BusinessCardScanResponse draft = draft(null);
+        List<OcrLine> lines = List.of(new OcrLine("Ada Lovelace", 0.99, 1, 1, 10, 10));
+        when(ocrClient.isReady()).thenReturn(false);
+        when(aiExtractionService.isAvailable()).thenReturn(true);
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(ocrClient.isReadyForScan()).thenReturn(true);
+        when(ocrClient.recognize(validated)).thenReturn(lines);
+        when(extractor.extract(lines)).thenReturn(draft);
+
+        BusinessCardScanResponse response = service.scan(image);
+
+        assertEquals(draft, response);
+        InOrder scanOrder = inOrder(ocrClient, aiExtractionService, imageValidator, extractor);
+        scanOrder.verify(ocrClient).isReady();
+        scanOrder.verify(aiExtractionService).isAvailable();
+        scanOrder.verify(imageValidator).validate(image);
+        scanOrder.verify(ocrClient).isReadyForScan();
+        scanOrder.verify(ocrClient).recognize(validated);
+        scanOrder.verify(extractor).extract(lines);
+        verify(aiExtractionService, never()).extract(any());
+    }
+
+    @Test
+    void scanFallsBackWhenReadyLocalScannerBecomesUnavailable() {
+        BusinessCardScanResponse draft = draft(null);
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(ocrClient.recognize(validated))
+                .thenThrow(new ServiceUnavailableException("OCR unavailable"));
+        when(aiExtractionService.extract(validated)).thenReturn(Optional.of(draft));
+
+        BusinessCardScanResponse response = service.scan(image);
+
+        assertEquals(draft, response);
+        verify(aiExtractionService).extract(validated);
+        verifyNoInteractions(extractor);
+    }
+
+    @Test
+    void scanDoesNotFallBackWhenCompanyMatchingIsUnavailable() {
+        BusinessCardScanResponse draft = draft("Analytical Labs");
+        List<OcrLine> lines = List.of(new OcrLine("Ada Lovelace", 0.99, 1, 1, 10, 10));
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(ocrClient.recognize(validated)).thenReturn(lines);
+        when(extractor.extract(lines)).thenReturn(draft);
+        when(companyService.findVisibleByNormalizedName("Analytical Labs"))
+                .thenThrow(new ServiceUnavailableException("Company lookup unavailable"));
+
+        assertThrows(ServiceUnavailableException.class, () -> service.scan(image));
+
+        verify(aiExtractionService, never()).extract(any());
+    }
+
+    @Test
+    void scanRejectsBeforeImageDecodeWhenNeitherScannerIsAvailable() {
+        when(ocrClient.isReady()).thenReturn(false);
+        when(ocrClient.isReadyForScan()).thenReturn(false);
+        when(aiExtractionService.isAvailable()).thenReturn(false);
+
+        assertThrows(ServiceUnavailableException.class, () -> service.scan(image));
+
+        verify(imageValidator, never()).validate(any());
+        verify(ocrClient, times(1)).isReadyForScan();
+        verify(aiExtractionService, never()).extract(any());
+    }
+
+    @Test
+    void scanDoesNotSendInvalidImagesToAiFallback() {
+        when(imageValidator.validate(image))
+                .thenThrow(new UnprocessableBusinessCardException("Invalid card image"));
+
+        assertThrows(UnprocessableBusinessCardException.class, () -> service.scan(image));
+
+        verify(aiExtractionService, never()).extract(any());
+        verify(ocrClient, never()).recognize(any());
+    }
+
+    @Test
+    void availabilityCombinesLocalAndWorkspaceAiReadinessWithoutProviderDetails() {
+        when(ocrClient.isReady()).thenReturn(false);
+        when(aiExtractionService.isAvailable()).thenReturn(true);
+
+        BusinessCardAvailabilityResponse response = service.availability();
+
+        assertTrue(response.scanning());
+        assertTrue(response.importing());
+        verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
     }
 
     @Test
@@ -526,6 +654,8 @@ class BusinessCardServiceTest {
     @Test
     void unavailableScannerFailsClosedBeforeImageProcessing() {
         when(ocrClient.isReady()).thenReturn(false);
+        when(ocrClient.isReadyForScan()).thenReturn(false);
+        when(aiExtractionService.isAvailable()).thenReturn(false);
 
         assertThrows(ServiceUnavailableException.class, () -> service.scan(image));
 

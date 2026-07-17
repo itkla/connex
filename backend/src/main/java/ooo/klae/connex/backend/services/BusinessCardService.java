@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import ooo.klae.connex.backend.ai.businesscard.BusinessCardAiExtractionService;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
@@ -31,10 +32,12 @@ import ooo.klae.connex.backend.businesscard.BusinessCardOcrClient;
 import ooo.klae.connex.backend.businesscard.BusinessCardProperties;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
+import ooo.klae.connex.backend.businesscard.OcrLine;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.dto.AttachmentDto;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
@@ -64,6 +67,7 @@ public class BusinessCardService {
     private final BusinessCardImageValidator imageValidator;
     private final BusinessCardOcrClient ocrClient;
     private final BusinessCardExtractor extractor;
+    private final BusinessCardAiExtractionService aiExtractionService;
     private final BusinessCardBinaryStore binaryStore;
     private final CompanyService companyService;
     private final PersonService personService;
@@ -80,6 +84,7 @@ public class BusinessCardService {
             BusinessCardImageValidator imageValidator,
             BusinessCardOcrClient ocrClient,
             BusinessCardExtractor extractor,
+            BusinessCardAiExtractionService aiExtractionService,
             BusinessCardBinaryStore binaryStore,
             CompanyService companyService,
             PersonService personService,
@@ -94,6 +99,7 @@ public class BusinessCardService {
         this.imageValidator = imageValidator;
         this.ocrClient = ocrClient;
         this.extractor = extractor;
+        this.aiExtractionService = aiExtractionService;
         this.binaryStore = binaryStore;
         this.companyService = companyService;
         this.personService = personService;
@@ -112,7 +118,7 @@ public class BusinessCardService {
      * @return capability readiness
      */
     public boolean isAvailable() {
-        return properties.isEnabled() && binaryStore.isReady() && ocrClient.isReady();
+        return binaryStore.isReady() && isLocalScannerReady();
     }
 
     /**
@@ -122,6 +128,22 @@ public class BusinessCardService {
      */
     public boolean isImportAvailable() {
         return binaryStore.isReady();
+    }
+
+    /**
+     * Returns business-card readiness for the authorized active workspace.
+     *
+     * @return workspace-scoped scan and import readiness
+     */
+    @RequirePermission(Permission.PERSON_CREATE)
+    public BusinessCardAvailabilityResponse availability() {
+        workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
+        boolean importing = capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_IMPORT)
+                && binaryStore.isReady();
+        boolean scanning = capabilityEntitlement.isEntitled(Capability.BUSINESS_CARD_SCANNING)
+                && binaryStore.isReady()
+                && (isLocalScannerReady() || aiExtractionService.isAvailable());
+        return new BusinessCardAvailabilityResponse(scanning, importing);
     }
 
     /**
@@ -135,10 +157,30 @@ public class BusinessCardService {
         requireEntitled(Capability.BUSINESS_CARD_SCANNING);
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         rateLimiter.requireScanAllowed();
-        requireScanningReady();
+        requireBinaryStorageReady();
+        boolean localScannerReady = isLocalScannerReady();
+        boolean readinessResolvedBeforeValidation = false;
+        if (!localScannerReady && !aiExtractionService.isAvailable()) {
+            localScannerReady = isLocalScannerReadyForScan();
+            readinessResolvedBeforeValidation = true;
+            if (!localScannerReady) {
+                throw scanningUnavailable();
+            }
+        }
         ValidatedBusinessCardImage validated = imageValidator.validate(image);
-        BusinessCardScanResponse draft = extractor.extract(ocrClient.recognize(validated));
-        return withCompanyMatch(draft);
+        if (!readinessResolvedBeforeValidation) {
+            localScannerReady = isLocalScannerReadyForScan();
+        }
+        if (localScannerReady) {
+            List<OcrLine> lines;
+            try {
+                lines = ocrClient.recognize(validated);
+            } catch (ServiceUnavailableException exception) {
+                return withCompanyMatch(aiDraft(validated));
+            }
+            return withCompanyMatch(extractor.extract(lines));
+        }
+        return withCompanyMatch(aiDraft(validated));
     }
 
     /**
@@ -394,10 +436,20 @@ public class BusinessCardService {
         return attachment;
     }
 
-    private void requireScanningReady() {
-        if (!properties.isEnabled() || !binaryStore.isReady() || !ocrClient.isReady()) {
-            throw new ServiceUnavailableException("Business-card scanning is unavailable");
-        }
+    private boolean isLocalScannerReady() {
+        return properties.isEnabled() && ocrClient.isReady();
+    }
+
+    private boolean isLocalScannerReadyForScan() {
+        return properties.isEnabled() && ocrClient.isReadyForScan();
+    }
+
+    private BusinessCardScanResponse aiDraft(ValidatedBusinessCardImage validated) {
+        return aiExtractionService.extract(validated).orElseThrow(BusinessCardService::scanningUnavailable);
+    }
+
+    private static ServiceUnavailableException scanningUnavailable() {
+        return new ServiceUnavailableException("Business-card scanning is unavailable");
     }
 
     private void requireBinaryStorageReady() {

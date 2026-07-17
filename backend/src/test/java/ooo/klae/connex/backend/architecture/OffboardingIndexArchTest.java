@@ -35,6 +35,8 @@ class OffboardingIndexArchTest {
         new String[] {"notification", "actor_id"},
         new String[] {"deal_collaborator", "user_id"},
         new String[] {"deal", "owner_id"},
+        new String[] {"company", "owner_id"},
+        new String[] {"person", "owner_id"},
         new String[] {"task", "assigned_to_id"},
         new String[] {"attachment", "uploaded_by_id"},
         new String[] {"rule", "run_as_user_id"},

@@ -58,6 +58,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
             serverFacets={facets}
             savedViews={savedViews}
             timezone={user.timezone}
+            currentUserId={user.id}
         />
     );
 }

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -73,6 +74,7 @@ public interface DealMapper {
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope,
         @Param("limit") int limit,
         @Param("offset") int offset
     );
@@ -85,7 +87,8 @@ public interface DealMapper {
         @Param("companyIds") List<Integer> companyIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
-        @Param("riskIds") List<Integer> riskIds
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealCurrencyMetricsDto> dealMetricsFiltered(
         @Param("workspaceId") int workspaceId,
@@ -96,7 +99,8 @@ public interface DealMapper {
         @Param("companyIds") List<Integer> companyIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
-        @Param("riskIds") List<Integer> riskIds
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
     );
     List<Integer> getFilteredDealIds(
         @Param("workspaceId") int workspaceId,
@@ -108,6 +112,7 @@ public interface DealMapper {
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope,
         @Param("limit") int limit
     );
     DealRevenueRangeDto revenueClosedEventRange(
@@ -182,11 +187,20 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );
-    List<FacetCount> countsByStatus(int workspaceId);
-    List<FacetCount> countsByStage(int workspaceId);
-    List<FacetCount> countsByPipeline(int workspaceId);
-    List<FacetCount> countsByCompany(int workspaceId);
-    List<FacetCount> countsByCurrency(int workspaceId);
+    List<FacetCount> countsByStatus(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByStage(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByPipeline(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByCompany(@Param("workspaceId") int workspaceId);
+    /**
+     * Owner facet counts over the whole workspace: like every facet, the owner picker keeps
+     * showing all options (with stable counts) while a member scope is applied.
+     */
+    List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByCurrency(@Param("workspaceId") int workspaceId);
+    List<Deal> getDealBoard(
+        @Param("workspaceId") int workspaceId,
+        @Param("pipelineId") int pipelineId
+    );
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);

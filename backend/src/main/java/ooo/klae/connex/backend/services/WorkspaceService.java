@@ -279,6 +279,11 @@ public class WorkspaceService {
         }
     }
 
+    /** Returns whether every requested id is an active member of the workspace. */
+    public boolean areActiveMembers(int workspaceId, List<Integer> memberIds) {
+        return workspaceMapper.countActiveMembers(workspaceId, memberIds) == memberIds.size();
+    }
+
     public void requireRole(int workspaceId, int userId, Role min) {
         Role actual = Role.of(workspaceMapper.getRole(workspaceId, userId));
         if (actual == null || actual.ordinal() < min.ordinal()) {

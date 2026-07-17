@@ -116,15 +116,22 @@ workstream has implemented all of these controls:
 2. Endpoint allowlisting and SSRF defenses.
 3. Prompt assembly that respects `dataClassification`.
 4. Masking or exclusion rules for `special_care` fields and suspected
-   special-care free-text content.
+   special-care free-text content. Image pixels cannot satisfy this text-screening control and require
+   the narrow media exception below.
 5. Outbound LLM audit records that identify the data classification sent
    without logging the sensitive payload.
 6. Customer-facing disclosure that the customer, not Connex, controls the AI
    provider relationship under the BYOP model.
 
-Until those controls land under the AI roadmap ([#82], [#94]), special-care
-fields and suspected special-care free text are excluded from AI payloads by
-policy.
+Special-care fields and suspected special-care free text remain excluded from AI payloads by policy.
+Fallback business-card reading is a narrow media exception because the metadata-free pixels cannot be
+pre-screened without first reading the image. It is permitted only when local PaddleOCR is unavailable,
+the organization has enabled and attested its own provider, the actor has `AI_USE`, the UI discloses the
+image transfer, the model receives no tools or remote-image URL, and the result is bounded and review-only.
+Readiness and the exact resolved call snapshot must identify a verified image-capable model family before
+any card pixels leave Connex; unknown and text-only model ids fail closed to manual entry.
+Customers must not use this fallback for cards containing special-care data unless their lawful basis and
+provider terms cover that transfer.
 
 ## Future Detection
 

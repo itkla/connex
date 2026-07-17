@@ -54,4 +54,16 @@ public class AiProperties {
      * than truncated so downstream JSON parsing never sees partial provider output.
      */
     private int maxResponseBytes = 2097152;
+
+    /** Maximum concurrent AI requests that carry embedded media across the instance. */
+    private int maxConcurrentMediaRequests = 2;
+
+    /** Maximum concurrent embedded-media requests from one organization. */
+    private int maxConcurrentMediaRequestsPerOrg = 1;
+
+    /**
+     * Shared estimated working-memory budget for embedded media, Base64/JSON expansion, request
+     * bytes, and bounded provider responses.
+     */
+    private long maxMediaWorkingBytes = 67108864;
 }

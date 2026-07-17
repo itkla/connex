@@ -675,6 +675,7 @@ export type UpdateNotePayload = {
 export type Company = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     website: string;
     industry: string;
@@ -738,6 +739,7 @@ export type UpdateCompanyPayload = {
 export type Contact = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     email: string;
     phone: string;
@@ -1670,7 +1672,17 @@ export type AttachmentFacets = {
     totalSize: number;
 };
 
-export type DealFilterParams = {
+/**
+ * Canonical member-scope wire params shared by record, metric, and facet endpoints:
+ * `scope` selects Me / selected members / Unassigned (absent = all team), and
+ * `memberIds` carries the selection when {@code scope === 'members'}.
+ */
+export type MemberScopeParams = {
+    scope?: 'me' | 'members' | 'unassigned';
+    memberIds?: number[];
+};
+
+export type DealFilterParams = MemberScopeParams & {
     q?: string;
     status?: Array<'open' | 'closed' | 'won' | 'lost'>;
     risk?: Array<'high' | 'medium' | 'low' | 'none'>;
@@ -1706,6 +1718,7 @@ export type DealFacets = {
     companies: FacetCount[];
     currencies: FacetCount[];
     risk: FacetCount[];
+    owners: FacetCount[];
 };
 
 export type CompanyEngagement = {
@@ -2133,6 +2146,11 @@ export type InstanceCapabilities = {
     mailManaged: boolean;
     businessCardScanning: boolean;
     businessCardImport: boolean;
+};
+
+export type BusinessCardAvailability = {
+    scanning: boolean;
+    importing: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";

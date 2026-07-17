@@ -61,6 +61,27 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void recordImportsAssignNewRowsToTheCurrentActor() {
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Owned Import Person", "Email", "owned.import@x.test")),
+            "fill_empty"));
+        importService.commitCompanies(req(
+            List.of(map("Company", "name"), map("Web", "website")),
+            List.of(Map.of("Company", "Owned Import Company", "Web", "https://owned-import.test")),
+            "fill_empty"));
+
+        Person matched = personMapper.findByEmails(
+            workspace.getId(), List.of("owned.import@x.test")).getFirst();
+        Person person = personMapper.getPersonById(workspace.getId(), matched.getId());
+        Company company = companyMapper.getAllCompanies(workspace.getId()).stream()
+            .filter(candidate -> candidate.getName().equals("Owned Import Company"))
+            .findFirst().orElseThrow();
+        assertEquals(currentUser.getId(), person.getOwnerId());
+        assertEquals(currentUser.getId(), company.getOwnerId());
+    }
+
+    @Test
     void personImport_dedupesByEmailAndFillsEmptyFields() {
         List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"), map("Title", "title"));
         importService.commitPersons(req(mapping,

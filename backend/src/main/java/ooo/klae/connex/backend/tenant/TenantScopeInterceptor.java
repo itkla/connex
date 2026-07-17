@@ -142,7 +142,8 @@ public class TenantScopeInterceptor implements Interceptor {
      * run without a resolved workspace context.
      *
      * <p>The offboarding statements (#440 increment 3) replace the dropped
-     * cross-plane foreign keys. The {@code *Anywhere} guards and erasures run
+     * cross-plane foreign keys, including company, contact, and deal ownership.
+     * The {@code *Anywhere} guards and erasures run
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
@@ -154,7 +155,11 @@ public class TenantScopeInterceptor implements Interceptor {
      * the user id in SQL. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
-     * offboarding flows.
+     * offboarding flows. The AI-output-cache purge (issue #221 cease-of-use) is
+     * org-scoped: restricting a contact removes its cached AI outputs across every
+     * workspace in the contact's organization (including same-org grantee
+     * workspaces it was shared into), org-anchored via a {@code workspace} join
+     * rather than a single {@code workspace_id} predicate.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
@@ -170,6 +175,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
+        MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",
@@ -188,7 +195,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ReportMapper.clearDefinitionCreatorsAnywhere",
         MAPPERS + "ReportMapper.clearSnapshotGeneratorsAnywhere",
         MAPPERS + "SuppressionMapper.clearCreatorsAnywhere",
-        MAPPERS + "NotificationMapper.bumpStateVersions"
+        MAPPERS + "NotificationMapper.bumpStateVersions",
+        MAPPERS + "AiOutputCacheMapper.deleteForPerson"
     );
 
     private final TenantContext tenantContext;

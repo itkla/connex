@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -41,18 +43,23 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 class PersonServiceTest extends AbstractServiceTest {
 
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
+    @Autowired AiOutputCacheMapper aiOutputCacheMapper;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @MockitoBean RuleTriggerPublisher ruleTriggers;
+    @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
     void updateProcessingRestrictionsPreservesTimestampClearsIndependentlyAndAuditsChanges() {
@@ -103,6 +110,59 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void suspendingPurgesPersonKeyedAiOutputsAndKeepsUnrelatedRows() {
+        Company company = newCompany();
+        Person subject = newPerson(company);
+        Person other = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal subjectDeal = newDeal(pipeline, stage, company);
+        Deal otherDeal = newDeal(pipeline, stage, company);
+        dealMapper.addPerson(workspace.getId(), subjectDeal.getId(), subject.getId(), null);
+        dealMapper.addPerson(workspace.getId(), otherDeal.getId(), other.getId(), null);
+
+        Workspace grantee = newWorkspaceInSameOrg();
+
+        int lo = Math.min(subject.getId(), other.getId());
+        int hi = Math.max(subject.getId(), other.getId());
+        seedCache(workspace.getId(), "intro.rationale:en", lo, hi);
+        seedCache(grantee.getId(), "intro.rationale:ja", lo, hi);
+        seedCache(workspace.getId(), "deal.brief:en", subjectDeal.getId(), 0);
+        seedCache(workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0);
+        seedCache(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0);
+        seedCache(workspace.getId(), "report.narrative:v2:en", 4242, 0);
+
+        personService.updateProcessingRestrictions(subject.getId(), true, false);
+
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "intro.rationale:en", lo, hi));
+        assertNull(aiOutputCacheMapper.getBySubject(grantee.getId(), "intro.rationale:ja", lo, hi));
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", subjectDeal.getId(), 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
+
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.restrictions' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), subject.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("purgedAiOutputs"));
+    }
+
+    private void seedCache(int workspaceId, String feature, int subjectAId, int subjectBId) {
+        ooo.klae.connex.backend.beans.AiOutputCache row = new ooo.klae.connex.backend.beans.AiOutputCache();
+        row.setWorkspaceId(workspaceId);
+        row.setFeature(feature);
+        row.setSubjectAId(subjectAId);
+        row.setSubjectBId(subjectBId);
+        row.setContentHash(String.format("%064d", subjectAId));
+        row.setPayload("{\"rationale\":\"x\"}");
+        row.setGeneratedAt("2026-07-16T00:00:00Z");
+        aiOutputCacheMapper.upsert(row);
+    }
+
+    @Test
     void updateProcessingRestrictionsRequiresPersonUpdatePermission() {
         Person person = newPerson(newCompany());
         User restricted = newUser();
@@ -125,12 +185,17 @@ class PersonServiceTest extends AbstractServiceTest {
         Person created = personService.create(person);
 
         assertNull(created.getImageUrl());
+        assertEquals(currentUser.getId(), created.getOwnerId());
         assertNull(personMapper.getPersonById(workspace.getId(), created.getId()).getImageUrl());
+        assertEquals(currentUser.getId(),
+            personMapper.getPersonById(workspace.getId(), created.getId()).getOwnerId());
     }
 
     @Test
     void genericUpdatePreservesAndReturnsCurrentManagedImage() {
         Person person = newPerson(newCompany());
+        User owner = newUser();
+        personMapper.updateOwner(workspace.getId(), person.getId(), owner.getId());
         String managed = "/api/persons/" + person.getId()
             + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
         assertEquals(1, personMapper.updateImageUrlIfCurrent(
@@ -141,8 +206,44 @@ class PersonServiceTest extends AbstractServiceTest {
         Person updated = personService.update(person.getId(), update);
 
         assertEquals(managed, updated.getImageUrl());
+        assertEquals(owner.getId(), updated.getOwnerId());
         assertEquals(managed,
             personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+    }
+
+    @Test
+    void updateOwnerAssignsAndUnassignsMemberWithAuditNotificationAndRuleTrigger() {
+        Person person = newPerson(newCompany());
+        User owner = newUser();
+
+        Person assigned = personService.updateOwner(person.getId(), owner.getId());
+
+        assertEquals(owner.getId(), assigned.getOwnerId());
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.updateOwner' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), person.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("ownerId"));
+        assertTrue(changes.contains(Integer.toString(owner.getId())));
+        verify(notificationChanges).publish(workspace.getId(), "person", person.getId());
+        verify(ruleTriggers).publish(
+            workspace.getId(), "person", person.getId(), "person.owner_changed");
+
+        Person unassigned = personService.updateOwner(person.getId(), null);
+
+        assertNull(unassigned.getOwnerId());
+    }
+
+    @Test
+    void updateOwnerRejectsNonMemberBeforeChangingThePerson() {
+        Person person = newPerson(newCompany());
+        User outsider = newUser();
+        workspaceMapper.removeMember(workspace.getId(), outsider.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> personService.updateOwner(person.getId(), outsider.getId()));
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
     }
 
     @Test
@@ -205,6 +306,8 @@ class PersonServiceTest extends AbstractServiceTest {
             () -> personService.removeTag(shared.getId(), tag.getId()));
         assertThrows(ResourceNotFoundException.class,
             () -> personService.replaceTags(shared.getId(), List.of(tag.getId())));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.updateOwner(shared.getId(), currentUser.getId()));
         assertThrows(ResourceNotFoundException.class,
             () -> personService.delete(shared.getId()));
 
@@ -314,13 +417,16 @@ class PersonServiceTest extends AbstractServiceTest {
         PersonService service = new PersonService(
             mapper,
             mock(ShareMapper.class),
+            mock(AiOutputCacheMapper.class),
             mock(CompanyMapper.class),
             mock(TagMapper.class),
             mock(DealMapper.class),
             mock(ActivityMapper.class),
             mock(NoteMapper.class),
             mock(TaskMapper.class),
+            mock(AuthService.class),
             mock(AuditService.class),
+            mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             workspaceService,
             mock(EmploymentService.class),
             mock(CustomFieldValueService.class),
@@ -329,7 +435,8 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(mapper.countPersons(7, "Security", null, null, false)).thenReturn(1001L);
+        when(mapper.countPersons(
+            7, "Security", null, null, false, MemberScope.allTeam())).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
             () -> service.getMatchingPersonIds("Security", null, null, false));

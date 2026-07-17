@@ -1512,6 +1512,22 @@ export function bulkDeleteCompanies(ids: number[]) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/delete`, { ids: chunk }));
 }
 
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function updateCompanyOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Company>(`/api/companies/${id}/owner`, { ownerId });
+}
+
+export function updatePersonOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
+}
+
 export function bulkAddTagToDeals(ids: number[], tagId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
 }
@@ -1684,6 +1700,14 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
 
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
+}
+
+/** Reads business-card readiness for the authorized active workspace. */
+export function getBusinessCardAvailability(init: RequestInit = {}) {
+    return getJson<Types.BusinessCardAvailability>("/api/business-cards/availability", {
+        cache: "no-store",
+        ...init,
+    });
 }
 
 /** Reads contact candidates from one business-card image without mutating workspace data. */
@@ -1888,9 +1912,11 @@ export function getDealMetricsFromCookie(cookie: string | null, params: Types.De
 }
 
 /**
- * Stable filter-facet vocabulary (status, stage, pipeline, company, currency) with counts,
- * computed server-side over the whole workspace so options never vanish when the visible page
- * lacks them (e.g. the "Closed" status option).
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
+ * counts, computed server-side over the whole workspace so options never vanish when the
+ * visible page lacks them (e.g. the "Closed" status option). The owners facet in particular
+ * always reflects all-team counts — including the `__empty__` unassigned bucket — regardless
+ * of any active member scope, so the owner picker stays complete while a scope is applied.
  */
 export function getDealFacets(init: RequestInit = {}) {
     return getJson<Types.DealFacets>(`/api/deals/facets`, init);

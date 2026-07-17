@@ -13,6 +13,13 @@
     "deal": "取引",
     "company": "会社"
   },
+  "MemberScope": {
+    "label": "担当者",
+    "ariaLabel": "担当者で絞り込む",
+    "me": "自分",
+    "unassigned": "未割り当て",
+    "clear": "クリア"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "機能",

@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "connex.business-cards")
 public class BusinessCardProperties {
+    private static final Duration MAX_LOCAL_FIRST_WAIT = Duration.ofSeconds(10);
+
     private boolean enabled;
     private URI ocrBaseUrl;
     private String plainHttpPrivateHost = "";
@@ -21,6 +23,7 @@ public class BusinessCardProperties {
     private Duration connectTimeout = Duration.ofSeconds(2);
     private Duration requestTimeout = Duration.ofSeconds(15);
     private Duration readinessCache = Duration.ofSeconds(5);
+    private Duration localFirstWait = Duration.ofSeconds(2);
     private int maxResponseBytes = 1_048_576;
     private long maxImageBytes = 8_388_608;
     private int maxWidth = 8_192;
@@ -89,6 +92,18 @@ public class BusinessCardProperties {
 
     public void setReadinessCache(Duration readinessCache) {
         this.readinessCache = positive(readinessCache, "readinessCache");
+    }
+
+    public Duration getLocalFirstWait() {
+        return localFirstWait;
+    }
+
+    public void setLocalFirstWait(Duration localFirstWait) {
+        Duration value = positive(localFirstWait, "localFirstWait");
+        if (value.compareTo(MAX_LOCAL_FIRST_WAIT) > 0) {
+            throw new IllegalArgumentException("localFirstWait must not exceed 10 seconds");
+        }
+        this.localFirstWait = value;
     }
 
     public int getMaxResponseBytes() {

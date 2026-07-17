@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.ai.provider.bedrock;
 
+import java.util.Base64;
+
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -62,10 +65,28 @@ public class BedrockAnthropicAdapter implements AiProvider {
             root.put("system", request.systemPrompt());
         }
         ArrayNode messages = root.putArray("messages");
+        boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode node = messages.addObject();
             node.put("role", message.role());
-            node.put("content", message.content());
+            if (imagesPending && "user".equals(message.role())) {
+                ArrayNode content = node.putArray("content");
+                for (AiInputImage image : request.images()) {
+                    ObjectNode source = content.addObject()
+                            .put("type", "image")
+                            .putObject("source");
+                    source.put("type", "base64");
+                    source.put("media_type", image.contentType());
+                    source.put("data", Base64.getEncoder().encodeToString(image.content()));
+                }
+                content.addObject().put("type", "text").put("text", message.content());
+                imagesPending = false;
+            } else {
+                node.put("content", message.content());
+            }
+        }
+        if (imagesPending) {
+            throw new AiProviderException("AI images require a user message");
         }
         return objectMapper.writeValueAsString(root);
     }

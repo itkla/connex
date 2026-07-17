@@ -259,12 +259,14 @@
       },
       "company": {
         "created": "作成",
-        "updated": "更新"
+        "updated": "更新",
+        "owner_changed": "担当者変更"
       },
       "person": {
         "created": "作成",
         "updated": "更新",
-        "job_changed": "転職"
+        "job_changed": "転職",
+        "owner_changed": "担当者変更"
       },
       "task": {
         "created": "作成",

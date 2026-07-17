@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.azure;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -11,10 +12,12 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -84,14 +87,38 @@ public class AzureOpenAiAdapter implements AiProvider {
             system.put("role", "system");
             system.put("content", request.systemPrompt());
         }
+        boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode node = messages.addObject();
             node.put("role", message.role());
-            node.put("content", message.content());
+            if (imagesPending && "user".equals(message.role())) {
+                ArrayNode content = node.putArray("content");
+                content.addObject().put("type", "text").put("text", message.content());
+                for (AiInputImage image : request.images()) {
+                    ObjectNode imageUrl = content.addObject()
+                            .put("type", "image_url")
+                            .putObject("image_url");
+                    imageUrl.put("url", dataUrl(image));
+                    imageUrl.put("detail", "high");
+                }
+                imagesPending = false;
+            } else {
+                node.put("content", message.content());
+            }
+        }
+        if (imagesPending) {
+            throw new AiProviderException("AI images require a user message");
         }
         root.put("max_completion_tokens", request.maxTokens());
-        root.put("temperature", request.temperature());
+        if (!OpenAiChatParameters.usesReasoningDialect(request.target().modelId())) {
+            root.put("temperature", request.temperature());
+        }
         return objectMapper.writeValueAsString(root);
+    }
+
+    private static String dataUrl(AiInputImage image) {
+        return "data:" + image.contentType() + ";base64,"
+                + Base64.getEncoder().encodeToString(image.content());
     }
 
     private AiCompletionResult parseResponse(String responseBody) {

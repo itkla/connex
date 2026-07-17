@@ -18,11 +18,13 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
@@ -40,6 +42,8 @@ class UserOffboardingOrderTest {
     @Mock private ActivityMapper activityMapper;
     @Mock private IntroductionMapper introductionMapper;
     @Mock private NotificationMapper notificationMapper;
+    @Mock private CompanyMapper companyMapper;
+    @Mock private PersonMapper personMapper;
     @Mock private DealMapper dealMapper;
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
@@ -60,9 +64,12 @@ class UserOffboardingOrderTest {
     void removeAndLeaveDetachmentLocksMembershipBeforeNotificationDeletion() {
         service.detachMemberContent(7, 9);
 
-        InOrder order = inOrder(notificationMapper, taskMapper, dealMapper, campaignMapper);
+        InOrder order = inOrder(
+            notificationMapper, taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
+        order.verify(companyMapper).clearMemberOwnership(7, 9);
+        order.verify(personMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).clearMemberDealOwnership(7, 9);
         order.verify(campaignMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
@@ -79,7 +86,8 @@ class UserOffboardingOrderTest {
 
         service.eraseOrgDataReferences(9);
 
-        InOrder order = inOrder(userMapper, notificationMapper, stateVersionService);
+        InOrder order = inOrder(
+            userMapper, notificationMapper, stateVersionService, companyMapper, personMapper, dealMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(notificationMapper).lockRecipientMemberships(3);
@@ -91,6 +99,9 @@ class UserOffboardingOrderTest {
         order.verify(stateVersionService).markChanged(3);
         order.verify(stateVersionService).markChanged(5);
         order.verify(stateVersionService).markChanged(11);
+        order.verify(companyMapper).clearOwnershipAnywhere(9);
+        order.verify(personMapper).clearOwnershipAnywhere(9);
+        order.verify(dealMapper).clearOwnershipAnywhere(9);
     }
 
     @Test

@@ -4,27 +4,30 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.hc.core5.http.ContentType;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
 /**
- * Minimal Vertex AI transport. The client accepts only constructed regional Vertex hosts, never
- * follows redirects, re-vets the host immediately before sending, and bounds response bytes.
+ * Minimal Vertex AI transport. The production path accepts only constructed regional Vertex
+ * hosts and uses bounded, validated, pinned DNS under the caller's absolute provider deadline.
  */
 @Component
 public class VertexClient {
@@ -33,26 +36,24 @@ public class VertexClient {
     private static final int BUFFER_BYTES = 8192;
 
     private final RestClient restClient;
+    private final FixedAiProviderClient providerClient;
     private final int maxResponseBytes;
+    private final long requestTimeoutMillis;
 
     @Autowired
-    public VertexClient(AiProperties aiProperties) {
+    public VertexClient(AiProperties aiProperties, FixedAiProviderClient providerClient) {
         Objects.requireNonNull(aiProperties, "aiProperties");
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(duration(aiProperties.getConnectTimeoutMs(), "connect timeout"))
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(duration(aiProperties.getRequestTimeoutMs(), "request timeout"));
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory)
-                .build();
+        this.restClient = null;
+        this.providerClient = Objects.requireNonNull(providerClient, "providerClient");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
+        this.requestTimeoutMillis = positiveLong(aiProperties.getRequestTimeoutMs(), "request timeout");
     }
 
     VertexClient(RestClient restClient, int maxResponseBytes) {
         this.restClient = Objects.requireNonNull(restClient, "restClient");
+        this.providerClient = null;
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
+        this.requestTimeoutMillis = Duration.ofSeconds(60).toMillis();
     }
 
     /**
@@ -63,13 +64,23 @@ public class VertexClient {
      * @return provider response JSON
      */
     public String complete(URI endpoint, String accessToken, String requestBodyJson) {
+        return complete(endpoint, accessToken, requestBodyJson,
+                AiRequestDeadline.afterMillis(requestTimeoutMillis));
+    }
+
+    String complete(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline) {
         String host = requireVertexEndpoint(endpoint);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
+        Objects.requireNonNull(deadline, "deadline");
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         VertexResponse response;
         try {
-            response = sendOnce(endpoint, host, accessToken, body);
+            response = sendOnce(endpoint, host, accessToken, body, deadline);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -83,7 +94,26 @@ public class VertexClient {
         return new String(response.body(), StandardCharsets.UTF_8);
     }
 
-    private VertexResponse sendOnce(URI endpoint, String host, String accessToken, byte[] body) {
+    private VertexResponse sendOnce(
+            URI endpoint,
+            String host,
+            String accessToken,
+            byte[] body,
+            AiRequestDeadline deadline) {
+        if (providerClient != null) {
+            FixedAiProviderClient.Response response = providerClient.post(
+                    endpoint,
+                    Set.of(host),
+                    Map.of(
+                            "Content-Type", ContentType.APPLICATION_JSON.getMimeType(),
+                            "Accept", ContentType.APPLICATION_JSON.getMimeType(),
+                            "Authorization", "Bearer " + accessToken),
+                    ContentType.APPLICATION_JSON,
+                    body,
+                    deadline,
+                    "Vertex invocation");
+            return new VertexResponse(response.statusCode(), response.body());
+        }
         RestClient.RequestBodySpec spec = restClient.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -140,11 +170,11 @@ public class VertexClient {
         }
     }
 
-    private static Duration duration(long millis, String name) {
-        if (millis <= 0) {
+    private static long positiveLong(long value, String name) {
+        if (value <= 0) {
             throw new IllegalStateException("AI " + name + " must be positive");
         }
-        return Duration.ofMillis(millis);
+        return value;
     }
 
     private static int positiveInt(int value, String name) {
