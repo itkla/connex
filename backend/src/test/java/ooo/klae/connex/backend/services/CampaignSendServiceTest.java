@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -95,6 +96,25 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         assertEquals(included.getId(), delivery.getPersonId());
         assertEquals(prefix + "-in@example.com", delivery.getAddress());
         assertEquals(64, delivery.getUnsubscribeToken().length());
+    }
+
+    @Test
+    void emailSendResolvesAddressesFromPersonEmailNormalizedAndSkipsPersonsWithoutOne() {
+        String prefix = "email-" + unique();
+        Company company = newCompany();
+        Person mailable = person(company, prefix + "-in-a", prefix + "-A@Example.COM");
+        Person phoneOnly = phonePerson(company, prefix + "-in-b", "+81 50-1234-5678");
+        consentService.setForPerson(mailable.getId(), grantedConsent());
+        consentService.setForPerson(phoneOnly.getId(), grantedConsent());
+
+        int sendId = readySend(prefix).id();
+
+        List<Integer> pending = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), sendId);
+        assertEquals(1, pending.size());
+        CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), pending.getFirst());
+        assertEquals(mailable.getId(), delivery.getPersonId());
+        assertNotEquals(phoneOnly.getId(), delivery.getPersonId());
+        assertEquals(prefix.toLowerCase() + "-a@example.com", delivery.getAddress());
     }
 
     @Test
@@ -201,6 +221,17 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         person.setWorkspaceId(workspace.getId());
         person.setName(name);
         person.setEmail(email);
+        person.setTitle("Marketing contact");
+        person.setCompany(company);
+        personMapper.insert(person);
+        return person;
+    }
+
+    private Person phonePerson(Company company, String name, String phone) {
+        Person person = new Person();
+        person.setWorkspaceId(workspace.getId());
+        person.setName(name);
+        person.setPhone(phone);
         person.setTitle("Marketing contact");
         person.setCompany(company);
         personMapper.insert(person);
