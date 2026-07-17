@@ -253,8 +253,8 @@ export function segmentConditionLabel(
     if (condition.type === "predicate") {
         const key = condition.key ?? "";
         const label = condition.negate ? t(`${key}.labelNot`) : t(`${key}.label`);
-        if (condition.key === "no_activity") {
-            return t("chipDays", { label, days: condition.days ?? DEFAULT_DAYS });
+        if (condition.days != null) {
+            return t("chipDays", { label, days: condition.days });
         }
         return label;
     }

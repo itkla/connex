@@ -100,32 +100,46 @@ class SegmentCatalogTest {
     }
 
     @Test
-    void predicatesAreCompanyOnly() {
-        assertEquals(Set.of("warm_intro_available", "open_deal", "cooling", "no_activity"),
+    void predicateApplicabilityMatchesTheCatalog() {
+        assertEquals(Set.of("warm_intro_available", "open_deal", "cooling", "no_activity",
+                "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment"),
             catalog.predicates().stream().map(PredicateSpec::key).collect(Collectors.toSet()));
-        for (PredicateSpec spec : catalog.predicates()) {
-            assertEquals(Set.of("company"), spec.recordTypes(), spec.key());
-            assertTrue(catalog.predicateAppliesTo(spec.key(), "company"));
-            assertFalse(catalog.predicateAppliesTo(spec.key(), "person"));
-            assertFalse(catalog.predicateAppliesTo(spec.key(), "deal"));
+
+        for (String key : Set.of("warm_intro_available", "open_deal", "cooling", "no_activity")) {
+            assertEquals(Set.of("company"), catalog.predicate(key).recordTypes(), key);
         }
+        for (String key : Set.of("has_open_task", "overdue_task", "recent_meeting", "has_note")) {
+            assertEquals(Set.of("person", "deal"), catalog.predicate(key).recordTypes(), key);
+        }
+        assertEquals(Set.of("company", "person", "deal"), catalog.predicate("has_attachment").recordTypes());
+
+        assertTrue(catalog.predicateAppliesTo("open_deal", "company"));
+        assertFalse(catalog.predicateAppliesTo("open_deal", "person"));
+        assertTrue(catalog.predicateAppliesTo("has_open_task", "person"));
+        assertFalse(catalog.predicateAppliesTo("has_open_task", "company"));
+        assertTrue(catalog.predicateAppliesTo("has_attachment", "company"));
+
         assertTrue(catalog.recordTypeSupportsPredicates("company"));
-        assertFalse(catalog.recordTypeSupportsPredicates("person"));
-        assertFalse(catalog.recordTypeSupportsPredicates("deal"));
+        assertTrue(catalog.recordTypeSupportsPredicates("person"));
+        assertTrue(catalog.recordTypeSupportsPredicates("deal"));
         assertTrue(catalog.isPredicate("cooling"));
         assertFalse(catalog.isPredicate("unknown"));
     }
 
     @Test
-    void onlyNoActivityAcceptsDays() {
-        PredicateSpec noActivity = catalog.predicate("no_activity");
-        assertTrue(noActivity.acceptsDays());
-        assertEquals(30, noActivity.defaultDays());
-        assertEquals(1, noActivity.minDays());
-        assertEquals(3650, noActivity.maxDays());
+    void dayParameterizedPredicates() {
+        for (String key : Set.of("no_activity", "recent_meeting")) {
+            PredicateSpec spec = catalog.predicate(key);
+            assertTrue(spec.acceptsDays(), key);
+            assertEquals(30, spec.defaultDays(), key);
+            assertEquals(1, spec.minDays(), key);
+            assertEquals(3650, spec.maxDays(), key);
+        }
         assertFalse(catalog.predicate("open_deal").acceptsDays());
         assertFalse(catalog.predicate("cooling").acceptsDays());
         assertFalse(catalog.predicate("warm_intro_available").acceptsDays());
+        assertFalse(catalog.predicate("has_open_task").acceptsDays());
+        assertFalse(catalog.predicate("has_attachment").acceptsDays());
         assertNull(catalog.predicate("unknown"));
     }
 

@@ -108,7 +108,32 @@
     "pickCompany": "Choose a company",
     "pickStage": "Choose a stage",
     "catalogFailed": "Could not load the segment builder.",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "has_open_task": {
+      "label": "Has an open task",
+      "labelNot": "No open task",
+      "description": "At least one task is still incomplete."
+    },
+    "overdue_task": {
+      "label": "Has an overdue task",
+      "labelNot": "No overdue task",
+      "description": "An incomplete task is past its due date."
+    },
+    "recent_meeting": {
+      "label": "Met recently",
+      "labelNot": "No recent meeting",
+      "description": "A meeting was logged in the last 30 days."
+    },
+    "has_note": {
+      "label": "Has a note",
+      "labelNot": "No notes",
+      "description": "At least one workspace-visible note exists."
+    },
+    "has_attachment": {
+      "label": "Has an attachment",
+      "labelNot": "No attachments",
+      "description": "At least one file is attached."
+    }
   },
   "SavedViews": {
     "all": "All",

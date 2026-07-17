@@ -215,12 +215,13 @@ public class SegmentService {
     private void validateCondition(SegmentCondition condition, String recordType) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!catalog.recordTypeSupportsPredicates(recordType)) {
-                throw new BadRequestException("Predicates are only available for company records");
-            }
             String key = normalize(condition.getKey());
             if (key == null || !catalog.isPredicate(key)) {
                 throw new BadRequestException("Unknown predicate: " + condition.getKey());
+            }
+            if (!catalog.predicateAppliesTo(key, recordType)) {
+                throw new BadRequestException(
+                    "Predicate '" + condition.getKey() + "' is not available for " + recordType + " records");
             }
             return;
         }
@@ -299,10 +300,7 @@ public class SegmentService {
     private Set<Integer> evaluateCondition(SegmentCondition condition, EvalContext ctx) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!catalog.recordTypeSupportsPredicates(ctx.recordType())) {
-                throw new BadRequestException("Predicates are only available for company records");
-            }
-            return evaluatePredicate(condition, ctx.workspaceId(), ctx.userId());
+            return evaluatePredicate(condition, ctx);
         }
         if ("field".equals(type)) {
             return evaluateField(condition, ctx);
@@ -310,19 +308,40 @@ public class SegmentService {
         throw new BadRequestException("Unknown condition type (expected 'predicate' or 'field'): " + condition.getType());
     }
 
-    private Set<Integer> evaluatePredicate(SegmentCondition condition, int workspaceId, int userId) {
+    private Set<Integer> evaluatePredicate(SegmentCondition condition, EvalContext ctx) {
         String key = normalize(condition.getKey());
         if (key == null || !catalog.isPredicate(key)) {
             throw new BadRequestException("Unknown predicate: " + condition.getKey());
         }
+        if (!catalog.predicateAppliesTo(key, ctx.recordType())) {
+            throw new BadRequestException(
+                "Predicate '" + condition.getKey() + "' is not available for " + ctx.recordType() + " records");
+        }
+        int workspaceId = ctx.workspaceId();
         return switch (key) {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
                 workspaceId, catalog.clampDays(condition.getDays())));
             case "cooling" -> coolingCompanyIds(workspaceId);
-            case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, userId);
+            case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, ctx.userId());
+            case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
+                existencePredicate(key, condition, ctx);
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
         };
+    }
+
+    private Set<Integer> existencePredicate(String key, SegmentCondition condition, EvalContext ctx) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("workspaceId", ctx.workspaceId());
+        params.put("predicate", key);
+        params.put("days", catalog.clampDays(condition.getDays()));
+        params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
+        return new HashSet<>(switch (ctx.recordType()) {
+            case "person" -> segmentMapper.personExistence(params);
+            case "deal" -> segmentMapper.dealExistence(params);
+            case "company" -> segmentMapper.companyExistence(params);
+            default -> List.<Integer>of();
+        });
     }
 
     private Set<Integer> evaluateField(SegmentCondition condition, EvalContext ctx) {

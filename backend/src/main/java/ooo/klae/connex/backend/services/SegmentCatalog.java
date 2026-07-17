@@ -109,6 +109,16 @@ public class SegmentCatalog {
             new PredicateSpec("cooling", Set.of("company"), false, 0, 0, 0));
         predicates.put("no_activity",
             new PredicateSpec("no_activity", Set.of("company"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("has_open_task",
+            new PredicateSpec("has_open_task", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("overdue_task",
+            new PredicateSpec("overdue_task", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("recent_meeting",
+            new PredicateSpec("recent_meeting", Set.of("person", "deal"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("has_note",
+            new PredicateSpec("has_note", Set.of("person", "deal"), false, 0, 0, 0));
+        predicates.put("has_attachment",
+            new PredicateSpec("has_attachment", Set.of("company", "person", "deal"), false, 0, 0, 0));
         return Collections.unmodifiableMap(predicates);
     }
 

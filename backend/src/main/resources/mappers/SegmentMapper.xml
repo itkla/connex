@@ -207,6 +207,64 @@
         </choose>
     </select>
 
+    <sql id="existencePredicate">
+        <choose>
+            <when test="predicate == 'has_open_task'">
+                AND EXISTS (SELECT 1 FROM task t
+                    WHERE t.workspace_id = #{workspaceId} AND t.${fk} = ${alias}.id AND t.completed = FALSE)
+            </when>
+            <when test="predicate == 'overdue_task'">
+                AND EXISTS (SELECT 1 FROM task t
+                    WHERE t.workspace_id = #{workspaceId} AND t.${fk} = ${alias}.id AND t.completed = FALSE
+                      AND t.due_date IS NOT NULL AND t.due_date &lt; CURDATE())
+            </when>
+            <when test="predicate == 'recent_meeting'">
+                AND EXISTS (SELECT 1 FROM activity a
+                    WHERE a.workspace_id = #{workspaceId} AND a.${fk} = ${alias}.id
+                      AND a.type = 'meeting' AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY))
+            </when>
+            <when test="predicate == 'has_note'">
+                AND EXISTS (SELECT 1 FROM note n WHERE n.${fk} = ${alias}.id AND n.visibility = 'workspace')
+            </when>
+            <when test="predicate == 'has_attachment'">
+                AND EXISTS (SELECT 1 FROM attachment att
+                    WHERE att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
+            </when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <select id="companyExistence" resultType="int">
+        SELECT c.id FROM company c WHERE c.workspace_id = #{workspaceId}
+        <choose>
+            <when test="predicate == 'has_attachment'">
+                AND EXISTS (SELECT 1 FROM attachment att
+                    WHERE att.entity_type = 'company' AND att.entity_id = c.id)
+            </when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </select>
+
+    <select id="personExistence" resultType="int">
+        SELECT p.id FROM person p
+        WHERE p.workspace_id = #{workspaceId}
+        <if test="!includeRestrictedPeople">AND p.suspended_at IS NULL</if>
+        <include refid="existencePredicate">
+            <property name="alias" value="p"/>
+            <property name="fk" value="person_id"/>
+            <property name="entityType" value="person"/>
+        </include>
+    </select>
+
+    <select id="dealExistence" resultType="int">
+        SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId}
+        <include refid="existencePredicate">
+            <property name="alias" value="d"/>
+            <property name="fk" value="deal_id"/>
+            <property name="entityType" value="deal"/>
+        </include>
+    </select>
+
     <select id="companyLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
         SELECT id, name AS label FROM company
         WHERE workspace_id = #{workspaceId}
