@@ -131,6 +131,20 @@ public class SegmentCatalog {
             new PredicateSpec("warmth_rising", Set.of("company", "person"), false, 0, 0, 0));
         predicates.put("going_cold",
             new PredicateSpec("going_cold", Set.of("company", "person"), true, DEFAULT_DAYS, MIN_DAYS, MAX_DAYS));
+        predicates.put("at_risk",
+            new PredicateSpec("at_risk", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_high",
+            new PredicateSpec("risk_high", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_close_overdue",
+            new PredicateSpec("risk_close_overdue", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_closing_soon",
+            new PredicateSpec("risk_closing_soon", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_stalled",
+            new PredicateSpec("risk_stalled", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_stakeholder_cold",
+            new PredicateSpec("risk_stakeholder_cold", Set.of("deal"), false, 0, 0, 0));
+        predicates.put("risk_no_stakeholders",
+            new PredicateSpec("risk_no_stakeholders", Set.of("deal"), false, 0, 0, 0));
         return Collections.unmodifiableMap(predicates);
     }
 

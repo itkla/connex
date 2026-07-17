@@ -163,6 +163,41 @@
       "label": "まもなく冷却",
       "labelNot": "まもなく冷却しない",
       "description": "指定期間内にコールドになると予測されます。"
+    },
+    "at_risk": {
+      "label": "リスクあり",
+      "labelNot": "リスクなし",
+      "description": "取引リスクが高または中です。"
+    },
+    "risk_high": {
+      "label": "高リスク",
+      "labelNot": "高リスクでない",
+      "description": "取引リスクレベルが高です。"
+    },
+    "risk_close_overdue": {
+      "label": "完了予定日超過",
+      "labelNot": "完了予定日未超過",
+      "description": "完了予定日が過ぎています。"
+    },
+    "risk_closing_soon": {
+      "label": "まもなく完了だが停滞",
+      "labelNot": "該当なし",
+      "description": "まもなく完了予定ですが最近の活動がありません。"
+    },
+    "risk_stalled": {
+      "label": "停滞中",
+      "labelNot": "停滞していない",
+      "description": "取引に最近の活動がありません。"
+    },
+    "risk_stakeholder_cold": {
+      "label": "関係者が冷却",
+      "labelNot": "冷却した関係者なし",
+      "description": "主要な関係者の関係が冷え込んでいます。"
+    },
+    "risk_no_stakeholders": {
+      "label": "関係者なし",
+      "labelNot": "関係者あり",
+      "description": "取引に紐づく連絡先がありません。"
     }
   },
   "SavedViews": {

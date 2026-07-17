@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.SegmentCatalogDto;
@@ -41,10 +42,11 @@ import ooo.klae.connex.backend.util.LikePattern;
  * negatives are expressed as a positive operator plus {@code negate}. Predicates declare their
  * applicable record types in {@link SegmentCatalog} and dispatch per type: the graph/temperature
  * signals ({@code warm_intro_available}, {@code open_deal}, {@code cooling}) are company-only, the
- * existence signals ({@code has_open_task}, {@code recent_meeting}, …) apply to person/deal, and the
+ * existence signals ({@code has_open_task}, {@code recent_meeting}, …) apply to person/deal, the
  * warmth signals ({@code warmth_hot}…{@code going_cold}) apply to company/person via
- * {@link ScoringService} (scored once per evaluation and reused across warmth conditions). This shared
- * model is the rule engine's {@code WHEN}.
+ * {@link ScoringService}, and the deal-risk signals ({@code at_risk}, {@code risk_stalled}, …) apply
+ * to deals via {@link DealRiskService}. Each computed signal is evaluated once per evaluation and
+ * reused across sibling conditions. This shared model is the rule engine's {@code WHEN}.
  */
 @Service
 @RequiredArgsConstructor
@@ -53,6 +55,7 @@ public class SegmentService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final ScoringService scoringService;
+    private final DealRiskService dealRiskService;
     private final SegmentMapper segmentMapper;
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
@@ -335,8 +338,39 @@ public class SegmentService {
             case "warmth_cold" -> warmthBand(ctx, "cold");
             case "warmth_rising" -> warmthTrend(ctx, "rising");
             case "going_cold" -> goingCold(ctx, catalog.clampDays(condition.getDays()));
+            case "at_risk" -> dealRiskLevel(ctx, Set.of("high", "medium"));
+            case "risk_high" -> dealRiskLevel(ctx, Set.of("high"));
+            case "risk_close_overdue" -> dealRiskFactor(ctx, "close_overdue");
+            case "risk_closing_soon" -> dealRiskFactor(ctx, "closing_soon_quiet");
+            case "risk_stalled" -> dealRiskFactor(ctx, "stalled");
+            case "risk_stakeholder_cold" -> dealRiskFactor(ctx, "stakeholder_cold");
+            case "risk_no_stakeholders" -> dealRiskFactor(ctx, "no_stakeholders");
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
         };
+    }
+
+    private Set<Integer> dealRiskLevel(EvalContext ctx, Set<String> levels) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (DealRiskDto risk : ctx.dealRisks(dealRiskService)) {
+            if (levels.contains(risk.getLevel()) && universe.contains(risk.getDealId())) {
+                ids.add(risk.getDealId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> dealRiskFactor(EvalContext ctx, String code) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (DealRiskDto risk : ctx.dealRisks(dealRiskService)) {
+            if (risk.getFactors() != null
+                    && risk.getFactors().stream().anyMatch(factor -> code.equals(factor.getCode()))
+                    && universe.contains(risk.getDealId())) {
+                ids.add(risk.getDealId());
+            }
+        }
+        return ids;
     }
 
     private Set<Integer> warmthBand(EvalContext ctx, String band) {
@@ -585,6 +619,7 @@ public class SegmentService {
         private final boolean includeRestrictedPeople;
         private Set<Integer> universe;
         private List<RelationshipTemperatureDto> temperatures;
+        private List<DealRiskDto> dealRisks;
 
         private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople) {
             this.workspaceId = workspaceId;
@@ -637,6 +672,17 @@ public class SegmentService {
                 };
             }
             return temperatures;
+        }
+
+        /**
+         * The risk assessments for the workspace's open deals, computed once per evaluation and reused
+         * across every deal-risk predicate. Only the {@code deal} record type has risk assessments.
+         */
+        private List<DealRiskDto> dealRisks(DealRiskService riskService) {
+            if (dealRisks == null) {
+                dealRisks = "deal".equals(recordType) ? riskService.assessWorkspace(workspaceId) : List.of();
+            }
+            return dealRisks;
         }
     }
 }

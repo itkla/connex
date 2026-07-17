@@ -437,7 +437,9 @@ class SegmentServiceTest extends AbstractServiceTest {
     void catalog_deal_hasStatusEnumOptionsAndExistencePredicates() {
         SegmentCatalogDto dto = segmentService.catalog("deal");
 
-        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment"),
+        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment",
+                "at_risk", "risk_high", "risk_close_overdue", "risk_closing_soon", "risk_stalled",
+                "risk_stakeholder_cold", "risk_no_stakeholders"),
             dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
         assertEquals(List.of("open", "won", "lost"), dto.enumOptions().get("status"));
         SegmentCatalogDto.CatalogField stage = dto.fields().stream()
@@ -593,6 +595,28 @@ class SegmentServiceTest extends AbstractServiceTest {
         SegmentCondition goingCold = predicate("going_cold");
         goingCold.setDays(90);
         assertFalse(evaluate(def("all", goingCold)).contains(cold.getId()));
+    }
+
+    @Test
+    void dealPredicate_atRisk_matchesOverdueDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
+        Deal future = dealWith(pipeline, stage, newCompany(), 1000.0, "2999-01-01");
+
+        List<Integer> atRisk = segmentService.evaluate("deal", def("all", predicate("at_risk")));
+        List<Integer> riskHigh = segmentService.evaluate("deal", def("all", predicate("risk_high")));
+        List<Integer> closeOverdue = segmentService.evaluate("deal", def("all", predicate("risk_close_overdue")));
+
+        assertTrue(atRisk.contains(overdue.getId()));
+        assertTrue(riskHigh.contains(overdue.getId()));
+        assertTrue(closeOverdue.contains(overdue.getId()));
+        assertFalse(closeOverdue.contains(future.getId()));
+    }
+
+    @Test
+    void dealRiskPredicate_notApplicableToCompany_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", predicate("at_risk"))));
     }
 
     @Test
