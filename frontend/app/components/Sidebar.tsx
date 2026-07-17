@@ -11,6 +11,7 @@ import {
     FolderIcon,
     FunnelIcon,
     HomeIcon,
+    MegaphoneIcon,
     TagIcon,
     UserCircleIcon,
     UserGroupIcon,
@@ -94,6 +95,12 @@ function useSections(): NavSection[] {
                 { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
+            ],
+        },
+        {
+            label: t("sectionMarketing"),
+            items: [
+                { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
             ],
         },
         {

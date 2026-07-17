@@ -46,6 +46,9 @@ public enum Permission {
     AUDIT_READ,
     WORKSPACE_SETTINGS,
     RULE_MANAGE,
+    CAMPAIGN_VIEW,
+    CAMPAIGN_MANAGE,
+    CONSENT_MANAGE,
     /**
      * Permission to invoke AI-powered features (e.g. account/meeting briefs).
      * Grantable; the instance flag and per-org BYOP provider config additionally

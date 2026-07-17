@@ -10,7 +10,9 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -20,6 +22,7 @@ import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -58,9 +61,12 @@ public class UserOffboardingService {
     private final DealMapper dealMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
+    private final CampaignMapper campaignMapper;
+    private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
     private final RuleMapper ruleMapper;
     private final ShareMapper shareMapper;
+    private final SuppressionMapper suppressionMapper;
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
     private final UserMapper userMapper;
@@ -140,6 +146,7 @@ public class UserOffboardingService {
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.clearMemberDealOwnership(workspaceId, userId);
+        campaignMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
     }
@@ -148,9 +155,10 @@ public class UserOffboardingService {
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
      * (CASCADE — saved views, dashboards, notifications, collaborator seats)
-     * and shared-history references are nulled (SET NULL — company, contact, and
-     * deal ownership, task assignment, uploader, notification actor, report actors,
-     * rule principals, share grantors). Statements are grouped deletes-then-nulls
+     * and shared-history references are nulled (SET NULL — company, contact, deal, and
+     * campaign ownership, task assignment, uploader, notification actor, report and
+     * campaign actors, rule principals, consent/suppression actors, share grantors).
+     * Statements are grouped deletes-then-nulls
      * for readability; no data dependency exists between them, so the order is otherwise
      * immaterial. Must run inside the caller's deletion transaction.
      * Recipient memberships are locked in user-id order before notification
@@ -195,6 +203,9 @@ public class UserOffboardingService {
         dealMapper.clearOwnershipAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
+        campaignMapper.clearCampaignUserReferencesAnywhere(userId);
+        campaignMapper.clearSnapshotCreatorsAnywhere(userId);
+        consentMapper.clearEventCreatorsAnywhere(userId);
         reportMapper.clearDefinitionCreatorsAnywhere(userId);
         reportMapper.clearSnapshotGeneratorsAnywhere(userId);
         ruleMapper.clearRunAsAnywhere(userId);
@@ -202,5 +213,6 @@ public class UserOffboardingService {
         shareMapper.clearCompanyShareGrantedByAnywhere(userId);
         shareMapper.clearPersonShareGrantedByAnywhere(userId);
         shareMapper.clearPipelineShareGrantedByAnywhere(userId);
+        suppressionMapper.clearCreatorsAnywhere(userId);
     }
 }

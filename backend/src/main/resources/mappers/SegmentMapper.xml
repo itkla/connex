@@ -11,6 +11,10 @@
         WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
     </select>
 
+    <select id="personIdsInWorkspaceIncludingRestricted" resultType="int">
+        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+    </select>
+
     <select id="dealIdsInWorkspace" resultType="int">
         SELECT id FROM deal WHERE workspace_id = #{workspaceId}
     </select>
@@ -146,6 +150,19 @@
     <select id="personIdsMatching" resultType="int">
         SELECT id FROM person
         WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+        <choose>
+            <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+            <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+            <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </select>
+
+    <select id="personIdsMatchingIncludingRestricted" resultType="int">
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId}
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>

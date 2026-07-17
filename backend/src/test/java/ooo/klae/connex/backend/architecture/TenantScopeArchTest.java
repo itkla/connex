@@ -111,6 +111,9 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
         "ooo.klae.connex.backend.mappers.TaskMapper.unassignAnywhere",
         "ooo.klae.connex.backend.mappers.AttachmentMapper.clearUploaderAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignMapper.clearCampaignUserReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignMapper.clearSnapshotCreatorsAnywhere",
+        "ooo.klae.connex.backend.mappers.ConsentMapper.clearEventCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.RuleMapper.clearRunAsAnywhere",
         "ooo.klae.connex.backend.mappers.RuleMapper.clearCreatedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearCompanyShareGrantedByAnywhere",
@@ -120,6 +123,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearDefinitionCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearSnapshotGeneratorsAnywhere",
+        "ooo.klae.connex.backend.mappers.SuppressionMapper.clearCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions"
     );
 
