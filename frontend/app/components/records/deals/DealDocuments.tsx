@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowDownTrayIcon,
@@ -8,18 +9,12 @@ import {
     ArchiveBoxXMarkIcon,
     TrashIcon,
     EllipsisHorizontalIcon,
+    ChevronDownIcon,
+    PlusIcon,
+    DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import {
-    Combobox,
-    ComboboxContent,
-    ComboboxEmpty,
-    ComboboxInput,
-    ComboboxItem,
-    ComboboxList,
-} from '@/components/ui/combobox';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -50,20 +45,21 @@ const TYPE_KEY: Record<DocumentType, string> = {
     contract: 'typeContract',
 };
 
-const STATUS_VARIANT: Record<DocumentStatus, 'secondary' | 'default' | 'outline'> = {
-    draft: 'secondary',
-    final: 'default',
-    superseded: 'outline',
+const STATUS_CLASS: Record<DocumentStatus, string> = {
+    draft: 'bg-chart-open/12 text-chart-open',
+    final: 'bg-chart-won/12 text-chart-won',
+    superseded: 'bg-muted text-muted-foreground',
 };
 
 /**
  * Generated-documents panel for a deal. Documents are immutable server-side snapshots; the client
  * generates a draft from a template, transitions its status, or opens a print view (browser
- * print-to-PDF) — it never edits a document's content.
+ * print-to-PDF) — it never edits a document's content or computes money.
  */
 export default function DealDocuments({ dealId, initial }: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
+    const router = useRouter();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
@@ -74,7 +70,16 @@ export default function DealDocuments({ dealId, initial }: Props) {
             .catch(() => setTemplates([]));
     }, []);
 
-    const templateItems = useMemo(() => templates, [templates]);
+    const run = async (op: () => Promise<void>) => {
+        setBusy(true);
+        try {
+            await op();
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t('actionFailed'));
+        } finally {
+            setBusy(false);
+        }
+    };
 
     const generate = (template: DocumentTemplate) => run(async () => {
         const created = await generateDealDocument(dealId, template.id);
@@ -93,51 +98,56 @@ export default function DealDocuments({ dealId, initial }: Props) {
         toastSuccess(t('deleted'));
     });
 
-    const run = async (op: () => Promise<void>) => {
-        setBusy(true);
-        try {
-            await op();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t('actionFailed'));
-        } finally {
-            setBusy(false);
-        }
-    };
-
     const openPdf = (doc: DealDocument) => {
         window.open(`/records/deals/${dealId}/documents/${doc.id}/print`, '_blank', 'noopener,noreferrer');
     };
+
+    const generateMenu = (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="brand" size="sm" disabled={busy}>
+                    <PlusIcon className="size-4" />
+                    {t('generate')}
+                    <ChevronDownIcon className="size-3.5 opacity-70 transition-transform duration-150 group-data-[state=open]/button:rotate-180" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-56">
+                {templates.length === 0 ? (
+                    <DropdownMenuItem onSelect={() => router.push('/records/document-templates/new')}>
+                        <PlusIcon className="size-4" />
+                        {t('createTemplate')}
+                    </DropdownMenuItem>
+                ) : (
+                    templates.map((tpl) => (
+                        <DropdownMenuItem key={tpl.id} onSelect={() => generate(tpl)}>
+                            <span className="flex w-full items-center justify-between gap-4">
+                                <span className="truncate">{tpl.name}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{t(TYPE_KEY[tpl.type])}</span>
+                            </span>
+                        </DropdownMenuItem>
+                    ))
+                )}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
 
     return (
         <section>
             <div className="mb-3 flex items-center justify-between">
                 <SectionHeader title={t('title')} />
-                <Combobox
-                    items={templateItems}
-                    itemToStringLabel={(tpl: DocumentTemplate) => tpl.name}
-                    value={null}
-                    onValueChange={(tpl) => { if (tpl) generate(tpl as DocumentTemplate); }}
-                >
-                    <ComboboxInput placeholder={t('generateFromTemplate')} className="w-60" disabled={busy} />
-                    <ComboboxContent>
-                        <ComboboxList>
-                            <ComboboxEmpty>{t('noTemplates')}</ComboboxEmpty>
-                            {templateItems.map((tpl) => (
-                                <ComboboxItem key={tpl.id} value={tpl}>
-                                    <span className="flex w-full items-center justify-between gap-3">
-                                        <span className="truncate">{tpl.name}</span>
-                                        <span className="shrink-0 text-xs text-muted-foreground">{t(TYPE_KEY[tpl.type])}</span>
-                                    </span>
-                                </ComboboxItem>
-                            ))}
-                        </ComboboxList>
-                    </ComboboxContent>
-                </Combobox>
+                {documents.length > 0 && generateMenu}
             </div>
 
             {documents.length === 0 ? (
-                <div className="rounded-2xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
-                    {t('empty')}
+                <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
+                    <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <DocumentTextIcon className="size-5" />
+                    </div>
+                    <div className="space-y-1">
+                        <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+                        <p className="mx-auto max-w-sm text-sm text-muted-foreground">{t('emptyBody')}</p>
+                    </div>
+                    {generateMenu}
                 </div>
             ) : (
                 <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -145,11 +155,10 @@ export default function DealDocuments({ dealId, initial }: Props) {
                         <thead>
                             <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
                                 <th className="px-4 py-3 font-medium">{t('columnDocument')}</th>
-                                <th className="w-28 px-4 py-3 font-medium">{t('columnType')}</th>
                                 <th className="w-28 px-4 py-3 font-medium">{t('columnStatus')}</th>
-                                <th className="w-40 px-4 py-3 font-medium text-right">{t('columnTotal')}</th>
-                                <th className="w-44 px-4 py-3 font-medium">{t('columnGenerated')}</th>
-                                <th className="w-10 px-2 py-3" />
+                                <th className="w-36 px-4 py-3 text-right font-medium">{t('columnTotal')}</th>
+                                <th className="w-40 px-4 py-3 font-medium">{t('columnGenerated')}</th>
+                                <th className="w-24 px-2 py-3" />
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -157,11 +166,14 @@ export default function DealDocuments({ dealId, initial }: Props) {
                                 <tr key={doc.id} className="transition-colors hover:bg-muted/50">
                                     <td className="px-4 py-3">
                                         <div className="font-medium text-foreground">{doc.title || t('untitled')}</div>
-                                        <div className="text-xs text-muted-foreground">{t('version', { version: doc.version })}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {t(TYPE_KEY[doc.type])} · {t('version', { version: doc.version })}
+                                        </div>
                                     </td>
-                                    <td className="px-4 py-3 text-muted-foreground">{t(TYPE_KEY[doc.type])}</td>
                                     <td className="px-4 py-3">
-                                        <Badge variant={STATUS_VARIANT[doc.status]}>{t(`status_${doc.status}`)}</Badge>
+                                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[doc.status]}`}>
+                                            {t(`status_${doc.status}`)}
+                                        </span>
                                     </td>
                                     <td className="px-4 py-3 text-right tabular-nums">
                                         {formatCurrency(doc.content.totals.grandTotal, doc.currency, locale)}
@@ -169,37 +181,40 @@ export default function DealDocuments({ dealId, initial }: Props) {
                                     <td className="px-4 py-3 text-muted-foreground">
                                         {formatDateTime(doc.generatedAt, locale)}
                                     </td>
-                                    <td className="px-2 py-3 text-right">
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon-xs" aria-label={t('actions')} disabled={busy}>
-                                                    <EllipsisHorizontalIcon className="size-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onSelect={() => openPdf(doc)}>
-                                                    <ArrowDownTrayIcon className="size-4" />{t('downloadPdf')}
-                                                </DropdownMenuItem>
-                                                {doc.status === 'draft' && (
-                                                    <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
-                                                        <CheckCircleIcon className="size-4" />{t('markFinal')}
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {doc.status !== 'superseded' && (
-                                                    <DropdownMenuItem onSelect={() => changeStatus(doc, 'superseded')}>
-                                                        <ArchiveBoxXMarkIcon className="size-4" />{t('markSuperseded')}
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {doc.status === 'draft' && (
-                                                    <>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem variant="destructive" onSelect={() => remove(doc)}>
-                                                            <TrashIcon className="size-4" />{t('delete')}
+                                    <td className="px-2 py-3">
+                                        <div className="flex items-center justify-end gap-1">
+                                            <Button variant="outline" size="sm" onClick={() => openPdf(doc)} disabled={busy}>
+                                                <ArrowDownTrayIcon className="size-4" />
+                                                {t('pdf')}
+                                            </Button>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon-xs" aria-label={t('actions')} disabled={busy}>
+                                                        <EllipsisHorizontalIcon className="size-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    {doc.status === 'draft' && (
+                                                        <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
+                                                            <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
-                                                    </>
-                                                )}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
+                                                    )}
+                                                    {doc.status !== 'superseded' && (
+                                                        <DropdownMenuItem onSelect={() => changeStatus(doc, 'superseded')}>
+                                                            <ArchiveBoxXMarkIcon className="size-4" />{t('markSuperseded')}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {doc.status === 'draft' && (
+                                                        <>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem variant="destructive" onSelect={() => remove(doc)}>
+                                                                <TrashIcon className="size-4" />{t('delete')}
+                                                            </DropdownMenuItem>
+                                                        </>
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}

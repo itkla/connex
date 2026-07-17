@@ -431,6 +431,11 @@
       "notFound": "ドキュメントが見つかりません。",
       "draftWatermark": "下書き",
       "supersededWatermark": "無効"
-    }
+    },
+    "generate": "生成",
+    "createTemplate": "テンプレートを作成",
+    "emptyTitle": "ドキュメントがありません",
+    "emptyBody": "テンプレートから見積書・提案書・注文書・契約書を生成します。明細と合計はその時点で確定されます。",
+    "pdf": "PDF"
   }
 }
