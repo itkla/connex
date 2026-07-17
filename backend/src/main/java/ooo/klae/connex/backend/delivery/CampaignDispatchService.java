@@ -168,6 +168,10 @@ public class CampaignDispatchService {
         if (!audienceEligibilityService.suppressedAddresses(workspaceId, channelToken, List.of(normalizedAddress)).isEmpty()) {
             return "suppressed";
         }
+        if (personId != null && !audienceEligibilityService
+                .suppressedPersonRefIds(workspaceId, List.of(personId), channelToken).isEmpty()) {
+            return "suppressed";
+        }
         if (audienceEligibilityService.consentBlocks(workspaceId, personId, channelToken, send.getPurpose())) {
             return AudienceEligibilityService.CONSENT_POLICY.exclusionReason();
         }

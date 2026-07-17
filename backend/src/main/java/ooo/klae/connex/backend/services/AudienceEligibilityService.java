@@ -64,8 +64,14 @@ public class AudienceEligibilityService {
      * {@link #suppressedAddresses(int, String, List)} query the dispatch re-check uses, so a snapshot
      * and a dispatch of the same audience cannot disagree: an SMS audience is matched on phone
      * numbers rather than on email addresses, and a suppression stored in a different but equivalent
-     * format still matches. A person with no address the channel can reach is not suppression-matched
+     * format still matches. A person with no address the channel can reach is not address-matched
      * here; materialization skips them as {@code no_address}.
+     *
+     * <p>Suppression is additionally sticky to the person: a candidate is suppressed when a
+     * {@code suppression_entry} on this channel carries their {@code person_id}, regardless of the
+     * address string it stored, via {@link #suppressedPersonRefIds(int, List, String)}. This keeps an
+     * unsubscribe honored even after the person's contact field is later reformatted. The address path
+     * is retained so manual, address-only suppressions with no person link still block.
      * @param workspaceId the workspace
      * @param personIds candidate person ids
      * @param channel the delivery channel token
@@ -85,13 +91,31 @@ public class AudienceEligibilityService {
                 }
             }
         });
-        if (idsByAddress.isEmpty()) {
-            return Set.of();
+        Set<Integer> result = new HashSet<>(suppressedPersonRefIds(workspaceId, personIds, channel));
+        if (!idsByAddress.isEmpty()) {
+            for (String address : suppressedAddresses(workspaceId, channel, new ArrayList<>(idsByAddress.keySet()))) {
+                result.addAll(idsByAddress.getOrDefault(address, List.of()));
+            }
         }
+        return result;
+    }
+
+    /**
+     * The subset of the given people who carry a person-linked suppression on the channel, matched by
+     * {@code person_id} rather than by address. Channel-keyed, so a suppression on one channel never
+     * blocks another. This is the person-sticky arm of {@link #suppressedIds(int, List, String)} and
+     * the dispatch re-check's per-delivery equivalent: it keeps an unsubscribe honored even after the
+     * person's contact field is reformatted into a differently-canonicalized address that the
+     * address path alone would no longer match.
+     * @param workspaceId the workspace
+     * @param personIds candidate person ids
+     * @param channel the delivery channel token
+     * @return the suppressed person ids
+     */
+    public Set<Integer> suppressedPersonRefIds(int workspaceId, List<Integer> personIds, String channel) {
         Set<Integer> result = new HashSet<>();
-        for (String address : suppressedAddresses(workspaceId, channel, new ArrayList<>(idsByAddress.keySet()))) {
-            result.addAll(idsByAddress.getOrDefault(address, List.of()));
-        }
+        forEachBatch(personIds, batch -> result.addAll(
+                campaignMapper.suppressedPersonRefIds(workspaceId, batch, channel)));
         return result;
     }
 

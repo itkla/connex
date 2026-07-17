@@ -271,6 +271,30 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         assertEquals("suppressed", delivery.getSkipReason());
     }
 
+    /**
+     * The opt-out integrity invariant: an unsubscribe stores the person's {@code person_id} alongside
+     * the phone as it read then. If the phone is later reformatted, the next send materializes a
+     * differently-canonicalized address the stored suppression address no longer matches, but the
+     * person-sticky arm keeps the dispatch re-check skipping them.
+     */
+    @Test
+    void smsDispatchSkipsAPersonSuppressedByPersonRefEvenWhenTheDeliveryAddressWasReformatted() {
+        String prefix = "sms-sticky-" + unique();
+        Person person = phonePerson(newCompany(), prefix + "-in", "09012345678");
+        CampaignSendDto send = readySmsSend(prefix);
+        campaignSendService.queueSend(send.campaignId(), send.id());
+        int deliveryId = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id()).getFirst();
+        suppressionService.add(new SuppressionEntryRequest(
+                "workspace", "sms", "+819012345678", person.getId(), "unsubscribe", null));
+
+        campaignDispatchService.processSend(workspace.getId(), send.id());
+
+        assertEquals(0, fakeDispatcher.count());
+        CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("skipped", delivery.getStatus());
+        assertEquals("suppressed", delivery.getSkipReason());
+    }
+
     @Test
     void anEmailSuppressionDoesNotBlockAnSmsSend() {
         String prefix = "sms-xchan-" + unique();
