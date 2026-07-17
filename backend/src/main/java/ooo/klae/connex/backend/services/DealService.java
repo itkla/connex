@@ -67,6 +67,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -87,6 +88,7 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
 @RequiredArgsConstructor
 public class DealService {
     private final DealMapper dealMapper;
+    private final DealLineItemMapper dealLineItemMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
@@ -732,6 +734,11 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (deal.getCurrency() != null && !deal.getCurrency().equalsIgnoreCase(before.getCurrency())
+                && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
+            throw new BadRequestException(
+                "Cannot change the deal currency while it has line items; remove the line items first");
+        }
         Boolean previousOutcome = before.getWon();
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);

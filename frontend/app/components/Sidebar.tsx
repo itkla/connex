@@ -7,6 +7,8 @@ import {
     ChatBubbleLeftRightIcon,
     CheckCircleIcon,
     ChevronDownIcon,
+    CubeIcon,
+    DocumentDuplicateIcon,
     DocumentTextIcon,
     FolderIcon,
     FunnelIcon,
@@ -95,6 +97,8 @@ function useSections(): NavSection[] {
                 { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
+                { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
+                { label: t("navDocumentTemplates"), href: "/records/document-templates", icon: DocumentDuplicateIcon },
             ],
         },
         {

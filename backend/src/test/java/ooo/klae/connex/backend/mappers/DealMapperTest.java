@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -1012,6 +1013,21 @@ class DealMapperTest extends AbstractMapperTest {
     /**
      * Adds a person to a deal and checks if the person is added only once.
      */
+    @Test
+    void addPerson_onDuplicateKey_updatesRole() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Person person = newPerson(newCompany());
+
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "stakeholder");
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "decision_maker");
+
+        List<DealPerson> people = dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId());
+        assertEquals(1, people.size());
+        assertEquals("decision_maker", people.get(0).getRole());
+    }
+
     @Test
     void addPerson_isIdempotent() {
         Pipeline pipeline = newPipeline();

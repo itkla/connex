@@ -965,7 +965,7 @@
     FROM deal d
     JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
-    ON DUPLICATE KEY UPDATE role = VALUES(role)
+    ON DUPLICATE KEY UPDATE role = #{role}
   </insert>
 
   <update id="updatePersonRole">

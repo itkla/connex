@@ -451,6 +451,12 @@ export type WarmPathPayload = {
     taskDescription?: string;
 };
 
+/** Combined introductions feed — suggestions + warm paths from one backend warmth pass (#630). */
+export type IntroOverview = {
+    suggestions: IntroSuggestion[];
+    paths: WarmPath[];
+};
+
 export type User = {
     id: number;
     username: string;
@@ -1018,6 +1024,178 @@ export type CreateTagPayload = {
 export type UpdateTagPayload = {
     name?: string;
     color?: string;
+};
+
+export type BillingFrequency = 'one_time' | 'recurring';
+export type LineDiscountType = 'amount' | 'percent';
+
+/** A workspace-scoped catalog product/service. Money fields are server-authoritative. */
+export type Product = {
+    id: number;
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateProductPayload = {
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active?: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+};
+
+export type UpdateProductPayload = Partial<CreateProductPayload>;
+
+/**
+ * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
+ * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
+ * server-computed (BigDecimal) — the client never does money arithmetic.
+ */
+export type DealLineItem = {
+    id: number;
+    dealId: number;
+    productId?: number | null;
+    name: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position: number;
+    currency: string;
+    lineSubtotal: number;
+    lineTax: number;
+    lineTotal: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** Server-computed deal roll-up; recurring vs one-time kept separate to avoid double-counting. */
+export type DealLineItemTotals = {
+    currency: string;
+    subtotal: number;
+    tax: number;
+    oneTimeTotal: number;
+    recurringTotal: number;
+    grandTotal: number;
+};
+
+export type DealLineItemsResponse = {
+    items: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+export type DealLineItemPayload = {
+    productId?: number | null;
+    name?: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice?: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency?: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position?: number;
+};
+
+export type DocumentType = 'quote' | 'proposal' | 'order_form' | 'contract';
+
+/** A workspace-scoped commercial-document template. Sections may carry {{merge tokens}}. */
+export type DocumentTemplate = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    active: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateDocumentTemplatePayload = {
+    name: string;
+    type: DocumentType;
+    locale?: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    active?: boolean;
+};
+
+export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayload>;
+
+export type DocumentStatus = 'draft' | 'final' | 'superseded';
+
+/** A party rendered on a document (workspace, company, or owner). */
+export type DocumentParty = {
+    name: string;
+    address?: string | null;
+};
+
+/**
+ * The immutable, resolved snapshot stored on a generated document. Merge tokens are already
+ * substituted and the line items/totals frozen at generation — the client only renders this.
+ */
+export type DocumentContent = {
+    generatedAt: string;
+    workspace?: DocumentParty | null;
+    company?: DocumentParty | null;
+    owner?: DocumentParty | null;
+    deal: { name: string; currency: string };
+    sections: {
+        title?: string | null;
+        intro?: string | null;
+        terms?: string | null;
+        footer?: string | null;
+    };
+    lineItems: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+/** A generated, immutable, versioned commercial document on a deal. */
+export type DealDocument = {
+    id: number;
+    dealId: number;
+    templateId?: number | null;
+    type: DocumentType;
+    locale: string;
+    status: DocumentStatus;
+    version: number;
+    title?: string | null;
+    currency: string;
+    generatedAt: string;
+    content: DocumentContent;
 };
 
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';

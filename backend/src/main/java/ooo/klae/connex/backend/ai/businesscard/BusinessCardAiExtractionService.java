@@ -16,17 +16,14 @@ import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
-import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
-import ooo.klae.connex.backend.exceptions.ForbiddenException;
 
 /**
  * Extracts review-only business-card fields through the active organization's configured provider.
@@ -87,7 +84,7 @@ public class BusinessCardAiExtractionService {
                 return Optional.empty();
             }
             return Optional.of(toResponse(parsed.value()));
-        } catch (MaskingLeakException | AiProviderException | ForbiddenException | IllegalArgumentException exception) {
+        } catch (RuntimeException exception) {
             return Optional.empty();
         }
     }

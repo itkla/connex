@@ -72,6 +72,7 @@
   }
 
   .report-controls,
+  .document-controls,
   #app-sidebar,
   [data-app-toolbar] {
     display: none;
@@ -110,6 +111,33 @@
   }
 
   .report-paper section {
+    break-inside: avoid;
+  }
+
+  .document-page {
+    background: white;
+    padding: 0;
+  }
+
+  .document-paper {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    color-scheme: light;
+    max-width: none;
+    background: var(--card);
+    color: var(--foreground);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .document-paper section {
     break-inside: avoid;
   }
 }

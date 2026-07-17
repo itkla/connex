@@ -1708,14 +1708,6 @@ export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: num
 }
 
 /**
- * As {@link getIntroSuggestionsFromCookie}, but failure-aware (see {@link resultWithCookie}), so
- * the introductions page can distinguish a backend fault from a genuinely empty workspace.
- */
-export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
-    return resultWithCookie<Types.IntroSuggestion[]>((init) => getIntroSuggestions(init, limit), cookie);
-}
-
-/**
  * Failure-aware variant of {@link getIntroductions} for the introductions page (see
  * {@link resultWithCookie}), so a lineage fetch failure is not presented as zero intros made.
  */
@@ -1745,16 +1737,27 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
 * == Warm paths (the "receive side" of the graph, #614)
 */
 
-export function getWarmPaths(init: RequestInit = {}, limit?: number) {
-    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+/** The combined introductions feed — suggestions + warm paths from one backend warmth pass. */
+export function getIntroOverview(init: RequestInit = {}, suggestions?: number, paths?: number) {
+    return getJson<Types.IntroOverview>(
+        `/api/introductions/overview${buildQuery({ suggestions, paths })}`,
+        init,
+    );
 }
 
 /**
- * Failure-aware warm-paths fetch for the introductions page (see {@link resultWithCookie}), so a
- * backend fault renders as an error state instead of an empty feed.
+ * Failure-aware overview fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as error states instead of an empty page.
  */
-export function getWarmPathsResultFromCookie(cookie: string | null, limit?: number) {
-    return resultWithCookie<Types.WarmPath[]>((init) => getWarmPaths(init, limit), cookie);
+export function getIntroOverviewResultFromCookie(
+    cookie: string | null,
+    suggestions?: number,
+    paths?: number,
+) {
+    return resultWithCookie<Types.IntroOverview>(
+        (init) => getIntroOverview(init, suggestions, paths),
+        cookie,
+    );
 }
 
 /** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
@@ -2476,6 +2479,102 @@ export function updateTag(id: number, payload: Types.UpdateTagPayload) {
 
 export function deleteTag(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/tags/${id}`, init);
+}
+
+export function getProducts(init: RequestInit = {}) {
+    return getJson<Types.Product[]>(`/api/products`, init);
+}
+
+export function getProductsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Product>((init) => getProducts(init), cookie);
+}
+
+export function getProductById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Product>(`/api/products/${id}`, init);
+}
+
+export function createProduct(payload: Types.CreateProductPayload) {
+    return postJson<Types.Product>(`/api/products`, payload);
+}
+
+export function updateProduct(id: number, payload: Types.UpdateProductPayload) {
+    return putJson<Types.Product>(`/api/products/${id}`, payload);
+}
+
+export function deleteProduct(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/products/${id}`, init);
+}
+
+export function getDocumentTemplates(init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate[]>(`/api/document-templates`, init);
+}
+
+export function getDocumentTemplatesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DocumentTemplate>((init) => getDocumentTemplates(init), cookie);
+}
+
+export function getDocumentTemplateById(id: number, init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, init);
+}
+
+export function createDocumentTemplate(payload: Types.CreateDocumentTemplatePayload) {
+    return postJson<Types.DocumentTemplate>(`/api/document-templates`, payload);
+}
+
+export function updateDocumentTemplate(id: number, payload: Types.UpdateDocumentTemplatePayload) {
+    return putJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, payload);
+}
+
+export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/document-templates/${id}`, init);
+}
+
+export function getDealDocuments(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
+}
+
+export function getDealDocumentsFromCookie(dealId: number, cookie: string | null) {
+    return safeWithCookie<Types.DealDocument>(
+        (init) => getDealDocuments(dealId, init), cookie);
+}
+
+export function getDealDocumentById(dealId: number, documentId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
+export function generateDealDocument(dealId: number, templateId: number) {
+    return postJson<Types.DealDocument>(`/api/deals/${dealId}/documents`, { templateId });
+}
+
+export function updateDealDocumentStatus(dealId: number, documentId: number, status: Types.DocumentStatus) {
+    return putJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}/status`, { status });
+}
+
+export function deleteDealDocument(dealId: number, documentId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
+export function getDealLineItems(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
+}
+
+export function getDealLineItemsFromCookie(dealId: number, cookie: string | null) {
+    return getJson<Types.DealLineItemsResponse>(
+        `/api/deals/${dealId}/line-items`,
+        cookie ? { headers: { cookie }, cache: 'no-store' } : {},
+    );
+}
+
+export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload) {
+    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload);
+}
+
+export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload) {
+    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload);
+}
+
+export function deleteDealLineItem(dealId: number, itemId: number, init: RequestInit = {}) {
+    return deleteJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, init);
 }
 
 export function getPeopleForTag(id: number, init: RequestInit = {}) {

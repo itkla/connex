@@ -1,0 +1,135 @@
+package ooo.klae.connex.backend.ai.report;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
+
+/**
+ * Resolves a model's {@link AiReportNarrativeSelection} into grounded {@link AiReportNarrativeContent}
+ * by filling canonical deterministic claim text. Invalid selections (unknown source id, bad kind,
+ * unrecognized title, duplicates) are dropped individually; the narrative fails closed only when the
+ * surviving structure is not viable or the model dropped more than half of what it emitted.
+ */
+final class AiReportSelectionResolver {
+    static final int MAX_SECTIONS = 3;
+    static final int MAX_CLAIMS_PER_SECTION = 12;
+    static final int MAX_FINDINGS = 12;
+    static final String KIND_FACT = "fact";
+    static final String KIND_RECOMMENDATION = "recommendation";
+
+    private AiReportSelectionResolver() {
+    }
+
+    static Optional<AiReportNarrativeContent> resolve(
+            AiReportNarrativeSelection selection, AiReportContext context) {
+        if (selection == null || selection.sections() == null || selection.findings() == null) {
+            return Optional.empty();
+        }
+        Map<String, ReportAppendixRowDto> sources = new LinkedHashMap<>();
+        for (ReportAppendixRowDto source : context.sources()) {
+            sources.put(source.sourceId(), source);
+        }
+        Map<String, String> titles = titleLookup();
+        int[] tally = {0, 0};
+
+        List<AiReportNarrativeContent.Section> sections = new ArrayList<>();
+        for (AiReportNarrativeSelection.Section section : bounded(selection.sections(), MAX_SECTIONS)) {
+            resolveSection(section, sources, titles, tally).ifPresent(sections::add);
+        }
+        List<AiReportNarrativeContent.Claim> findings = resolveItems(
+                bounded(selection.findings(), MAX_FINDINGS), sources, tally);
+
+        if (sections.isEmpty() || findings.isEmpty()) {
+            return Optional.empty();
+        }
+        int emitted = tally[0];
+        int dropped = tally[1];
+        if (emitted == 0 || dropped * 2 > emitted) {
+            return Optional.empty();
+        }
+        return Optional.of(new AiReportNarrativeContent(List.copyOf(sections), List.copyOf(findings)));
+    }
+
+    private static Optional<AiReportNarrativeContent.Section> resolveSection(
+            AiReportNarrativeSelection.Section section,
+            Map<String, ReportAppendixRowDto> sources,
+            Map<String, String> titles,
+            int[] tally) {
+        if (section == null || section.title() == null) {
+            return Optional.empty();
+        }
+        String canonicalTitle = titles.get(normalize(section.title()));
+        if (canonicalTitle == null) {
+            return Optional.empty();
+        }
+        List<AiReportNarrativeContent.Claim> claims = resolveItems(
+                bounded(section.items(), MAX_CLAIMS_PER_SECTION), sources, tally);
+        if (claims.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new AiReportNarrativeContent.Section(canonicalTitle, claims));
+    }
+
+    private static List<AiReportNarrativeContent.Claim> resolveItems(
+            List<AiReportNarrativeSelection.Item> items,
+            Map<String, ReportAppendixRowDto> sources,
+            int[] tally) {
+        if (items == null) {
+            return List.of();
+        }
+        List<AiReportNarrativeContent.Claim> resolved = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (AiReportNarrativeSelection.Item item : items) {
+            tally[0]++;
+            String text = resolveText(item, sources);
+            if (text == null || !seen.add(item.sourceId() + '\u0000' + normalize(item.kind()))) {
+                tally[1]++;
+                continue;
+            }
+            resolved.add(new AiReportNarrativeContent.Claim(text, List.of(item.sourceId())));
+        }
+        return resolved;
+    }
+
+    private static String resolveText(
+            AiReportNarrativeSelection.Item item, Map<String, ReportAppendixRowDto> sources) {
+        if (item == null || item.sourceId() == null || item.kind() == null) {
+            return null;
+        }
+        ReportAppendixRowDto source = sources.get(item.sourceId());
+        if (source == null) {
+            return null;
+        }
+        return switch (normalize(item.kind())) {
+            case KIND_FACT -> AiReportFacts.fact(source);
+            case KIND_RECOMMENDATION -> AiReportFacts.recommendation(source);
+            default -> null;
+        };
+    }
+
+    private static Map<String, String> titleLookup() {
+        Map<String, String> lookup = new LinkedHashMap<>();
+        for (String title : AiReportFacts.titles()) {
+            lookup.put(normalize(title), title);
+        }
+        return lookup;
+    }
+
+    private static <T> List<T> bounded(List<T> values, int max) {
+        if (values == null) {
+            return List.of();
+        }
+        return values.size() <= max ? values : values.subList(0, max);
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+}

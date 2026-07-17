@@ -444,7 +444,32 @@ public class ReportService {
         }
         return widgetResult(
                 widget, widgetIndex, current, prior, effectiveBucket, period,
-                priorComparable(widget, filters));
+                priorComparable(widget, filters),
+                networkAuthoritativeTotalRows(widget, inputs));
+    }
+
+    /**
+     * Authoritative total rows for a grouped relationship-network widget: the ungrouped ("none")
+     * aggregation over the same snapshot, so a display cap (top-N paths, connectors, or reverse-intro
+     * pairs) never truncates the KPI scalar or a scheduled-delivery headline. Distinct-count measures
+     * (reachable accounts) also require this because summing per-connector rows double-counts a company
+     * reachable through several connectors. Returns {@code null} for non-network or already-ungrouped
+     * widgets, which keep deriving their total from their own rows.
+     */
+    private List<ReportAggregateRow> networkAuthoritativeTotalRows(
+            ReportWidgetConfig widget, GenerationInputs inputs) {
+        if ("none".equals(normalizeGroup(widget.groupBy()))) {
+            return null;
+        }
+        ReportWidgetConfig ungrouped = new ReportWidgetConfig(
+                widget.id(), widget.title(), widget.dataSource(), widget.measure(), "none", widget.chartType());
+        if (REVERSE_INTRO_MEASURES.contains(widget.measure())) {
+            return ReportNetworkService.aggregateReverseIntro(ungrouped, inputs.reverseIntroSuggestions());
+        }
+        if (WARM_INTRO_MEASURES.contains(widget.measure())) {
+            return ReportNetworkService.aggregateWarmIntro(ungrouped, inputs.warmIntroOpportunities());
+        }
+        return null;
     }
 
     private RowPair aggregateWidget(
@@ -526,7 +551,8 @@ public class ReportService {
             List<ReportAggregateRow> prior,
             String bucket,
             PeriodWindow period,
-            boolean priorComparable) {
+            boolean priorComparable,
+            List<ReportAggregateRow> authoritativeTotalRows) {
         Map<String, ReportAggregateRow> priorByKey = new HashMap<>();
         for (ReportAggregateRow row : prior) {
             priorByKey.put(comparisonKey(row, widget, bucket, period.priorStart()), row);
@@ -577,7 +603,17 @@ public class ReportService {
         boolean additive = !Set.of("win_rate", "avg_cycle_days").contains(widget.measure())
                 || "none".equals(normalizeGroup(widget.groupBy()));
         boolean emptyAttainment = "attainment".equals(widget.measure()) && current.isEmpty();
-        BigDecimal publicTotal = units.size() <= 1 && additive && !emptyAttainment ? total : null;
+        BigDecimal scalarTotal = total;
+        Set<String> scalarUnits = units;
+        if (authoritativeTotalRows != null) {
+            scalarTotal = BigDecimal.ZERO;
+            scalarUnits = new LinkedHashSet<>();
+            for (ReportAggregateRow row : authoritativeTotalRows) {
+                scalarTotal = scalarTotal.add(safe(row.value()));
+                scalarUnits.add(normalizedUnit(row.unit()));
+            }
+        }
+        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !emptyAttainment ? scalarTotal : null;
         BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable && !emptyAttainment
                 ? priorTotal
                 : null;

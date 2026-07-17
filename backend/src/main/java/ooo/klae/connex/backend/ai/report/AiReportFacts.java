@@ -180,6 +180,16 @@ final class AiReportFacts {
     }
 
     static List<String> claims(ReportAppendixRowDto source) {
+        return List.of(fact(source), recommendation(source));
+    }
+
+    /** The deterministic fact sentence for a source (grounding {@code kind = fact}). */
+    static String fact(ReportAppendixRowDto source) {
+        return claim(source);
+    }
+
+    /** The deterministic recommendation sentence for a source (grounding {@code kind = recommendation}). */
+    static String recommendation(ReportAppendixRowDto source) {
         String label = label(source);
         String measure = measure(source);
         String recommendation;
@@ -226,7 +236,17 @@ final class AiReportFacts {
                     ? label + "を担当チームで確認し、次の対応を記録してください。"
                     : "Review " + label + " with the responsible team and record the next action.";
         }
-        return List.of(claim(source), recommendation);
+        return recommendation;
+    }
+
+    /**
+     * The localized measure name for a source, derived from the report widget's measure enum (never
+     * tenant data), safe to send to the provider in the clear as selection context.
+     */
+    static String measureLabel(ReportAppendixRowDto source) {
+        String measure = measure(source);
+        Map<String, String> labels = japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
+        return labels.getOrDefault(measure, measure);
     }
 
     static String label(ReportAppendixRowDto source) {

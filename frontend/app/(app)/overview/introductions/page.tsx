@@ -6,8 +6,7 @@ import {
     getContactsFromCookie,
     getCurrentUserFromCookie,
     getIntroductionsResultFromCookie,
-    getIntroSuggestionsResultFromCookie,
-    getWarmPathsResultFromCookie,
+    getIntroOverviewResultFromCookie,
 } from '@/app/lib/api';
 import IntroductionsBoard from '@/app/components/introductions/IntroductionsBoard';
 
@@ -31,20 +30,19 @@ export default async function IntroductionsPage() {
         redirect('/auth/login');
     }
 
-    const [suggestionsResult, pathsResult, lineageResult, contacts] = await Promise.all([
-        getIntroSuggestionsResultFromCookie(cookie, 40),
-        getWarmPathsResultFromCookie(cookie, 20),
+    const [overviewResult, lineageResult, contacts] = await Promise.all([
+        getIntroOverviewResultFromCookie(cookie, 40, 20),
         getIntroductionsResultFromCookie(cookie, { page: 1, size: 50 }),
         getContactsFromCookie(cookie),
     ]);
 
     return (
         <IntroductionsBoard
-            key={`${suggestionsResult.ok ? 'q' : 'qx'}-${pathsResult.ok ? 'p' : 'px'}-${lineageResult.ok ? 'l' : 'lx'}`}
-            initialSuggestions={suggestionsResult.ok ? suggestionsResult.data : []}
-            suggestionsFailed={!suggestionsResult.ok}
-            initialPaths={pathsResult.ok ? pathsResult.data : []}
-            pathsFailed={!pathsResult.ok}
+            key={`${overviewResult.ok ? 'o' : 'ox'}-${lineageResult.ok ? 'l' : 'lx'}`}
+            initialSuggestions={overviewResult.ok ? overviewResult.data.suggestions : []}
+            suggestionsFailed={!overviewResult.ok}
+            initialPaths={overviewResult.ok ? overviewResult.data.paths : []}
+            pathsFailed={!overviewResult.ok}
             initialLineage={lineageResult.ok ? lineageResult.data.items : []}
             initialLineageTotal={lineageResult.ok ? lineageResult.data.total : 0}
             lineageFailed={!lineageResult.ok}
