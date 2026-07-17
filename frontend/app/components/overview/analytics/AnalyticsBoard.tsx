@@ -212,7 +212,7 @@ export default function AnalyticsBoard({
 
     useUrlSync({
         range: range === '90d' ? undefined : range,
-        currency: selectedCurrency ?? undefined,
+        currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,
         owner: ownerValues.length ? ownerValues.join(',') : undefined,
     });
 
