@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.delivery;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -139,7 +140,8 @@ public class CampaignDispatchService {
                 && !audienceEligibilityService.restrictedIds(workspaceId, List.of(personId)).isEmpty()) {
             return "restricted";
         }
-        if (!audienceEligibilityService.suppressedAddresses(workspaceId, channelToken, List.of(address)).isEmpty()) {
+        String normalizedAddress = address.trim().toLowerCase(Locale.ROOT);
+        if (!audienceEligibilityService.suppressedAddresses(workspaceId, channelToken, List.of(normalizedAddress)).isEmpty()) {
             return "suppressed";
         }
         if (personId == null || !audienceEligibilityService

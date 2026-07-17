@@ -163,9 +163,8 @@
     SELECT DISTINCT suppression.address FROM suppression_entry suppression
     WHERE suppression.workspace_id = #{workspaceId}
       AND suppression.channel = #{channel}
-      AND suppression.address IN
+      AND suppression.address COLLATE utf8mb4_bin IN
         <foreach item="address" collection="addresses" open="(" separator="," close=")">#{address}</foreach>
-        COLLATE utf8mb4_bin
   </select>
 
   <update id="clearMemberOwnership">

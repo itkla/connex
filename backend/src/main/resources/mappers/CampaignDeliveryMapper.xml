@@ -70,7 +70,7 @@
     WHERE d.workspace_id = #{workspaceId}
       AND d.person_id = #{personId}
       AND s.channel = #{channel}
-      AND d.send_id <> #{sendId}
+      AND d.send_id != #{sendId}
       AND d.status = 'dispatched'
       AND d.updated_at >= #{since}
   </select>
