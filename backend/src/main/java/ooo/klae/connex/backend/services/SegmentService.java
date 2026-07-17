@@ -52,47 +52,9 @@ public class SegmentService {
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
+    private final SegmentCatalog catalog;
 
-    private static final int DEFAULT_DAYS = 30;
-    private static final int MAX_DAYS = 3650;
     private static final int STRONG_EDGE = 2;
-    private static final int MAX_CONDITIONS = 32;
-    private static final int MAX_DEPTH = 4;
-
-    private static final Set<String> SUPPORTED_RECORD_TYPES = Set.of("company", "person", "deal");
-    private static final Set<String> PREDICATE_KEYS =
-        Set.of("warm_intro_available", "open_deal", "cooling", "no_activity");
-    private static final Set<String> STATUS_VALUES = Set.of("open", "won", "lost");
-
-    private enum Kind { STRING, NUMBER, ID, ENUM, TAG, DATE }
-
-    private static final Map<String, Map<String, Kind>> FIELDS = Map.of(
-        "company", Map.of(
-            "industry", Kind.STRING,
-            "name", Kind.STRING,
-            "tag", Kind.TAG),
-        "person", Map.of(
-            "name", Kind.STRING,
-            "title", Kind.STRING,
-            "email", Kind.STRING,
-            "company", Kind.ID,
-            "tag", Kind.TAG),
-        "deal", Map.of(
-            "name", Kind.STRING,
-            "value", Kind.NUMBER,
-            "stage", Kind.ID,
-            "owner", Kind.ID,
-            "status", Kind.ENUM,
-            "close_date", Kind.DATE,
-            "tag", Kind.TAG));
-
-    private static final Map<Kind, Set<String>> OPS = Map.of(
-        Kind.STRING, Set.of("equals", "contains", "starts_with", "is_set"),
-        Kind.NUMBER, Set.of("equals", "gt", "gte", "lt", "lte"),
-        Kind.ID, Set.of("is", "in"),
-        Kind.ENUM, Set.of("is"),
-        Kind.TAG, Set.of("has"),
-        Kind.DATE, Set.of("before", "after", "within_days", "is_set"));
 
     /**
      * Returns the ids of records matching the definition, scoped to the active session's workspace
@@ -128,8 +90,8 @@ public class SegmentService {
             return List.of();
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
         EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
@@ -137,8 +99,8 @@ public class SegmentService {
     }
 
     private int countConditions(SegmentDefinition group, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         int count = group.getConditions() == null ? 0 : group.getConditions().size();
         if (group.getGroups() != null) {
@@ -186,8 +148,8 @@ public class SegmentService {
             return;
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
         validateGroup(definition, type);
     }
@@ -213,11 +175,11 @@ public class SegmentService {
     private void validateCondition(SegmentCondition condition, String recordType) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(recordType)) {
+            if (!catalog.recordTypeSupportsPredicates(recordType)) {
                 throw new BadRequestException("Predicates are only available for company records");
             }
             String key = normalize(condition.getKey());
-            if (key == null || !PREDICATE_KEYS.contains(key)) {
+            if (key == null || !catalog.isPredicate(key)) {
                 throw new BadRequestException("Unknown predicate: " + condition.getKey());
             }
             return;
@@ -228,8 +190,8 @@ public class SegmentService {
             if (field == null || op == null) {
                 throw new BadRequestException("Field condition requires 'field' and 'op'");
             }
-            Kind kind = fieldKind(recordType, field);
-            if (!OPS.get(kind).contains(op)) {
+            SegmentCatalog.Kind kind = fieldKind(recordType, field);
+            if (!catalog.operatorsFor(kind).contains(op)) {
                 throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
             }
             bindValue(kind, op, condition, new HashMap<>());
@@ -244,8 +206,8 @@ public class SegmentService {
     }
 
     private Set<Integer> combineMembers(SegmentDefinition group, EvalContext ctx, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         String match = normalize(group.getMatch());
         boolean any = "any".equals(match);
@@ -297,7 +259,7 @@ public class SegmentService {
     private Set<Integer> evaluateCondition(SegmentCondition condition, EvalContext ctx) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(ctx.recordType())) {
+            if (!catalog.recordTypeSupportsPredicates(ctx.recordType())) {
                 throw new BadRequestException("Predicates are only available for company records");
             }
             return evaluatePredicate(condition, ctx.workspaceId(), ctx.userId());
@@ -310,13 +272,13 @@ public class SegmentService {
 
     private Set<Integer> evaluatePredicate(SegmentCondition condition, int workspaceId, int userId) {
         String key = normalize(condition.getKey());
-        if (key == null || !PREDICATE_KEYS.contains(key)) {
+        if (key == null || !catalog.isPredicate(key)) {
             throw new BadRequestException("Unknown predicate: " + condition.getKey());
         }
         return switch (key) {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
-                workspaceId, resolveDays(condition.getDays())));
+                workspaceId, catalog.clampDays(condition.getDays())));
             case "cooling" -> coolingCompanyIds(workspaceId);
             case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, userId);
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
@@ -329,8 +291,8 @@ public class SegmentService {
         if (field == null || op == null) {
             throw new BadRequestException("Field condition requires 'field' and 'op'");
         }
-        Kind kind = fieldKind(ctx.recordType(), field);
-        if (!OPS.get(kind).contains(op)) {
+        SegmentCatalog.Kind kind = fieldKind(ctx.recordType(), field);
+        if (!catalog.operatorsFor(kind).contains(op)) {
             throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
         }
         Map<String, Object> params = new HashMap<>();
@@ -353,7 +315,7 @@ public class SegmentService {
         };
     }
 
-    private void bindValue(Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
+    private void bindValue(SegmentCatalog.Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
         switch (kind) {
             case STRING -> {
                 switch (op) {
@@ -379,7 +341,7 @@ public class SegmentService {
                     case "within_days" -> {
                         LocalDate today = LocalDate.now();
                         params.put("dateFrom", today.toString());
-                        params.put("dateTo", today.plusDays(resolveDays(condition.getDays())).toString());
+                        params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
                     }
                     default -> { }
                 }
@@ -393,9 +355,8 @@ public class SegmentService {
         return complement;
     }
 
-    private static Kind fieldKind(String recordType, String field) {
-        Map<String, Kind> catalog = FIELDS.get(recordType);
-        Kind kind = catalog == null ? null : catalog.get(field);
+    private SegmentCatalog.Kind fieldKind(String recordType, String field) {
+        SegmentCatalog.Kind kind = catalog.fieldKind(recordType, field);
         if (kind == null) {
             throw new BadRequestException("Unknown field for " + recordType + ": " + field);
         }
@@ -440,19 +401,12 @@ public class SegmentService {
             workspaceId, userId, new ArrayList<>(warmlyConnected)));
     }
 
-    private static String requireSupported(String recordType) {
+    private String requireSupported(String recordType) {
         String type = normalize(recordType);
-        if (type == null || !SUPPORTED_RECORD_TYPES.contains(type)) {
+        if (type == null || !catalog.supportsRecordType(type)) {
             throw new BadRequestException("Smart segments are not available for record type: " + recordType);
         }
         return type;
-    }
-
-    private static int resolveDays(Integer days) {
-        if (days == null) {
-            return DEFAULT_DAYS;
-        }
-        return Math.min(Math.max(days, 1), MAX_DAYS);
     }
 
     private static String requireValue(SegmentCondition condition) {
@@ -495,9 +449,9 @@ public class SegmentService {
         return ids;
     }
 
-    private static String requireStatus(SegmentCondition condition) {
+    private String requireStatus(SegmentCondition condition) {
         String value = normalize(requireValue(condition));
-        if (!STATUS_VALUES.contains(value)) {
+        if (!catalog.statusValues().contains(value)) {
             throw new BadRequestException("Status must be one of open, won, lost");
         }
         return value;
