@@ -43,6 +43,7 @@ class RbacEnforcementArchTest {
         "CompanyService", "PersonService", "DealService", "ActivityService",
         "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
         "ProductService", "DealLineItemService",
+        "DocumentTemplateService", "DealDocumentService",
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
         "IntroductionService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
