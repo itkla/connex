@@ -52,6 +52,12 @@ type NarrativeState = 'idle' | 'generating' | 'error';
 
 const FIGURES_TIMEOUT_MS = 30_000;
 const NARRATIVE_TIMEOUT_MS = 90_000;
+const RECOVERY_POLL_INTERVAL_MS = 6_000;
+const RECOVERY_DEADLINE_MS = 60_000;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
@@ -114,18 +120,46 @@ export default function ReportDocumentBoard({
         ? activeSnapshot?.computedResult ?? null
         : state.status === 'ready' ? state.document : null;
 
+    /**
+     * Generates the narrative, then recovers from a request that was cut in transit. The server
+     * completes and caches the narrative regardless of whether the client still holds the
+     * connection, so a lost response is resolved by polling the provider-free cached mode rather
+     * than by surfacing an error the reader has to retry by hand.
+     */
     const runNarrative = useCallback(async (generationId: number) => {
         setNarrativeState('generating');
+        const apply = (document: ReportDocument) => {
+            setState({ status: 'ready', document });
+            setNarrativeState('idle');
+        };
         try {
             const full = await withTimeout(
                 generateReport(definition.id, generationInputRef.current, 'full'),
                 NARRATIVE_TIMEOUT_MS,
             );
             if (generationRef.current !== generationId) return;
-            setState({ status: 'ready', document: full });
-            setNarrativeState('idle');
+            apply(full);
+            return;
         } catch {
             if (generationRef.current !== generationId) return;
+        }
+        const deadline = Date.now() + RECOVERY_DEADLINE_MS;
+        while (Date.now() < deadline) {
+            await sleep(RECOVERY_POLL_INTERVAL_MS);
+            if (generationRef.current !== generationId) return;
+            try {
+                const recovered = await generateReport(
+                    definition.id, generationInputRef.current, 'cached');
+                if (generationRef.current !== generationId) return;
+                if (recovered.narrative.available) {
+                    apply(recovered);
+                    return;
+                }
+            } catch {
+                continue;
+            }
+        }
+        if (generationRef.current === generationId) {
             setNarrativeState('error');
         }
     }, [definition.id]);
