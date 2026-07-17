@@ -20,6 +20,7 @@ import java.util.Set;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -98,6 +99,7 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
      * @param deliveryProperties the delivery transport tuning
      * @param objectMapper the shared JSON mapper
      */
+    @Autowired
     public HttpEspDeliveryProvider(DeliveryProperties deliveryProperties, ObjectMapper objectMapper) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
