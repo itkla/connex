@@ -3290,6 +3290,22 @@ export function deleteDeliveryProvider(channel: string) {
     return deleteJson<void>(`/api/delivery/providers/${encodeURIComponent(channel)}`);
 }
 
+export function getConnectors(init: RequestInit = {}) {
+    return getJson<Types.ConnectorConfig[]>(`/api/delivery/connectors`, { cache: "no-store", ...init });
+}
+
+export function getConnectorsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ConnectorConfig>((init) => getConnectors(init), cookie);
+}
+
+export function saveConnector(payload: Types.ConnectorConfigPayload) {
+    return putJson<Types.ConnectorConfig>(`/api/delivery/connectors`, payload);
+}
+
+export function deleteConnector(connector: string) {
+    return deleteJson<void>(`/api/delivery/connectors/${encodeURIComponent(connector)}`);
+}
+
 export function getCampaigns(init: RequestInit = {}) {
     return getJson<Types.Campaign[]>(`/api/campaigns`, init);
 }
@@ -3400,6 +3416,22 @@ export function pauseCampaignSend(id: number, sendId: number) {
 
 export function cancelCampaignSend(id: number, sendId: number) {
     return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/cancel`, {});
+}
+
+export function getCampaignExports(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceExport[]>(`/api/campaigns/${id}/exports`, init);
+}
+
+export function getCampaignExportsFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
+}
+
+export function createCampaignExport(id: number, payload: Types.CampaignAudienceExportPayload) {
+    return postJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports`, payload);
+}
+
+export function getCampaignExport(id: number, exportId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports/${exportId}`, init);
 }
 
 /**

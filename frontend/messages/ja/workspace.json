@@ -449,7 +449,15 @@
     "loadFailed": "配信設定を読み込めませんでした。",
     "retry": "再試行",
     "forbiddenTitle": "配信設定へのアクセス権がありません",
-    "forbiddenBody": "ワークスペース設定へのアクセス権の付与を管理者に依頼してください。"
+    "forbiddenBody": "ワークスペース設定へのアクセス権の付与を管理者に依頼してください。",
+    "connectorsTitle": "コネクター",
+    "connectorsSubtitle": "確定したキャンペーンの対象者を外部リストへ送信します。このワークスペースのHTTPリストコネクターを設定します。",
+    "connectorsEnableTitle": "このコネクターを有効化",
+    "connectorsEnableDescription": "オフの場合、このコネクターへの対象者エクスポートは利用できません。",
+    "connector": "コネクター",
+    "connectorHttpList": "HTTPリスト",
+    "connectorEndpoint": "リストエンドポイント",
+    "connectorExternalListId": "外部リストID"
   },
   "WorkspaceSso": {
     "title": "シングルサインオン",

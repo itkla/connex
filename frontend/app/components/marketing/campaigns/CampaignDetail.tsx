@@ -28,10 +28,12 @@ import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/Segme
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
+import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
 import {
     type Campaign,
     type CampaignAudience,
     type CampaignAudienceEstimate,
+    type CampaignAudienceExport,
     type CampaignAudienceRecordType,
     type CampaignAudienceSnapshotSummary,
     type CampaignMessage,
@@ -67,6 +69,7 @@ export default function CampaignDetail({
     initialSnapshots,
     initialMessages,
     initialSends,
+    initialExports,
     canManage,
     canSend,
 }: {
@@ -75,6 +78,7 @@ export default function CampaignDetail({
     initialSnapshots: CampaignAudienceSnapshotSummary[];
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
+    initialExports: CampaignAudienceExport[];
     canManage: boolean;
     canSend: boolean;
 }) {
@@ -384,6 +388,13 @@ export default function CampaignDetail({
                     snapshots={snapshots}
                     canManage={canManage}
                     canSend={canSend}
+                />
+
+                <CampaignExportPanel
+                    campaignId={campaign.id}
+                    initialExports={initialExports}
+                    snapshots={snapshots}
+                    canManage={canManage}
                 />
             </div>
 

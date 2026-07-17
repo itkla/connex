@@ -189,5 +189,34 @@
         "cancelled": "配信をキャンセルしました",
         "deliveryUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。",
         "unknownMessage": "メッセージ"
+    },
+    "CampaignExports": {
+        "title": "エクスポート",
+        "subtitle": "確定した対象者スナップショットを外部コネクターへ送信します。",
+        "status": {
+            "draft": "下書き",
+            "running": "実行中",
+            "completed": "完了",
+            "failed": "失敗"
+        },
+        "snapshot": "スナップショット",
+        "snapshotPlaceholder": "スナップショットを選択",
+        "snapshotOption": "v{version}・{count}件対象",
+        "connector": "コネクター",
+        "connectorPlaceholder": "コネクターを選択",
+        "connectorHttpList": "HTTPリスト",
+        "eligible": "現時点の対象",
+        "eligibleIncluded": "{count}件が対象",
+        "eligibleExcluded": "{count}件を除外",
+        "createHint": "エクスポートを作成すると、スナップショットの対象者がコネクターへ送信されます。",
+        "create": "エクスポートを作成",
+        "creating": "作成中…",
+        "created": "エクスポートを作成しました",
+        "empty": "エクスポートはまだありません",
+        "externalListLabel": "リスト {list}",
+        "total": "合計",
+        "pushed": "送信済み",
+        "failed": "失敗",
+        "exportUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。"
     }
 }

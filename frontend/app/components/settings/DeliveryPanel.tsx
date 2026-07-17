@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import type {
+    ConnectorConfig,
+    ConnectorConfigPayload,
     DeliveryProvider,
     DeliveryProviderConfig,
     DeliveryProviderConfigPayload,
@@ -11,9 +13,12 @@ import type {
 } from "@/app/lib/types";
 import {
     ApiError,
+    deleteConnector,
     deleteDeliveryProvider,
+    getConnectors,
     getDeliveryProviders,
     issueDeliveryWebhookToken,
+    saveConnector,
     saveDeliveryProvider,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -37,6 +42,7 @@ import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 const CHANNEL = "email";
+const CONNECTOR = "http_list";
 
 type FormState = {
     provider: DeliveryProvider;
@@ -440,7 +446,270 @@ export default function DeliveryPanel() {
                     )}
                 </div>
             )}
+
+            <ConnectorsSection />
         </Rise>
+    );
+}
+
+type ConnectorFormState = {
+    connector: string;
+    endpoint: string;
+    externalListId: string;
+    apiKey: string;
+    enabled: boolean;
+};
+
+const EMPTY_CONNECTOR: ConnectorFormState = {
+    connector: CONNECTOR,
+    endpoint: "",
+    externalListId: "",
+    apiKey: "",
+    enabled: false,
+};
+
+function toConnectorForm(config: ConnectorConfig): ConnectorFormState {
+    return {
+        connector: config.connector,
+        endpoint: config.endpoint ?? "",
+        externalListId: config.externalListId ?? "",
+        apiKey: "",
+        enabled: config.enabled,
+    };
+}
+
+/**
+ * Workspace audience-export connector configuration. Mirrors the delivery provider block: an enable
+ * toggle gates the connector fields and a write-only credential is stored encrypted and never shown.
+ */
+function ConnectorsSection() {
+    const t = useTranslations("WorkspaceDelivery");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const { activeWorkspaceId } = useWorkspace();
+
+    const [form, setForm] = useState<ConnectorFormState>(EMPTY_CONNECTOR);
+    const [hasCredential, setHasCredential] = useState(false);
+    const [credentialLast4, setCredentialLast4] = useState<string | null>(null);
+    const [configured, setConfigured] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+    const [forbidden, setForbidden] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+
+    useEffect(() => {
+        if (activeWorkspaceId == null) return;
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setError(false);
+            setForbidden(false);
+            try {
+                const connectors = await getConnectors();
+                if (cancelled) return;
+                const config = connectors.find((entry) => entry.connector === CONNECTOR) ?? null;
+                if (config) {
+                    setForm(toConnectorForm(config));
+                    setHasCredential(config.hasCredential);
+                    setCredentialLast4(config.credentialLast4);
+                    setConfigured(true);
+                } else {
+                    setForm(EMPTY_CONNECTOR);
+                    setHasCredential(false);
+                    setCredentialLast4(null);
+                    setConfigured(false);
+                }
+            } catch (err) {
+                if (cancelled) return;
+                if (err instanceof ApiError && err.status === 403) {
+                    setForbidden(true);
+                } else {
+                    setError(true);
+                    toastError(t("loadFailed"));
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeWorkspaceId, t, reloadKey]);
+
+    const set = <K extends keyof ConnectorFormState>(key: K, value: ConnectorFormState[K]) =>
+        setForm((prev) => ({ ...prev, [key]: value }));
+
+    const applyConfig = (config: ConnectorConfig) => {
+        setForm(toConnectorForm(config));
+        setHasCredential(config.hasCredential);
+        setCredentialLast4(config.credentialLast4);
+        setConfigured(true);
+    };
+
+    const buildPayload = (): ConnectorConfigPayload => ({
+        connector: form.connector,
+        endpoint: form.endpoint.trim() || null,
+        externalListId: form.externalListId.trim() || null,
+        apiKey: form.apiKey ? form.apiKey : null,
+        enabled: form.enabled,
+    });
+
+    const save = async () => {
+        if (activeWorkspaceId == null) return;
+        setSaving(true);
+        try {
+            const saved = await saveConnector(buildPayload());
+            applyConfig(saved);
+            toastSuccess(t("saved"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const remove = async () => {
+        if (activeWorkspaceId == null) return;
+        setSaving(true);
+        try {
+            await deleteConnector(CONNECTOR);
+            setForm(EMPTY_CONNECTOR);
+            setHasCredential(false);
+            setCredentialLast4(null);
+            setConfigured(false);
+            toastSuccess(t("removed"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <SectionHeader title={t("connectorsTitle")} />
+                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("connectorsSubtitle")}</p>
+            </div>
+
+            {forbidden ? (
+                <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
+                    <p className="text-sm font-medium text-foreground">{t("forbiddenTitle")}</p>
+                    <p className="max-w-prose text-sm text-muted-foreground">{t("forbiddenBody")}</p>
+                </div>
+            ) : error ? (
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => setReloadKey((key) => key + 1)}>
+                        {t("retry")}
+                    </Button>
+                </div>
+            ) : (
+                <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-4">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">{t("connectorsEnableTitle")}</p>
+                            <p className="text-sm text-muted-foreground">{t("connectorsEnableDescription")}</p>
+                        </div>
+                        {loading ? (
+                            <Skeleton className="h-[18.4px] w-8 shrink-0 rounded-full" />
+                        ) : (
+                            <Switch
+                                checked={form.enabled}
+                                disabled={saving}
+                                onCheckedChange={(value) => set("enabled", value)}
+                                aria-label={t("connectorsEnableTitle")}
+                            />
+                        )}
+                    </div>
+
+                    {loading ? (
+                        <div className="space-y-3 pt-2">
+                            <Skeleton className="h-9 w-full rounded-md" />
+                            <Skeleton className="h-9 w-full rounded-md" />
+                            <Skeleton className="h-9 w-full rounded-md" />
+                        </div>
+                    ) : (
+                        <fieldset
+                            disabled={!form.enabled || saving}
+                            className="space-y-4 border-t border-border pt-4 transition-opacity disabled:opacity-50"
+                        >
+                            <div className="space-y-1.5">
+                                <Label htmlFor="connector-kind">{t("connector")}</Label>
+                                <Select value={form.connector} onValueChange={(value) => set("connector", value)}>
+                                    <SelectTrigger id="connector-kind" className="w-full">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="http_list">{t("connectorHttpList")}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="connector-endpoint">{t("connectorEndpoint")}</Label>
+                                <Input
+                                    id="connector-endpoint"
+                                    value={form.endpoint}
+                                    placeholder="https://api.lists.example.com/v1/lists"
+                                    onChange={(e) => set("endpoint", e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="connector-list-id">{t("connectorExternalListId")}</Label>
+                                <Input
+                                    id="connector-list-id"
+                                    value={form.externalListId}
+                                    placeholder="list_123"
+                                    onChange={(e) => set("externalListId", e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="connector-api-key">{t("apiKey")}</Label>
+                                <Input
+                                    id="connector-api-key"
+                                    type="password"
+                                    autoComplete="new-password"
+                                    value={form.apiKey}
+                                    placeholder={
+                                        hasCredential && credentialLast4
+                                            ? t("apiKeyConfigured", { last4: credentialLast4 })
+                                            : ""
+                                    }
+                                    onChange={(e) => set("apiKey", e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">{t("apiKeyHint")}</p>
+                            </div>
+                        </fieldset>
+                    )}
+
+                    {!loading && (
+                        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+                            <Button onClick={save} disabled={saving}>
+                                {t("save")}
+                            </Button>
+                            {configured && (
+                                <Button
+                                    variant="ghost"
+                                    className="ml-auto text-destructive hover:text-destructive"
+                                    onClick={remove}
+                                    disabled={saving}
+                                >
+                                    {t("remove")}
+                                </Button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 

@@ -189,5 +189,34 @@
         "cancelled": "Send cancelled",
         "deliveryUnavailable": "Campaign delivery is not enabled on this instance.",
         "unknownMessage": "Message"
+    },
+    "CampaignExports": {
+        "title": "Exports",
+        "subtitle": "Push a frozen audience snapshot to an external connector.",
+        "status": {
+            "draft": "Draft",
+            "running": "Running",
+            "completed": "Completed",
+            "failed": "Failed"
+        },
+        "snapshot": "Snapshot",
+        "snapshotPlaceholder": "Pick a snapshot",
+        "snapshotOption": "v{version} · {count} included",
+        "connector": "Connector",
+        "connectorPlaceholder": "Pick a connector",
+        "connectorHttpList": "HTTP list",
+        "eligible": "Eligible now",
+        "eligibleIncluded": "{count} included",
+        "eligibleExcluded": "{count} excluded",
+        "createHint": "Creating an export pushes the snapshot's members to the connector.",
+        "create": "Create export",
+        "creating": "Creating…",
+        "created": "Export created",
+        "empty": "No exports yet",
+        "externalListLabel": "list {list}",
+        "total": "Total",
+        "pushed": "Pushed",
+        "failed": "Failed",
+        "exportUnavailable": "Campaign delivery is not enabled on this instance."
     }
 }

@@ -1242,6 +1242,29 @@ export type CampaignSendPayload = {
     scheduledAt?: string | null;
 };
 
+export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
+
+/** A campaign audience export bound to a frozen snapshot and an external connector. */
+export type CampaignAudienceExport = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    connector: string;
+    externalListId: string | null;
+    status: CampaignExportStatus;
+    totalMembers: number;
+    pushedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignAudienceExportPayload = {
+    snapshotVersion: number;
+    connector: string;
+};
+
 /** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
 export type DeliveryUnsubscribeInfo = {
     channel: string;
@@ -2257,6 +2280,24 @@ export type DeliveryWebhookToken = {
     token: string;
     secret: string;
     signatureHeader: string;
+};
+
+export type ConnectorConfig = {
+    connector: string;
+    endpoint: string | null;
+    externalListId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type ConnectorConfigPayload = {
+    connector: string;
+    endpoint?: string | null;
+    externalListId?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
 };
 
 export type InstanceCapabilities = {

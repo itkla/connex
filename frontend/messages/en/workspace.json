@@ -449,7 +449,15 @@
     "loadFailed": "Your delivery settings couldn't be loaded.",
     "retry": "Try again",
     "forbiddenTitle": "You don't have access to delivery settings",
-    "forbiddenBody": "Ask a workspace administrator to grant you workspace settings access."
+    "forbiddenBody": "Ask a workspace administrator to grant you workspace settings access.",
+    "connectorsTitle": "Connectors",
+    "connectorsSubtitle": "Push frozen campaign audiences to an external list. Configure the HTTP list connector for this workspace.",
+    "connectorsEnableTitle": "Enable this connector",
+    "connectorsEnableDescription": "When off, campaign audience exports to this connector are unavailable.",
+    "connector": "Connector",
+    "connectorHttpList": "HTTP list",
+    "connectorEndpoint": "List endpoint",
+    "connectorExternalListId": "External list ID"
   },
   "WorkspaceSso": {
     "title": "Single sign-on",
