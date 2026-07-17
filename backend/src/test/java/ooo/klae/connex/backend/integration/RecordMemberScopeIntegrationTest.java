@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -99,6 +101,59 @@ class RecordMemberScopeIntegrationTest {
         assertEquals(2, facetCount(personFacets.path("owners"), fixture.firstMember().getId()));
         assertEquals(1, facetCount(companyFacets.path("owners"), "__empty__"));
         assertEquals(1, facetCount(personFacets.path("owners"), "__empty__"));
+    }
+
+    @Test
+    void exportEndpointsHonorMemberScope() throws Exception {
+        Fixture fixture = fixture();
+
+        assertEquals(5, exportRowCount(fixture, "/api/exports/companies"));
+        assertEquals(5, exportRowCount(fixture, "/api/exports/persons"));
+
+        assertEquals(1, exportRowCount(fixture, "/api/exports/companies", "scope", "me"));
+        assertEquals(1, exportRowCount(fixture, "/api/exports/persons", "scope", "me"));
+        assertEquals(1, exportRowCount(fixture, "/api/exports/companies", "scope", "unassigned"));
+        assertEquals(1, exportRowCount(fixture, "/api/exports/persons", "scope", "unassigned"));
+
+        assertEquals(2, exportRowCount(fixture, "/api/exports/companies",
+            "scope", "members", "memberIds", Integer.toString(fixture.firstMember().getId())));
+        assertEquals(2, exportRowCount(fixture, "/api/exports/persons",
+            "scope", "members", "memberIds", Integer.toString(fixture.firstMember().getId())));
+
+        String mineCompanies = export(fixture, "/api/exports/companies", "scope", "me");
+        assertTrue(mineCompanies.contains("Scope Company Mine"), "me export includes the caller-owned company");
+        assertFalse(mineCompanies.contains("Scope Company Second"), "me export excludes other owners");
+    }
+
+    private int exportRowCount(Fixture fixture, String path, String... parameters) throws Exception {
+        String body = export(fixture, path, parameters);
+        int rows = 0;
+        boolean firstLine = true;
+        for (String line : body.split("\r\n")) {
+            if (line.isEmpty()) {
+                continue;
+            }
+            if (firstLine) {
+                firstLine = false;
+                continue;
+            }
+            rows++;
+        }
+        return rows;
+    }
+
+    private String export(Fixture fixture, String path, String... parameters) throws Exception {
+        MockHttpServletRequestBuilder request = get(path)
+            .header("X-Workspace-Id", fixture.workspace().getId())
+            .session(fixture.session());
+        for (int index = 0; index < parameters.length; index += 2) {
+            request.param(parameters[index], parameters[index + 1]);
+        }
+        return mockMvc.perform(request)
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
     }
 
     private void assertScopedTotals(Fixture fixture, String scope, List<Integer> memberIds,

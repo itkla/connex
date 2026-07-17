@@ -439,9 +439,10 @@ class PersonServiceTest extends AbstractServiceTest {
             7, "Security", null, null, false, MemberScope.allTeam())).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
-            () -> service.getMatchingPersonIds("Security", null, null, false));
+            () -> service.getMatchingPersonIds("Security", null, null, false, MemberScope.allTeam()));
 
-        verify(mapper, never()).getPersonIdsFiltered(7, "Security", null, null, false, 1000);
+        verify(mapper, never()).getPersonIdsFiltered(
+            7, "Security", null, null, false, MemberScope.allTeam(), 1000);
     }
 
     @Test

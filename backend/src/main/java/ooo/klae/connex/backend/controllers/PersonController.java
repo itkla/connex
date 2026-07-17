@@ -159,16 +159,20 @@ public class PersonController {
         @RequestParam(required = false) String q,
         @RequestParam(required = false) List<String> companies,
         @RequestParam(required = false) List<String> titles,
-        @RequestParam(defaultValue = "false") boolean noCompany
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         if (query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
-            && !noCompany) {
+            && !noCompany
+            && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
-        return personService.getMatchingPersonIds(query, companies, titles, noCompany);
+        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope);
     }
 
     /**

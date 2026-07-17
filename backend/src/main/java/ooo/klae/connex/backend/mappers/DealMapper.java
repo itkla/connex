@@ -90,6 +90,19 @@ public interface DealMapper {
         @Param("riskIds") List<Integer> riskIds,
         @Param("memberScope") MemberScope memberScope
     );
+    /** Full filtered+scoped deal set for CSV export, mirroring the visible list without pagination. */
+    List<Deal> getDealsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
+    );
     List<DealCurrencyMetricsDto> dealMetricsFiltered(
         @Param("workspaceId") int workspaceId,
         @Param("query") String query,

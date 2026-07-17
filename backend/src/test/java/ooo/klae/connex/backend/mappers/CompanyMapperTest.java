@@ -263,7 +263,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
         assertEquals(List.of(finance.getId(), noIndustry.getId()),
             companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
-                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100, 0));
+                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), 100, 0));
         assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
             List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope()));
         assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
@@ -288,7 +288,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         long count = companyMapper.countCompanies(
             pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope());
         List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100, 0);
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), 100, 0);
 
         assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);

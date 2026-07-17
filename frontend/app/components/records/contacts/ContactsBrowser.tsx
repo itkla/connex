@@ -22,7 +22,7 @@ import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -36,7 +36,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
@@ -68,6 +68,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const reduce = useReducedMotion() ?? false;
 
     const {
@@ -81,16 +82,19 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
 
+    const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo(() => {
         const company = filterState.company ?? [];
         const titles = filterState.title ?? [];
         const companies = company.filter((k) => k !== FILTER_EMPTY);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean } = {};
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
+        if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
+        if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         return params;
-    }, [filterState]);
+    }, [filterState, ownerScope]);
 
     const {
         items: contacts,
@@ -176,10 +180,40 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         return out;
     }, [personFacets, t]);
 
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const ownerCounts = useMemo(
+        () => new Map(personFacets?.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [personFacets],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        setFilterState({ ...filterState, owner: values });
+    }, [filterState, setFilterState]);
+
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
     ];
 
@@ -195,10 +229,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
-    const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
-    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
-    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const selectAllMatching = useCallback(async () => {
@@ -589,7 +619,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                 newLabel={t('new')}
                                 newAriaLabel={t('newAria')}
                                 onImported={refresh}
-                                contactsFilter={{ ...filterParams, q: query || undefined }}
+                                onExport={() => exportContactsCsv({ ...filterParams, q: query.trim() || undefined })}
                             />
                         </div>
                     </div>
@@ -643,6 +673,12 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={filterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Contact>
                             facets={facets}
                             filterState={filterState}

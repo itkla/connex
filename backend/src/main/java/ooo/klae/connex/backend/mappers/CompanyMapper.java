@@ -65,10 +65,15 @@ public interface CompanyMapper {
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("limit") int limit);
-    /** All-team ids using the browser's non-owner filters; backs "select all matching". */
+    /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("limit") int limit, @Param("offset") int offset);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit, @Param("offset") int offset);
+    /** CSV export using the browser filters and member scope, mirroring the visible list. */
+    List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope);
     List<String> distinctIndustries(int workspaceId);
     boolean hasCompanyWithoutIndustry(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);

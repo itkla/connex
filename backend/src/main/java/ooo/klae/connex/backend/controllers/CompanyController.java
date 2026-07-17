@@ -150,16 +150,20 @@ public class CompanyController {
         @RequestParam(required = false) String q,
         @RequestParam(required = false) List<String> industry,
         @RequestParam(defaultValue = "false") boolean noIndustry,
-        @RequestParam(required = false) List<Integer> ids
+        @RequestParam(required = false) List<Integer> ids,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         if (query == null
             && (industry == null || industry.isEmpty())
             && !noIndustry
-            && (ids == null || ids.isEmpty())) {
+            && (ids == null || ids.isEmpty())
+            && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
-        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids);
+        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids, memberScope);
     }
 
     /**

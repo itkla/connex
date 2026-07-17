@@ -58,13 +58,13 @@ import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -81,10 +81,7 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/deals")
 @RequiredArgsConstructor
 public class DealController {
-    private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
-    private static final Set<String> DEAL_RISKS = Set.of("high", "medium", "low", "none");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
-    private static final int MAX_FILTER_VALUES = 100;
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
@@ -151,7 +148,7 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
-            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             memberScope, bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
@@ -178,7 +175,7 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
-            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(scope, memberIds));
     }
 
@@ -317,30 +314,11 @@ public class DealController {
     }
 
     private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        if (!allowed.contains(value)) {
-            throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
-        }
-        return value;
+        return DealFilterNormalizer.validateOptionalValue(value, allowed, parameter);
     }
 
     private static List<Integer> normalizeIds(List<Integer> values, String parameter) {
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
-        if (values.size() > MAX_FILTER_VALUES) {
-            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
-        }
-        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
-        for (Integer value : values) {
-            if (value == null || value < 1) {
-                throw new BadRequestException(parameter + " values must be positive integers");
-            }
-            normalized.add(value);
-        }
-        return List.copyOf(normalized);
+        return DealFilterNormalizer.normalizeIds(values, parameter);
     }
 
     private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
@@ -348,37 +326,11 @@ public class DealController {
     }
 
     private static List<String> normalizeStatuses(List<String> values) {
-        List<String> normalized = normalizeValues(values, DEAL_STATUSES, "status");
-        if (normalized == null) {
-            return null;
-        }
-        LinkedHashSet<String> expanded = new LinkedHashSet<>();
-        for (String value : normalized) {
-            if ("closed".equals(value)) {
-                expanded.add("won");
-                expanded.add("lost");
-            } else {
-                expanded.add(value);
-            }
-        }
-        return List.copyOf(expanded);
+        return DealFilterNormalizer.normalizeStatuses(values);
     }
 
     private static List<String> normalizeValues(List<String> values, Set<String> allowed, String parameter) {
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
-        if (values.size() > MAX_FILTER_VALUES) {
-            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
-        }
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        for (String value : values) {
-            if (value == null || value.isBlank()) {
-                throw new BadRequestException(parameter + " values must not be blank");
-            }
-            normalized.add(validateOptionalValue(value, allowed, parameter));
-        }
-        return List.copyOf(normalized);
+        return DealFilterNormalizer.normalizeValues(values, allowed, parameter);
     }
 
     private static int validatePositiveDays(int days) {
