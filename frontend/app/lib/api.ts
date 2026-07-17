@@ -3267,6 +3267,29 @@ export function sendWorkspaceMailTest(workspaceId: number) {
     return postJson<Types.MailTestResult>(`/api/workspaces/${workspaceId}/mail-config/test`, {});
 }
 
+export function getDeliveryProviders(init: RequestInit = {}) {
+    return getJson<Types.DeliveryProviderConfig[]>(`/api/delivery/providers`, { cache: "no-store", ...init });
+}
+
+export function getDeliveryProvidersFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DeliveryProviderConfig>((init) => getDeliveryProviders(init), cookie);
+}
+
+export function saveDeliveryProvider(payload: Types.DeliveryProviderConfigPayload) {
+    return putJson<Types.DeliveryProviderConfig>(`/api/delivery/providers`, payload);
+}
+
+export function issueDeliveryWebhookToken(channel: string) {
+    return postJson<Types.DeliveryWebhookToken>(
+        `/api/delivery/providers/${encodeURIComponent(channel)}/webhook-token`,
+        {},
+    );
+}
+
+export function deleteDeliveryProvider(channel: string) {
+    return deleteJson<void>(`/api/delivery/providers/${encodeURIComponent(channel)}`);
+}
+
 export function getCampaigns(init: RequestInit = {}) {
     return getJson<Types.Campaign[]>(`/api/campaigns`, init);
 }

@@ -13,6 +13,7 @@ const TABS = [
     { key: "tabRules", href: "/settings/rules" },
     { key: "tabCustomFields", href: "/settings/custom-fields" },
     { key: "tabEmail", href: "/settings/email" },
+    { key: "tabDelivery", href: "/settings/delivery" },
 ] as const;
 
 export default function SettingsTabs({ mailManaged = false }: { mailManaged?: boolean }) {

@@ -2228,6 +2228,37 @@ export type MailTestResult = {
     error: string | null;
 };
 
+export type DeliveryProvider = "smtp" | "http_esp";
+
+export type DeliveryProviderConfig = {
+    channel: string;
+    provider: DeliveryProvider;
+    endpoint: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    webhookConfigured: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type DeliveryProviderConfigPayload = {
+    channel: string;
+    provider: string;
+    endpoint?: string | null;
+    fromAddress?: string | null;
+    fromName?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
+export type DeliveryWebhookToken = {
+    token: string;
+    secret: string;
+    signatureHeader: string;
+};
+
 export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
