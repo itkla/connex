@@ -417,19 +417,19 @@ public class DealService {
         return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
-        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency);
+        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency, memberScope);
         List<DealRevenueMonthBoundary> boundaries = revenueMonthBoundaries(range, zone);
         List<DealMonthDecimalTotalDto> timezoneBucketed = boundaries.isEmpty()
             ? List.of()
-            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries);
+            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries, memberScope);
         return new DealRevenueSeriesDto(
             revenueClosedByMonth(
-                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency),
+                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency, memberScope),
                 timezoneBucketed),
-            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency))
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope))
         );
     }
 
@@ -483,21 +483,21 @@ public class DealService {
         return List.copyOf(boundaries);
     }
 
-    public List<DealStageDistributionDto> getStageDistribution(String currency) {
-        return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency);
+    public List<DealStageDistributionDto> getStageDistribution(String currency, MemberScope memberScope) {
+        return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency, memberScope);
     }
 
-    public DealKpisDto getDealKpis(String currency, int days) {
+    public DealKpisDto getDealKpis(String currency, int days, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspaceId, currency, days);
-        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspaceId, currency, days, days * 2);
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspaceId, currency, days, memberScope);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspaceId, currency, days, days * 2, memberScope);
         double span = days / (double) KPI_SERIES_BUCKETS;
 
         List<Double> wonSeries = emptyKpiSeries();
         List<Double> winRateSeries = emptyKpiSeries();
         List<Double> avgCycleSeries = emptyKpiSeries();
         for (DealKpiClosedBucketDto bucket :
-                dealMapper.dealKpiClosedSeries(workspaceId, currency, days, span)) {
+                dealMapper.dealKpiClosedSeries(workspaceId, currency, days, span, memberScope)) {
             int index = bucket.bucketIndex();
             wonSeries.set(index, bucket.wonValue());
             long closedCount = bucket.wonCount() + bucket.lostCount();
@@ -507,7 +507,7 @@ public class DealService {
 
         List<Double> newPipelineSeries = emptyKpiSeries();
         for (DealBucketValueDto bucket :
-                dealMapper.dealKpiNewPipelineSeries(workspaceId, currency, days, span)) {
+                dealMapper.dealKpiNewPipelineSeries(workspaceId, currency, days, span, memberScope)) {
             newPipelineSeries.set(bucket.bucketIndex(), bucket.value());
         }
 
@@ -532,20 +532,20 @@ public class DealService {
         );
     }
 
-    public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days) {
-        return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days);
+    public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days, MemberScope memberScope) {
+        return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days, memberScope);
     }
 
-    public List<DealAgingDto> getDealAging(String currency) {
-        return dealMapper.dealAging(workspaceService.getCurrentWorkspaceId(), currency);
+    public List<DealAgingDto> getDealAging(String currency, MemberScope memberScope) {
+        return dealMapper.dealAging(workspaceService.getCurrentWorkspaceId(), currency, memberScope);
     }
 
-    public DealTopDto getTopDeals(String currency) {
+    public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency).stream()
+        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency, memberScope).stream()
             .map(deal -> toDealSummary(workspaceId, deal))
             .toList();
-        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency).stream()
+        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency, memberScope).stream()
             .map(deal -> toDealSummary(workspaceId, deal))
             .toList();
         return new DealTopDto(topOpen, topWon);

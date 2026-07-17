@@ -133,7 +133,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage foreignStage = newStage(foreignPipeline, 0);
         Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
 
-        List<Integer> candidates = dealMapper.getRiskCandidateIds(target.getId(), 2);
+        List<Integer> candidates = dealMapper.getRiskCandidateIds(target.getId(), MemberScope.allTeam(), 2);
 
         assertEquals(2, candidates.size());
         assertTrue(candidates.contains(first.getId()) || candidates.contains(second.getId()));
@@ -382,20 +382,20 @@ class DealMapperTest extends AbstractMapperTest {
         updateChartDeal(newDeal(secondPipeline, secondStage, company),
             400.0, 0.0, "USD", null, "2026-03-15", null);
 
-        DealRevenueRangeDto closedRange = dealMapper.revenueClosedEventRange(workspace.getId(), null);
+        DealRevenueRangeDto closedRange = dealMapper.revenueClosedEventRange(workspace.getId(), null, MemberScope.allTeam());
         assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.earliest());
         assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.latest());
         List<DealRevenueMonthBoundary> mayBoundary = List.of(new DealRevenueMonthBoundary(
             2026, 5, LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.of(2026, 6, 1, 0, 0)));
         assertEquals(Map.of("2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, mayBoundary)));
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, mayBoundary, MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 430.0),
-            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), null)));
+            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), null, MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
-            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null)));
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null, MemberScope.allTeam())));
 
         List<DealStageDistributionDto> distribution =
-            dealMapper.stageDistribution(workspace.getId(), null);
+            dealMapper.stageDistribution(workspace.getId(), null, MemberScope.allTeam());
         DealStageDistributionDto first = distributionFor(
             distribution, firstStage.getId(), firstPipeline.getId());
         assertEquals(1, first.openCount());
@@ -409,15 +409,15 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, second.closedCount());
         assertEquals(250.0, second.closedValue(), 0.0001);
 
-        assertEquals(closedRange, dealMapper.revenueClosedEventRange(workspace.getId(), "JPY"));
+        assertEquals(closedRange, dealMapper.revenueClosedEventRange(workspace.getId(), "JPY", MemberScope.allTeam()));
         assertEquals(Map.of("2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), "JPY", mayBoundary)));
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), "JPY", mayBoundary, MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 180.0),
-            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), "JPY")));
+            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), "JPY", MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
-            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY")));
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY", MemberScope.allTeam())));
         List<DealStageDistributionDto> filtered =
-            dealMapper.stageDistribution(workspace.getId(), "JPY");
+            dealMapper.stageDistribution(workspace.getId(), "JPY", MemberScope.allTeam());
         assertEquals(1, filtered.size());
         assertEquals(firstStage.getId(), filtered.get(0).stageId());
         assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
@@ -461,8 +461,8 @@ class DealMapperTest extends AbstractMapperTest {
         analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign Previous",
             4000.0, 3000.0, "JPY", true, 50, 40, 1);
 
-        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
-        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30, MemberScope.allTeam());
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60, MemberScope.allTeam());
 
         assertEquals(200.0, current.wonRevenue(), 0.0001);
         assertEquals(410.0, current.newPipeline(), 0.0001);
@@ -499,8 +499,8 @@ class DealMapperTest extends AbstractMapperTest {
         setAnalyticsBoundary(previousLowerBoundary, 60, 1);
         setAnalyticsBoundary(beforePreviousBoundary, 60, -1);
 
-        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
-        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30, MemberScope.allTeam());
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60, MemberScope.allTeam());
 
         assertEquals(10.0, current.wonRevenue(), 0.0001);
         assertEquals(10.0, current.newPipeline(), 0.0001);
@@ -527,10 +527,10 @@ class DealMapperTest extends AbstractMapperTest {
         analyticsDeal(workspace, pipeline, stage, "Previous Invalid", 100.0, 50.0,
             "JPY", true, 35, 40, 1);
 
-        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
-        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30, MemberScope.allTeam());
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60, MemberScope.allTeam());
         Map<Integer, DealKpiClosedBucketDto> series = dealMapper
-            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5, MemberScope.allTeam()).stream()
             .collect(Collectors.toMap(DealKpiClosedBucketDto::bucketIndex, value -> value));
 
         assertEquals(8.0, current.avgCycleDays(), 0.0001);
@@ -562,10 +562,10 @@ class DealMapperTest extends AbstractMapperTest {
             "JPY", true, 11, 1, 1);
 
         Map<Integer, DealKpiClosedBucketDto> closed = dealMapper
-            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5, MemberScope.allTeam()).stream()
             .collect(Collectors.toMap(DealKpiClosedBucketDto::bucketIndex, value -> value));
         Map<Integer, Double> created = dealMapper
-            .dealKpiNewPipelineSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .dealKpiNewPipelineSeries(workspace.getId(), "JPY", 30, 2.5, MemberScope.allTeam()).stream()
             .collect(Collectors.toMap(DealBucketValueDto::bucketIndex, DealBucketValueDto::value));
 
         assertEquals(3, closed.size());
@@ -617,7 +617,7 @@ class DealMapperTest extends AbstractMapperTest {
             "JPY", null, 1, null, 1);
 
         List<DealPipelineValueDto> values =
-            dealMapper.dealPipelineValue(workspace.getId(), "JPY", 30);
+            dealMapper.dealPipelineValue(workspace.getId(), "JPY", 30, MemberScope.allTeam());
         DealPipelineValueDto first = pipelineValueFor(values, firstPipeline.getId());
         DealPipelineValueDto second = pipelineValueFor(values, secondPipeline.getId());
 
@@ -652,7 +652,7 @@ class DealMapperTest extends AbstractMapperTest {
         analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 10.0, 0.0,
             "JPY", null, 61, null, 61);
 
-        List<DealAgingDto> aging = dealMapper.dealAging(workspace.getId(), "JPY");
+        List<DealAgingDto> aging = dealMapper.dealAging(workspace.getId(), "JPY", MemberScope.allTeam());
 
         assertEquals(1, aging.size());
         assertEquals(stage.getId(), aging.get(0).stageId());
@@ -742,9 +742,57 @@ class DealMapperTest extends AbstractMapperTest {
             "JPY", null, 5, null, 1);
 
         assertEquals(List.of(open500.getId(), open400.getId(), open300.getId()),
-            dealMapper.topOpenDeals(workspace.getId(), "JPY").stream().map(Deal::getId).toList());
+            dealMapper.topOpenDeals(workspace.getId(), "JPY", MemberScope.allTeam()).stream().map(Deal::getId).toList());
         assertEquals(List.of(won50.getId(), won40.getId(), won30.getId()),
-            dealMapper.topWonDeals(workspace.getId(), "JPY").stream().map(Deal::getId).toList());
+            dealMapper.topWonDeals(workspace.getId(), "JPY", MemberScope.allTeam()).stream().map(Deal::getId).toList());
+    }
+
+    @Test
+    void dealAnalyticsHonorMemberScopeAttribution() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        Deal mine = analyticsDeal(workspace, pipeline, stage, "Mine 500", 500.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal theirs = analyticsDeal(workspace, pipeline, stage, "Theirs 400", 400.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal nobody = analyticsDeal(workspace, pipeline, stage, "Nobody 300", 300.0, 0.0,
+            "JPY", null, 1, null, 1);
+        jdbcTemplate.update("UPDATE deal SET owner_id = ? WHERE id = ?", 7, mine.getId());
+        jdbcTemplate.update("UPDATE deal SET owner_id = ? WHERE id = ?", 9, theirs.getId());
+        jdbcTemplate.update("UPDATE deal SET owner_id = NULL WHERE id = ?", nobody.getId());
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        Deal foreign = analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 999.0, 0.0,
+            "JPY", null, 1, null, 1);
+        jdbcTemplate.update("UPDATE deal SET owner_id = ? WHERE id = ?", 7, foreign.getId());
+
+        MemberScope me = MemberScope.fromRequest("me", null, 7);
+        MemberScope members = MemberScope.fromRequest("members", List.of(7, 9), 7);
+        MemberScope unassigned = MemberScope.fromRequest("unassigned", null, 7);
+
+        assertEquals(3, dealMapper.dealAging(workspace.getId(), "JPY", MemberScope.allTeam()).get(0).fresh());
+        assertEquals(1, dealMapper.dealAging(workspace.getId(), "JPY", me).get(0).fresh());
+        assertEquals(2, dealMapper.dealAging(workspace.getId(), "JPY", members).get(0).fresh());
+        assertEquals(1, dealMapper.dealAging(workspace.getId(), "JPY", unassigned).get(0).fresh());
+
+        assertEquals(3, dealMapper.stageDistribution(workspace.getId(), "JPY", MemberScope.allTeam()).get(0).openCount());
+        assertEquals(1, dealMapper.stageDistribution(workspace.getId(), "JPY", me).get(0).openCount());
+        assertEquals(2, dealMapper.stageDistribution(workspace.getId(), "JPY", members).get(0).openCount());
+        assertEquals(1, dealMapper.stageDistribution(workspace.getId(), "JPY", unassigned).get(0).openCount());
+
+        assertEquals(List.of(mine.getId(), theirs.getId(), nobody.getId()),
+            topOpenIds(workspace, MemberScope.allTeam()));
+        assertEquals(List.of(mine.getId()), topOpenIds(workspace, me));
+        assertEquals(List.of(mine.getId(), theirs.getId()), topOpenIds(workspace, members));
+        assertEquals(List.of(nobody.getId()), topOpenIds(workspace, unassigned));
+    }
+
+    private List<Integer> topOpenIds(Workspace ws, MemberScope scope) {
+        return dealMapper.topOpenDeals(ws.getId(), "JPY", scope).stream().map(Deal::getId).toList();
     }
 
     @Test

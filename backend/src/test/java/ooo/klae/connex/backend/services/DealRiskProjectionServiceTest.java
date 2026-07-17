@@ -7,6 +7,7 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -24,7 +25,7 @@ class DealRiskProjectionServiceTest {
     void analyticsCapsCandidateHydrationAndReportsTruncation() {
         DealMapper dealMapper = mock(DealMapper.class);
         List<Integer> candidates = IntStream.rangeClosed(1, 1_001).boxed().toList();
-        when(dealMapper.getRiskCandidateIds(7, 1_001)).thenReturn(candidates);
+        when(dealMapper.getRiskCandidateIds(7, MemberScope.allTeam(), 1_001)).thenReturn(candidates);
         when(dealMapper.getByIds(
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000)))
             .thenReturn(List.of());
@@ -36,11 +37,11 @@ class DealRiskProjectionServiceTest {
             mock(ScoringService.class),
             Clock.systemUTC());
 
-        var analytics = service.analytics(7);
+        var analytics = service.analytics(7, MemberScope.allTeam());
 
         assertTrue(analytics.truncated());
         assertTrue(analytics.currencies().isEmpty());
-        verify(dealMapper).getRiskCandidateIds(7, 1_001);
+        verify(dealMapper).getRiskCandidateIds(7, MemberScope.allTeam(), 1_001);
         verify(dealMapper).getByIds(
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000));
     }
@@ -49,7 +50,7 @@ class DealRiskProjectionServiceTest {
     void dashboardCapsCandidateHydrationAndReportsTruncation() {
         DealMapper dealMapper = mock(DealMapper.class);
         List<Integer> candidates = IntStream.rangeClosed(1, 1_001).boxed().toList();
-        when(dealMapper.getRiskCandidateIds(7, 1_001)).thenReturn(candidates);
+        when(dealMapper.getRiskCandidateIds(7, MemberScope.allTeam(), 1_001)).thenReturn(candidates);
         when(dealMapper.getByIds(
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000)))
             .thenReturn(List.of());
@@ -65,7 +66,7 @@ class DealRiskProjectionServiceTest {
 
         assertTrue(dashboard.truncated());
         assertTrue(dashboard.items().isEmpty());
-        verify(dealMapper).getRiskCandidateIds(7, 1_001);
+        verify(dealMapper).getRiskCandidateIds(7, MemberScope.allTeam(), 1_001);
         verify(dealMapper).getByIds(
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000));
     }

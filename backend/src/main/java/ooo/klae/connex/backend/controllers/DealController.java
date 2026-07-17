@@ -220,10 +220,13 @@ public class DealController {
     public DealRevenueSeriesDto getRevenueTimeseries(
         @RequestParam(required = false) String currency,
         @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(required = false) String tzOffset,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getRevenueTimeseries(normalizedCurrency, resolveTimezone(timezone, tzOffset));
+        return dealService.getRevenueTimeseries(
+            normalizedCurrency, resolveTimezone(timezone, tzOffset), resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -231,10 +234,12 @@ public class DealController {
      */
     @GetMapping("/stage-distribution")
     public List<DealStageDistributionDto> getStageDistribution(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getStageDistribution(normalizedCurrency);
+        return dealService.getStageDistribution(normalizedCurrency, resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -243,10 +248,13 @@ public class DealController {
     @GetMapping("/kpis")
     public DealKpisDto getDealKpis(
         @RequestParam(required = false) String currency,
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealKpis(normalizedCurrency, analyticsRangeDays(range));
+        return dealService.getDealKpis(
+            normalizedCurrency, analyticsRangeDays(range), resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -255,10 +263,13 @@ public class DealController {
     @GetMapping("/pipeline-value")
     public List<DealPipelineValueDto> getDealPipelineValue(
         @RequestParam(required = false) String currency,
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealPipelineValue(normalizedCurrency, analyticsRangeDays(range));
+        return dealService.getDealPipelineValue(
+            normalizedCurrency, analyticsRangeDays(range), resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -266,10 +277,12 @@ public class DealController {
      */
     @GetMapping("/aging")
     public List<DealAgingDto> getDealAging(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealAging(normalizedCurrency);
+        return dealService.getDealAging(normalizedCurrency, resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -277,10 +290,12 @@ public class DealController {
      */
     @GetMapping("/top")
     public DealTopDto getTopDeals(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getTopDeals(normalizedCurrency);
+        return dealService.getTopDeals(normalizedCurrency, resolveMemberScope(scope, memberIds));
     }
 
     /**
@@ -386,8 +401,12 @@ public class DealController {
 
     /** Compact bounded risk totals for analytics. */
     @GetMapping("/risk/analytics")
-    public DealRiskAnalyticsDto getDealRiskAnalytics() {
-        return dealRiskService.analytics(workspaceService.getCurrentWorkspaceId());
+    public DealRiskAnalyticsDto getDealRiskAnalytics(
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
+    ) {
+        return dealRiskService.analytics(
+            workspaceService.getCurrentWorkspaceId(), resolveMemberScope(scope, memberIds));
     }
 
     /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */

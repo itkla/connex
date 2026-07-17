@@ -130,56 +130,67 @@ public interface DealMapper {
     );
     DealRevenueRangeDto revenueClosedEventRange(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueClosedByBoundaries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("boundaries") List<DealRevenueMonthBoundary> boundaries
+        @Param("boundaries") List<DealRevenueMonthBoundary> boundaries,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueScheduledClosedByMonth(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealStageDistributionDto> stageDistribution(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     DealKpiPeriodDto dealKpiCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("days") int days
+        @Param("days") int days,
+        @Param("memberScope") MemberScope memberScope
     );
     DealKpiPeriodDto dealKpiPrevious(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("previousDays") int previousDays
+        @Param("previousDays") int previousDays,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealKpiClosedBucketDto> dealKpiClosedSeries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("span") double span
+        @Param("span") double span,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealBucketValueDto> dealKpiNewPipelineSeries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("span") double span
+        @Param("span") double span,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealPipelineValueDto> dealPipelineValue(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("days") int days
+        @Param("days") int days,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealAgingDto> dealAging(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     long closingSoonCount(
         @Param("workspaceId") int workspaceId,
@@ -194,11 +205,13 @@ public interface DealMapper {
     );
     List<Deal> topOpenDeals(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<Deal> topWonDeals(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<FacetCount> countsByStatus(@Param("workspaceId") int workspaceId);
     List<FacetCount> countsByStage(@Param("workspaceId") int workspaceId);
@@ -237,6 +250,7 @@ public interface DealMapper {
     List<Deal> getDealsByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     List<Integer> getRiskCandidateIds(@Param("workspaceId") int workspaceId,
+            @Param("memberScope") MemberScope memberScope,
             @Param("limit") int limit);
     int insert(Deal deal);
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */

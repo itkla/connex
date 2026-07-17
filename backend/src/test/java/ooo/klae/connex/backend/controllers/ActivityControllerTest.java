@@ -15,16 +15,21 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class ActivityControllerTest {
     @Mock private ActivityService activityService;
+    @Mock private WorkspaceService workspaceService;
+    @Mock private MemberScopeResolver memberScopeResolver;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new ActivityController(activityService)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(
+            new ActivityController(activityService, workspaceService, memberScopeResolver)).build();
     }
 
     @Test

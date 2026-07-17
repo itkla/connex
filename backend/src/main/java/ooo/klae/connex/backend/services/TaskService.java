@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -83,8 +84,9 @@ public class TaskService {
         return taskMapper.countTasks(workspaceService.getCurrentWorkspaceId());
     }
 
-    public TaskSummaryDto getTaskSummary() {
-        return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId(), userCalendarService.today());
+    public TaskSummaryDto getTaskSummary(MemberScope memberScope) {
+        return taskMapper.taskSummary(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), memberScope);
     }
 
     public List<Task> getUpcomingOpenTasks(int limit) {

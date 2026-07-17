@@ -14,10 +14,13 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
@@ -38,6 +41,8 @@ public class ActivityController {
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final ActivityService activityService;
+    private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
 
     /**
      * GET endpoint to retrieve activities, with optional filtering by personId, dealId, or createdById.
@@ -95,9 +100,16 @@ public class ActivityController {
      */
     @GetMapping("/volume")
     public List<ActivityVolumeBucketDto> getActivityVolume(
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
-        return activityService.getActivityVolume(analyticsRangeDays(range));
+        return activityService.getActivityVolume(
+            analyticsRangeDays(range), resolveMemberScope(scope, memberIds));
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
     }
 
     /**

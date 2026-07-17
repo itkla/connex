@@ -405,6 +405,7 @@
     SELECT MIN(d.closed_at) AS earliest, MAX(d.closed_at) AS latest
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -420,6 +421,7 @@
              SELECT SUM(d.actual_value)
              FROM deal d FORCE INDEX FOR JOIN (idx_deal_workspace_closed_at)
              WHERE d.workspace_id = #{workspaceId}
+             <include refid="memberScopePredicate"/>
              <if test="currency != null">
                AND d.currency = #{currency}
              </if>
@@ -446,6 +448,7 @@
            COALESCE(SUM(d.actual_value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -461,6 +464,7 @@
            COALESCE(SUM(d.value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -478,6 +482,7 @@
                THEN (CASE WHEN d.won THEN d.actual_value ELSE d.value END) END), 0) AS closed_value
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -507,6 +512,7 @@
                AND d.closed_at &gt;= d.created_at THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -542,6 +548,7 @@
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -557,6 +564,7 @@
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -573,6 +581,7 @@
            COALESCE(SUM(d.value), 0) AS value
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -591,6 +600,7 @@
            COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -608,6 +618,7 @@
            COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &gt; 60 THEN 1 END) AS stalled
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -643,6 +654,7 @@
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -655,6 +667,7 @@
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -826,9 +839,10 @@
   </select>
 
   <select id="getRiskCandidateIds" resultType="int">
-    SELECT id FROM deal
-    WHERE workspace_id = #{workspaceId} AND won IS NULL AND risk_excluded = FALSE
-    ORDER BY expected_close_date IS NULL, expected_close_date, updated_at, id
+    SELECT d.id FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.won IS NULL AND d.risk_excluded = FALSE
+    <include refid="memberScopePredicate"/>
+    ORDER BY d.expected_close_date IS NULL, d.expected_close_date, d.updated_at, d.id
     LIMIT #{limit}
   </select>
 

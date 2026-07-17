@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
@@ -83,7 +84,7 @@ public class ActivityService {
         return activityMapper.countActivities(workspaceId, personId, dealId, createdById);
     }
 
-    public List<ActivityVolumeBucketDto> getActivityVolume(int days) {
+    public List<ActivityVolumeBucketDto> getActivityVolume(int days, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bucketCount = activityBucketCount(days);
         double spanDays = days / (double) bucketCount;
@@ -92,7 +93,7 @@ public class ActivityService {
             volume.add(new ActivityVolumeBucketDto(bucketIndex, 0, 0, 0, 0, 0));
         }
         for (ActivityVolumeBucketDto bucket :
-                activityMapper.activityVolume(workspaceId, days, bucketCount, spanDays)) {
+                activityMapper.activityVolume(workspaceId, days, bucketCount, spanDays, memberScope)) {
             volume.set(bucket.bucketIndex(), bucket);
         }
         return volume;
