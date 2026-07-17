@@ -136,6 +136,17 @@ class DealDocumentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void noOpStatusChangeIsIdempotent() {
+        Deal deal = jpyDeal();
+        DocumentTemplate tpl = template();
+        DealDocumentDto doc = documentService.generate(deal.getId(), tpl.getId());
+
+        DealDocumentDto same = documentService.updateStatus(deal.getId(), doc.id(), "draft");
+        assertEquals("draft", same.status());
+        assertEquals(doc.version(), same.version());
+    }
+
+    @Test
     void onlyDraftDocumentsCanBeDeleted() {
         Deal deal = jpyDeal();
         DocumentTemplate tpl = template();

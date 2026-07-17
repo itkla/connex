@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,7 @@ public class DealDocumentService {
     private final ObjectMapper objectMapper;
 
     private static final Set<String> STATUSES = Set.of("draft", "final", "superseded");
+    private static final int MAX_VERSION_ATTEMPTS = 5;
 
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
@@ -113,13 +115,11 @@ public class DealDocumentService {
         document.setType(template.getType());
         document.setLocale(template.getLocale());
         document.setStatus("draft");
-        Integer max = documentMapper.maxVersion(workspaceId, dealId);
-        document.setVersion(max == null ? 1 : max + 1);
         document.setTitle(resolvedTitle);
         document.setContent(objectMapper.writeValueAsString(content));
         document.setCurrency(currency);
         document.setCreatedBy(workspaceService.getCurrentUserId());
-        documentMapper.insert(document);
+        insertNextVersion(workspaceId, dealId, document);
 
         auditService.record("deal_document.generate", "deal", dealId, deal.getName(),
             "Generated " + template.getType() + " document v" + document.getVersion() + " on " + deal.getName(), null);
@@ -134,6 +134,9 @@ public class DealDocumentService {
         DealDocument document = requireDocument(workspaceId, dealId, documentId);
         if (status == null || !STATUSES.contains(status)) {
             throw new BadRequestException("status must be one of: draft, final, superseded");
+        }
+        if (document.getStatus().equals(status)) {
+            return toDto(document);
         }
         if (!isAllowedTransition(document.getStatus(), status)) {
             throw new BadRequestException("Cannot change document status from " + document.getStatus() + " to " + status);
@@ -159,12 +162,30 @@ public class DealDocumentService {
     }
 
     private boolean isAllowedTransition(String from, String to) {
-        if (from.equals(to)) return true;
         return switch (from) {
             case "draft" -> to.equals("final") || to.equals("superseded");
             case "final" -> to.equals("superseded");
             default -> false;
         };
+    }
+
+    /**
+     * Inserts the document at the next per-deal version, retrying on the unique-version constraint so
+     * two concurrent generations on the same deal can never persist a duplicate or gapped version.
+     */
+    private void insertNextVersion(int workspaceId, int dealId, DealDocument document) {
+        for (int attempt = 0; attempt < MAX_VERSION_ATTEMPTS; attempt++) {
+            Integer max = documentMapper.maxVersion(workspaceId, dealId);
+            document.setVersion(max == null ? 1 : max + 1);
+            try {
+                documentMapper.insert(document);
+                return;
+            } catch (DuplicateKeyException contended) {
+                if (attempt == MAX_VERSION_ATTEMPTS - 1) {
+                    throw contended;
+                }
+            }
+        }
     }
 
     private String resolve(String template, Map<String, String> tokens) {

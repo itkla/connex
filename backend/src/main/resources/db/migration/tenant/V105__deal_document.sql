@@ -21,5 +21,6 @@ CREATE TABLE deal_document (
     CONSTRAINT fk_deal_document_template FOREIGN KEY (template_id) REFERENCES document_template(id) ON DELETE SET NULL,
     CONSTRAINT chk_deal_document_type CHECK (type IN ('quote', 'proposal', 'order_form', 'contract')),
     CONSTRAINT chk_deal_document_status CHECK (status IN ('draft', 'final', 'superseded')),
-    INDEX idx_deal_document_deal (workspace_id, deal_id, version)
+    UNIQUE KEY uq_deal_document_version (workspace_id, deal_id, version),
+    INDEX idx_deal_document_deal (workspace_id, deal_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Generated, immutable, versioned commercial documents on a deal';
