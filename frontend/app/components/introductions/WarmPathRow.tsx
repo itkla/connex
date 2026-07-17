@@ -3,9 +3,17 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLongRightIcon } from '@heroicons/react/24/outline';
+import { ArrowLongRightIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { warmthDotClass } from '@/app/lib/utils';
 import type { TemperatureBand, WarmPath, WarmPathBridge } from '@/app/lib/types';
@@ -78,32 +86,43 @@ function Party({
 }
 
 /**
- * One warm introduction path: the bridge contact the team is warm with, an arrow toward the
- * target worth reaching, the labeled evidence tier connecting them, and always-visible
- * ask/dismiss actions. Mirrors {@link IntroSuggestionRow}; the arrow is directional because the
- * path is — the bridge introduces you to the target.
+ * One warm introduction path: the selected bridge contact, an arrow toward the target worth
+ * reaching, the labeled evidence tier connecting them, and always-visible ask/dismiss actions.
+ * When several bridges exist, a switcher chip cycles the active avenue — evidence and both
+ * actions follow the selection — and Dismiss offers "not via this bridge" (per avenue) versus
+ * "not interested in this contact" (whole target). Mirrors {@link IntroSuggestionRow}.
  */
 export default function WarmPathRow({
     path,
     onAsk,
-    onDismiss,
+    onDismissAvenue,
+    onDismissTarget,
 }: {
     path: WarmPath;
-    onAsk: () => Promise<void>;
-    onDismiss: () => Promise<void>;
+    onAsk: (bridge: WarmPathBridge) => Promise<void>;
+    onDismissAvenue: (bridge: WarmPathBridge) => Promise<void>;
+    onDismissTarget: () => Promise<void>;
 }) {
     const t = useTranslations('Introductions');
     const tw = useTranslations('Temperature');
-    const [acted, setActed] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [bridgeIndex, setBridgeIndex] = useState(0);
+    const [bridgeCount, setBridgeCount] = useState(path.bridges.length);
+    if (bridgeCount !== path.bridges.length) {
+        setBridgeCount(path.bridges.length);
+        setBridgeIndex(0);
+    }
 
-    const act = (fn: () => Promise<void>) => {
-        if (acted) return;
-        setActed(true);
-        fn().catch(() => setActed(false));
+    const bridge = path.bridges[Math.min(bridgeIndex, path.bridges.length - 1)];
+    const otherBridges = path.bridges.length - 1;
+
+    const run = (action: () => Promise<void>) => {
+        if (busy) return;
+        setBusy(true);
+        action()
+            .catch(() => undefined)
+            .finally(() => setBusy(false));
     };
-
-    const bridge = path.bridges[0];
-    const morePaths = path.bridges.length - 1;
 
     return (
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-foreground/15 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
@@ -118,6 +137,46 @@ export default function WarmPathRow({
                     warmth={bridge.warmth}
                     warmthLabel={bridge.warmth ? tw(bridge.warmth) : ''}
                 />
+                {otherBridges > 0 ? (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                disabled={busy}
+                                className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground aria-expanded:border-foreground/20 aria-expanded:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                            >
+                                {t('morePaths', { count: otherBridges })}
+                                <span className="sr-only">{t('chooseBridgeAria', { count: path.bridges.length })}</span>
+                                <ChevronDownIcon className="size-3" aria-hidden />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-64">
+                            <DropdownMenuRadioGroup
+                                value={String(bridge.personId)}
+                                onValueChange={(value) => {
+                                    const index = path.bridges.findIndex((b) => String(b.personId) === value);
+                                    if (index >= 0) setBridgeIndex(index);
+                                }}
+                            >
+                                {path.bridges.map((candidate) => (
+                                    <DropdownMenuRadioItem
+                                        key={candidate.personId}
+                                        value={String(candidate.personId)}
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-sm font-medium text-foreground">
+                                                {candidate.name}
+                                            </span>
+                                            <span className="block truncate text-xs text-muted-foreground">
+                                                {evidenceLabel(candidate, t)}
+                                            </span>
+                                        </span>
+                                    </DropdownMenuRadioItem>
+                                ))}
+                            </DropdownMenuRadioGroup>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                ) : null}
                 <ArrowLongRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 <Party
                     id={path.targetId}
@@ -132,18 +191,28 @@ export default function WarmPathRow({
                 </span>
             </div>
 
-            <span className="hidden max-w-[15rem] shrink-0 text-xs text-muted-foreground md:block">
-                <span className="block truncate">{evidenceLabel(bridge, t)}</span>
-                {morePaths > 0 ? (
-                    <span className="block truncate">{t('morePaths', { count: morePaths })}</span>
-                ) : null}
+            <span className="hidden max-w-[15rem] shrink-0 truncate text-xs text-muted-foreground md:block">
+                {evidenceLabel(bridge, t)}
             </span>
 
             <div className="flex shrink-0 items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => act(onDismiss)} disabled={acted}>
-                    {t('dismiss')}
-                </Button>
-                <Button size="sm" onClick={() => act(onAsk)} disabled={acted}>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" disabled={busy}>
+                            {t('dismiss')}
+                            <ChevronDownIcon className="size-3" aria-hidden />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-60">
+                        <DropdownMenuItem onClick={() => run(() => onDismissAvenue(bridge))}>
+                            {t('dismissNotVia', { name: bridge.name })}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => run(onDismissTarget)}>
+                            {t('dismissTargetItem', { name: path.targetName })}
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+                <Button size="sm" onClick={() => run(() => onAsk(bridge))} disabled={busy}>
                     {t('askIntro')}
                 </Button>
             </div>

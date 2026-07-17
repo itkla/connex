@@ -13,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
+import ooo.klae.connex.backend.dto.IntroOverviewDto;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
@@ -47,6 +48,20 @@ public class IntroductionController {
     @GetMapping("/suggestions")
     public List<IntroSuggestionDto> getSuggestions(@RequestParam(defaultValue = "20") int limit) {
         return introductionService.getSuggestions(limit);
+    }
+
+    /**
+     * GET the combined introductions feed — suggestions and warm paths from one warmth pass —
+     * for the introductions page.
+     * @param suggestions maximum suggestion rows to return
+     * @param paths maximum warm-path rows to return
+     */
+    @GetMapping("/overview")
+    public IntroOverviewDto getOverview(
+        @RequestParam(defaultValue = "20") int suggestions,
+        @RequestParam(defaultValue = "20") int paths
+    ) {
+        return introductionService.getOverview(suggestions, paths);
     }
 
     /** Returns an AI-generated introduction rationale, or a graceful unavailability response. */

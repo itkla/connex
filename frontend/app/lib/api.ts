@@ -1708,14 +1708,6 @@ export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: num
 }
 
 /**
- * As {@link getIntroSuggestionsFromCookie}, but failure-aware (see {@link resultWithCookie}), so
- * the introductions page can distinguish a backend fault from a genuinely empty workspace.
- */
-export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
-    return resultWithCookie<Types.IntroSuggestion[]>((init) => getIntroSuggestions(init, limit), cookie);
-}
-
-/**
  * Failure-aware variant of {@link getIntroductions} for the introductions page (see
  * {@link resultWithCookie}), so a lineage fetch failure is not presented as zero intros made.
  */
@@ -1745,16 +1737,27 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
 * == Warm paths (the "receive side" of the graph, #614)
 */
 
-export function getWarmPaths(init: RequestInit = {}, limit?: number) {
-    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+/** The combined introductions feed — suggestions + warm paths from one backend warmth pass. */
+export function getIntroOverview(init: RequestInit = {}, suggestions?: number, paths?: number) {
+    return getJson<Types.IntroOverview>(
+        `/api/introductions/overview${buildQuery({ suggestions, paths })}`,
+        init,
+    );
 }
 
 /**
- * Failure-aware warm-paths fetch for the introductions page (see {@link resultWithCookie}), so a
- * backend fault renders as an error state instead of an empty feed.
+ * Failure-aware overview fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as error states instead of an empty page.
  */
-export function getWarmPathsResultFromCookie(cookie: string | null, limit?: number) {
-    return resultWithCookie<Types.WarmPath[]>((init) => getWarmPaths(init, limit), cookie);
+export function getIntroOverviewResultFromCookie(
+    cookie: string | null,
+    suggestions?: number,
+    paths?: number,
+) {
+    return resultWithCookie<Types.IntroOverview>(
+        (init) => getIntroOverview(init, suggestions, paths),
+        cookie,
+    );
 }
 
 /** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */

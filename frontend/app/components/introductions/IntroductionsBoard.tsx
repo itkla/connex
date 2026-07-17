@@ -21,6 +21,7 @@ import type {
     IntroSuggestion,
     IntroductionRecord,
     WarmPath,
+    WarmPathBridge,
     WarmPathReachType,
 } from '@/app/lib/types';
 
@@ -215,11 +216,13 @@ export default function IntroductionsBoard({
         [paths, pathFilter],
     );
 
-    const removePath = (targetId: number) => {
+    const mention = (name: string, id: number) => `[${name}](person:${id})`;
+
+    const removePathRow = (targetId: number) => {
         setPaths((current) => current.filter((p) => p.targetId !== targetId));
     };
 
-    const restorePath = (path: WarmPath, index: number) => {
+    const restorePathRow = (path: WarmPath, index: number) => {
         setPaths((current) => {
             if (current.some((p) => p.targetId === path.targetId)) return current;
             const next = [...current];
@@ -228,12 +231,9 @@ export default function IntroductionsBoard({
         });
     };
 
-    const mention = (name: string, id: number) => `[${name}](person:${id})`;
-
-    const askIntro = async (path: WarmPath) => {
-        const bridge = path.bridges[0];
+    const askIntro = async (path: WarmPath, bridge: WarmPathBridge) => {
         const index = paths.findIndex((p) => p.targetId === path.targetId);
-        removePath(path.targetId);
+        removePathRow(path.targetId);
         try {
             await acceptWarmPath({
                 targetPersonId: path.targetId,
@@ -245,19 +245,52 @@ export default function IntroductionsBoard({
             });
             toastSuccess(t('acceptToast', { name: path.targetName }));
         } catch (err) {
-            restorePath(path, index);
+            restorePathRow(path, index);
             toastError(err instanceof Error ? err.message : t('acceptFailed'));
             throw err;
         }
     };
 
-    const dismissPath = async (path: WarmPath) => {
+    const dismissTarget = async (path: WarmPath) => {
         const index = paths.findIndex((p) => p.targetId === path.targetId);
-        removePath(path.targetId);
+        removePathRow(path.targetId);
         try {
             await dismissWarmPath({ targetPersonId: path.targetId });
         } catch (err) {
-            restorePath(path, index);
+            restorePathRow(path, index);
+            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            throw err;
+        }
+    };
+
+    const restoreAvenue = (path: WarmPath, rowIndex: number, bridge: WarmPathBridge, bridgeIndex: number) => {
+        setPaths((current) => {
+            const existing = current.find((p) => p.targetId === path.targetId);
+            if (!existing) {
+                const next = [...current];
+                next.splice(Math.min(Math.max(rowIndex, 0), next.length), 0, path);
+                return next;
+            }
+            if (existing.bridges.some((b) => b.personId === bridge.personId)) return current;
+            const at = Math.min(Math.max(bridgeIndex, 0), existing.bridges.length);
+            return current.map((p) => p.targetId === path.targetId
+                ? { ...p, bridges: [...p.bridges.slice(0, at), bridge, ...p.bridges.slice(at)] }
+                : p);
+        });
+    };
+
+    const dismissAvenue = async (path: WarmPath, bridge: WarmPathBridge) => {
+        const rowIndex = paths.findIndex((p) => p.targetId === path.targetId);
+        const bridgeIndex = path.bridges.findIndex((b) => b.personId === bridge.personId);
+        setPaths((current) => current
+            .map((p) => p.targetId === path.targetId
+                ? { ...p, bridges: p.bridges.filter((b) => b.personId !== bridge.personId) }
+                : p)
+            .filter((p) => p.bridges.length > 0));
+        try {
+            await dismissWarmPath({ targetPersonId: path.targetId, bridgePersonId: bridge.personId });
+        } catch (err) {
+            restoreAvenue(path, rowIndex, bridge, bridgeIndex);
             toastError(err instanceof Error ? err.message : t('dismissFailed'));
             throw err;
         }
@@ -445,8 +478,9 @@ export default function IntroductionsBoard({
                                     >
                                         <WarmPathRow
                                             path={path}
-                                            onAsk={() => askIntro(path)}
-                                            onDismiss={() => dismissPath(path)}
+                                            onAsk={(bridge) => askIntro(path, bridge)}
+                                            onDismissAvenue={(bridge) => dismissAvenue(path, bridge)}
+                                            onDismissTarget={() => dismissTarget(path)}
                                         />
                                     </motion.div>
                                 ))}
