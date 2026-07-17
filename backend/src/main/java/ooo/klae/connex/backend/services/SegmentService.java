@@ -101,9 +101,60 @@ public class SegmentService {
         if (total > catalog.maxConditions()) {
             throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
-        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople);
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople, null);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
         return new ArrayList<>(result);
+    }
+
+    /**
+     * Whether a single record matches the definition, evaluated for that record alone. Field and
+     * graph conditions run as usual and are tested for membership, while the temperature- and
+     * risk-based signals score only this record (via {@link ScoringService}/{@link DealRiskService}
+     * scoped overloads) rather than the whole workspace. Semantically equal to
+     * {@code evaluate(...).contains(entityId)} but bounded to the one record — the rule engine uses it
+     * for its after-commit per-entity check so a computed {@code WHEN} does not score the workspace on
+     * every event.
+     */
+    public boolean matchesEntity(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition, int entityId) {
+        String type = requireSupported(recordType);
+        if (definition == null) {
+            return false;
+        }
+        countConditions(definition, 1);
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, false, Set.of(entityId));
+        return matchesGroup(definition, ctx, entityId, 1);
+    }
+
+    private boolean matchesGroup(SegmentDefinition group, EvalContext ctx, int entityId, int depth) {
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
+        }
+        String match = normalize(group.getMatch());
+        boolean any = "any".equals(match);
+        if (!any && !"all".equals(match)) {
+            throw new BadRequestException("Invalid match (expected 'all' or 'any'): " + group.getMatch());
+        }
+        List<SegmentCondition> conditions = group.getConditions() == null ? List.of() : group.getConditions();
+        List<SegmentDefinition> groups = group.getGroups() == null ? List.of() : group.getGroups();
+        if (conditions.isEmpty() && groups.isEmpty()) {
+            throw new BadRequestException("A condition group requires at least one condition or nested group");
+        }
+        boolean matched = !any;
+        for (SegmentCondition condition : conditions) {
+            boolean hit = conditionMatchesEntity(condition, ctx, entityId);
+            matched = any ? matched || hit : matched && hit;
+        }
+        for (SegmentDefinition nested : groups) {
+            boolean hit = matchesGroup(nested, ctx, entityId, depth + 1);
+            matched = any ? matched || hit : matched && hit;
+        }
+        return group.isNegate() != matched;
+    }
+
+    private boolean conditionMatchesEntity(SegmentCondition condition, EvalContext ctx, int entityId) {
+        boolean matched = evaluateCondition(condition, ctx).contains(entityId);
+        return condition.isNegate() != matched;
     }
 
     private int countConditions(SegmentDefinition group, int depth) {
@@ -328,7 +379,7 @@ public class SegmentService {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
                 workspaceId, catalog.clampDays(condition.getDays())));
-            case "cooling" -> coolingCompanyIds(workspaceId);
+            case "cooling" -> coolingCompanyIds(ctx);
             case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, ctx.userId());
             case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
                 existencePredicate(key, condition, ctx);
@@ -499,11 +550,11 @@ public class SegmentService {
         return kind;
     }
 
-    private Set<Integer> coolingCompanyIds(int workspaceId) {
-        Set<Integer> owned = new HashSet<>(segmentMapper.companyIdsInWorkspace(workspaceId));
+    private Set<Integer> coolingCompanyIds(EvalContext ctx) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
         Set<Integer> ids = new HashSet<>();
-        for (RelationshipTemperatureDto temperature : scoringService.scoreCompanies(workspaceId)) {
-            if (owned.contains(temperature.getId())
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (universe.contains(temperature.getId())
                     && ("cool".equals(temperature.getBand())
                         || "cold".equals(temperature.getBand())
                         || "cooling".equals(temperature.getTrend()))) {
@@ -617,15 +668,18 @@ public class SegmentService {
         private final int userId;
         private final String recordType;
         private final boolean includeRestrictedPeople;
+        private final Set<Integer> candidateIds;
         private Set<Integer> universe;
         private List<RelationshipTemperatureDto> temperatures;
         private List<DealRiskDto> dealRisks;
 
-        private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople) {
+        private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople,
+                Set<Integer> candidateIds) {
             this.workspaceId = workspaceId;
             this.userId = userId;
             this.recordType = recordType;
             this.includeRestrictedPeople = includeRestrictedPeople;
+            this.candidateIds = candidateIds;
         }
 
         private int workspaceId() {
@@ -666,8 +720,12 @@ public class SegmentService {
         private List<RelationshipTemperatureDto> temperatures(ScoringService scoring) {
             if (temperatures == null) {
                 temperatures = switch (recordType) {
-                    case "company" -> scoring.scoreCompanies(workspaceId);
-                    case "person" -> scoring.scoreContacts(workspaceId);
+                    case "company" -> candidateIds == null
+                            ? scoring.scoreCompanies(workspaceId)
+                            : scoring.scoreCompanies(workspaceId, candidateIds);
+                    case "person" -> candidateIds == null
+                            ? scoring.scoreContacts(workspaceId)
+                            : scoring.scoreContacts(workspaceId, candidateIds);
                     default -> List.of();
                 };
             }
@@ -676,11 +734,18 @@ public class SegmentService {
 
         /**
          * The risk assessments for the workspace's open deals, computed once per evaluation and reused
-         * across every deal-risk predicate. Only the {@code deal} record type has risk assessments.
+         * across every deal-risk predicate. Only the {@code deal} record type has risk assessments;
+         * when scoped to a candidate set, only those deals are assessed.
          */
         private List<DealRiskDto> dealRisks(DealRiskService riskService) {
             if (dealRisks == null) {
-                dealRisks = "deal".equals(recordType) ? riskService.assessWorkspace(workspaceId) : List.of();
+                if (!"deal".equals(recordType)) {
+                    dealRisks = List.of();
+                } else {
+                    dealRisks = candidateIds == null
+                            ? riskService.assessWorkspace(workspaceId)
+                            : riskService.assessDeals(workspaceId, new ArrayList<>(candidateIds));
+                }
             }
             return dealRisks;
         }
