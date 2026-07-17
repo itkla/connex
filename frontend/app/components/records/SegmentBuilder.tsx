@@ -421,10 +421,8 @@ function GroupEditor({
                 {conditions.map((condition, index) => (
                     <motion.div
                         key={index}
-                        layout={!reduce}
                         initial={reduce ? false : { opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
                         transition={{ duration: 0.18, ease: easeOut }}
                     >
                         <ConditionCard
