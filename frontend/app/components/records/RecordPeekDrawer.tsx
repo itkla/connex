@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -75,7 +75,11 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
     const [error, setError] = useState<'notFound' | 'forbidden' | 'failed' | null>(null);
 
     const label = data ? recordLabel(data) : '';
-    useActionRecord(target ? { type: target.type, id: target.id, label } : null);
+    const actionRecord = useMemo(
+        () => (target ? { type: target.type, id: target.id, label } : null),
+        [target, label],
+    );
+    useActionRecord(actionRecord);
 
     useEffect(() => {
         if (!target) return;
