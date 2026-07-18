@@ -41,6 +41,12 @@ public enum Permission {
     TAG_MANAGE,
     PRODUCT_MANAGE,
     DOCUMENT_MANAGE,
+    /**
+     * Permission to approve or reject generated deal documents that an approval
+     * policy has routed for review. Requesting approval only needs
+     * {@link #DEAL_UPDATE}; policy configuration stays {@link #DOCUMENT_MANAGE}.
+     */
+    DOCUMENT_APPROVE,
     CUSTOM_FIELD_MANAGE,
     SHARE_MANAGE,
     MEMBER_MANAGE,
