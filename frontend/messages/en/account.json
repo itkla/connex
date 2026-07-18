@@ -19,7 +19,8 @@
     "displayNameLabel": "Display name",
     "usernameLabel": "Username",
     "emailLabel": "Email",
-    "emailReadonlyHint": "Your email is used to sign in. Changing it isn't available here yet.",
+    "changeEmail": "Change email",
+    "emailReadonlyHint": "Your email is used to sign in. Use “Change email” to update it.",
     "timezoneLabel": "Timezone",
     "timezoneHint": "Dates and times are shown in this timezone.",
     "timezonePlaceholder": "Search timezones",
@@ -75,6 +76,19 @@
     "removeFailed": "Couldn't remove that passkey. Please try again.",
     "loadFailed": "Couldn't load your passkeys.",
     "retry": "Try again"
+  },
+  "AccountChangeEmail": {
+    "title": "Change your email",
+    "description": "Enter a new email address and your current password. We'll send a confirmation link to the new address.",
+    "newEmailLabel": "New email",
+    "currentPasswordLabel": "Current password",
+    "submit": "Send confirmation link",
+    "submitting": "Sending",
+    "cancel": "Cancel",
+    "successTitle": "Check your inbox",
+    "successBody": "We sent a confirmation link to {email}. Open it to finish changing your email. Your current email stays active until then.",
+    "close": "Close",
+    "genericError": "Something went wrong"
   },
   "PasskeyStepUp": {
     "canceled": "Passkey verification was canceled.",
