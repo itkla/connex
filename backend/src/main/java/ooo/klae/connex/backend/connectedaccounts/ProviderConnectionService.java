@@ -107,15 +107,29 @@ public class ProviderConnectionService {
         if (providerError != null || code == null || code.isBlank()) {
             return connectionsUrl("error", "denied");
         }
-        ProviderTokenResponse tokens;
         try {
-            tokens = tokenClient.exchange(providers.tokenUri(provider), exchangeForm(provider, code));
+            return exchangeAndStore(provider, code, userId);
         } catch (ProviderTokenException e) {
             log.warn("Token exchange with {} failed: {}", provider, e.getCode());
             auditService.record("user.connection.connect_failed", "user", userId, provider,
                 "Token exchange failed: " + e.getCode(), null);
             return connectionsUrl("error", "exchange");
+        } catch (RuntimeException e) {
+            log.warn("Completing a {} connection failed: {}", provider, e.getClass().getSimpleName());
+            auditService.record("user.connection.connect_failed", "user", userId, provider,
+                "Completing the connection failed: " + e.getClass().getSimpleName(), null);
+            return connectionsUrl("error", "exchange");
         }
+    }
+
+    /**
+     * The post-validation half of the callback. Anything thrown here is turned into an
+     * {@code error=exchange} redirect by the caller — after the user consented at the provider,
+     * a raw error page must never be the answer to a routine failure.
+     */
+    private String exchangeAndStore(String provider, String code, int userId) {
+        ProviderTokenResponse tokens =
+            tokenClient.exchange(providers.tokenUri(provider), exchangeForm(provider, code));
         if (tokens.refreshToken() == null || tokens.refreshToken().isBlank()) {
             auditService.record("user.connection.connect_failed", "user", userId, provider,
                 "Provider withheld a refresh token", null);
@@ -203,7 +217,7 @@ public class ProviderConnectionService {
                 tokenClient.revoke(revokeUri, bundle.get("refreshToken").asString());
             }
         } catch (RuntimeException e) {
-            log.warn("Best-effort revocation for {} connection failed: {}", provider, e.toString());
+            log.warn("Best-effort revocation for {} connection failed: {}", provider, e.getClass().getSimpleName());
         }
     }
 

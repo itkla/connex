@@ -54,7 +54,12 @@ public class HttpProviderTokenClient implements ProviderTokenClient {
                 throw new ProviderTokenException("exchange_rejected",
                     "Token endpoint returned status " + response.statusCode());
             }
-            JsonNode body = objectMapper.readTree(response.body());
+            JsonNode body;
+            try {
+                body = objectMapper.readTree(response.body());
+            } catch (tools.jackson.core.JacksonException e) {
+                throw new ProviderTokenException("exchange_malformed", "Token response is not valid JSON", e);
+            }
             String accessToken = textOrNull(body, "access_token");
             if (accessToken == null) {
                 throw new ProviderTokenException("exchange_malformed", "Token response missing access_token");

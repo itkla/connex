@@ -107,8 +107,8 @@ export default function ConnectionsPanel({ capabilities }: Props) {
         if ((!connected && !callbackError) || callbackAnnounced.current) return;
         callbackAnnounced.current = true;
         const announce = () => {
-            if (connected) {
-                toastSuccess(t("connectedToast", { provider: t(`provider_${connected === "microsoft" ? "microsoft" : "google"}`) }));
+            if (connected === "google" || connected === "microsoft") {
+                toastSuccess(t("connectedToast", { provider: t(`provider_${connected}`) }));
             } else if (callbackError) {
                 const known = ["state", "denied", "exchange", "no_offline_access"].includes(callbackError);
                 toastError(t(known ? `error_${callbackError}` : "error_exchange"));
@@ -248,7 +248,7 @@ export default function ConnectionsPanel({ capabilities }: Props) {
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end">
-                                            {connection.status !== "revoked" && (
+                                            {(connection.status === "connected" || connection.status === "paused") && (
                                                 <DropdownMenuItem onSelect={() => togglePause(connection)}>
                                                     {connection.status === "paused"
                                                         ? <><PlayIcon className="size-4" />{t("resume")}</>
