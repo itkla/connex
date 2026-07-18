@@ -45,10 +45,10 @@ const TYPE_KEY: Record<DocumentType, string> = {
     contract: 'typeContract',
 };
 
-const STATUS_CLASS: Record<DocumentStatus, string> = {
-    draft: 'bg-chart-open/12 text-chart-open',
-    final: 'bg-chart-won/12 text-chart-won',
-    superseded: 'bg-muted text-muted-foreground',
+const STATUS_DOT: Record<DocumentStatus, string> = {
+    draft: 'bg-chart-open',
+    final: 'bg-chart-won',
+    superseded: 'bg-muted-foreground',
 };
 
 /**
@@ -171,7 +171,8 @@ export default function DealDocuments({ dealId, initial }: Props) {
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">
-                                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[doc.status]}`}>
+                                        <span className={`inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs font-medium ${doc.status === 'superseded' ? 'text-muted-foreground' : 'text-foreground'}`}>
+                                            <span className={`size-1.5 rounded-full ${STATUS_DOT[doc.status]}`} aria-hidden="true" />
                                             {t(`status_${doc.status}`)}
                                         </span>
                                     </td>
