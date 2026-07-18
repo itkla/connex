@@ -50,6 +50,8 @@ import {
 } from '@/app/lib/api';
 import { MemberScopeFilter, interpretMemberScope } from '@/app/components/filters';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { resolveCan } from '@/app/lib/actions/permissions';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
@@ -177,10 +179,20 @@ export default function AnalyticsBoard({
         return initial ? initial.split(',').filter(Boolean) : [];
     });
 
+    const { activeWorkspace } = useWorkspace();
+    const canScopeByMember = useMemo(() => resolveCan(activeWorkspace)('WORKSPACE_MANAGE'), [activeWorkspace]);
+
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    useEffect(() => {
+        if (!canScopeByMember) return;
+        getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+    }, [canScopeByMember]);
     const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
-    const ownerScope = useMemo(() => interpretMemberScope(ownerValues), [ownerValues]);
+    const effectiveOwnerValues = useMemo(
+        () => (canScopeByMember ? ownerValues : []),
+        [canScopeByMember, ownerValues],
+    );
+    const ownerScope = useMemo(() => interpretMemberScope(effectiveOwnerValues), [effectiveOwnerValues]);
     const scopeParams = useMemo<MemberScopeParams>(() => ({
         scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
         memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
@@ -213,7 +225,7 @@ export default function AnalyticsBoard({
     useUrlSync({
         range: range === '90d' ? undefined : range,
         currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,
-        owner: ownerValues.length ? ownerValues.join(',') : undefined,
+        owner: effectiveOwnerValues.length ? effectiveOwnerValues.join(',') : undefined,
     });
 
     const dealRangeScope = `${currency}:${range}:${memberKey}`;
@@ -379,7 +391,9 @@ export default function AnalyticsBoard({
                 </div>
                 {(hasDeals || hasRelationshipData) && (
                     <div className="flex flex-wrap items-center gap-2">
-                    <MemberScopeFilter values={ownerValues} onChange={setOwnerValues} members={activeMembers} />
+                    {canScopeByMember && (
+                        <MemberScopeFilter values={ownerValues} onChange={setOwnerValues} members={activeMembers} />
+                    )}
                     {currencyCounts.size > 1 ? (
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>

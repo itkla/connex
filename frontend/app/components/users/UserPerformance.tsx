@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowRightIcon } from '@heroicons/react/24/outline';
 
 import { getDealKpis, getDealMetrics, getTaskSummary } from '@/app/lib/api';
 import { type MemberScopeParams } from '@/app/lib/types';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { resolveCan } from '@/app/lib/actions/permissions';
 import StatCard from '@/app/components/me/StatCard';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 
@@ -29,9 +31,12 @@ const EMPTY: Snapshot = { wonDeals: 0, winRate: 0, openDeals: 0, openTasks: 0 };
  */
 export default function UserPerformance({ userId }: { userId: number }) {
     const t = useTranslations('UsersPage');
+    const { activeWorkspace } = useWorkspace();
+    const canView = useMemo(() => resolveCan(activeWorkspace)('WORKSPACE_MANAGE'), [activeWorkspace]);
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 
     useEffect(() => {
+        if (!canView) return;
         let cancelled = false;
         const scope: MemberScopeParams = { scope: 'members', memberIds: [userId] };
         Promise.all([
@@ -48,10 +53,12 @@ export default function UserPerformance({ userId }: { userId: number }) {
             setSnapshot({ wonDeals, winRate, openDeals, openTasks });
         });
         return () => { cancelled = true; };
-    }, [userId]);
+    }, [userId, canView]);
 
     const data = snapshot ?? EMPTY;
     const loading = snapshot === null;
+
+    if (!canView) return null;
 
     return (
         <section aria-busy={loading}>
