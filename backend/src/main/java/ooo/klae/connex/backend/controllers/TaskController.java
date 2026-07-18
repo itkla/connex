@@ -86,11 +86,24 @@ public class TaskController {
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
-        return taskService.getTaskSummary(resolveMemberScope(scope, memberIds));
+        return taskService.getTaskSummary(analyticsMemberScope(scope, memberIds));
     }
 
     private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
         return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
+    }
+
+    /**
+     * Resolves a member scope for per-member analytics, restricting any
+     * non-workspace-wide scope to workspace managers (admin or owner). Members
+     * retain the all-team view.
+     */
+    private MemberScope analyticsMemberScope(String scope, List<Integer> memberIds) {
+        MemberScope resolved = resolveMemberScope(scope, memberIds);
+        if (resolved.mode() != MemberScope.Mode.ALL_TEAM) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        return resolved;
     }
 
     /** Returns a bounded due-date-ordered preview of open tasks for the dashboard. */

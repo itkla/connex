@@ -226,7 +226,7 @@ public class DealController {
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getRevenueTimeseries(
-            normalizedCurrency, resolveTimezone(timezone, tzOffset), resolveMemberScope(scope, memberIds));
+            normalizedCurrency, resolveTimezone(timezone, tzOffset), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -239,7 +239,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getStageDistribution(normalizedCurrency, resolveMemberScope(scope, memberIds));
+        return dealService.getStageDistribution(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -254,7 +254,7 @@ public class DealController {
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getDealKpis(
-            normalizedCurrency, analyticsRangeDays(range), resolveMemberScope(scope, memberIds));
+            normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -269,7 +269,7 @@ public class DealController {
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getDealPipelineValue(
-            normalizedCurrency, analyticsRangeDays(range), resolveMemberScope(scope, memberIds));
+            normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -282,7 +282,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealAging(normalizedCurrency, resolveMemberScope(scope, memberIds));
+        return dealService.getDealAging(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -295,7 +295,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getTopDeals(normalizedCurrency, resolveMemberScope(scope, memberIds));
+        return dealService.getTopDeals(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -338,6 +338,20 @@ public class DealController {
 
     private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
         return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
+    }
+
+    /**
+     * Resolves a member scope for per-member analytics, restricting any
+     * non-workspace-wide scope to workspace managers (admin or owner). Members
+     * retain the all-team view; only managers may narrow analytics to an
+     * individual member.
+     */
+    private MemberScope analyticsMemberScope(String scope, List<Integer> memberIds) {
+        MemberScope resolved = resolveMemberScope(scope, memberIds);
+        if (resolved.mode() != MemberScope.Mode.ALL_TEAM) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        return resolved;
     }
 
     private static List<String> normalizeStatuses(List<String> values) {
@@ -406,7 +420,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         return dealRiskService.analytics(
-            workspaceService.getCurrentWorkspaceId(), resolveMemberScope(scope, memberIds));
+            workspaceService.getCurrentWorkspaceId(), analyticsMemberScope(scope, memberIds));
     }
 
     /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
