@@ -436,7 +436,7 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
     if (accessDenied) {
         return (
             <div className="rounded-2xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
-                {tr("accessDenied")}
+                {tr("noAccess")}
             </div>
         );
     }
@@ -486,7 +486,7 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+            <div className="relative grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
                 <div className="hidden h-[calc(100dvh-19rem)] min-h-[480px] overflow-hidden rounded-2xl border border-border bg-muted/20 lg:block">
                     <ReactFlow
                         nodes={nodes}
@@ -506,7 +506,10 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
                     </ReactFlow>
                 </div>
 
-                <ol className="flex flex-col gap-2 lg:hidden" aria-label={t("outlineLabel")}>
+                <ol
+                    className="flex flex-col gap-2 lg:sr-only lg:focus-within:not-sr-only lg:focus-within:absolute lg:focus-within:left-3 lg:focus-within:top-3 lg:focus-within:z-20 lg:focus-within:w-80 lg:focus-within:rounded-2xl lg:focus-within:border lg:focus-within:border-border lg:focus-within:bg-card lg:focus-within:p-3 lg:focus-within:shadow-lg"
+                    aria-label={t("outlineLabel")}
+                >
                     {steps.map((step) => (
                         <li key={step.key}>
                             <button
