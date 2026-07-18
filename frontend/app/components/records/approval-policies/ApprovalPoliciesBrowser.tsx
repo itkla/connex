@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
-import { PlusIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon, DocumentDuplicateIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
+import { useLocale, useTranslations } from 'next-intl';
+import { PlusIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon, ShieldCheckIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -17,9 +17,11 @@ import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
-import { deleteDocumentTemplate } from '@/app/lib/api';
+import ApprovalPolicyDialog from '@/app/components/records/approval-policies/ApprovalPolicyDialog';
+import { deleteApprovalPolicy } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { DocumentTemplate, DocumentType } from '@/app/lib/types';
+import { formatCurrency } from '@/app/lib/utils';
+import type { ApprovalPolicy, DocumentType } from '@/app/lib/types';
 
 const TYPE_KEY: Record<DocumentType, string> = {
     quote: 'typeQuote',
@@ -28,32 +30,51 @@ const TYPE_KEY: Record<DocumentType, string> = {
     contract: 'typeContract',
 };
 
-/** Workspace-scoped commercial-document template admin: searchable list opening the full-page builder. */
-export default function DocumentTemplatesBrowser({ templates: initial }: { templates: DocumentTemplate[] }) {
-    const t = useTranslations('DocumentTemplatesBrowser');
+/**
+ * Workspace-scoped approval-policy admin: a searchable list with a dialog editor. Policies gate
+ * finalization of generated deal documents server-side; this surface only configures them.
+ */
+export default function ApprovalPoliciesBrowser({ policies: initial }: { policies: ApprovalPolicy[] }) {
+    const t = useTranslations('ApprovalPoliciesBrowser');
     const tf = useTranslations('Filters');
+    const locale = useLocale();
     const router = useRouter();
-    const [templates, setTemplates] = useState(initial);
+    const [policies, setPolicies] = useState(initial);
     const [query, setQuery] = useState('');
-    const [removeTarget, setRemoveTarget] = useState<DocumentTemplate | null>(null);
+    const [editorTarget, setEditorTarget] = useState<ApprovalPolicy | null>(null);
+    const [editorOpen, setEditorOpen] = useState(false);
+    const [removeTarget, setRemoveTarget] = useState<ApprovalPolicy | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
-        if (!q) return templates;
-        return templates.filter((tpl) =>
-            [tpl.name, tpl.title, tpl.type].some((v) => v?.toLowerCase().includes(q)));
-    }, [templates, query]);
+        if (!q) return policies;
+        return policies.filter((policy) =>
+            [policy.name, policy.documentType, policy.currency].some((v) => v?.toLowerCase().includes(q)));
+    }, [policies, query]);
 
-    const openNew = () => router.push('/records/document-templates/new');
-    const openEdit = (id: number) => router.push(`/records/document-templates/${id}`);
+    const openNew = () => {
+        setEditorTarget(null);
+        setEditorOpen(true);
+    };
+
+    const openEdit = (policy: ApprovalPolicy) => {
+        setEditorTarget(policy);
+        setEditorOpen(true);
+    };
+
+    const onSaved = (saved: ApprovalPolicy, isNew: boolean) => {
+        setPolicies((prev) => (isNew
+            ? [...prev, saved].sort((a, b) => a.name.localeCompare(b.name))
+            : prev.map((p) => (p.id === saved.id ? saved : p))));
+    };
 
     const confirmRemove = async () => {
         if (!removeTarget) return;
         setIsRemoving(true);
         try {
-            await deleteDocumentTemplate(removeTarget.id);
-            setTemplates((prev) => prev.filter((tpl) => tpl.id !== removeTarget.id));
+            await deleteApprovalPolicy(removeTarget.id);
+            setPolicies((prev) => prev.filter((policy) => policy.id !== removeTarget.id));
             toastSuccess(t('deleted'));
             setRemoveTarget(null);
         } catch (err) {
@@ -63,6 +84,17 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
         }
     };
 
+    const conditionSummary = (policy: ApprovalPolicy) => {
+        const parts: string[] = [];
+        if (policy.minTotal != null && policy.currency) {
+            parts.push(t('conditionTotal', { amount: formatCurrency(policy.minTotal, policy.currency, locale) }));
+        }
+        if (policy.minDiscountPercent != null) {
+            parts.push(t('conditionDiscount', { percent: policy.minDiscountPercent }));
+        }
+        return parts.length === 0 ? t('conditionAlways') : parts.join(t('conditionJoin'));
+    };
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
@@ -70,9 +102,9 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={() => router.push('/records/approval-policies')}>
-                                <ShieldCheckIcon className="size-4" />
-                                {t('approvalPoliciesLink')}
+                            <Button variant="outline" onClick={() => router.push('/records/document-templates')}>
+                                <DocumentDuplicateIcon className="size-4" />
+                                {t('templatesLink')}
                             </Button>
                             <Button variant="brand" onClick={openNew}>
                                 <PlusIcon className="size-4" />
@@ -84,7 +116,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
 
                 <Rise delay={0.06}>
                     <div className="flex items-center justify-between gap-3">
-                        <SectionHeader title={t('sectionTemplates')} />
+                        <SectionHeader title={t('sectionPolicies')} />
                         <div className="w-64">
                             <SearchField value={query} onChange={setQuery} onClear={() => setQuery('')}
                                 placeholder={t('searchPlaceholder')}
@@ -102,7 +134,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                         ) : (
                             <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-card px-6 py-20 text-center">
                                 <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                                    <DocumentDuplicateIcon className="size-6" />
+                                    <ShieldCheckIcon className="size-6" />
                                 </div>
                                 <div className="space-y-1">
                                     <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
@@ -120,25 +152,26 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                                 <thead>
                                     <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
                                         <th className="px-6 py-3 font-medium">{t('columnName')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnType')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnLocale')}</th>
+                                        <th className="px-6 py-3 font-medium">{t('columnAppliesTo')}</th>
+                                        <th className="px-6 py-3 font-medium">{t('columnCondition')}</th>
                                         <th className="px-6 py-3 font-medium">{t('columnStatus')}</th>
                                         <th className="px-6 py-3" />
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border">
-                                    {filtered.map((tpl) => (
-                                        <tr key={tpl.id} className="cursor-pointer transition-colors hover:bg-muted/50"
-                                            onClick={() => openEdit(tpl.id)}>
+                                    {filtered.map((policy) => (
+                                        <tr key={policy.id} className="cursor-pointer transition-colors hover:bg-muted/50"
+                                            onClick={() => openEdit(policy)}>
                                             <td className="px-6 py-3">
-                                                <div className="font-medium text-foreground">{tpl.name}</div>
-                                                {tpl.title ? <div className="text-xs text-muted-foreground">{tpl.title}</div> : null}
+                                                <div className="font-medium text-foreground">{policy.name}</div>
                                             </td>
-                                            <td className="px-6 py-3 text-muted-foreground">{t(TYPE_KEY[tpl.type])}</td>
-                                            <td className="px-6 py-3 uppercase text-muted-foreground">{tpl.locale}</td>
+                                            <td className="px-6 py-3 text-muted-foreground">
+                                                {policy.documentType ? t(TYPE_KEY[policy.documentType]) : t('typeAll')}
+                                            </td>
+                                            <td className="px-6 py-3 text-muted-foreground">{conditionSummary(policy)}</td>
                                             <td className="px-6 py-3">
-                                                <span className={tpl.active ? 'text-chart-won' : 'text-muted-foreground'}>
-                                                    {tpl.active ? t('active') : t('inactive')}
+                                                <span className={policy.active ? 'text-chart-won' : 'text-muted-foreground'}>
+                                                    {policy.active ? t('active') : t('inactive')}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-3 text-right">
@@ -150,11 +183,11 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                                                         </Button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onSelect={() => openEdit(tpl.id)}>
+                                                        <DropdownMenuItem onSelect={() => openEdit(policy)}>
                                                             <PencilIcon className="size-4" />{t('edit')}
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
-                                                        <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(tpl)}>
+                                                        <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(policy)}>
                                                             <TrashIcon className="size-4" />{t('delete')}
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>
@@ -169,13 +202,20 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                 </Rise>
             </div>
 
+            <ApprovalPolicyDialog
+                open={editorOpen}
+                onOpenChange={setEditorOpen}
+                policy={editorTarget}
+                onSaved={onSaved}
+            />
+
             <DeleteRecordDialog
                 open={removeTarget !== null}
                 onOpenChange={(next) => { if (!next) setRemoveTarget(null); }}
                 selectedIds={removeTarget ? new Set([removeTarget.id]) : new Set()}
                 selectedItems={removeTarget ? [removeTarget] : []}
                 entityLabel={t('entityLabel')}
-                getDisplayName={(tpl) => tpl.name}
+                getDisplayName={(policy) => policy.name}
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />

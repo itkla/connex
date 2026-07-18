@@ -2587,6 +2587,45 @@ export function deleteDealDocument(dealId: number, documentId: number, init: Req
     return deleteJson<void[]>(`/api/deals/${dealId}/documents/${documentId}`, init);
 }
 
+export function getApprovalPolicies(init: RequestInit = {}) {
+    return getJson<Types.ApprovalPolicy[]>(`/api/approval-policies`, init);
+}
+
+export function getApprovalPoliciesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
+}
+
+export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload) {
+    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload);
+}
+
+export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload) {
+    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload);
+}
+
+export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/approval-policies/${id}`, init);
+}
+
+export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval`, { comment: comment ?? null });
+}
+
+export function decideDocumentApproval(
+    dealId: number,
+    documentId: number,
+    decision: 'approved' | 'rejected',
+    comment?: string | null,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/decision`, { decision, comment: comment ?? null });
+}
+
+export function cancelDocumentApproval(dealId: number, documentId: number) {
+    return postJson<Types.DocumentApproval>(`/api/deals/${dealId}/documents/${documentId}/approval/cancel`, {});
+}
+
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
 }

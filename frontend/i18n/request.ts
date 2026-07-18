@@ -24,6 +24,7 @@ const namespaces = [
     "pipelines",
     "products",
     "document-templates",
+    "approval-policies",
     "campaigns",
     "users",
     "map",

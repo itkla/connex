@@ -12,9 +12,24 @@ import {
     ChevronDownIcon,
     PlusIcon,
     DocumentTextIcon,
+    ShieldCheckIcon,
+    XCircleIcon,
+    ArrowUturnLeftIcon,
 } from '@heroicons/react/24/outline';
+import { Loader2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+    DialogClose,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -27,16 +42,24 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDateTime } from '@/app/lib/utils';
 import {
     getDocumentTemplates,
+    getDealDocumentById,
     generateDealDocument,
     updateDealDocumentStatus,
     deleteDealDocument,
+    requestDocumentApproval,
+    decideDocumentApproval,
+    cancelDocumentApproval,
 } from '@/app/lib/api';
 import type { DealDocument, DocumentStatus, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
 type Props = {
     dealId: number;
     initial: DealDocument[];
+    canApprove: boolean;
+    currentUserId: number;
 };
+
+type ApprovalAction = 'request' | 'approve' | 'reject';
 
 const TYPE_KEY: Record<DocumentType, string> = {
     quote: 'typeQuote',
@@ -47,22 +70,28 @@ const TYPE_KEY: Record<DocumentType, string> = {
 
 const STATUS_DOT: Record<DocumentStatus, string> = {
     draft: 'bg-chart-open',
+    pending_approval: 'bg-risk-medium',
+    approved: 'bg-chart-won',
     final: 'bg-chart-won',
     superseded: 'bg-muted-foreground',
 };
 
 /**
  * Generated-documents panel for a deal. Documents are immutable server-side snapshots; the client
- * generates a draft from a template, transitions its status, or opens a print view (browser
- * print-to-PDF) — it never edits a document's content or computes money.
+ * generates a draft from a template, transitions its status, runs the approval flow (request /
+ * approve / reject / cancel), or opens a print view (browser print-to-PDF) — it never edits a
+ * document's content or computes money. The server owns the approval gate; this UI only reflects
+ * `requiresApproval` and the caller's `DOCUMENT_APPROVE` permission.
  */
-export default function DealDocuments({ dealId, initial }: Props) {
+export default function DealDocuments({ dealId, initial, canApprove, currentUserId }: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
+    const [approvalDialog, setApprovalDialog] = useState<{ doc: DealDocument; action: ApprovalAction } | null>(null);
+    const [comment, setComment] = useState('');
 
     useEffect(() => {
         getDocumentTemplates()
@@ -79,6 +108,11 @@ export default function DealDocuments({ dealId, initial }: Props) {
         } finally {
             setBusy(false);
         }
+    };
+
+    const refreshDocument = async (documentId: number) => {
+        const updated = await getDealDocumentById(dealId, documentId);
+        setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
     };
 
     const generate = (template: DocumentTemplate) => run(async () => {
@@ -98,9 +132,40 @@ export default function DealDocuments({ dealId, initial }: Props) {
         toastSuccess(t('deleted'));
     });
 
+    const cancelRequest = (doc: DealDocument) => run(async () => {
+        await cancelDocumentApproval(dealId, doc.id);
+        await refreshDocument(doc.id);
+        toastSuccess(t('approvalCancelled'));
+    });
+
+    const submitApprovalAction = () => {
+        if (!approvalDialog) return;
+        const { doc, action } = approvalDialog;
+        const trimmed = comment.trim();
+        return run(async () => {
+            if (action === 'request') {
+                await requestDocumentApproval(dealId, doc.id, trimmed || null);
+                toastSuccess(t('approvalRequested'));
+            } else {
+                await decideDocumentApproval(dealId, doc.id, action === 'approve' ? 'approved' : 'rejected', trimmed || null);
+                toastSuccess(action === 'approve' ? t('approvalApproved') : t('approvalRejected'));
+            }
+            await refreshDocument(doc.id);
+            setApprovalDialog(null);
+            setComment('');
+        });
+    };
+
+    const openApprovalDialog = (doc: DealDocument, action: ApprovalAction) => {
+        setComment('');
+        setApprovalDialog({ doc, action });
+    };
+
     const openPdf = (doc: DealDocument) => {
         window.open(`/records/deals/${dealId}/documents/${doc.id}/print`, '_blank', 'noopener,noreferrer');
     };
+
+    const isRequester = (doc: DealDocument) => doc.latestApproval?.requestedBy === currentUserId;
 
     const generateMenu = (
         <DropdownMenu>
@@ -131,6 +196,8 @@ export default function DealDocuments({ dealId, initial }: Props) {
         </DropdownMenu>
     );
 
+    const dialogAction = approvalDialog?.action;
+
     return (
         <section>
             <div className="mb-3 flex items-center justify-between">
@@ -155,7 +222,7 @@ export default function DealDocuments({ dealId, initial }: Props) {
                         <thead>
                             <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
                                 <th className="px-4 py-3 font-medium">{t('columnDocument')}</th>
-                                <th className="w-28 px-4 py-3 font-medium">{t('columnStatus')}</th>
+                                <th className="w-32 px-4 py-3 font-medium">{t('columnStatus')}</th>
                                 <th className="w-36 px-4 py-3 text-right font-medium">{t('columnTotal')}</th>
                                 <th className="w-40 px-4 py-3 font-medium">{t('columnGenerated')}</th>
                                 <th className="w-24 px-2 py-3" />
@@ -169,6 +236,13 @@ export default function DealDocuments({ dealId, initial }: Props) {
                                         <div className="text-xs text-muted-foreground">
                                             {t(TYPE_KEY[doc.type])} · {t('version', { version: doc.version })}
                                         </div>
+                                        {doc.status === 'draft' && doc.latestApproval?.status === 'rejected' && (
+                                            <div className="mt-1 text-xs text-destructive">
+                                                {doc.latestApproval.decisionComment
+                                                    ? t('rejectedWithComment', { comment: doc.latestApproval.decisionComment })
+                                                    : t('rejectedNote')}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         <span className={`inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs font-medium ${doc.status === 'superseded' ? 'text-muted-foreground' : 'text-foreground'}`}>
@@ -196,6 +270,31 @@ export default function DealDocuments({ dealId, initial }: Props) {
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
                                                     {doc.status === 'draft' && (
+                                                        <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'request')}>
+                                                            <ShieldCheckIcon className="size-4" />{t('requestApproval')}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {doc.status === 'draft' && !doc.requiresApproval && (
+                                                        <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
+                                                            <CheckCircleIcon className="size-4" />{t('markFinal')}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {doc.status === 'pending_approval' && canApprove && (
+                                                        <>
+                                                            <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'approve')}>
+                                                                <CheckCircleIcon className="size-4" />{t('approve')}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'reject')}>
+                                                                <XCircleIcon className="size-4" />{t('reject')}
+                                                            </DropdownMenuItem>
+                                                        </>
+                                                    )}
+                                                    {doc.status === 'pending_approval' && isRequester(doc) && (
+                                                        <DropdownMenuItem onSelect={() => cancelRequest(doc)}>
+                                                            <ArrowUturnLeftIcon className="size-4" />{t('cancelRequest')}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {doc.status === 'approved' && (
                                                         <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
                                                             <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
@@ -223,6 +322,61 @@ export default function DealDocuments({ dealId, initial }: Props) {
                     </table>
                 </div>
             )}
+
+            <Dialog
+                open={approvalDialog !== null}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setApprovalDialog(null);
+                        setComment('');
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {dialogAction === 'request' && t('requestDialogTitle')}
+                            {dialogAction === 'approve' && t('approveDialogTitle')}
+                            {dialogAction === 'reject' && t('rejectDialogTitle')}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {dialogAction === 'request' && t('requestDialogBody', { title: approvalDialog?.doc.title ?? '' })}
+                            {dialogAction === 'approve' && t('approveDialogBody', { title: approvalDialog?.doc.title ?? '' })}
+                            {dialogAction === 'reject' && t('rejectDialogBody', { title: approvalDialog?.doc.title ?? '' })}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="approval-comment">{t('commentLabel')}</Label>
+                        <Textarea
+                            id="approval-comment"
+                            rows={3}
+                            maxLength={1000}
+                            value={comment}
+                            placeholder={t('commentPlaceholder')}
+                            onChange={(e) => setComment(e.target.value)}
+                            disabled={busy}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline" disabled={busy}>{t('dialogCancel')}</Button>
+                        </DialogClose>
+                        <Button
+                            variant={dialogAction === 'reject' ? 'destructive' : 'brand'}
+                            disabled={busy}
+                            onClick={submitApprovalAction}
+                        >
+                            {busy ? <Loader2Icon className="size-4 animate-spin" /> : (
+                                <>
+                                    {dialogAction === 'request' && t('requestConfirm')}
+                                    {dialogAction === 'approve' && t('approveConfirm')}
+                                    {dialogAction === 'reject' && t('rejectConfirm')}
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </section>
     );
 }
