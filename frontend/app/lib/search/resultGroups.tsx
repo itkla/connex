@@ -134,20 +134,20 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
     }));
     addGroup("activities", t("groupActivities"), results.activities, (a) => ({
         key: `activity-${a.id}`,
-        href: "/activity/all",
+        href: `/activity/activities/${a.id}`,
         icon: BoltIcon,
         label: a.subject,
         subtitle: a.type || undefined,
     }));
     addGroup("notes", t("groupNotes"), results.notes, (n) => ({
         key: `note-${n.id}`,
-        href: "/activity/notes",
+        href: `/activity/notes/${n.id}`,
         icon: DocumentTextIcon,
         label: truncate(noteContentToPlainText(n.content)),
     }));
     addGroup("tasks", t("groupTasks"), results.tasks, (task) => ({
         key: `task-${task.id}`,
-        href: "/activity/tasks",
+        href: `/activity/tasks/${task.id}`,
         icon: CheckCircleIcon,
         label: truncate(noteContentToPlainText(task.description)),
     }));
