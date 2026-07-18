@@ -117,9 +117,9 @@
     "dealMentionTitle": "Deal mentions",
     "dealMentionDescription": "When a teammate @-mentions you in a deal's close reason.",
     "approvalRequestTitle": "Approval requests",
-    "approvalRequestDescription": "When a document is sent for your approval",
+    "approvalRequestDescription": "When a document is sent for your approval.",
     "approvalDecisionTitle": "Approval decisions",
-    "approvalDecisionDescription": "When your approval request is approved, rejected, or withdrawn",
+    "approvalDecisionDescription": "When your approval request is approved, rejected, or withdrawn.",
     "loadFailed": "Your notification preferences couldn't be loaded.",
     "saveFailed": "Your change couldn't be saved. Try again.",
     "retry": "Try again"
