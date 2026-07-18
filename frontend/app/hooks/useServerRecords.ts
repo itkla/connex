@@ -11,10 +11,13 @@ export type SortDir = 'asc' | 'desc';
  * {@link useRecordsBrowser} can preserve them rather than wiping them as stale filter params. */
 export const SERVER_RECORDS_URL_KEYS = ['q', 'sort', 'dir', 'page', 'size'] as const;
 
-function parsePositiveInt(value: string | null, fallback: number): number {
+/** Upper bound applied to a URL-supplied page size so a crafted `?size=` can't request an unbounded page. */
+const MAX_URL_PAGE_SIZE = 100;
+
+function parsePositiveInt(value: string | null, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
     if (value === null) return fallback;
     const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+    return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 }
 
 /**
@@ -45,7 +48,7 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(() => parsePositiveInt(seed?.get('page') ?? null, 1));
-    const [size, setSize] = useState(() => parsePositiveInt(seed?.get('size') ?? null, defaultSize));
+    const [size, setSize] = useState(() => parsePositiveInt(seed?.get('size') ?? null, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
     const [query, setQuery] = useState(seededQuery);
     const [debouncedQuery, setDebouncedQuery] = useState(seededQuery);
     const [sortKey, setSortKey] = useState<string | null>(() => seed?.get('sort') || null);
@@ -56,10 +59,11 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
 
     const debounceMountedRef = useRef(false);
     useEffect(() => {
+        const isMount = !debounceMountedRef.current;
+        debounceMountedRef.current = true;
         const id = setTimeout(() => {
             setDebouncedQuery(query.trim());
-            if (debounceMountedRef.current) setPage(1);
-            else debounceMountedRef.current = true;
+            if (!isMount) setPage(1);
         }, 250);
         return () => clearTimeout(id);
     }, [query]);
@@ -85,8 +89,10 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     useEffect(() => {
         if (workspaceRef.current === activeWorkspaceId) return;
         workspaceRef.current = activeWorkspaceId;
+        if (!urlSync) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPage(1); setSize(defaultSize); setQuery(''); setDebouncedQuery(''); setSortKey(null); setSortDirection('asc');
-    }, [activeWorkspaceId, defaultSize]);
+    }, [activeWorkspaceId, defaultSize, urlSync]);
 
     const load = useCallback(() => {
         let active = true;
