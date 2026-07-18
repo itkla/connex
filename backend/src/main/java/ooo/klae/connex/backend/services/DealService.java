@@ -1288,7 +1288,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);
