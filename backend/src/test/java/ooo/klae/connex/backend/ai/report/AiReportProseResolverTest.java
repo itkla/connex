@@ -92,6 +92,23 @@ class AiReportProseResolverTest {
     }
 
     @Test
+    void lowercaseTitleSnapsToCanonicalSoCacheReadRevalidationPasses() {
+        AiReportContext ctx = context();
+        AiReportNarrativeContent.Claim claim =
+                new AiReportNarrativeContent.Claim("Won revenue is {{num:metric.0.0.current}}.", List.of("metric.0.0"));
+        AiReportNarrativeContent input = new AiReportNarrativeContent(
+                List.of(new AiReportNarrativeContent.Section("  executive SUMMARY ", List.of(claim))),
+                List.of(claim));
+
+        Optional<AiReportNarrativeContent> resolved =
+                AiReportProseResolver.resolve(input, ctx, figures(ctx));
+
+        assertTrue(resolved.isPresent());
+        assertEquals("Executive summary", resolved.get().sections().getFirst().title());
+        assertTrue(AiReportNarrativeValidator.validate(resolved.get(), ctx).isPresent());
+    }
+
+    @Test
     void figuresFormatDeltaAndCurrency() {
         AiReportFigures figures = figures(context());
         assertEquals("$1,000,000", figures.resolve("num:metric.0.0.current"));

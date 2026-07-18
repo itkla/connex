@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai.report;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -65,7 +64,7 @@ final class AiReportProseResolver {
         for (ReportAppendixRowDto source : context.sources()) {
             sources.put(source.sourceId(), source);
         }
-        Set<String> titles = titleLookup();
+        Map<String, String> titles = titleLookup();
         int[] tally = {0, 0};
 
         List<AiReportNarrativeContent.Section> sections = new ArrayList<>();
@@ -89,13 +88,13 @@ final class AiReportProseResolver {
     private static Optional<AiReportNarrativeContent.Section> resolveSection(
             AiReportNarrativeContent.Section section,
             Set<String> sourceIds,
-            Set<String> titles,
+            Map<String, String> titles,
             AiReportFigures figures,
             int[] tally) {
         if (section == null || section.title() == null) {
             return Optional.empty();
         }
-        String canonicalTitle = titles.contains(normalize(section.title())) ? section.title().strip() : null;
+        String canonicalTitle = titles.get(normalize(section.title()));
         if (canonicalTitle == null) {
             return Optional.empty();
         }
@@ -167,10 +166,10 @@ final class AiReportProseResolver {
         return TOKEN.matcher(text).replaceAll(" ");
     }
 
-    private static Set<String> titleLookup() {
-        Set<String> lookup = new LinkedHashSet<>();
+    private static Map<String, String> titleLookup() {
+        Map<String, String> lookup = new LinkedHashMap<>();
         for (String title : AiReportFacts.titles()) {
-            lookup.add(normalize(title));
+            lookup.put(normalize(title), title);
         }
         return lookup;
     }
