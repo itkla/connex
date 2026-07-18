@@ -9,6 +9,7 @@ import type { Contact, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { publishRecordMutation } from "@/app/lib/record-mutation-events";
 import { toastError } from "@/app/lib/toast";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
@@ -17,6 +18,7 @@ const ActivityDialog = dynamic(() => import("@/app/components/activity/activitie
 const CompanyCreateContainer = dynamic(() => import("@/app/components/actions/create/CompanyCreateContainer"));
 const ContactCreateContainer = dynamic(() => import("@/app/components/actions/create/ContactCreateContainer"));
 const DealCreateContainer = dynamic(() => import("@/app/components/actions/create/DealCreateContainer"));
+const ImportDialog = dynamic(() => import("@/app/components/import/ImportDialog"));
 
 const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-task",
@@ -143,6 +145,9 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
 
+    const handleCompaniesImported = () => publishRecordMutation("company");
+    const handleContactsImported = () => publishRecordMutation("contact");
+
     const references = loadedReferences?.key === referenceKey ? loadedReferences : null;
     const users = loadedUsers?.key === usersKey ? loadedUsers.users : null;
     const persons = references?.persons ?? [];
@@ -201,6 +206,30 @@ export default function ActionOverlayHost({
             ) : null}
             {rendered?.kind === "create-deal" ? (
                 <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.defaults} />
+            ) : null}
+            {rendered?.kind === "import-companies" ? (
+                <ImportDialog
+                    entity="companies"
+                    open={visible}
+                    onOpenChange={handleOpenChange}
+                    onImported={handleCompaniesImported}
+                />
+            ) : null}
+            {rendered?.kind === "import-contacts" ? (
+                <ImportDialog
+                    entity="persons"
+                    open={visible}
+                    onOpenChange={handleOpenChange}
+                    onImported={handleContactsImported}
+                />
+            ) : null}
+            {rendered?.kind === "import-deals" ? (
+                <ImportDialog
+                    entity="deals"
+                    open={visible}
+                    onOpenChange={handleOpenChange}
+                    onImported={() => {}}
+                />
             ) : null}
         </>
     );

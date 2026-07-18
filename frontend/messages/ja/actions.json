@@ -51,7 +51,10 @@
     },
     "utility": {
       "copyPageLink": "このページのリンクをコピー",
-      "markAllNotificationsRead": "すべての通知を既読にする"
+      "markAllNotificationsRead": "すべての通知を既読にする",
+      "importCompanies": "会社をインポート",
+      "importContacts": "連絡先をインポート",
+      "importDeals": "取引をインポート"
     },
     "feedback": {
       "linkCopied": "リンクをクリップボードにコピーしました",
@@ -85,6 +88,11 @@
       "workspace": {
         "theme": "テーマ, 外観, ダーク, ライト, モード",
         "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
+      },
+      "utility": {
+        "importCompanies": "会社をインポート, csv, アップロード, 一括",
+        "importContacts": "連絡先をインポート, 人, 担当者, csv, アップロード, 一括",
+        "importDeals": "取引をインポート, 商談, 案件, csv, アップロード, 一括"
       }
     }
   }

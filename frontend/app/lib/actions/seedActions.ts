@@ -1,4 +1,5 @@
 import {
+    ArrowUpTrayIcon,
     BoltIcon,
     BriefcaseIcon,
     BuildingLibraryIcon,
@@ -145,6 +146,40 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         keywordsKey: "keywords.create.activity",
         execute: (context, helpers) => {
             helpers.openOverlay({ kind: "create-activity", defaults: deriveCreateDefaults(context, "activity") });
+        },
+    },
+
+    {
+        id: "utility.import-companies",
+        group: "utility",
+        labelKey: "utility.importCompanies",
+        icon: ArrowUpTrayIcon,
+        order: 30,
+        keywordsKey: "keywords.utility.importCompanies",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-companies" });
+        },
+    },
+    {
+        id: "utility.import-contacts",
+        group: "utility",
+        labelKey: "utility.importContacts",
+        icon: ArrowUpTrayIcon,
+        order: 40,
+        keywordsKey: "keywords.utility.importContacts",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-contacts" });
+        },
+    },
+    {
+        id: "utility.import-deals",
+        group: "utility",
+        labelKey: "utility.importDeals",
+        icon: ArrowUpTrayIcon,
+        order: 50,
+        keywordsKey: "keywords.utility.importDeals",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-deals" });
         },
     },
 
