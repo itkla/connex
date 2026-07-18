@@ -1160,7 +1160,57 @@ export type CreateDocumentTemplatePayload = {
 
 export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayload>;
 
-export type DocumentStatus = 'draft' | 'final' | 'superseded';
+export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final' | 'superseded';
+
+/**
+ * Statuses a client may request through the status endpoint. The approval states are owned by the
+ * approval flow and are rejected server-side if sent here.
+ */
+export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
+
+export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+/** One approval request on a generated document, with its decision once made. */
+export type DocumentApproval = {
+    id: number;
+    documentId: number;
+    policyId?: number | null;
+    status: DocumentApprovalStatus;
+    requestedBy?: number | null;
+    requestComment?: string | null;
+    decidedBy?: number | null;
+    decisionComment?: string | null;
+    decidedAt?: string | null;
+    createdAt: string;
+};
+
+/** Declares when a generated document requires internal approval before finalization. */
+export type ApprovalPolicy = {
+    id: number;
+    name: string;
+    active: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateApprovalPolicyPayload = {
+    name: string;
+    active?: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+};
+
+/**
+ * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
+ * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ */
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
 
 /** A party rendered on a document (workspace, company, or owner). */
 export type DocumentParty = {
@@ -1201,6 +1251,8 @@ export type DealDocument = {
     currency: string;
     generatedAt: string;
     content: DocumentContent;
+    requiresApproval: boolean;
+    latestApproval?: DocumentApproval | null;
 };
 
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';

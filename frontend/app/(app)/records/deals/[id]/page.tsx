@@ -19,6 +19,7 @@ import {
     getDealById,
     getDealLineItemsFromCookie,
     getDealDocumentsFromCookie,
+    getEffectivePermissionsFromCookie,
     getDealCollaborators,
     getDealPeople,
     getDealRisk,
@@ -116,7 +117,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
         .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
 
-    const documents = await getDealDocumentsFromCookie(deal.id, cookie).catch(() => []);
+    const [documents, effectivePermissions] = await Promise.all([
+        getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
+        getEffectivePermissionsFromCookie(cookie),
+    ]);
 
     const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null
@@ -364,7 +368,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 </Rise>
 
                 <Rise delay={0.24}>
-                    <DealDocuments dealId={deal.id} initial={documents} />
+                    <DealDocuments
+                        dealId={deal.id}
+                        initial={documents}
+                        canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                        currentUserId={currentUser.id}
+                    />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">

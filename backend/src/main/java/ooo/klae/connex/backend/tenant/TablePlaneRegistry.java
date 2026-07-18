@@ -76,6 +76,7 @@ public final class TablePlaneRegistry {
     public static final Set<String> ORG_DATA_TABLES = Set.of(
         "activity",
         "ai_output_cache",
+        "approval_policy",
         "attachment",
         "attachment_tag",
         "business_card_import_request",
@@ -105,6 +106,7 @@ public final class TablePlaneRegistry {
         "deal_tag",
         "connector_config",
         "delivery_provider_config",
+        "document_approval",
         "document_template",
         "product",
         "entity_reference",

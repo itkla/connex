@@ -6,6 +6,7 @@
   "DocumentTemplatesBrowser": {
     "title": "Document templates",
     "newButton": "New template",
+    "approvalPoliciesLink": "Approval policies",
     "sectionTemplates": "Templates",
     "searchPlaceholder": "Search templates",
     "emptyTitle": "No templates yet",

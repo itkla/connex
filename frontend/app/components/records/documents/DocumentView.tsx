@@ -31,9 +31,9 @@ export default function DocumentView({ content, type, status, version, generated
     const tp = useTranslations('DealsDocuments.print');
     const locale = useLocale();
     const money = (value: number) => formatCurrency(value, content.deal.currency, locale);
-    const watermark = status === 'draft'
-        ? tp('draftWatermark')
-        : status === 'superseded' ? tp('supersededWatermark') : null;
+    const watermark = status === 'superseded'
+        ? tp('supersededWatermark')
+        : status != null && status !== 'final' ? tp('draftWatermark') : null;
 
     return (
         <div className="relative text-foreground">

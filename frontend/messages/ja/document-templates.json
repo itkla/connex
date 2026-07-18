@@ -6,6 +6,7 @@
   "DocumentTemplatesBrowser": {
     "title": "ドキュメントテンプレート",
     "newButton": "新規テンプレート",
+    "approvalPoliciesLink": "承認ポリシー",
     "sectionTemplates": "テンプレート",
     "searchPlaceholder": "テンプレートを検索",
     "emptyTitle": "テンプレートがありません",
