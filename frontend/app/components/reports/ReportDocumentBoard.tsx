@@ -28,6 +28,7 @@ import {
     generateReport,
     getReportSnapshot,
 } from '@/app/lib/api';
+import { recoverAiResult } from '@/app/lib/aiRecovery';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     ReportCitation,
@@ -114,18 +115,38 @@ export default function ReportDocumentBoard({
         ? activeSnapshot?.computedResult ?? null
         : state.status === 'ready' ? state.document : null;
 
+    /**
+     * Generates the narrative, then recovers from a request that was cut in transit. The server
+     * completes and caches the narrative regardless of whether the client still holds the
+     * connection, so a lost response is resolved by polling the provider-free cached mode rather
+     * than by surfacing an error the reader has to retry by hand.
+     */
     const runNarrative = useCallback(async (generationId: number) => {
         setNarrativeState('generating');
+        const apply = (document: ReportDocument) => {
+            setState({ status: 'ready', document });
+            setNarrativeState('idle');
+        };
         try {
             const full = await withTimeout(
                 generateReport(definition.id, generationInputRef.current, 'full'),
                 NARRATIVE_TIMEOUT_MS,
             );
             if (generationRef.current !== generationId) return;
-            setState({ status: 'ready', document: full });
-            setNarrativeState('idle');
+            apply(full);
+            return;
         } catch {
             if (generationRef.current !== generationId) return;
+        }
+        const recovered = await recoverAiResult(
+            () => generateReport(definition.id, generationInputRef.current, 'cached'),
+            (document) => document.narrative.available,
+            () => generationRef.current !== generationId,
+        );
+        if (generationRef.current !== generationId) return;
+        if (recovered) {
+            apply(recovered);
+        } else {
             setNarrativeState('error');
         }
     }, [definition.id]);
