@@ -57,6 +57,7 @@ export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
         reset();
         try {
             await requestEmailChange({ newEmail: newEmail.trim(), currentPassword });
+            setCurrentPassword("");
             setSent(true);
         } catch (err) {
             if (err instanceof ApiError) {
