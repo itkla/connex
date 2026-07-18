@@ -186,7 +186,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         applySort: applyServerSort,
         revision,
         reload,
-    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams);
+    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams, { urlSync: true });
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
     const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
