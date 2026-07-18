@@ -194,6 +194,43 @@
         "deliveryUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。",
         "unknownMessage": "メッセージ"
     },
+    "CampaignEngagement": {
+        "title": "エンゲージメント",
+        "subtitle": "このキャンペーンの各配信を集計した到達結果です。",
+        "empty": "エンゲージメントはまだありません",
+        "emptyHint": "配信をキューに追加すると、到達結果の収集が始まります。",
+        "recipients": "対象者",
+        "dispatched": "送信済み",
+        "delivered": "到達",
+        "bounced": "バウンス",
+        "complained": "苦情",
+        "unsubscribed": "配信停止",
+        "skipped": "スキップ",
+        "failed": "失敗",
+        "notMeasured": "計測不可",
+        "notMeasuredHint": "SMTPは到達通知を返しません。計測するにはESPを接続してください。",
+        "deliveryRate": "到達率",
+        "bounceRate": "バウンス率",
+        "complaintRate": "苦情率",
+        "channelsTitle": "チャネル",
+        "channels": {
+            "email": "メール",
+            "sms": "SMS"
+        },
+        "deliveries": "{count}件到達",
+        "skipTitle": "スキップ理由",
+        "skipReasons": {
+            "consent_revoked": "オプトアウト",
+            "suppressed": "抑制",
+            "restricted": "制限",
+            "frequency_capped": "頻度制限",
+            "quiet_hours": "サイレント時間帯",
+            "no_address": "アドレスなし",
+            "consent_missing": "許諾なし"
+        },
+        "sendsTitle": "配信別",
+        "sendLabel": "配信 #{id}"
+    },
     "CampaignExports": {
         "title": "エクスポート",
         "subtitle": "確定した対象者スナップショットを外部コネクターへ送信します。",
