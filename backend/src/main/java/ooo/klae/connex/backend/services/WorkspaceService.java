@@ -279,6 +279,20 @@ public class WorkspaceService {
         }
     }
 
+    /**
+     * Verifies the user is an active member of the workspace while holding a {@code FOR UPDATE} lock on
+     * their membership row until the surrounding transaction commits. Unlike {@link #requireMember}, this
+     * closes the time-of-check/time-of-use gap against concurrent offboarding: a caller must invoke it
+     * inside its own transaction (e.g. {@code updateOwner}) so the assignment and the membership check
+     * cannot straddle {@code UserOffboardingService}'s membership lock, preventing a dangling owner id
+     * pointing at a just-removed member.
+     */
+    public void lockAndRequireMember(int workspaceId, int userId) {
+        if (workspaceMapper.lockActiveMembership(workspaceId, userId) == null) {
+            throw new ForbiddenException("User " + userId + " is not a member of this workspace");
+        }
+    }
+
     /** Returns whether every requested id is an active member of the workspace. */
     public boolean areActiveMembers(int workspaceId, List<Integer> memberIds) {
         return workspaceMapper.countActiveMembers(workspaceId, memberIds) == memberIds.size();

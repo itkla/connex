@@ -409,7 +409,7 @@ public class CompanyService {
     public Company updateOwner(int companyId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = requireOwnedCompany(workspaceId, companyId);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         companyMapper.updateOwner(workspaceId, companyId, ownerId);
         auditService.record("company.updateOwner", "company", companyId, before.getName(),
             "Updated owner on " + before.getName(),
