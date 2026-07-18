@@ -4,21 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import type { Page, PageParams } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl, type SortDir } from '@/app/hooks/listStateUrl';
 
-export type SortDir = 'asc' | 'desc';
-
-/** URL query keys owned by {@link useServerRecords} when `urlSync` is on. Kept in one place so
- * {@link useRecordsBrowser} can preserve them rather than wiping them as stale filter params. */
-export const SERVER_RECORDS_URL_KEYS = ['q', 'sort', 'dir', 'page', 'size'] as const;
-
-/** Upper bound applied to a URL-supplied page size so a crafted `?size=` can't request an unbounded page. */
-const MAX_URL_PAGE_SIZE = 100;
-
-function parsePositiveInt(value: string | null, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
-    if (value === null) return fallback;
-    const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
-}
+export type { SortDir };
+export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
 
 /**
  * Server-side pagination hook. When `urlSync` is true, its query/sort/page/size are seeded from and
@@ -47,8 +36,8 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const [items, setItems] = useState<T[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [page, setPage] = useState(() => parsePositiveInt(seed?.get('page') ?? null, 1));
-    const [size, setSize] = useState(() => parsePositiveInt(seed?.get('size') ?? null, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
+    const [page, setPage] = useState(() => parseListInt(seed?.get('page') ?? null, 1));
+    const [size, setSize] = useState(() => parseListInt(seed?.get('size') ?? null, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
     const [query, setQuery] = useState(seededQuery);
     const [debouncedQuery, setDebouncedQuery] = useState(seededQuery);
     const [sortKey, setSortKey] = useState<string | null>(() => seed?.get('sort') || null);
@@ -73,16 +62,7 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
 
     useEffect(() => {
         if (!urlSync) return;
-        const params = new URLSearchParams(window.location.search);
-        const set = (key: string, value: string) => (value ? params.set(key, value) : params.delete(key));
-        set('q', debouncedQuery);
-        set('sort', sortKey ?? '');
-        set('dir', sortKey && sortDirection === 'desc' ? 'desc' : '');
-        set('page', page > 1 ? String(page) : '');
-        set('size', size !== defaultSize ? String(size) : '');
-        const next = params.toString();
-        if (next === window.location.search.replace(/^\?/, '')) return;
-        window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+        writeListStateToUrl(pathname, { q: debouncedQuery, sort: sortKey, dir: sortDirection, page, size }, defaultSize);
     }, [urlSync, debouncedQuery, sortKey, sortDirection, page, size, defaultSize, pathname]);
 
     const workspaceRef = useRef(activeWorkspaceId);
