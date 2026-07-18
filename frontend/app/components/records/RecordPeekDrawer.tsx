@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActionRecord, useActions } from '@/app/hooks/useActions';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
-import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { RECORD_PATHS } from '@/app/lib/actions/seedActions';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealSummary, getTasksForDeal } from '@/app/lib/api';
 import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
@@ -50,34 +50,36 @@ type PeekData =
     | { kind: 'company'; company: Company; engagement: CompanyEngagement | null }
     | { kind: 'deal'; summary: DealSummary; tasks: Task[]; activities: Activity[] };
 
-const DETAIL_PATH: Record<PeekType, string> = {
-    company: '/records/companies',
-    person: '/records/contacts',
-    deal: '/records/deals',
-};
-
 /**
  * Right-side (bottom-sheet on mobile) drawer that shows a triage summary of a company, person, or
  * deal without leaving the list. Content loads lazily per record with skeleton/error/not-found
- * states; the active record is published to the action registry so add-note/task/activity and
+ * states; the loaded record is published to the action registry so add-note/task/activity and
  * copy-link light up and prefill. Prev/next steps through the visible order.
  */
-export default function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPrev, hasNext, position }: Props) {
+function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPrev, hasNext, position }: Props) {
     const t = useTranslations('RecordPeek');
     const locale = useLocale();
     const router = useRouter();
     const { run, getAction } = useActions();
-    const { activeWorkspaceId } = useWorkspace();
     const isMobile = useIsMobile();
 
     const [data, setData] = useState<PeekData | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<'notFound' | 'forbidden' | 'failed' | null>(null);
 
+    const targetKey = target ? `${target.type}:${target.id}` : null;
+    const [loadedKey, setLoadedKey] = useState<string | null>(null);
+    if (targetKey !== loadedKey) {
+        setLoadedKey(targetKey);
+        setData(null);
+        setError(null);
+        setLoading(targetKey !== null);
+    }
+
     const label = data ? recordLabel(data) : '';
     const actionRecord = useMemo(
-        () => (target ? { type: target.type, id: target.id, label } : null),
-        [target, label],
+        () => (target && data ? { type: target.type, id: target.id, label } : null),
+        [target, data, label],
     );
     useActionRecord(actionRecord);
 
@@ -85,9 +87,6 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
         if (!target) return;
         let cancelled = false;
         (async () => {
-            setLoading(true);
-            setError(null);
-            setData(null);
             try {
                 const loaded = await loadPeek(target);
                 if (!cancelled) setData(loaded);
@@ -103,16 +102,12 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
         return () => {
             cancelled = true;
         };
-    }, [target, activeWorkspaceId]);
+    }, [target]);
 
     const openFull = () => {
         if (!target) return;
-        router.push(`${DETAIL_PATH[target.type]}/${target.id}`);
-    };
-
-    const quickAction = (id: string) => {
-        if (!getAction(id)) return null;
-        return id;
+        const base = RECORD_PATHS[target.type];
+        if (base) router.push(`${base}/${target.id}`);
     };
 
     return (
@@ -123,7 +118,7 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
             }}
             swipeDirection={isMobile ? 'down' : 'right'}
         >
-            <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-md">
+            <DrawerContent data-record-peek="" className="flex w-full flex-col gap-0 sm:max-w-md">
                 <DrawerHeader className="gap-3 border-b pr-12">
                     <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -146,7 +141,7 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
                     <div className="flex items-center gap-3">
                         <PeekAvatar target={target} data={data} />
                         <div className="min-w-0 flex-1">
-                            <DrawerTitle className="truncate text-base">{data ? recordLabel(data) : loading ? t('loading') : ''}</DrawerTitle>
+                            <DrawerTitle className="truncate text-base">{label || (loading ? t('loading') : '')}</DrawerTitle>
                             <DrawerDescription className="truncate">{data ? recordSubtitle(data) : ''}</DrawerDescription>
                         </div>
                     </div>
@@ -175,19 +170,19 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
                             <ArrowTopRightOnSquareIcon className="size-4" />
                             {t('openFull')}
                         </Button>
-                        {quickAction('create.note') && (
+                        {getAction('create.note') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('create.note', { source: 'programmatic' })} className="justify-start">
                                 <DocumentTextIcon className="size-4" />
                                 {t('addNote')}
                             </Button>
                         )}
-                        {quickAction('create.task') && (
+                        {getAction('create.task') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('create.task', { source: 'programmatic' })} className="justify-start">
                                 <CheckCircleIcon className="size-4" />
                                 {t('createTask')}
                             </Button>
                         )}
-                        {quickAction('record.copy-link') && (
+                        {getAction('record.copy-link') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('record.copy-link', { source: 'programmatic' })} className="justify-start">
                                 <LinkIcon className="size-4" />
                                 {t('copyLink')}
@@ -199,6 +194,8 @@ export default function RecordPeekDrawer({ target, browserType, onClose, onPrev,
         </Drawer>
     );
 }
+
+export default memo(RecordPeekDrawer);
 
 function PeekAvatar({ target, data }: { target: PeekTarget | null; data: PeekData | null }) {
     if (data?.kind === 'person') return <ContactAvatar contact={data.contact} type="large" />;
@@ -229,17 +226,15 @@ function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: Retu
     if (data.kind === 'company') {
         const e = data.engagement;
         return (
-            <>
-                <Facts
-                    rows={[
-                        [t('industry'), data.company.industry || '—'],
-                        [t('website'), data.company.website || '—'],
-                        [t('people'), e ? String(e.personCount) : '—'],
-                        [t('openTasks'), e ? String(e.openTasks) : '—'],
-                        [t('projectedRevenue'), e ? formatCurrency(e.projectedRevenue, e.currency, locale) : '—'],
-                    ]}
-                />
-            </>
+            <Facts
+                rows={[
+                    [t('industry'), data.company.industry || '—'],
+                    [t('website'), data.company.website || '—'],
+                    [t('people'), e ? String(e.personCount) : '—'],
+                    [t('openTasks'), e ? String(e.openTasks) : '—'],
+                    [t('projectedRevenue'), e ? formatCurrency(e.projectedRevenue, e.currency, locale) : '—'],
+                ]}
+            />
         );
     }
     const openTasks = data.tasks.filter((task) => !task.completed);
@@ -298,18 +293,17 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
 }
 
 function ActivitySection({ activities, locale, t }: { activities: Activity[]; locale: string; t: ReturnType<typeof useTranslations> }) {
-    const sorted = [...activities].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
     return (
         <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
                 <BoltIcon className="size-3.5" />
                 {t('latestActivityTitle')}
             </h3>
-            {sorted.length === 0 ? (
+            {activities.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('noActivity')}</p>
             ) : (
                 <ul className="space-y-2">
-                    {sorted.slice(0, 4).map((activity) => (
+                    {activities.slice(0, 4).map((activity) => (
                         <li key={activity.id} className="space-y-0.5">
                             <p className="truncate text-sm text-foreground">{activity.subject}</p>
                             <p className="text-xs text-muted-foreground">
@@ -353,9 +347,15 @@ function recordSubtitle(data: PeekData): string {
     return `${data.summary.pipelineName ?? ''}${data.summary.stageName ? ` · ${data.summary.stageName}` : ''}`;
 }
 
+function sortActivities(activities: Activity[]): Activity[] {
+    return [...activities].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
+}
+
 async function loadPeek(target: PeekTarget): Promise<PeekData> {
     if (target.type === 'person') {
-        return { kind: 'person', contact: await getContactById(target.id) };
+        const contact = await getContactById(target.id);
+        contact.activities = sortActivities(contact.activities ?? []);
+        return { kind: 'person', contact };
     }
     if (target.type === 'company') {
         const [company, engagement] = await Promise.all([
@@ -369,5 +369,5 @@ async function loadPeek(target: PeekTarget): Promise<PeekData> {
         getTasksForDeal(target.id).catch(() => [] as Task[]),
         getActivitiesForDeal(target.id).catch(() => [] as Activity[]),
     ]);
-    return { kind: 'deal', summary, tasks, activities };
+    return { kind: 'deal', summary, tasks, activities: sortActivities(activities) };
 }

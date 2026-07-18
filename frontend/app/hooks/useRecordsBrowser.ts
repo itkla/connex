@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
+import { PEEK_PARAM } from './useRecordPeek';
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -35,7 +36,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
-            if (key !== 'view' && key !== 'peek' && value) state[key] = value.split(',');
+            if (key !== 'view' && key !== PEEK_PARAM && value) state[key] = value.split(',');
         });
         return state;
     });
@@ -58,7 +59,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         const params = new URLSearchParams(searchParams.toString());
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
-            if (key !== 'view' && key !== 'peek') params.delete(key);
+            if (key !== 'view' && key !== PEEK_PARAM) params.delete(key);
         }
         for (const [key, values] of Object.entries(filterState)) {
             if (values.length) params.set(key, values.join(','));

@@ -607,7 +607,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         [setFilterState, applyQuery, applySort],
     );
 
-    const peek = useRecordPeekController('person', contacts);
+    const peek = useRecordPeekController('person', contacts, displayMode === 'table');
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">

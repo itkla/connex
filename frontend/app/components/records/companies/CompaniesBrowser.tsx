@@ -730,7 +730,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         [setFilterState, applyQuery, applySort],
     );
 
-    const peek = useRecordPeekController('company', companies);
+    const peek = useRecordPeekController('company', companies, displayMode === 'table');
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
