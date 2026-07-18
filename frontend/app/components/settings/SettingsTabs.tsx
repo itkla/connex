@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
     { key: "tabMembers", href: "/settings/members" },
     { key: "tabRoles", href: "/settings/roles" },
-    { key: "tabRules", href: "/settings/rules" },
+    { key: "tabWorkflows", href: "/settings/workflows" },
     { key: "tabCustomFields", href: "/settings/custom-fields" },
     { key: "tabEmail", href: "/settings/email" },
     { key: "tabDelivery", href: "/settings/delivery" },

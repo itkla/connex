@@ -39,35 +39,16 @@ import type {
     SegmentFields,
 } from "@/app/lib/types";
 
-const RECORD_TYPES = ["deal", "company", "person", "task"];
-const EVENTS: Record<string, string[]> = {
-    deal: ["deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost", "deal.owner_changed", "deal.value_changed"],
-    company: ["company.created", "company.updated", "company.owner_changed"],
-    person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed"],
-    task: ["task.created", "task.completed"],
-};
-const ACTIONS: Record<string, string[]> = {
-    deal: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "change_stage", "notify"],
-    company: ["add_tag", "remove_tag", "notify"],
-    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "notify"],
-    task: ["notify"],
-};
-const CADENCES = ["hourly", "daily", "weekly"];
-const EXECUTION_MODES = ["user", "system"] as const;
-const SEGMENT_RECORD_TYPES = ["company", "person", "deal"];
-const SCHEDULE_RECORD_TYPES = ["company", "person", "deal"];
-
-function eventsFor(recordType: string): string[] {
-    return EVENTS[recordType] ?? [];
-}
-
-function actionsFor(recordType: string): string[] {
-    return ACTIONS[recordType] ?? ["notify"];
-}
-
-function defaultAction(recordType: string): RuleAction {
-    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : { type: actionsFor(recordType)[0] };
-}
+import {
+    CADENCES,
+    EXECUTION_MODES,
+    RECORD_TYPES,
+    SCHEDULE_RECORD_TYPES,
+    SEGMENT_RECORD_TYPES,
+    actionsFor,
+    defaultAction,
+    eventsFor,
+} from "@/app/components/settings/workflows/vocabulary";
 
 type Props = {
     open: boolean;
