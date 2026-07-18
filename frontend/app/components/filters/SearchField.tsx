@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { cn } from "@/lib/utils";
+import { isTypingTarget } from "@/app/lib/utils";
 
 export default function SearchField({
     value,
@@ -31,12 +32,7 @@ export default function SearchField({
     useEffect(() => {
         if (!shortcut) return;
         function onKeyDown(e: KeyboardEvent) {
-            const target = e.target as HTMLElement | null;
-            const typing =
-                target?.tagName === "INPUT" ||
-                target?.tagName === "TEXTAREA" ||
-                target?.isContentEditable;
-            if (e.key === shortcut && !typing) {
+            if (e.key === shortcut && !isTypingTarget(e.target)) {
                 e.preventDefault();
                 ref.current?.focus();
             }

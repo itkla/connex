@@ -23,6 +23,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -726,7 +727,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'company',
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
-            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
             filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
@@ -818,6 +819,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale]);
 
     const visibleDeals = deals;
+
+    const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
 
@@ -1180,6 +1183,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 );
                             }}
                             detailPath={(item) => `/records/deals/${item.id}`}
+                            onRowClick={(item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
                             displayMode={displayMode}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={setSelectedIds}
@@ -1198,6 +1203,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         />
                     )}
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditDealSheet
                     open={editSheetOpen}

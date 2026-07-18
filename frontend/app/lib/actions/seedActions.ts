@@ -21,7 +21,8 @@ import { toastSuccess } from "@/app/lib/toast";
 import { deriveCreateDefaults } from "./createDefaults";
 import type { ActiveRecordRef, AppAction, RecordType } from "./types";
 
-const RECORD_PATHS: Record<RecordType, string | null> = {
+/** Detail-page base path per record type; `null` for types without a detail route. */
+export const RECORD_PATHS: Record<RecordType, string | null> = {
     company: "/records/companies",
     person: "/records/contacts",
     deal: "/records/deals",

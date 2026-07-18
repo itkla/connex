@@ -19,6 +19,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -729,6 +730,8 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         [setFilterState, applyQuery, applySort],
     );
 
+    const peek = useRecordPeekController('company', companies, displayMode === 'table');
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
@@ -861,6 +864,8 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={(item) => `/records/companies/${item.id}`}
+                        onRowClick={(item) => peek.openPeek(item.id)}
+                        activeId={peek.activeId}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
@@ -873,6 +878,8 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditCompanySheet
                     open={editSheetOpen}

@@ -18,6 +18,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
@@ -606,6 +607,8 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         [setFilterState, applyQuery, applySort],
     );
 
+    const peek = useRecordPeekController('person', contacts, displayMode === 'table');
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
@@ -739,6 +742,8 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
                         detailPath={(item) => `/records/contacts/${item.id}`}
+                        onRowClick={(item) => peek.openPeek(item.id)}
+                        activeId={peek.activeId}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
@@ -751,6 +756,8 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                     />
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditSheet
                     editSheetOpen={editSheetOpen}
