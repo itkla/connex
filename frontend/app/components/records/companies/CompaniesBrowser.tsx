@@ -19,6 +19,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import type { RecordMenuModel } from '@/app/components/records/RecordActionMenu';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
@@ -732,6 +733,17 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
 
     const peek = useRecordPeekController('company', companies, displayMode === 'table');
 
+    const openPeek = peek.openPeek;
+    const recordMenu = useCallback(
+        (company: Company): RecordMenuModel => ({
+            record: { type: 'company', id: company.id, label: company.name },
+            onPeek: () => openPeek(company.id),
+            onQuickEdit: () => quickEditOne(company),
+            onDelete: () => deleteOne(company),
+        }),
+        [openPeek, quickEditOne, deleteOne],
+    );
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
@@ -866,6 +878,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         detailPath={(item) => `/records/companies/${item.id}`}
                         onRowClick={(item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
+                        recordMenu={recordMenu}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}

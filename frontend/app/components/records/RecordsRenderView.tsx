@@ -38,6 +38,7 @@ import { useTranslations } from 'next-intl';
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
+import { RecordActionMenuTrigger, RecordContextMenu, type RecordMenuModel } from './RecordActionMenu';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
 
 type SortDirection = 'asc' | 'desc';
@@ -74,6 +75,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
     onQuickEdit?: (item: T) => void;
     onDelete?: (item: T) => void;
+    recordMenu?: (item: T) => RecordMenuModel | null;
     gridClassName?: string;
     entityLabel: string;
     selectionActions?: ReactNode; // pass along the react node for the selection actions
@@ -106,6 +108,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
+    recordMenu,
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
     selectionActions,
@@ -182,7 +185,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         onSelectedIdsChange(next);
     };
 
-    const hasRowActions = !!(onQuickEdit || onDelete);
+    const hasRowActions = !!(onQuickEdit || onDelete || recordMenu);
 
     const [frozenOffsets, setFrozenOffsets] = useState({ avatar: 0, name: 0 });
     const frozenCleanup = useRef<(() => void) | null>(null);
@@ -393,19 +396,29 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                 {gridSortBar}
                 <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
-                        {pagedData.map((item) => (
-                            <motion.div
-                                key={item.id}
-                                initial={false}
-                                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.18, ease: EASE_OUT } }}
-                                className={cn(
-                                    'rounded-2xl',
-                                    selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
-                                )}
-                            >
-                                {renderCard(item, { onQuickEdit, onDelete })}
-                            </motion.div>
-                        ))}
+                        {pagedData.map((item) => {
+                            const menuModel = recordMenu ? recordMenu(item) : null;
+                            const card = renderCard(item, { onQuickEdit, onDelete });
+                            return (
+                                <motion.div
+                                    key={item.id}
+                                    initial={false}
+                                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.18, ease: EASE_OUT } }}
+                                    className={cn(
+                                        'rounded-2xl',
+                                        selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
+                                    )}
+                                >
+                                    {menuModel ? (
+                                        <RecordContextMenu model={menuModel}>
+                                            <div className="contents">{card}</div>
+                                        </RecordContextMenu>
+                                    ) : (
+                                        card
+                                    )}
+                                </motion.div>
+                            );
+                        })}
                     </AnimatePresence>
                 </div>
                 {pager}
@@ -486,15 +499,17 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 const isSelected = selectedIds.has(item.id);
                                 const isActive = activeId != null && item.id === activeId;
                                 const clickable = !!(onRowClick || detailPath);
+                                const menuModel = recordMenu ? recordMenu(item) : null;
                                 const stickyBodyBg = isSelected
                                     ? "bg-card before:absolute before:inset-0 before:-z-10 before:bg-brand-light/40 before:transition-colors before:content-[''] group-hover:before:bg-brand-light/55"
                                     : 'bg-card transition-colors group-hover:bg-muted';
-                                return (
+                                const row = (
                                     <tr
                                         key={item.id}
                                         data-state={isSelected ? 'selected' : undefined}
+                                        tabIndex={menuModel ? -1 : undefined}
                                         className={cn(
-                                            'group border-b border-border transition-colors last:border-b-0',
+                                            'group border-b border-border outline-hidden transition-colors last:border-b-0',
                                             clickable && 'cursor-pointer',
                                             isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
                                             isActive && 'ring-2 ring-inset ring-brand',
@@ -557,17 +572,28 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         {addColumnSlot && <td className="px-2 py-2.5" aria-hidden />}
                                         {hasRowActions && (
                                             <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                                                <RowActions
-                                                    name={item.name ?? entityLabel}
-                                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                                                    onDelete={onDelete ? () => onDelete(item) : undefined}
-                                                    actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
-                                                    quickEditLabel={t('quickEdit')}
-                                                    deleteLabel={t('delete')}
-                                                />
+                                                {menuModel ? (
+                                                    <RecordActionMenuTrigger model={menuModel} />
+                                                ) : (
+                                                    <RowActions
+                                                        name={item.name ?? entityLabel}
+                                                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                                                        actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
+                                                        quickEditLabel={t('quickEdit')}
+                                                        deleteLabel={t('delete')}
+                                                    />
+                                                )}
                                             </td>
                                         )}
                                     </tr>
+                                );
+                                return menuModel ? (
+                                    <RecordContextMenu key={item.id} model={menuModel}>
+                                        {row}
+                                    </RecordContextMenu>
+                                ) : (
+                                    row
                                 );
                             })}
                         </tbody>

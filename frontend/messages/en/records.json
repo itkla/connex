@@ -384,5 +384,11 @@
     "noOpenTasks": "No open tasks",
     "latestActivityTitle": "Latest activity",
     "noActivity": "No recent activity"
+  },
+  "RecordActionMenu": {
+    "menuAria": "Actions for {name}",
+    "peek": "Peek",
+    "quickEdit": "Quick edit",
+    "delete": "Delete"
   }
 }
