@@ -13,6 +13,12 @@ public enum Capability {
     /** Microsoft social login. */
     SOCIAL_LOGIN_MICROSOFT,
 
+    /** Per-user Google connected accounts (mail/calendar OAuth). */
+    CONNECTED_ACCOUNTS_GOOGLE,
+
+    /** Per-user Microsoft connected accounts (mail/calendar OAuth). */
+    CONNECTED_ACCOUNTS_MICROSOFT,
+
     /** Instance-managed mail transport. */
     MANAGED_MAIL,
 

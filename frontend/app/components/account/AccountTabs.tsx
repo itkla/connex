@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
     { key: "tabProfile", href: "/account/profile" },
     { key: "tabSecurity", href: "/account/security" },
+    { key: "tabConnections", href: "/account/connections" },
     { key: "tabNotifications", href: "/account/notifications" },
     { key: "tabInvites", href: "/account/invites" },
 ] as const;

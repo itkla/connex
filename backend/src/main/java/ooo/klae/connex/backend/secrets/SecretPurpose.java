@@ -11,7 +11,9 @@ public enum SecretPurpose {
     WORKSPACE_CONNECTOR_CREDENTIAL("workspace", "workspace.connector.credential"),
     ORG_SSO_OIDC_CLIENT_SECRET("organization", "org.sso.oidc_client_secret"),
     ORG_SSO_SAML_SP_PRIVATE_KEY("organization", "org.sso.saml_sp_private_key"),
-    ORG_AI_PROVIDER_CREDENTIAL("organization", "org.ai.provider_credential");
+    ORG_AI_PROVIDER_CREDENTIAL("organization", "org.ai.provider_credential"),
+    USER_PROVIDER_GOOGLE_TOKEN("user", "user.provider.google_token"),
+    USER_PROVIDER_MICROSOFT_TOKEN("user", "user.provider.microsoft_token");
 
     private final String scopeType;
     private final String value;

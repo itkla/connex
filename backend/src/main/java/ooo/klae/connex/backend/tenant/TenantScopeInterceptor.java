@@ -132,6 +132,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "PreferenceMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
         MAPPERS + "SecretValueMapper",
+        MAPPERS + "ProviderConnectionMapper",
         MAPPERS + "SsoConnectionMapper",
         MAPPERS + "SsoDomainMapper",
         MAPPERS + "SsoLinkChallengeMapper",

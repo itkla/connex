@@ -55,6 +55,7 @@ public final class TablePlaneRegistry {
         "organization",
         "password_reset_token",
         "registration_verification_token",
+        "provider_connection",
         "secret_value",
         "sso_connection",
         "sso_domain",
