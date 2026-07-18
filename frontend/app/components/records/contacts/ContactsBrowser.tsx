@@ -18,6 +18,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
@@ -609,6 +610,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const peek = useRecordPeekController('person', contacts, displayMode === 'table');
 
+    const recordRef = useCallback(
+        (contact: Contact): ActiveRecordRef => ({ type: 'person', id: contact.id, label: contact.name }),
+        [],
+    );
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
@@ -744,6 +750,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         detailPath={(item) => `/records/contacts/${item.id}`}
                         onRowClick={(item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
+                        recordRef={recordRef}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}

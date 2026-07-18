@@ -384,5 +384,11 @@
     "noOpenTasks": "未完了のタスクはありません",
     "latestActivityTitle": "最近のアクティビティ",
     "noActivity": "最近のアクティビティはありません"
+  },
+  "RecordActionMenu": {
+    "menuAria": "{name}のアクション",
+    "peek": "プレビュー",
+    "quickEdit": "クイック編集",
+    "delete": "削除"
   }
 }

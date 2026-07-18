@@ -25,6 +25,7 @@ import {
     type ActionGroup,
     type ActionId,
     type ActionRunResult,
+    type ActionSource,
     type ActionsContextValue,
     type ActiveRecordRef,
     type ActiveSelection,
@@ -211,7 +212,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
     );
 
     const run = useCallback(
-        async (id: ActionId): Promise<ActionRunResult> => {
+        async (
+            id: ActionId,
+            options?: { source?: ActionSource; record?: ActiveRecordRef | null },
+        ): Promise<ActionRunResult> => {
             const action = registryMapRef.current.get(id);
             if (!action) {
                 if (process.env.NODE_ENV !== "production") {
@@ -219,7 +223,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
                 }
                 return { status: "skipped", reason: "unknown-id" };
             }
-            const currentContext = contextRef.current;
+            const currentContext =
+                options && "record" in options
+                    ? { ...contextRef.current, record: options.record ?? null }
+                    : contextRef.current;
             if (action.isAvailable && !action.isAvailable(currentContext)) {
                 return { status: "skipped", reason: "unavailable" };
             }
@@ -246,6 +253,13 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const getAction = useCallback((id: ActionId) => registryMapRef.current.get(id), []);
 
+    const isAvailableForRecord = useCallback((id: ActionId, record: ActiveRecordRef) => {
+        const action = registryMapRef.current.get(id);
+        if (!action) return false;
+        if (!action.isAvailable) return true;
+        return action.isAvailable({ ...contextRef.current, record });
+    }, []);
+
     const seedTokenRef = useRef<RegistrationToken>(Symbol("actions:seed"));
     useEffect(() => {
         const token = seedTokenRef.current;
@@ -254,8 +268,8 @@ export function ActionProvider({ user, children }: { user: User | null; children
     }, [register, unregister]);
 
     const value = useMemo<ActionsContextValue>(
-        () => ({ actions, context, pendingIds, run, getAction, openOverlay }),
-        [actions, context, pendingIds, run, getAction, openOverlay],
+        () => ({ actions, context, pendingIds, run, getAction, isAvailableForRecord, openOverlay }),
+        [actions, context, pendingIds, run, getAction, isAvailableForRecord, openOverlay],
     );
     const contributorValue = useMemo<ActionContributorValue>(
         () => ({ register, unregister, setRecord, clearRecord, setSelection, clearSelection }),

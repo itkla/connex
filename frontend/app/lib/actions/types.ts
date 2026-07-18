@@ -153,10 +153,22 @@ export type ActionsContextValue = {
     context: ActionContext;
     /** Ids currently mid-execute; drive per-item spinners and disabled state. */
     pendingIds: ReadonlySet<ActionId>;
-    /** Runs an action by id: rejects re-entrancy, tracks pending, and toasts unhandled failures. */
-    run: (id: ActionId, options?: { source?: ActionSource }) => Promise<ActionRunResult>;
+    /**
+     * Runs an action by id: rejects re-entrancy, tracks pending, and toasts unhandled failures. Pass
+     * `record` to run the action against a specific record (e.g. a list row) instead of the page's
+     * published record slot; availability and execution both see the override for that one invocation.
+     */
+    run: (
+        id: ActionId,
+        options?: { source?: ActionSource; record?: ActiveRecordRef | null },
+    ) => Promise<ActionRunResult>;
     /** Resolves a live action by id. */
     getAction: (id: ActionId) => AppAction | undefined;
+    /**
+     * Whether an action is available for a specific record without publishing it to the shared slot.
+     * Powers per-row menus, which must reflect the row's record, not the page's focused one.
+     */
+    isAvailableForRecord: (id: ActionId, record: ActiveRecordRef) => boolean;
     /** Opens a shell-owned overlay (e.g. a create form). */
     openOverlay: (request: OverlayRequest) => void;
 };
