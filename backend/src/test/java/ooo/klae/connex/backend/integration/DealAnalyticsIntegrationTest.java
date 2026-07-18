@@ -123,6 +123,7 @@ class DealAnalyticsIntegrationTest {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User user = newMember(workspace);
+        workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), "admin");
         MockHttpSession session = login(user.getUsername());
 
         mockMvc.perform(get("/api/deals/aging")
