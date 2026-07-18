@@ -230,7 +230,7 @@ public class PersonService {
     public Person updateOwner(int personId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requireOwnedPerson(workspaceId, personId);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         personMapper.updateOwner(workspaceId, personId, ownerId);
         auditService.record("person.updateOwner", "person", personId, before.getName(),
             "Updated owner on " + before.getName(),

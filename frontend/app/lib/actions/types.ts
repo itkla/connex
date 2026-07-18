@@ -88,7 +88,10 @@ export type OverlayRequest =
     | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
-    | { kind: "create-deal"; defaults?: CreateDefaults };
+    | { kind: "create-deal"; defaults?: CreateDefaults }
+    | { kind: "import-companies" }
+    | { kind: "import-contacts" }
+    | { kind: "import-deals" };
 
 /**
  * The imperative capabilities handed to {@link AppAction.execute}. Kept out of {@link ActionContext}

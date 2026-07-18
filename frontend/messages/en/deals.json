@@ -387,14 +387,10 @@
   },
   "DealsDocuments": {
     "title": "Documents",
-    "generateFromTemplate": "Generate from template",
-    "noTemplates": "No active templates",
-    "empty": "No documents yet. Generate one from a template.",
     "generated": "Document generated",
     "deleted": "Document deleted",
     "actionFailed": "Something went wrong. Please try again.",
     "columnDocument": "Document",
-    "columnType": "Type",
     "columnStatus": "Status",
     "columnTotal": "Total",
     "columnGenerated": "Generated",
@@ -408,7 +404,6 @@
     "status_final": "Final",
     "status_superseded": "Superseded",
     "actions": "Actions",
-    "downloadPdf": "Download PDF",
     "markFinal": "Mark as final",
     "markSuperseded": "Mark as superseded",
     "delete": "Delete",
@@ -433,6 +428,11 @@
       "notFound": "Document not found.",
       "draftWatermark": "DRAFT",
       "supersededWatermark": "SUPERSEDED"
-    }
+    },
+    "generate": "Generate",
+    "createTemplate": "Create a template",
+    "emptyTitle": "No documents yet",
+    "emptyBody": "Generate a quote, proposal, order form, or contract from a template. Line items and totals are captured at that moment.",
+    "pdf": "PDF"
   }
 }

@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { PlusIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -16,7 +17,6 @@ import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
-import DocumentTemplateDialog from '@/app/components/records/document-templates/DocumentTemplateDialog';
 import { deleteDocumentTemplate } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { DocumentTemplate, DocumentType } from '@/app/lib/types';
@@ -28,13 +28,13 @@ const TYPE_KEY: Record<DocumentType, string> = {
     contract: 'typeContract',
 };
 
-/** Workspace-scoped commercial-document template admin: searchable table with create/edit/delete. */
+/** Workspace-scoped commercial-document template admin: searchable list opening the full-page builder. */
 export default function DocumentTemplatesBrowser({ templates: initial }: { templates: DocumentTemplate[] }) {
     const t = useTranslations('DocumentTemplatesBrowser');
     const tf = useTranslations('Filters');
+    const router = useRouter();
     const [templates, setTemplates] = useState(initial);
     const [query, setQuery] = useState('');
-    const [dialog, setDialog] = useState<{ mode: 'create' | 'edit'; template?: DocumentTemplate } | null>(null);
     const [removeTarget, setRemoveTarget] = useState<DocumentTemplate | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
 
@@ -45,11 +45,8 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
             [tpl.name, tpl.title, tpl.type].some((v) => v?.toLowerCase().includes(q)));
     }, [templates, query]);
 
-    const upsert = (saved: DocumentTemplate) => {
-        setTemplates((prev) => prev.some((tpl) => tpl.id === saved.id)
-            ? prev.map((tpl) => (tpl.id === saved.id ? saved : tpl))
-            : [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)));
-    };
+    const openNew = () => router.push('/records/document-templates/new');
+    const openEdit = (id: number) => router.push(`/records/document-templates/${id}`);
 
     const confirmRemove = async () => {
         if (!removeTarget) return;
@@ -72,7 +69,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <Button variant="brand" onClick={() => setDialog({ mode: 'create' })}>
+                        <Button variant="brand" onClick={openNew}>
                             <PlusIcon className="size-4" />
                             {t('newButton')}
                         </Button>
@@ -92,9 +89,25 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
 
                 <Rise delay={0.12}>
                     {filtered.length === 0 ? (
-                        <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
-                            {query ? t('noMatches') : t('empty')}
-                        </div>
+                        query ? (
+                            <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+                                {t('noMatches')}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-card px-6 py-20 text-center">
+                                <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                    <DocumentDuplicateIcon className="size-6" />
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+                                    <p className="mx-auto max-w-sm text-sm text-muted-foreground">{t('emptyBody')}</p>
+                                </div>
+                                <Button variant="brand" onClick={openNew}>
+                                    <PlusIcon className="size-4" />
+                                    {t('emptyAction')}
+                                </Button>
+                            </div>
+                        )
                     ) : (
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
                             <table className="w-full text-sm">
@@ -109,7 +122,8 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                                 </thead>
                                 <tbody className="divide-y divide-border">
                                     {filtered.map((tpl) => (
-                                        <tr key={tpl.id} className="transition-colors hover:bg-muted/50">
+                                        <tr key={tpl.id} className="cursor-pointer transition-colors hover:bg-muted/50"
+                                            onClick={() => openEdit(tpl.id)}>
                                             <td className="px-6 py-3">
                                                 <div className="font-medium text-foreground">{tpl.name}</div>
                                                 {tpl.title ? <div className="text-xs text-muted-foreground">{tpl.title}</div> : null}
@@ -124,12 +138,13 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                                             <td className="px-6 py-3 text-right">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon-xs" aria-label={t('actions')}>
+                                                        <Button variant="ghost" size="icon-xs" aria-label={t('actions')}
+                                                            onClick={(e) => e.stopPropagation()}>
                                                             <EllipsisHorizontalIcon className="size-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onSelect={() => setDialog({ mode: 'edit', template: tpl })}>
+                                                        <DropdownMenuItem onSelect={() => openEdit(tpl.id)}>
                                                             <PencilIcon className="size-4" />{t('edit')}
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
@@ -147,17 +162,6 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                     )}
                 </Rise>
             </div>
-
-            {dialog && (
-                <DocumentTemplateDialog
-                    key={dialog.mode === 'edit' ? `edit-${dialog.template?.id}` : 'create'}
-                    open
-                    onOpenChange={(next) => { if (!next) setDialog(null); }}
-                    mode={dialog.mode}
-                    template={dialog.template}
-                    onSaved={upsert}
-                />
-            )}
 
             <DeleteRecordDialog
                 open={removeTarget !== null}
