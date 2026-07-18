@@ -236,6 +236,18 @@ connex:
             enabled: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_ENABLED:false}
             client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
+    connected-accounts:
+        # Per-user connected accounts (#60) — OAuth clients for connecting a user's own mailbox
+        # and calendar with offline access. Deliberately separate client apps from social login:
+        # a sign-in client must never hold mail/calendar scopes. Off until configured.
+        google:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_SECRET:}
+        microsoft:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_SECRET:}
     ai:
         # Instance-level switch for AI features (#94/#386). Defaults false pending live public/APPI
         # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,

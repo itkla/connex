@@ -1,0 +1,150 @@
+package ooo.klae.connex.backend.connectedaccounts;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.springframework.stereotype.Component;
+
+import lombok.RequiredArgsConstructor;
+
+/**
+ * Static provider catalog for connected accounts: endpoints, scopes, and authorize-URL
+ * construction. Endpoints are hard-coded provider hosts — never derived from request input —
+ * so the connect flow has no server-side request-forgery surface. Scopes are the minimum the
+ * epic's capture workstreams need today (read-only mail + calendar plus an OpenID identity for
+ * display); widening them is a deliberate later change.
+ */
+@Component
+@RequiredArgsConstructor
+public class ConnectedAccountProviders {
+
+    /** Provider id for Google connected accounts. */
+    public static final String GOOGLE = "google";
+    /** Provider id for Microsoft connected accounts. */
+    public static final String MICROSOFT = "microsoft";
+
+    private static final String GOOGLE_AUTHORIZE_URI = "https://accounts.google.com/o/oauth2/v2/auth";
+    private static final String GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token";
+    private static final String GOOGLE_REVOKE_URI = "https://oauth2.googleapis.com/revoke";
+    private static final String GOOGLE_SCOPES =
+        "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly";
+
+    private static final String MICROSOFT_AUTHORIZE_URI = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+    private static final String MICROSOFT_TOKEN_URI = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+    private static final String MICROSOFT_SCOPES =
+        "openid email offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Calendars.Read";
+
+    private final ConnectedAccountProperties properties;
+
+    /**
+     * Whether the id names a supported provider.
+     * @param provider candidate id
+     * @return true for {@code google} or {@code microsoft}
+     */
+    public boolean isSupported(String provider) {
+        return GOOGLE.equals(provider) || MICROSOFT.equals(provider);
+    }
+
+    /**
+     * Whether the provider is enabled and fully configured with an OAuth client.
+     * @param provider provider id
+     * @return true when available; unknown providers are never available
+     */
+    public boolean isEnabled(String provider) {
+        return switch (provider) {
+            case GOOGLE -> isConfigured(properties.getGoogle());
+            case MICROSOFT -> isConfigured(properties.getMicrosoft());
+            default -> false;
+        };
+    }
+
+    /** Whether Google connected accounts are enabled and configured. */
+    public boolean isGoogleEnabled() {
+        return isEnabled(GOOGLE);
+    }
+
+    /** Whether Microsoft connected accounts are enabled and configured. */
+    public boolean isMicrosoftEnabled() {
+        return isEnabled(MICROSOFT);
+    }
+
+    /**
+     * The configured OAuth client for a provider.
+     * @param provider provider id
+     * @return the client config; never null for a supported provider
+     */
+    public ConnectedAccountProperties.Provider client(String provider) {
+        return switch (provider) {
+            case GOOGLE -> properties.getGoogle();
+            case MICROSOFT -> properties.getMicrosoft();
+            default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
+        };
+    }
+
+    /** The provider's token endpoint (fixed host). */
+    public String tokenUri(String provider) {
+        return switch (provider) {
+            case GOOGLE -> GOOGLE_TOKEN_URI;
+            case MICROSOFT -> MICROSOFT_TOKEN_URI;
+            default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
+        };
+    }
+
+    /** The provider's token-revocation endpoint, or null when the provider has none. */
+    public String revokeUri(String provider) {
+        return GOOGLE.equals(provider) ? GOOGLE_REVOKE_URI : null;
+    }
+
+    /** The scopes requested at consent, space-delimited. */
+    public String scopes(String provider) {
+        return switch (provider) {
+            case GOOGLE -> GOOGLE_SCOPES;
+            case MICROSOFT -> MICROSOFT_SCOPES;
+            default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
+        };
+    }
+
+    /**
+     * Builds the provider consent URL the browser navigates to. {@code state} is the
+     * session-bound single-use value the callback validates; {@code redirectUri} is derived
+     * from the trusted configured app base URL, never from the request.
+     *
+     * @param provider provider id
+     * @param redirectUri the callback URI registered with the provider
+     * @param state session-bound anti-forgery value
+     * @return the fully encoded authorize URL
+     */
+    public String authorizeUrl(String provider, String redirectUri, String state) {
+        ConnectedAccountProperties.Provider client = client(provider);
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("client_id", client.getClientId());
+        params.put("redirect_uri", redirectUri);
+        params.put("response_type", "code");
+        params.put("scope", scopes(provider));
+        params.put("state", state);
+        if (GOOGLE.equals(provider)) {
+            params.put("access_type", "offline");
+            params.put("prompt", "consent");
+        } else {
+            params.put("response_mode", "query");
+        }
+        StringBuilder url = new StringBuilder(GOOGLE.equals(provider) ? GOOGLE_AUTHORIZE_URI : MICROSOFT_AUTHORIZE_URI);
+        char separator = '?';
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            url.append(separator)
+                .append(entry.getKey())
+                .append('=')
+                .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+            separator = '&';
+        }
+        return url.toString();
+    }
+
+    private static boolean isConfigured(ConnectedAccountProperties.Provider provider) {
+        return provider.isEnabled()
+            && provider.getClientId() != null && !provider.getClientId().isBlank()
+            && provider.getClientSecret() != null && !provider.getClientSecret().isBlank();
+    }
+}

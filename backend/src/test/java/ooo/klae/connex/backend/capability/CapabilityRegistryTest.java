@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
@@ -28,6 +29,7 @@ class CapabilityRegistryTest {
 
     @Mock private SsoConnectionService ssoConnectionService;
     @Mock private SocialLoginClientRegistrations socialLoginClientRegistrations;
+    @Mock private ConnectedAccountProviders connectedAccountProviders;
     @Mock private MailProperties mailProperties;
     @Mock private BusinessCardService businessCardService;
     @Mock private DeploymentProperties deploymentProperties;
@@ -38,7 +40,7 @@ class CapabilityRegistryTest {
     @BeforeEach
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
-                socialLoginClientRegistrations, mailProperties, businessCardService,
+                socialLoginClientRegistrations, connectedAccountProviders, mailProperties, businessCardService,
                 deploymentProperties, capability -> true, deliveryProperties);
     }
 
@@ -79,6 +81,7 @@ class CapabilityRegistryTest {
         CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
                 ssoConnectionService,
                 socialLoginClientRegistrations,
+                connectedAccountProviders,
                 mailProperties,
                 businessCardService,
                 deploymentProperties,
@@ -100,6 +103,7 @@ class CapabilityRegistryTest {
         CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
                 ssoConnectionService,
                 socialLoginClientRegistrations,
+                connectedAccountProviders,
                 managedMailProperties,
                 businessCardService,
                 new DeploymentProperties(),
