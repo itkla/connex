@@ -23,7 +23,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
-import type { RecordMenuModel } from '@/app/components/records/RecordActionMenu';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
@@ -823,15 +823,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
 
-    const openPeek = peek.openPeek;
-    const recordMenu = useCallback(
-        (deal: Deal): RecordMenuModel => ({
-            record: { type: 'deal', id: deal.id, label: deal.name },
-            onPeek: () => openPeek(deal.id),
-            onQuickEdit: () => quickEditOne(deal),
-            onDelete: () => deleteOne(deal),
-        }),
-        [openPeek, quickEditOne, deleteOne],
+    const recordRef = useCallback(
+        (deal: Deal): ActiveRecordRef => ({ type: 'deal', id: deal.id, label: deal.name }),
+        [],
     );
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
@@ -1197,7 +1191,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             detailPath={(item) => `/records/deals/${item.id}`}
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
-                            recordMenu={recordMenu}
+                            recordRef={recordRef}
                             displayMode={displayMode}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={setSelectedIds}

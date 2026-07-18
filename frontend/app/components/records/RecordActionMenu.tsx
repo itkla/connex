@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useMemo } from 'react';
+import { Fragment, forwardRef, type ComponentProps, type ComponentType, type ReactNode, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { EllipsisHorizontalIcon, EyeIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
 
@@ -18,8 +18,9 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
 import { useActions } from '@/app/hooks/useActions';
-import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import type { ActionId, ActiveRecordRef } from '@/app/lib/actions/types';
 
 /**
  * The record a row/card menu acts on, plus the browser-local actions the shell owns (peek, quick
@@ -32,136 +33,123 @@ export type RecordMenuModel = {
     onDelete?: () => void;
 };
 
-type MenuEntry =
-    | { kind: 'separator'; key: string }
-    | {
-          kind: 'item';
-          key: string;
-          label: string;
-          icon: ReactNode;
-          destructive?: boolean;
-          onSelect: () => void;
-      };
+type MenuItemDescriptor = {
+    key: string;
+    label: string;
+    icon: ReactNode;
+    destructive?: boolean;
+    onSelect: () => void;
+};
 
-const REGISTRY_ORDER = [
-    'record.open',
-    'record.open-new-tab',
-    '--',
-    'create.task',
-    'create.note',
-    'create.activity',
-    '--',
-    'record.copy-link',
-] as const;
+/** Registry action ids surfaced in a record menu, grouped so separators fall between groups. */
+const REGISTRY_VIEW = ['record.open', 'record.open-new-tab'] as const;
+const REGISTRY_CREATE = ['create.task', 'create.note', 'create.activity'] as const;
 
 /**
- * Builds the ordered menu entries for a record: browser-local peek/quick-edit at the top, the
- * registry-backed navigate/create/copy actions in the middle (each resolved against the row's record
- * via {@link useActions}'s per-record override so availability reflects the row, not the page), and a
- * destructive delete last. Entries collapse adjacent/edge separators so the rendered menu never shows
- * a dangling divider.
+ * Resolves the record menu into ordered groups of items — browser-local peek/open at the top, the
+ * create actions, then quick-edit/copy-link, then a destructive delete. Registry items are resolved
+ * against the row's record via {@link useActions}'s per-record override so availability reflects the
+ * row, not the page. Returns empty until `enabled` (the menu opens), so closed rows — nearly all of
+ * them — pay nothing on a parent re-render.
  */
-function useRecordMenuEntries(model: RecordMenuModel): MenuEntry[] {
+function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItemDescriptor[][] {
     const { getAction, isAvailableForRecord, run } = useActions();
     const t = useTranslations('Actions');
     const tr = useTranslations('RecordActionMenu');
 
     return useMemo(() => {
-        const entries: MenuEntry[] = [];
+        if (!enabled) return [];
         const { record, onPeek, onQuickEdit, onDelete } = model;
 
-        if (onPeek) {
-            entries.push({
-                kind: 'item',
-                key: 'peek',
-                label: tr('peek'),
-                icon: <EyeIcon className="size-4 text-muted-foreground" />,
-                onSelect: onPeek,
-            });
-        }
-        if (onQuickEdit) {
-            entries.push({
-                kind: 'item',
-                key: 'quick-edit',
-                label: tr('quickEdit'),
-                icon: <PencilSquareIcon className="size-4 text-muted-foreground" />,
-                onSelect: onQuickEdit,
-            });
-        }
-
-        for (const id of REGISTRY_ORDER) {
-            if (id === '--') {
-                entries.push({ kind: 'separator', key: `sep-${entries.length}` });
-                continue;
-            }
+        const registry = (id: ActionId): MenuItemDescriptor | null => {
             const action = getAction(id);
-            if (!action || !isAvailableForRecord(id, record)) continue;
+            if (!action || !isAvailableForRecord(id, record)) return null;
             const Icon = action.icon;
-            entries.push({
-                kind: 'item',
+            return {
                 key: id,
                 label: t(action.labelKey),
                 icon: Icon ? <Icon className="size-4 text-muted-foreground" /> : null,
                 onSelect: () => void run(id, { source: 'menu', record }),
-            });
-        }
+            };
+        };
+        const peek: MenuItemDescriptor | null = onPeek
+            ? { key: 'peek', label: tr('peek'), icon: <EyeIcon className="size-4 text-muted-foreground" />, onSelect: onPeek }
+            : null;
+        const quickEdit: MenuItemDescriptor | null = onQuickEdit
+            ? { key: 'quick-edit', label: tr('quickEdit'), icon: <PencilSquareIcon className="size-4 text-muted-foreground" />, onSelect: onQuickEdit }
+            : null;
+        const remove: MenuItemDescriptor | null = onDelete
+            ? { key: 'delete', label: tr('delete'), icon: <TrashIcon className="size-4 text-destructive" />, destructive: true, onSelect: onDelete }
+            : null;
 
-        if (onDelete) {
-            entries.push({ kind: 'separator', key: `sep-delete` });
-            entries.push({
-                kind: 'item',
-                key: 'delete',
-                label: tr('delete'),
-                icon: <TrashIcon className="size-4 text-destructive" />,
-                destructive: true,
-                onSelect: onDelete,
-            });
-        }
-
-        return collapseSeparators(entries);
-    }, [model, getAction, isAvailableForRecord, run, t, tr]);
+        const groups: (MenuItemDescriptor | null)[][] = [
+            [peek, ...REGISTRY_VIEW.map(registry)],
+            REGISTRY_CREATE.map(registry),
+            [quickEdit, registry('record.copy-link')],
+            [remove],
+        ];
+        return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);
+    }, [enabled, model, getAction, isAvailableForRecord, run, t, tr]);
 }
 
-function collapseSeparators(entries: MenuEntry[]): MenuEntry[] {
-    const out: MenuEntry[] = [];
-    for (const entry of entries) {
-        if (entry.kind === 'separator') {
-            if (out.length === 0 || out[out.length - 1].kind === 'separator') continue;
-            out.push(entry);
-        } else {
-            out.push(entry);
-        }
-    }
-    while (out.length && out[out.length - 1].kind === 'separator') out.pop();
-    return out;
+type MenuItemComponent = ComponentType<{ variant?: 'default' | 'destructive'; onSelect?: (event: Event) => void; children?: ReactNode }>;
+
+/** Renders resolved menu groups with the primitives of one menu family, so both surfaces share one layout. */
+function MenuBody({
+    groups,
+    Item,
+    Separator,
+}: {
+    groups: MenuItemDescriptor[][];
+    Item: MenuItemComponent;
+    Separator: ComponentType;
+}) {
+    return groups.map((group, index) => (
+        <Fragment key={`group-${index}`}>
+            {index > 0 && <Separator />}
+            {group.map((item) => (
+                <Item key={item.key} variant={item.destructive ? 'destructive' : 'default'} onSelect={item.onSelect}>
+                    {item.icon}
+                    {item.label}
+                </Item>
+            ))}
+        </Fragment>
+    ));
 }
+
+/** The ellipsis button shared by the record menu kebab and the basic RowActions trigger. */
+export const RecordActionsTriggerButton = forwardRef<HTMLButtonElement, { ariaLabel: string } & ComponentProps<'button'>>(
+    function RecordActionsTriggerButton({ ariaLabel, className, ...props }, ref) {
+        return (
+            <button
+                ref={ref}
+                type="button"
+                aria-label={ariaLabel}
+                className={cn(
+                    'flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
+                    className,
+                )}
+                {...props}
+            >
+                <EllipsisHorizontalIcon className="size-5" />
+            </button>
+        );
+    },
+);
 
 /**
  * Wraps a record row or card so a right-click (or the platform context-menu key when the element is
  * focused) opens the shared record action menu. Left-click behaviour of the wrapped element is
- * untouched. Renders nothing extra in the DOM flow — the content is portaled — so it is safe to wrap
- * a `<tr>` or a grid card.
+ * untouched, and the content is portaled so it is safe to wrap a `<tr>` or a grid card.
  */
 export function RecordContextMenu({ model, children }: { model: RecordMenuModel; children: ReactNode }) {
-    const entries = useRecordMenuEntries(model);
+    const [open, setOpen] = useState(false);
+    const groups = useRecordMenuGroups(model, open);
     return (
-        <ContextMenu>
+        <ContextMenu onOpenChange={setOpen}>
             <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
             <ContextMenuContent>
-                {entries.map((entry) =>
-                    entry.kind === 'separator' ? (
-                        <ContextMenuSeparator key={entry.key} />
-                    ) : (
-                        <ContextMenuItem
-                            key={entry.key}
-                            variant={entry.destructive ? 'destructive' : 'default'}
-                            onSelect={entry.onSelect}
-                        >
-                            {entry.icon}
-                            {entry.label}
-                        </ContextMenuItem>
-                    ),
-                )}
+                <MenuBody groups={groups} Item={ContextMenuItem} Separator={ContextMenuSeparator} />
             </ContextMenuContent>
         </ContextMenu>
     );
@@ -169,38 +157,20 @@ export function RecordContextMenu({ model, children }: { model: RecordMenuModel;
 
 /**
  * The always-visible kebab that opens the same record action menu as {@link RecordContextMenu}. Both
- * consume {@link useRecordMenuEntries}, so the pointer, keyboard, and right-click surfaces can never
+ * consume {@link useRecordMenuGroups}, so the pointer, keyboard, and right-click surfaces can never
  * drift. The trigger is keyboard-operable and reveals on row/card hover or focus.
  */
 export function RecordActionMenuTrigger({ model }: { model: RecordMenuModel }) {
-    const entries = useRecordMenuEntries(model);
+    const [open, setOpen] = useState(false);
+    const groups = useRecordMenuGroups(model, open);
     const tr = useTranslations('RecordActionMenu');
     return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={tr('menuAria', { name: model.record.label })}
-                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                >
-                    <EllipsisHorizontalIcon className="size-5" />
-                </button>
+                <RecordActionsTriggerButton ariaLabel={tr('menuAria', { name: model.record.label })} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-                {entries.map((entry) =>
-                    entry.kind === 'separator' ? (
-                        <DropdownMenuSeparator key={entry.key} />
-                    ) : (
-                        <DropdownMenuItem
-                            key={entry.key}
-                            variant={entry.destructive ? 'destructive' : 'default'}
-                            onSelect={entry.onSelect}
-                        >
-                            {entry.icon}
-                            {entry.label}
-                        </DropdownMenuItem>
-                    ),
-                )}
+                <MenuBody groups={groups} Item={DropdownMenuItem} Separator={DropdownMenuSeparator} />
             </DropdownMenuContent>
         </DropdownMenu>
     );

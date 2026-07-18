@@ -7,7 +7,6 @@ import {
     ChevronDownIcon,
     ChevronUpIcon,
     ChevronUpDownIcon,
-    EllipsisHorizontalIcon,
     InboxIcon,
     PencilSquareIcon,
     TrashIcon,
@@ -38,7 +37,13 @@ import { useTranslations } from 'next-intl';
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
-import { RecordActionMenuTrigger, RecordContextMenu, type RecordMenuModel } from './RecordActionMenu';
+import {
+    RecordActionMenuTrigger,
+    RecordActionsTriggerButton,
+    RecordContextMenu,
+    type RecordMenuModel,
+} from './RecordActionMenu';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
 
 type SortDirection = 'asc' | 'desc';
@@ -75,7 +80,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
     onQuickEdit?: (item: T) => void;
     onDelete?: (item: T) => void;
-    recordMenu?: (item: T) => RecordMenuModel | null;
+    recordRef?: (item: T) => ActiveRecordRef | null;
     gridClassName?: string;
     entityLabel: string;
     selectionActions?: ReactNode; // pass along the react node for the selection actions
@@ -108,7 +113,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
-    recordMenu,
+    recordRef,
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
     selectionActions,
@@ -185,7 +190,20 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         onSelectedIdsChange(next);
     };
 
-    const hasRowActions = !!(onQuickEdit || onDelete || recordMenu);
+    const hasRowActions = !!(onQuickEdit || onDelete || recordRef);
+    const buildRecordMenu = useCallback(
+        (item: T): RecordMenuModel | null => {
+            const record = recordRef ? recordRef(item) : null;
+            if (!record) return null;
+            return {
+                record,
+                onPeek: onRowClick ? () => onRowClick(item) : undefined,
+                onQuickEdit: onQuickEdit ? () => onQuickEdit(item) : undefined,
+                onDelete: onDelete ? () => onDelete(item) : undefined,
+            };
+        },
+        [recordRef, onRowClick, onQuickEdit, onDelete],
+    );
 
     const [frozenOffsets, setFrozenOffsets] = useState({ avatar: 0, name: 0 });
     const frozenCleanup = useRef<(() => void) | null>(null);
@@ -397,7 +415,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                 <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
                         {pagedData.map((item) => {
-                            const menuModel = recordMenu ? recordMenu(item) : null;
+                            const menuModel = buildRecordMenu(item);
                             const card = renderCard(item, { onQuickEdit, onDelete });
                             return (
                                 <motion.div
@@ -499,7 +517,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 const isSelected = selectedIds.has(item.id);
                                 const isActive = activeId != null && item.id === activeId;
                                 const clickable = !!(onRowClick || detailPath);
-                                const menuModel = recordMenu ? recordMenu(item) : null;
+                                const menuModel = buildRecordMenu(item);
                                 const stickyBodyBg = isSelected
                                     ? "bg-card before:absolute before:inset-0 before:-z-10 before:bg-brand-light/40 before:transition-colors before:content-[''] group-hover:before:bg-brand-light/55"
                                     : 'bg-card transition-colors group-hover:bg-muted';
@@ -630,13 +648,7 @@ function RowActions({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={actionsAria}
-                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                >
-                    <EllipsisHorizontalIcon className="size-5" />
-                </button>
+                <RecordActionsTriggerButton ariaLabel={actionsAria} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
                 {onQuickEdit && (
