@@ -504,6 +504,11 @@ export type ResetPasswordPayload = {
     newPassword: string;
 };
 
+export type EmailChangePayload = {
+    newEmail: string;
+    currentPassword: string;
+};
+
 export type ResetTokenValidation = {
     valid: boolean;
 };

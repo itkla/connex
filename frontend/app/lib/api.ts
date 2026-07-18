@@ -950,6 +950,39 @@ export function confirmEmailVerification(token: string) {
     return postJson<Types.AuthResponse>("/api/auth/verify-email/confirm", { token });
 }
 
+/**
+ * Requests a verified change of the signed-in user's email address. The backend emails a
+ * confirmation link to the new address and only applies the change once it is redeemed.
+ *
+ * @param payload - The new email and the current password proving ownership
+ * @returns A promise resolving to the confirmation message
+ * @throws ApiError with fieldErrors when the password is wrong or the email is invalid or taken
+ */
+export function requestEmailChange(payload: Types.EmailChangePayload) {
+    return postJson<Types.AuthResponse>("/api/users/me/email-change", payload);
+}
+
+/**
+ * Checks whether an email-change token is still valid (unconsumed and unexpired).
+ * @param token - The raw token from the confirmation link
+ * @returns A promise resolving to the validation result
+ */
+export function validateEmailChangeToken(token: string, init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>(
+        `/api/auth/email-change/validate?token=${encodeURIComponent(token)}`,
+        init,
+    );
+}
+
+/**
+ * Applies a pending email change behind a valid confirmation token.
+ * @param token - The raw token from the confirmation link
+ * @returns A promise resolving to the confirmation message
+ */
+export function confirmEmailChange(token: string) {
+    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", { token });
+}
+
 export function getPasskeys(init: RequestInit = {}) {
     return getJson<Types.Passkey[]>("/api/auth/webauthn/credentials", { cache: "no-store", ...init });
 }

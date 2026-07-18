@@ -19,7 +19,8 @@
     "displayNameLabel": "表示名",
     "usernameLabel": "ユーザー名",
     "emailLabel": "メールアドレス",
-    "emailReadonlyHint": "メールアドレスはサインインに使用されます。ここでの変更はまだ利用できません。",
+    "changeEmail": "メールアドレスを変更",
+    "emailReadonlyHint": "メールアドレスはサインインに使用されます。変更するには「メールアドレスを変更」をご利用ください。",
     "timezoneLabel": "タイムゾーン",
     "timezoneHint": "日付と時刻はこのタイムゾーンで表示されます。",
     "timezonePlaceholder": "タイムゾーンを検索",
@@ -75,6 +76,19 @@
     "removeFailed": "パスキーを削除できませんでした。もう一度お試しください。",
     "loadFailed": "パスキーを読み込めませんでした。",
     "retry": "再試行"
+  },
+  "AccountChangeEmail": {
+    "title": "メールアドレスを変更",
+    "description": "新しいメールアドレスと現在のパスワードを入力してください。新しいアドレス宛てに確認リンクをお送りします。",
+    "newEmailLabel": "新しいメールアドレス",
+    "currentPasswordLabel": "現在のパスワード",
+    "submit": "確認リンクを送信",
+    "submitting": "送信しています",
+    "cancel": "キャンセル",
+    "successTitle": "受信トレイをご確認ください",
+    "successBody": "{email} 宛てに確認リンクを送信しました。リンクを開いてメールアドレスの変更を完了してください。それまでは現在のメールアドレスが引き続き有効です。",
+    "close": "閉じる",
+    "genericError": "エラーが発生しました"
   },
   "PasskeyStepUp": {
     "canceled": "パスキーによる本人確認をキャンセルしました。",
