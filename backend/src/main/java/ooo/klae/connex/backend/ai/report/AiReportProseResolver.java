@@ -141,25 +141,31 @@ final class AiReportProseResolver {
         if (citations.isEmpty() || claim.text().contains(UNKNOWN_REFERENCE)) {
             return null;
         }
-        String text = fillTokens(claim.text().strip(), figures);
+        String text = fillTokens(claim.text().strip(), figures, Set.copyOf(citations));
         if (text == null || text.contains("{{")) {
             return null;
         }
         return new AiReportNarrativeContent.Claim(truncate(text, MAX_CLAIM_CHARS), citations);
     }
 
-    private static String fillTokens(String text, AiReportFigures figures) {
+    private static String fillTokens(String text, AiReportFigures figures, Set<String> citations) {
         Matcher matcher = TOKEN.matcher(text);
         StringBuilder out = new StringBuilder();
         while (matcher.find()) {
             String token = matcher.group(1);
-            if (!figures.has(token)) {
+            if (!figures.has(token) || !citations.contains(figureSource(token))) {
                 return null;
             }
             matcher.appendReplacement(out, Matcher.quoteReplacement(figures.resolve(token)));
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    private static String figureSource(String token) {
+        int prefix = AiReportFigures.PREFIX.length();
+        int lastDot = token.lastIndexOf('.');
+        return lastDot <= prefix ? "" : token.substring(prefix, lastDot);
     }
 
     private static String stripTokens(String text) {
