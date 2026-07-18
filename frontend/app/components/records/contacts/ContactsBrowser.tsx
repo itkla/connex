@@ -115,7 +115,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         applySort: applyServerSort,
         revision,
         reload,
-    } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams);
+    } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
 
