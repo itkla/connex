@@ -49,8 +49,9 @@ const REGISTRY_CREATE = ['create.task', 'create.note', 'create.activity'] as con
  * Resolves the record menu into ordered groups of items — browser-local peek/open at the top, the
  * create actions, then quick-edit/copy-link, then a destructive delete. Registry items are resolved
  * against the row's record via {@link useActions}'s per-record override so availability reflects the
- * row, not the page. Returns empty until `enabled` (the menu opens), so closed rows — nearly all of
- * them — pay nothing on a parent re-render.
+ * row, not the page. Returns empty until `enabled` (the row's menu has been opened at least once),
+ * so rows never interacted with — nearly all of them — pay nothing on a parent re-render; once opened
+ * a row keeps computing so its items stay rendered through the menu's exit animation.
  */
 function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItemDescriptor[][] {
     const { getAction, isAvailableForRecord, run } = useActions();
@@ -143,10 +144,10 @@ export const RecordActionsTriggerButton = forwardRef<HTMLButtonElement, { ariaLa
  * untouched, and the content is portaled so it is safe to wrap a `<tr>` or a grid card.
  */
 export function RecordContextMenu({ model, children }: { model: RecordMenuModel; children: ReactNode }) {
-    const [open, setOpen] = useState(false);
-    const groups = useRecordMenuGroups(model, open);
+    const [activated, setActivated] = useState(false);
+    const groups = useRecordMenuGroups(model, activated);
     return (
-        <ContextMenu onOpenChange={setOpen}>
+        <ContextMenu onOpenChange={(open) => open && setActivated(true)}>
             <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
             <ContextMenuContent>
                 <MenuBody groups={groups} Item={ContextMenuItem} Separator={ContextMenuSeparator} />
@@ -161,11 +162,11 @@ export function RecordContextMenu({ model, children }: { model: RecordMenuModel;
  * drift. The trigger is keyboard-operable and reveals on row/card hover or focus.
  */
 export function RecordActionMenuTrigger({ model }: { model: RecordMenuModel }) {
-    const [open, setOpen] = useState(false);
-    const groups = useRecordMenuGroups(model, open);
+    const [activated, setActivated] = useState(false);
+    const groups = useRecordMenuGroups(model, activated);
     const tr = useTranslations('RecordActionMenu');
     return (
-        <DropdownMenu onOpenChange={setOpen}>
+        <DropdownMenu onOpenChange={(open) => open && setActivated(true)}>
             <DropdownMenuTrigger asChild>
                 <RecordActionsTriggerButton ariaLabel={tr('menuAria', { name: model.record.label })} />
             </DropdownMenuTrigger>
