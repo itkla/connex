@@ -17,7 +17,7 @@ import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import Rise from "@/app/components/motion/Rise";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
-import { TYPE_META, normalizeType } from "@/app/components/activity/activities/activityTypes";
+import { TYPE_META, normalizeType } from "@/app/components/activity/activities/activityTypeMeta";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
