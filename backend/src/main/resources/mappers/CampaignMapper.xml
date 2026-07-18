@@ -137,19 +137,6 @@
       AND (suspended_at IS NOT NULL OR provision_ceased_at IS NOT NULL)
   </select>
 
-  <select id="suppressedPersonIds" resultType="int">
-    SELECT p.id FROM person p
-    WHERE p.workspace_id = #{workspaceId}
-      AND p.id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
-      AND p.email IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM suppression_entry suppression
-        WHERE suppression.workspace_id = #{workspaceId}
-          AND suppression.channel = #{channel}
-          AND suppression.address = LOWER(TRIM(p.email)) COLLATE utf8mb4_bin
-      )
-  </select>
-
   <select id="grantedConsentPersonIds" resultType="int">
     SELECT person_id FROM contact_channel_consent
     WHERE workspace_id = #{workspaceId}
@@ -159,12 +146,28 @@
       AND status = 'granted'
   </select>
 
+  <select id="revokedConsentPersonIds" resultType="int">
+    SELECT person_id FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      AND channel = #{channel}
+      AND purpose = #{purpose}
+      AND status = 'revoked'
+  </select>
+
   <select id="suppressedAddresses" resultType="string">
     SELECT DISTINCT suppression.address FROM suppression_entry suppression
     WHERE suppression.workspace_id = #{workspaceId}
       AND suppression.channel = #{channel}
       AND suppression.address COLLATE utf8mb4_bin IN
         <foreach item="address" collection="addresses" open="(" separator="," close=")">#{address}</foreach>
+  </select>
+
+  <select id="suppressedPersonRefIds" resultType="int">
+    SELECT DISTINCT person_id FROM suppression_entry
+    WHERE workspace_id = #{workspaceId}
+      AND channel = #{channel}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
   </select>
 
   <update id="clearMemberOwnership">

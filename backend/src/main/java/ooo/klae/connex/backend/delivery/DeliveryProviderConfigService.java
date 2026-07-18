@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.beans.DeliveryProviderConfig;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.smtp.SmtpDeliveryProvider;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigDto;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigRequest;
@@ -50,6 +51,11 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
     private static final int TOKEN_BYTES = 32;
     private static final int MAX_ENDPOINT_LENGTH = 2048;
     private static final Pattern API_KEY = Pattern.compile("^[\\x21-\\x7e]{1,512}$");
+    private static final Pattern SMS_SENDER_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9 +._-]{0,31}$");
+    private static final Pattern EMAIL_ADDRESS = Pattern.compile(
+            "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+                    + "@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                    + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$");
 
     private final MailConfigResolver mailConfigResolver;
     private final DeliveryProviderConfigMapper deliveryProviderConfigMapper;
@@ -69,6 +75,9 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
      * @throws DeliveryProviderException when the channel is unsupported or no transport is configured
      */
     public ResolvedDeliveryProvider resolveForWorkspace(int workspaceId, DeliveryChannel channel) {
+        if (channel == DeliveryChannel.SMS) {
+            return resolveSms(deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token()));
+        }
         requireEmail(channel);
         DeliveryProviderConfig config =
                 deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
@@ -85,6 +94,14 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
 
     @Override
     public boolean isReady(int workspaceId, DeliveryChannel channel) {
+        if (channel == DeliveryChannel.SMS) {
+            DeliveryProviderConfig smsConfig =
+                    deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
+            return isEnabledSms(smsConfig)
+                    && !isBlank(smsConfig.getEndpoint())
+                    && !isBlank(smsConfig.getCredentialRef())
+                    && deliveryProviderSecretCipher.isAvailable();
+        }
         if (channel != DeliveryChannel.EMAIL) {
             return false;
         }
@@ -160,6 +177,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         }
         DeliveryChannel channel = resolveChannel(request.getChannel());
         String provider = resolveProvider(request.getProvider());
+        requireProviderMatchesChannel(channel, provider);
 
         DeliveryProviderConfig existing =
                 deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
@@ -178,6 +196,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         String newCredential = switch (provider) {
             case SmtpDeliveryProvider.PROVIDER_ID -> validateAndPopulateSmtp(request, config);
             case HttpEspDeliveryProvider.PROVIDER_ID -> validateAndPopulateHttpEsp(request, config);
+            case SmsHttpDeliveryProvider.PROVIDER_ID -> validateAndPopulateSmsHttp(request, config);
             default -> throw new BadRequestException("Unsupported delivery provider");
         };
 
@@ -280,6 +299,43 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
     }
 
+    private ResolvedDeliveryProvider resolveSms(DeliveryProviderConfig config) {
+        if (!isEnabledSms(config)) {
+            throw new DeliveryProviderException("No usable SMS transport is configured for delivery");
+        }
+        if (isBlank(config.getCredentialRef())) {
+            throw new DeliveryProviderException("Delivery provider credential is not configured");
+        }
+        String apiKey = deliveryProviderSecretCipher.decryptCredential(
+                config.getWorkspaceId(), config.getCredentialRef());
+        if (isBlank(apiKey)) {
+            throw new DeliveryProviderException("Delivery provider credential is not configured");
+        }
+        return new ResolvedDeliveryProvider(
+                config.getProvider(),
+                DeliveryChannel.SMS,
+                config.getWorkspaceId(),
+                config.getEndpoint(),
+                config.getFromAddress(),
+                config.getFromName(),
+                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
+    }
+
+    private String validateAndPopulateSmsHttp(DeliveryProviderConfigRequest request, DeliveryProviderConfig config) {
+        config.setEndpoint(resolveEspEndpoint(request.getEndpoint()));
+        config.setFromAddress(requireSenderId(request.getFromAddress()));
+        config.setFromName(trimToNull(request.getFromName()));
+        if (isBlank(request.getApiKey())) {
+            return null;
+        }
+        String apiKey = request.getApiKey().trim();
+        if (!API_KEY.matcher(apiKey).matches()) {
+            throw new BadRequestException("Invalid delivery provider API key");
+        }
+        config.setCredentialLast4(last4(apiKey));
+        return apiKey;
+    }
+
     private String validateAndPopulateSmtp(DeliveryProviderConfigRequest request, DeliveryProviderConfig config) {
         config.setEndpoint(null);
         config.setFromAddress(trimToNull(request.getFromAddress()));
@@ -337,8 +393,14 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 && HttpEspDeliveryProvider.PROVIDER_ID.equals(config.getProvider());
     }
 
+    private static boolean isEnabledSms(DeliveryProviderConfig config) {
+        return config != null && config.isEnabled()
+                && SmsHttpDeliveryProvider.PROVIDER_ID.equals(config.getProvider());
+    }
+
     private static boolean requiresCredential(String provider) {
-        return HttpEspDeliveryProvider.PROVIDER_ID.equals(provider);
+        return HttpEspDeliveryProvider.PROVIDER_ID.equals(provider)
+                || SmsHttpDeliveryProvider.PROVIDER_ID.equals(provider);
     }
 
     private static DeliveryChannel resolveChannel(String requested) {
@@ -348,7 +410,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         } catch (DeliveryProviderException exception) {
             throw new BadRequestException("Invalid delivery channel");
         }
-        if (channel != DeliveryChannel.EMAIL) {
+        if (channel != DeliveryChannel.EMAIL && channel != DeliveryChannel.SMS) {
             throw new BadRequestException("Delivery channel " + channel + " is not supported yet");
         }
         return channel;
@@ -360,18 +422,45 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         }
         String provider = requested.trim().toLowerCase(Locale.ROOT);
         if (!SmtpDeliveryProvider.PROVIDER_ID.equals(provider)
-                && !HttpEspDeliveryProvider.PROVIDER_ID.equals(provider)) {
+                && !HttpEspDeliveryProvider.PROVIDER_ID.equals(provider)
+                && !SmsHttpDeliveryProvider.PROVIDER_ID.equals(provider)) {
             throw new BadRequestException("Unsupported delivery provider");
         }
         return provider;
     }
 
+    private static void requireProviderMatchesChannel(DeliveryChannel channel, String provider) {
+        boolean matches = switch (channel) {
+            case EMAIL -> SmtpDeliveryProvider.PROVIDER_ID.equals(provider)
+                    || HttpEspDeliveryProvider.PROVIDER_ID.equals(provider);
+            case SMS -> SmsHttpDeliveryProvider.PROVIDER_ID.equals(provider);
+            default -> false;
+        };
+        if (!matches) {
+            throw new BadRequestException(
+                    "Provider " + provider + " is not valid for the " + channel + " channel");
+        }
+    }
+
+    private static String requireSenderId(String requested) {
+        String value = trimToNull(requested);
+        if (value == null || !SMS_SENDER_ID.matcher(value).matches()) {
+            throw new BadRequestException("A valid SMS sender id is required");
+        }
+        return value;
+    }
+
+    /**
+     * Validates an email envelope from-address to the same grade the DTO's {@code @Email} constraint
+     * gave before validation moved here per channel: a non-empty local part, a single {@code @}, and a
+     * dot-separated domain of label characters. A bare {@code a@} or {@code @host} is rejected.
+     */
     private static String requireFromAddress(String requested) {
         String value = trimToNull(requested);
         if (value == null) {
             throw new BadRequestException("A from address is required");
         }
-        if (value.length() > 320 || value.indexOf('@') <= 0) {
+        if (value.length() > 320 || !EMAIL_ADDRESS.matcher(value).matches()) {
             throw new BadRequestException("A valid from address is required");
         }
         return value;

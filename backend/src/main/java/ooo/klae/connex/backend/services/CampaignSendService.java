@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.dto.CampaignMessageDto;
@@ -55,6 +56,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class CampaignSendService {
 
     private static final String DEFAULT_CHANNEL = "email";
+    private static final Set<String> DISPATCHABLE_CHANNELS = Set.of("email", "sms");
     private static final String DEFAULT_PURPOSE = "marketing";
     private static final Set<String> LOCALES = Set.of("en", "ja");
     private static final int SQL_BATCH_SIZE = 500;
@@ -123,20 +125,12 @@ public class CampaignSendService {
             throw new BadRequestException("Campaign message revision is required");
         }
         String locale = normalizeLocale(request.locale());
-        if (request.subject() == null || request.subject().isBlank()) {
-            throw new BadRequestException("Campaign message subject is required");
-        }
-        if (request.bodyHtml() == null || request.bodyHtml().isBlank()) {
-            throw new BadRequestException("Campaign message body is required");
-        }
         CampaignMessageRevision revision = new CampaignMessageRevision();
         revision.setWorkspaceId(workspaceId);
         revision.setMessageId(messageId);
         revision.setVersion(campaignMessageMapper.nextRevisionVersion(workspaceId, messageId));
         revision.setLocale(locale);
-        revision.setSubject(request.subject().trim());
-        revision.setBodyHtml(request.bodyHtml());
-        revision.setBodyText(trimToNull(request.bodyText()));
+        applyContent(DeliveryChannel.fromToken(message.getChannel()), request, revision);
         campaignMessageMapper.insertRevision(revision);
         auditService.record("campaign.message.revision", "campaign", campaignId, campaign.getName(),
                 "Added campaign message revision", Map.of("messageId", messageId, "version", revision.getVersion()));
@@ -162,7 +156,9 @@ public class CampaignSendService {
 
     /**
      * Creates a draft send bound to a frozen snapshot version and message revision, materializing one
-     * pending {@code campaign_delivery} row per included person that has a resolvable email address.
+     * pending {@code campaign_delivery} row per included person that has an address resolvable on the
+     * message's channel. The send inherits that channel; a person the channel cannot address — no email
+     * for an email send, no usable phone for an SMS send — is not materialized.
      */
     @Transactional
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
@@ -173,9 +169,7 @@ public class CampaignSendService {
             throw new BadRequestException("Campaign send is required");
         }
         CampaignMessage message = requireMessage(workspaceId, campaignId, request.messageId());
-        if (!DEFAULT_CHANNEL.equals(message.getChannel())) {
-            throw new BadRequestException("Only email messages can be sent in this release");
-        }
+        DeliveryChannel channel = resolveDispatchableChannel(message.getChannel());
         CampaignMessageRevision revision =
                 campaignMessageMapper.getRevision(workspaceId, request.messageId(), request.messageVersion());
         if (revision == null) {
@@ -189,7 +183,7 @@ public class CampaignSendService {
                     + request.snapshotVersion());
         }
         if (!"person".equals(snapshot.getRecordType())) {
-            throw new BadRequestException("Only person audiences can be emailed");
+            throw new BadRequestException("Only person audiences can be sent to");
         }
         workspaceService.requirePermission(Permission.CONSENT_MANAGE);
         String purpose = normalizePurpose(request.purpose());
@@ -200,12 +194,12 @@ public class CampaignSendService {
         send.setSnapshotId(snapshot.getId());
         send.setMessageId(message.getId());
         send.setMessageVersion(revision.getVersion());
-        send.setChannel(DEFAULT_CHANNEL);
+        send.setChannel(message.getChannel());
         send.setPurpose(purpose);
         send.setStatus("draft");
         send.setScheduledAt(request.scheduledAt());
         send.setCreatedById(authService.getCurrentUser().getId());
-        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId());
+        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId(), channel);
         send.setTotalRecipients(deliveries.size());
         campaignSendMapper.insertSend(send);
         for (CampaignDelivery delivery : deliveries) {
@@ -227,8 +221,10 @@ public class CampaignSendService {
             throw new ForbiddenException("Campaign delivery is not enabled on this instance");
         }
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
-        if (!deliveryProviderConfigService.isReady(workspaceId, DeliveryChannel.EMAIL)) {
-            throw new BadRequestException("No usable mail transport is configured for delivery");
+        DeliveryChannel channel = resolveDispatchableChannel(send.getChannel());
+        if (!deliveryProviderConfigService.isReady(workspaceId, channel)) {
+            throw new BadRequestException(
+                    "No usable transport is configured for delivery on the " + channel + " channel");
         }
         if (campaignSendMapper.transitionStatus(workspaceId, sendId, "draft", "queued") == 0) {
             throw new BadRequestException("Only a draft send can be queued");
@@ -273,7 +269,40 @@ public class CampaignSendService {
         return toSendDto(requireSend(workspaceId, campaignId, sendId));
     }
 
-    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId) {
+    /**
+     * Applies a revision request's content to the revision under the message's channel rules. This is
+     * the enforcement {@code CampaignMessageRevisionRequest} documents but cannot express structurally,
+     * because which fields are required depends on the channel of the message being revised: email
+     * needs a subject and an HTML body, SMS is text-only and carries neither.
+     */
+    private static void applyContent(
+            DeliveryChannel channel, CampaignMessageRevisionRequest request, CampaignMessageRevision revision) {
+        switch (channel) {
+            case EMAIL -> {
+                if (request.subject() == null || request.subject().isBlank()) {
+                    throw new BadRequestException("Campaign message subject is required");
+                }
+                if (request.bodyHtml() == null || request.bodyHtml().isBlank()) {
+                    throw new BadRequestException("Campaign message body is required");
+                }
+                revision.setSubject(request.subject().trim());
+                revision.setBodyHtml(request.bodyHtml());
+                revision.setBodyText(trimToNull(request.bodyText()));
+            }
+            case SMS -> {
+                if (request.bodyText() == null || request.bodyText().isBlank()) {
+                    throw new BadRequestException("Campaign message text body is required");
+                }
+                revision.setSubject(null);
+                revision.setBodyHtml(null);
+                revision.setBodyText(request.bodyText().trim());
+            }
+            default -> throw new BadRequestException(
+                    "Campaign messages cannot be authored for the " + channel + " channel");
+        }
+    }
+
+    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel) {
         List<Integer> personIds = campaignMapper.getSnapshotMembers(workspaceId, snapshotId).stream()
                 .filter(member -> "included".equals(member.getStatus()))
                 .map(CampaignAudienceMember::getRecordId)
@@ -283,8 +312,9 @@ public class CampaignSendService {
         }
         Map<Integer, String> addresses = new HashMap<>();
         for (Person person : personMapper.getByIds(workspaceId, personIds)) {
-            if (person.getEmail() != null && !person.getEmail().isBlank()) {
-                addresses.put(person.getId(), person.getEmail().trim().toLowerCase(Locale.ROOT));
+            String address = ChannelAddressNormalizer.addressFor(channel, person);
+            if (address != null) {
+                addresses.put(person.getId(), address);
             }
         }
         List<CampaignDelivery> deliveries = new ArrayList<>();
@@ -355,10 +385,22 @@ public class CampaignSendService {
             return DEFAULT_CHANNEL;
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (!DEFAULT_CHANNEL.equals(normalized)) {
-            throw new BadRequestException("Only the email channel is supported in this release");
+        if (!DISPATCHABLE_CHANNELS.contains(normalized)) {
+            throw new BadRequestException("Campaign message channel must be email or sms");
         }
         return normalized;
+    }
+
+    /**
+     * Resolves a persisted channel token that the send path can actually dispatch. A message or send
+     * carrying a channel outside {@link #DISPATCHABLE_CHANNELS} has no send implementation, so it is
+     * rejected here rather than failing later against a provider.
+     */
+    private static DeliveryChannel resolveDispatchableChannel(String token) {
+        if (token == null || !DISPATCHABLE_CHANNELS.contains(token)) {
+            throw new BadRequestException("The " + token + " channel cannot be sent in this release");
+        }
+        return DeliveryChannel.fromToken(token);
     }
 
     private static String normalizeLocale(String value) {

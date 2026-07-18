@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.delivery;
 
 /**
- * Outbound delivery channels. Only {@link #EMAIL} is dispatchable in this slice; the remaining
- * channels are declared for the data model and future providers but carry no implementation yet.
+ * Outbound delivery channels. {@link #EMAIL} and {@link #SMS} are dispatchable; {@link #LINE} and
+ * {@link #WHATSAPP} are declared for the data model and future providers but carry no implementation
+ * yet. Each dispatchable channel defines the person field it addresses and the canonical form of that
+ * address in {@link ChannelAddressNormalizer}.
  */
 public enum DeliveryChannel {
     EMAIL,

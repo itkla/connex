@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.beans.DeliveryProviderConfig;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigRequest;
 import ooo.klae.connex.backend.dto.DeliveryWebhookTokenDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -51,6 +53,8 @@ class DeliveryProviderConfigServiceTest {
     private static final int ACTOR = 9;
     private static final String API_KEY = "esp_api_key_secret_1234";
     private static final String ENDPOINT = "https://esp.example.com/v1/send";
+    private static final String SMS_API_KEY = "sms_api_key_secret_1234";
+    private static final String SMS_ENDPOINT = "https://sms.example.com/v1/messages";
 
     @Mock private MailConfigResolver mailConfigResolver;
     @Mock private DeliveryProviderConfigMapper mapper;
@@ -82,6 +86,136 @@ class DeliveryProviderConfigServiceTest {
         request.setApiKey(API_KEY);
         request.setEnabled(true);
         return request;
+    }
+
+    private DeliveryProviderConfigRequest smsRequest() {
+        DeliveryProviderConfigRequest request = new DeliveryProviderConfigRequest();
+        request.setChannel("sms");
+        request.setProvider(SmsHttpDeliveryProvider.PROVIDER_ID);
+        request.setEndpoint(SMS_ENDPOINT);
+        request.setFromAddress("Connex");
+        request.setApiKey(SMS_API_KEY);
+        request.setEnabled(true);
+        return request;
+    }
+
+    @Test
+    void save_acceptsTheSmsProviderOnTheSmsChannelAndStoresOnlyASecretReference() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("sms.example.com", false)).thenReturn(true);
+        when(cipher.encryptCredential(WORKSPACE, SMS_API_KEY)).thenReturn("secret:v1:77");
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(null, enabledSms());
+
+        service().save(smsRequest());
+
+        ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
+        verify(mapper).upsert(captor.capture());
+        DeliveryProviderConfig saved = captor.getValue();
+        assertEquals(SmsHttpDeliveryProvider.PROVIDER_ID, saved.getProvider());
+        assertEquals("sms", saved.getChannel());
+        assertEquals("secret:v1:77", saved.getCredentialRef());
+        assertEquals("1234", saved.getCredentialLast4());
+        assertNotEquals(SMS_API_KEY, saved.getCredentialRef());
+    }
+
+    @Test
+    void save_rejectsTheSmsProviderOnTheEmailChannel() {
+        currentWorkspaceAndActor();
+        DeliveryProviderConfigRequest request = smsRequest();
+        request.setChannel("email");
+        request.setFromAddress("no-reply@sender.test");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_rejectsTheEspProviderOnTheSmsChannel() {
+        currentWorkspaceAndActor();
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setChannel("sms");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_rejectsAMalformedEmailFromAddressOnTheEmailChannel() {
+        currentWorkspaceAndActor();
+        lenient().when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        for (String malformed : new String[] {"a@", "@sender.test", "no-reply", "a@b@c.test", "a@-bad.test"}) {
+            DeliveryProviderConfigRequest request = espRequest();
+            request.setFromAddress(malformed);
+            assertThrows(BadRequestException.class, () -> service().save(request),
+                    "expected " + malformed + " to be rejected as a from address");
+        }
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_acceptsAWellFormedEmailFromAddressOnTheEmailChannel() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:9");
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, enabledEsp());
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setFromAddress("no-reply+campaigns@mail.sender.test");
+
+        service().save(request);
+
+        ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
+        verify(mapper).upsert(captor.capture());
+        assertEquals("no-reply+campaigns@mail.sender.test", captor.getValue().getFromAddress());
+    }
+
+    @Test
+    void save_rejectsAnSmsSenderIdThatIsNotAValidSenderId() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("sms.example.com", false)).thenReturn(true);
+        DeliveryProviderConfigRequest request = smsRequest();
+        request.setFromAddress("bad/sender!");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+        verify(mapper, never()).upsert(any());
+    }
+
+    @Test
+    void resolveForWorkspace_resolvesAnEnabledSmsConfigWithItsDecryptedCredential() {
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(enabledSms());
+        when(cipher.decryptCredential(WORKSPACE, "secret:v1:77")).thenReturn(SMS_API_KEY);
+
+        ResolvedDeliveryProvider resolved = service().resolveForWorkspace(WORKSPACE, DeliveryChannel.SMS);
+
+        assertEquals(SmsHttpDeliveryProvider.PROVIDER_ID, resolved.providerId());
+        assertEquals(DeliveryChannel.SMS, resolved.channel());
+        assertEquals(SMS_ENDPOINT, resolved.endpoint());
+        assertEquals(SMS_API_KEY, resolved.credentials().require("apiKey"));
+    }
+
+    @Test
+    void resolveForWorkspace_neverFallsBackToSmtpForSms() {
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(null);
+
+        assertThrows(DeliveryProviderException.class,
+                () -> service().resolveForWorkspace(WORKSPACE, DeliveryChannel.SMS));
+        verify(mailConfigResolver, never()).resolveForWorkspace(WORKSPACE);
+    }
+
+    @Test
+    void isReady_requiresAnEnabledSmsConfigWithAnEndpointCredentialAndCipher() {
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(enabledSms());
+        when(cipher.isAvailable()).thenReturn(true);
+        assertTrue(service().isReady(WORKSPACE, DeliveryChannel.SMS));
+    }
+
+    @Test
+    void isReady_isFalseForSmsWhenTheConfigIsMissingOrDisabled() {
+        DeliveryProviderConfig disabled = enabledSms();
+        disabled.setEnabled(false);
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(null, disabled);
+
+        assertFalse(service().isReady(WORKSPACE, DeliveryChannel.SMS));
+        assertFalse(service().isReady(WORKSPACE, DeliveryChannel.SMS));
     }
 
     @Test
@@ -212,6 +346,19 @@ class DeliveryProviderConfigServiceTest {
         RequirePermission annotation = target.getAnnotation(RequirePermission.class);
         assertTrue(annotation != null, method + " must be @RequirePermission gated");
         assertEquals(Permission.WORKSPACE_SETTINGS, annotation.value());
+    }
+
+    private DeliveryProviderConfig enabledSms() {
+        DeliveryProviderConfig config = new DeliveryProviderConfig();
+        config.setWorkspaceId(WORKSPACE);
+        config.setChannel("sms");
+        config.setProvider(SmsHttpDeliveryProvider.PROVIDER_ID);
+        config.setEndpoint(SMS_ENDPOINT);
+        config.setFromAddress("Connex");
+        config.setCredentialRef("secret:v1:77");
+        config.setCreatedById(ACTOR);
+        config.setEnabled(true);
+        return config;
     }
 
     private DeliveryProviderConfig enabledEsp() {

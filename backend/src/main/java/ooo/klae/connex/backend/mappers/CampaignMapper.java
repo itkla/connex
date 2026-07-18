@@ -55,12 +55,13 @@ public interface CampaignMapper {
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
 
-    List<Integer> suppressedPersonIds(
+    List<Integer> grantedConsentPersonIds(
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids,
-            @Param("channel") String channel);
+            @Param("channel") String channel,
+            @Param("purpose") String purpose);
 
-    List<Integer> grantedConsentPersonIds(
+    List<Integer> revokedConsentPersonIds(
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids,
             @Param("channel") String channel,
@@ -70,6 +71,11 @@ public interface CampaignMapper {
             @Param("workspaceId") int workspaceId,
             @Param("channel") String channel,
             @Param("addresses") List<String> addresses);
+
+    List<Integer> suppressedPersonRefIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("ids") List<Integer> ids,
+            @Param("channel") String channel);
 
     int clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
 

@@ -63,18 +63,24 @@ class CampaignServiceTest extends AbstractServiceTest {
                 () -> campaignService.create(campaignRequest("Denied", null)));
     }
 
+    /**
+     * Consent is opt-out: only an explicit revocation excludes, so the person with no consent record at
+     * all is now counted as included. The restricted &rarr; suppressed &rarr; consent precedence and the
+     * no-double-counting math are unchanged — the restricted person is also suppressed and is still
+     * counted once, as restricted.
+     */
     @Test
-    void estimateAppliesRestrictedThenSuppressedThenConsentMissingWithoutDoubleCounting() {
+    void estimateAppliesRestrictedThenSuppressedThenRevokedConsentWithoutDoubleCounting() {
         String prefix = "audience-" + unique();
         Company company = newCompany();
         Person restricted = person(company, prefix + "-restricted", prefix + "-restricted@example.com");
         Person suppressed = person(company, prefix + "-suppressed", prefix + "-suppressed@example.com");
-        Person consentMissing = person(company, prefix + "-missing", prefix + "-missing@example.com");
+        Person consentRevoked = person(company, prefix + "-revoked", prefix + "-revoked@example.com");
         Person included = person(company, prefix + "-included", prefix + "-included@example.com");
         personMapper.updateProcessingRestrictions(workspace.getId(), restricted.getId(), true, false);
         suppressionService.add(suppression(restricted));
         suppressionService.add(suppression(suppressed));
-        consentService.setForPerson(included.getId(), grantedConsent());
+        consentService.setForPerson(consentRevoked.getId(), revokedConsent());
 
         CampaignDto campaign = campaignService.create(campaignRequest("Audience math", null));
         campaignService.setAudience(campaign.id(), audience(prefix));
@@ -88,7 +94,7 @@ class CampaignServiceTest extends AbstractServiceTest {
         assertEquals(3, estimate.excludedTotal());
         assertEquals(List.of(included.getId()),
                 estimate.sampleLabels().stream().map(label -> label.getId()).toList());
-        assertTrue(estimate.sampleLabels().stream().noneMatch(label -> label.getId() == consentMissing.getId()));
+        assertTrue(estimate.sampleLabels().stream().noneMatch(label -> label.getId() == consentRevoked.getId()));
     }
 
     @Test
@@ -185,5 +191,10 @@ class CampaignServiceTest extends AbstractServiceTest {
     private ContactChannelConsentRequest grantedConsent() {
         return new ContactChannelConsentRequest(
                 "email", "marketing", "granted", "manual", null, null);
+    }
+
+    private ContactChannelConsentRequest revokedConsent() {
+        return new ContactChannelConsentRequest(
+                "email", "marketing", "revoked", "manual", null, null);
     }
 }

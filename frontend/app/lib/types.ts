@@ -1356,6 +1356,7 @@ export type CampaignAudienceEstimate = {
 };
 
 export type CampaignAudienceExclusionReason =
+    | "consent_revoked"
     | "consent_missing"
     | "suppressed"
     | "restricted";
@@ -1385,7 +1386,7 @@ export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
     members: CampaignAudienceMember[];
 };
 
-export type CampaignChannel = "email";
+export type CampaignChannel = "email" | "sms";
 
 export type CampaignMessageStatus = "draft" | "final";
 
@@ -1419,10 +1420,14 @@ export type CampaignMessagePayload = {
     channel: CampaignChannel;
 };
 
+/**
+ * Content for a new message revision. Which fields carry the content is channel-specific: an email
+ * revision sends {@code subject} and {@code bodyHtml}, an SMS revision sends only {@code bodyText}.
+ */
 export type CampaignMessageRevisionPayload = {
     locale: CampaignMessageLocale;
-    subject: string;
-    bodyHtml: string;
+    subject?: string | null;
+    bodyHtml?: string | null;
     bodyText?: string | null;
 };
 
@@ -2519,7 +2524,11 @@ export type MailTestResult = {
     error: string | null;
 };
 
-export type DeliveryProvider = "smtp" | "http_esp";
+export type DeliveryEmailProvider = "smtp" | "http_esp";
+
+export type DeliverySmsProvider = "sms_http";
+
+export type DeliveryProvider = DeliveryEmailProvider | DeliverySmsProvider;
 
 export type DeliveryProviderConfig = {
     channel: string;
