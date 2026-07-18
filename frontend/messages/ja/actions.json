@@ -40,6 +40,8 @@
       "activity": "アクティビティを記録"
     },
     "record": {
+      "open": "レコードを開く",
+      "openNewTab": "新しいタブで開く",
       "copyLink": "このレコードのリンクをコピー"
     },
     "workspace": {

@@ -40,6 +40,8 @@
       "activity": "Log activity"
     },
     "record": {
+      "open": "Open record",
+      "openNewTab": "Open in new tab",
       "copyLink": "Copy link to this record"
     },
     "workspace": {
