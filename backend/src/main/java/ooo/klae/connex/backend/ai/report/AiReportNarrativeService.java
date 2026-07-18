@@ -128,14 +128,17 @@ public class AiReportNarrativeService {
                     return ReportNarrativeDto.unavailable(RATE_LIMITED);
                 }
                 try {
-                    AiStructuredOutcome<AiReportNarrativeSelection> outcome = aiInvocationService.completeStructured(
+                    AiStructuredOutcome<AiReportNarrativeContent> outcome = aiInvocationService.completeStructured(
                             new AiInvocation(FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE),
-                            AiReportNarrativeSelection.class);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeSelection> parsed)) {
+                            AiReportNarrativeContent.class,
+                            AiReportProseResolver.noLiteralFigures());
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)) {
                         return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                     }
+                    AiReportFigures figures = AiReportFigures.from(
+                            reportContext.sources(), LocaleContextHolder.getLocale());
                     Optional<AiReportNarrativeContent> resolved =
-                            AiReportSelectionResolver.resolve(parsed.value(), reportContext);
+                            AiReportProseResolver.resolve(parsed.value(), reportContext, figures);
                     if (resolved.isEmpty()) {
                         return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
                     }
@@ -268,6 +271,6 @@ public class AiReportNarrativeService {
     private static String cacheFeature() {
         Locale locale = LocaleContextHolder.getLocale();
         String language = locale.getLanguage();
-        return FEATURE + ":v3:" + (language.isBlank() ? Locale.ENGLISH.getLanguage() : language);
+        return FEATURE + ":v4:" + (language.isBlank() ? Locale.ENGLISH.getLanguage() : language);
     }
 }
