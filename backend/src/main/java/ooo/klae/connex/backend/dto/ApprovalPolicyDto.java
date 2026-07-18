@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -34,10 +35,12 @@ public class ApprovalPolicyDto {
     private String currency;
 
     @DecimalMin(value = "0")
+    @Digits(integer = 13, fraction = 2)
     private BigDecimal minTotal;
 
     @DecimalMin(value = "0")
     @DecimalMax(value = "100")
+    @Digits(integer = 3, fraction = 3)
     private BigDecimal minDiscountPercent;
 
     private String createdAt;

@@ -38,6 +38,9 @@ type Props = {
 const DOCUMENT_TYPES: DocumentType[] = ['quote', 'proposal', 'order_form', 'contract'];
 const ALL_TYPES = 'all';
 
+const isDocumentType = (value: string): value is DocumentType =>
+    (DOCUMENT_TYPES as string[]).includes(value);
+
 type Draft = {
     name: string;
     active: boolean;
@@ -84,7 +87,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             const payload = {
                 name: draft.name.trim(),
                 active: draft.active,
-                documentType: draft.documentType === ALL_TYPES ? null : (draft.documentType as DocumentType),
+                documentType: isDocumentType(draft.documentType) ? draft.documentType : null,
                 currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
                 minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
                 minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),

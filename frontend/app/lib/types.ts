@@ -1162,6 +1162,12 @@ export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayloa
 
 export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final' | 'superseded';
 
+/**
+ * Statuses a client may request through the status endpoint. The approval states are owned by the
+ * approval flow and are rejected server-side if sent here.
+ */
+export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
+
 export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 /** One approval request on a generated document, with its decision once made. */
@@ -1200,7 +1206,11 @@ export type CreateApprovalPolicyPayload = {
     minDiscountPercent?: number | null;
 };
 
-export type UpdateApprovalPolicyPayload = Partial<CreateApprovalPolicyPayload>;
+/**
+ * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
+ * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ */
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
 
 /** A party rendered on a document (workspace, company, or owner). */
 export type DocumentParty = {

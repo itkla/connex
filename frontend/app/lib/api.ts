@@ -2579,7 +2579,7 @@ export function generateDealDocument(dealId: number, templateId: number) {
     return postJson<Types.DealDocument>(`/api/deals/${dealId}/documents`, { templateId });
 }
 
-export function updateDealDocumentStatus(dealId: number, documentId: number, status: Types.DocumentStatus) {
+export function updateDealDocumentStatus(dealId: number, documentId: number, status: Types.DocumentClientStatus) {
     return putJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}/status`, { status });
 }
 

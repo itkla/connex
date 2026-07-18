@@ -48,6 +48,8 @@
     "documentApprovedBody": "{actor} approved {document}",
     "documentRejectedTitle": "Document rejected",
     "documentRejectedBody": "{actor} rejected {document}",
+    "documentApprovalCancelledTitle": "Approval request withdrawn",
+    "documentApprovalCancelledBody": "The approval request for {document} was withdrawn because the document was superseded",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",

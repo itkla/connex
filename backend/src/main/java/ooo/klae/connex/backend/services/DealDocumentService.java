@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class DealDocumentService {
     private final DealDocumentMapper documentMapper;
     private final DocumentApprovalMapper approvalMapper;
+    private final DocumentApprovalService approvalService;
     private final DocumentTemplateService templateService;
     private final ApprovalPolicyService policyService;
     private final DealMapper dealMapper;
@@ -156,34 +157,36 @@ public class DealDocumentService {
     public DealDocumentDto updateStatus(int dealId, int documentId, String status) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
+        DealDocument document = lockDocument(workspaceId, dealId, documentId);
         if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
             throw new BadRequestException("status must be one of: draft, final, superseded");
         }
-        DealDocument document = lockDocument(workspaceId, dealId, documentId);
+        List<ApprovalPolicy> policies = policyService.activePolicies(workspaceId);
         if (document.getStatus().equals(status)) {
-            return enrich(workspaceId, document);
+            return enrichWith(workspaceId, document, policies);
         }
         if (!isAllowedTransition(document.getStatus(), status)) {
             throw new BadRequestException("Cannot change document status from " + document.getStatus() + " to " + status);
         }
         if ("final".equals(status) && "draft".equals(document.getStatus())) {
-            requireNoMatchingPolicy(workspaceId, document);
+            requireNoMatchingPolicy(policies, document);
         }
         if ("pending_approval".equals(document.getStatus())) {
-            cancelPendingApproval(workspaceId, documentId);
+            approvalService.cancelPendingOnSupersede(workspaceId, deal, document);
         }
         documentMapper.updateStatus(workspaceId, documentId, status);
         auditService.record("deal_document.status", "deal", dealId, deal.getName(),
             "Document v" + document.getVersion() + " status " + document.getStatus() + " → " + status, null);
-        return enrich(workspaceId, requireDocument(workspaceId, dealId, documentId));
+        return enrichWith(workspaceId, requireDocument(workspaceId, dealId, documentId), policies);
     }
 
     /** Deletes a draft document; finalized documents cannot be deleted. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public void delete(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
-        DealDocument document = requireDocument(workspaceId, dealId, documentId);
+        DealDocument document = lockDocument(workspaceId, dealId, documentId);
         if (!"draft".equals(document.getStatus())) {
             throw new BadRequestException("Only draft documents can be deleted");
         }
@@ -202,20 +205,11 @@ public class DealDocumentService {
         };
     }
 
-    private void requireNoMatchingPolicy(int workspaceId, DealDocument document) {
-        ApprovalPolicy match = policyService.firstMatch(
-            policyService.activePolicies(workspaceId), document, parseContent(document));
+    private void requireNoMatchingPolicy(List<ApprovalPolicy> policies, DealDocument document) {
+        ApprovalPolicy match = policyService.firstMatch(policies, document, parseContent(document));
         if (match != null) {
             throw new BadRequestException(
                 "This document requires approval under policy \"" + match.getName() + "\" before it can be finalized");
-        }
-    }
-
-    private void cancelPendingApproval(int workspaceId, int documentId) {
-        DocumentApproval pending = approvalMapper.findPending(workspaceId, documentId);
-        if (pending != null) {
-            approvalMapper.decide(workspaceId, pending.getId(), "cancelled",
-                workspaceService.getCurrentUserId(), null);
         }
     }
 
@@ -248,9 +242,12 @@ public class DealDocumentService {
     }
 
     private DealDocumentDto enrich(int workspaceId, DealDocument document) {
+        return enrichWith(workspaceId, document, policyService.activePolicies(workspaceId));
+    }
+
+    private DealDocumentDto enrichWith(int workspaceId, DealDocument document, List<ApprovalPolicy> policies) {
         List<DocumentApproval> approvals = approvalMapper.getByDocumentId(workspaceId, document.getId());
-        return toDto(document, policyService.activePolicies(workspaceId),
-            approvals.isEmpty() ? null : approvals.getFirst());
+        return toDto(document, policies, approvals.isEmpty() ? null : approvals.getFirst());
     }
 
     private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies, DocumentApproval latestApproval) {

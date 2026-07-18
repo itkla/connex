@@ -43,6 +43,7 @@ public class ApprovalPolicyService {
 
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy create(ApprovalPolicy policy) {
+        normalize(policy);
         validate(policy);
         policy.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         policyMapper.insert(policy);
@@ -54,6 +55,7 @@ public class ApprovalPolicyService {
 
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy update(int id, ApprovalPolicy policy) {
+        normalize(policy);
         validate(policy);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ApprovalPolicy before = require(workspaceId, id);
@@ -102,7 +104,7 @@ public class ApprovalPolicyService {
             return true;
         }
         if (policy.getMinTotal() != null && grandTotal != null
-                && policy.getCurrency() != null && policy.getCurrency().equals(document.getCurrency())
+                && currenciesMatch(policy.getCurrency(), document.getCurrency())
                 && grandTotal.compareTo(policy.getMinTotal()) >= 0) {
             return true;
         }
@@ -135,6 +137,22 @@ public class ApprovalPolicyService {
             .multiply(BigDecimal.valueOf(100))
             .divide(list, 3, RoundingMode.HALF_UP);
         return percent.max(BigDecimal.ZERO);
+    }
+
+    /**
+     * Normalizes the currency to a trimmed uppercase code so a policy saved as {@code "jpy "} can
+     * never silently fail to match {@code "JPY"} documents — a mismatch would fail open.
+     */
+    private void normalize(ApprovalPolicy policy) {
+        if (policy.getCurrency() != null) {
+            String currency = policy.getCurrency().trim().toUpperCase();
+            policy.setCurrency(currency.isEmpty() ? null : currency);
+        }
+    }
+
+    private boolean currenciesMatch(String policyCurrency, String documentCurrency) {
+        return policyCurrency != null && documentCurrency != null
+            && policyCurrency.trim().equalsIgnoreCase(documentCurrency.trim());
     }
 
     private void validate(ApprovalPolicy policy) {

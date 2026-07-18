@@ -135,12 +135,19 @@ export function notificationContent(notification: Notification, t: Translator, l
         };
     }
     if (notification.type === "document.approval_decision") {
+        const document = text(data.documentTitle, notification.sourceLabel ?? "");
+        if (data.decision === "cancelled") {
+            return {
+                title: t("documentApprovalCancelledTitle"),
+                body: t("documentApprovalCancelledBody", { document }),
+            };
+        }
         const approved = data.decision === "approved";
         return {
             title: t(approved ? "documentApprovedTitle" : "documentRejectedTitle"),
             body: t(approved ? "documentApprovedBody" : "documentRejectedBody", {
                 actor: notification.actorLabel ?? "",
-                document: text(data.documentTitle, notification.sourceLabel ?? ""),
+                document,
             }),
         };
     }

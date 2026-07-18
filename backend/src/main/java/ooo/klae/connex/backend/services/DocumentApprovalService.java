@@ -127,6 +127,26 @@ public class DocumentApprovalService {
         return DocumentApprovalDto.from(requireApproval(workspaceId, approval.getId()));
     }
 
+    /**
+     * Cancels a pending approval because its document is being superseded. Called by
+     * {@code DealDocumentService.updateStatus} under the document row lock — the superseder needs
+     * {@link Permission#DEAL_UPDATE} but not requester identity, so the requester is notified that
+     * their request was withdrawn on their behalf.
+     */
+    void cancelPendingOnSupersede(int workspaceId, Deal deal, DealDocument document) {
+        DocumentApproval pending = approvalMapper.findPending(workspaceId, document.getId());
+        if (pending == null) {
+            return;
+        }
+        User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
+        approvalMapper.decide(workspaceId, pending.getId(), "cancelled",
+            actor == null ? null : actor.getId(), null);
+        auditService.record("document_approval.cancel", "deal", deal.getId(), deal.getName(),
+            "Cancelled approval request for " + document.getType() + " v" + document.getVersion()
+                + " by superseding the document", null);
+        notifyDecided(workspaceId, document, pending, "cancelled", actor);
+    }
+
     /** Withdraws the requester's own pending approval request, returning the document to draft. */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
@@ -169,14 +189,14 @@ public class DocumentApprovalService {
                 notification.setSeverity("info");
                 notification.setTitle("Approval requested");
                 notification.setBody((actor == null ? "Someone" : actor.getDisplayName())
-                    + " requested approval for " + document.getTitle());
+                    + " requested approval for " + titleOf(document));
                 notification.setContextType("deal");
                 notification.setContextId(deal.getId());
                 notification.setDedupeKey(REQUEST_TYPE + ":" + approval.getId() + ":" + member.getId());
                 notification.setData(json(Map.of(
                     "dealId", deal.getId(),
                     "documentId", document.getId(),
-                    "documentTitle", document.getTitle(),
+                    "documentTitle", titleOf(document),
                     "version", document.getVersion())));
                 notificationDelivery.deliver(notification);
             } catch (RuntimeException e) {
@@ -199,21 +219,25 @@ public class DocumentApprovalService {
         }
         try {
             boolean approved = "approved".equals(decision);
+            boolean cancelled = "cancelled".equals(decision);
             Notification notification = baseNotification(workspaceId, document, actor,
                 LocalDateTime.now(ZoneOffset.UTC).format(TS));
             notification.setRecipientId(recipientId);
             notification.setType(DECISION_TYPE);
-            notification.setSeverity(approved ? "info" : "warning");
-            notification.setTitle(approved ? "Document approved" : "Document rejected");
-            notification.setBody((actor == null ? "An approver" : actor.getDisplayName())
-                + (approved ? " approved " : " rejected ") + document.getTitle());
+            notification.setSeverity(approved || cancelled ? "info" : "warning");
+            notification.setTitle(approved ? "Document approved"
+                : cancelled ? "Approval request cancelled" : "Document rejected");
+            notification.setBody(cancelled
+                ? "The approval request for " + titleOf(document) + " was withdrawn because the document was superseded"
+                : (actor == null ? "An approver" : actor.getDisplayName())
+                    + (approved ? " approved " : " rejected ") + titleOf(document));
             notification.setContextType("deal");
             notification.setContextId(document.getDealId());
             notification.setDedupeKey(DECISION_TYPE + ":" + approval.getId() + ":" + recipientId);
             notification.setData(json(Map.of(
                 "dealId", document.getDealId(),
                 "documentId", document.getId(),
-                "documentTitle", document.getTitle(),
+                "documentTitle", titleOf(document),
                 "version", document.getVersion(),
                 "decision", decision)));
             notificationDelivery.deliver(notification);
@@ -234,10 +258,15 @@ public class DocumentApprovalService {
         }
         notification.setSourceType("deal_document");
         notification.setSourceId(document.getId());
-        notification.setSourceLabel(document.getTitle());
+        notification.setSourceLabel(titleOf(document));
         notification.setActionUrl("/records/deals/" + document.getDealId());
         notification.setTriggeredAt(triggeredAt);
         return notification;
+    }
+
+    private String titleOf(DealDocument document) {
+        return document.getTitle() == null || document.getTitle().isBlank()
+            ? document.getType() + " v" + document.getVersion() : document.getTitle();
     }
 
     private String json(Map<String, Object> data) {

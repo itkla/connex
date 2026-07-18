@@ -117,8 +117,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
         .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
 
-    const documents = await getDealDocumentsFromCookie(deal.id, cookie).catch(() => []);
-    const effectivePermissions = await getEffectivePermissionsFromCookie(cookie);
+    const [documents, effectivePermissions] = await Promise.all([
+        getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
+        getEffectivePermissionsFromCookie(cookie),
+    ]);
 
     const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null

@@ -50,7 +50,7 @@ import {
     decideDocumentApproval,
     cancelDocumentApproval,
 } from '@/app/lib/api';
-import type { DealDocument, DocumentStatus, DocumentTemplate, DocumentType } from '@/app/lib/types';
+import type { DealDocument, DocumentClientStatus, DocumentStatus, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
 type Props = {
     dealId: number;
@@ -60,6 +60,12 @@ type Props = {
 };
 
 type ApprovalAction = 'request' | 'approve' | 'reject';
+
+const APPROVAL_DIALOG_KEYS: Record<ApprovalAction, { title: string; body: string; confirm: string }> = {
+    request: { title: 'requestDialogTitle', body: 'requestDialogBody', confirm: 'requestConfirm' },
+    approve: { title: 'approveDialogTitle', body: 'approveDialogBody', confirm: 'approveConfirm' },
+    reject: { title: 'rejectDialogTitle', body: 'rejectDialogBody', confirm: 'rejectConfirm' },
+};
 
 const TYPE_KEY: Record<DocumentType, string> = {
     quote: 'typeQuote',
@@ -91,6 +97,7 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
     const [approvalDialog, setApprovalDialog] = useState<{ doc: DealDocument; action: ApprovalAction } | null>(null);
+    const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
     const [comment, setComment] = useState('');
 
     useEffect(() => {
@@ -121,7 +128,7 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
         toastSuccess(t('generated'));
     });
 
-    const changeStatus = (doc: DealDocument, status: DocumentStatus) => run(async () => {
+    const changeStatus = (doc: DealDocument, status: DocumentClientStatus) => run(async () => {
         const updated = await updateDealDocumentStatus(dealId, doc.id, status);
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
     });
@@ -133,9 +140,12 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
     });
 
     const cancelRequest = (doc: DealDocument) => run(async () => {
-        await cancelDocumentApproval(dealId, doc.id);
-        await refreshDocument(doc.id);
-        toastSuccess(t('approvalCancelled'));
+        try {
+            await cancelDocumentApproval(dealId, doc.id);
+            toastSuccess(t('approvalCancelled'));
+        } finally {
+            await refreshDocument(doc.id).catch(() => undefined);
+        }
     });
 
     const submitApprovalAction = () => {
@@ -143,22 +153,25 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
         const { doc, action } = approvalDialog;
         const trimmed = comment.trim();
         return run(async () => {
-            if (action === 'request') {
-                await requestDocumentApproval(dealId, doc.id, trimmed || null);
-                toastSuccess(t('approvalRequested'));
-            } else {
-                await decideDocumentApproval(dealId, doc.id, action === 'approve' ? 'approved' : 'rejected', trimmed || null);
-                toastSuccess(action === 'approve' ? t('approvalApproved') : t('approvalRejected'));
+            try {
+                if (action === 'request') {
+                    await requestDocumentApproval(dealId, doc.id, trimmed || null);
+                    toastSuccess(t('approvalRequested'));
+                } else {
+                    await decideDocumentApproval(dealId, doc.id, action === 'approve' ? 'approved' : 'rejected', trimmed || null);
+                    toastSuccess(action === 'approve' ? t('approvalApproved') : t('approvalRejected'));
+                }
+            } finally {
+                await refreshDocument(doc.id).catch(() => undefined);
             }
-            await refreshDocument(doc.id);
-            setApprovalDialog(null);
-            setComment('');
+            setApprovalDialogOpen(false);
         });
     };
 
     const openApprovalDialog = (doc: DealDocument, action: ApprovalAction) => {
         setComment('');
         setApprovalDialog({ doc, action });
+        setApprovalDialogOpen(true);
     };
 
     const openPdf = (doc: DealDocument) => {
@@ -166,6 +179,9 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
     };
 
     const isRequester = (doc: DealDocument) => doc.latestApproval?.requestedBy === currentUserId;
+
+    const canFinalize = (doc: DealDocument) =>
+        (doc.status === 'draft' && !doc.requiresApproval) || doc.status === 'approved';
 
     const generateMenu = (
         <DropdownMenu>
@@ -196,7 +212,7 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
         </DropdownMenu>
     );
 
-    const dialogAction = approvalDialog?.action;
+    const dialogKeys = approvalDialog ? APPROVAL_DIALOG_KEYS[approvalDialog.action] : null;
 
     return (
         <section>
@@ -274,7 +290,7 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                                                             <ShieldCheckIcon className="size-4" />{t('requestApproval')}
                                                         </DropdownMenuItem>
                                                     )}
-                                                    {doc.status === 'draft' && !doc.requiresApproval && (
+                                                    {canFinalize(doc) && (
                                                         <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
                                                             <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
@@ -292,11 +308,6 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                                                     {doc.status === 'pending_approval' && isRequester(doc) && (
                                                         <DropdownMenuItem onSelect={() => cancelRequest(doc)}>
                                                             <ArrowUturnLeftIcon className="size-4" />{t('cancelRequest')}
-                                                        </DropdownMenuItem>
-                                                    )}
-                                                    {doc.status === 'approved' && (
-                                                        <DropdownMenuItem onSelect={() => changeStatus(doc, 'final')}>
-                                                            <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
                                                     )}
                                                     {doc.status !== 'superseded' && (
@@ -323,26 +334,12 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                 </div>
             )}
 
-            <Dialog
-                open={approvalDialog !== null}
-                onOpenChange={(open) => {
-                    if (!open) {
-                        setApprovalDialog(null);
-                        setComment('');
-                    }
-                }}
-            >
+            <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>
-                            {dialogAction === 'request' && t('requestDialogTitle')}
-                            {dialogAction === 'approve' && t('approveDialogTitle')}
-                            {dialogAction === 'reject' && t('rejectDialogTitle')}
-                        </DialogTitle>
+                        <DialogTitle>{dialogKeys ? t(dialogKeys.title) : ''}</DialogTitle>
                         <DialogDescription>
-                            {dialogAction === 'request' && t('requestDialogBody', { title: approvalDialog?.doc.title ?? '' })}
-                            {dialogAction === 'approve' && t('approveDialogBody', { title: approvalDialog?.doc.title ?? '' })}
-                            {dialogAction === 'reject' && t('rejectDialogBody', { title: approvalDialog?.doc.title ?? '' })}
+                            {dialogKeys ? t(dialogKeys.body, { title: approvalDialog?.doc.title ?? '' }) : ''}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2">
@@ -362,17 +359,13 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                             <Button variant="outline" disabled={busy}>{t('dialogCancel')}</Button>
                         </DialogClose>
                         <Button
-                            variant={dialogAction === 'reject' ? 'destructive' : 'brand'}
+                            variant={approvalDialog?.action === 'reject' ? 'destructive' : 'brand'}
                             disabled={busy}
                             onClick={submitApprovalAction}
                         >
-                            {busy ? <Loader2Icon className="size-4 animate-spin" /> : (
-                                <>
-                                    {dialogAction === 'request' && t('requestConfirm')}
-                                    {dialogAction === 'approve' && t('approveConfirm')}
-                                    {dialogAction === 'reject' && t('rejectConfirm')}
-                                </>
-                            )}
+                            {busy
+                                ? <Loader2Icon className="size-4 animate-spin" />
+                                : dialogKeys ? t(dialogKeys.confirm) : ''}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

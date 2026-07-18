@@ -189,11 +189,17 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     void supersedingAPendingDocumentCancelsItsApproval() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);
-        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
 
+        User superseder = newUser();
+        authenticateAs(superseder, workspace.getId());
         DealDocumentDto superseded = documentService.updateStatus(deal.getId(), doc.id(), "superseded");
         assertEquals("superseded", superseded.status());
         assertEquals("cancelled", superseded.latestApproval().status());
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), currentUser.getId(),
+            "document.approval_decision:" + approval.id() + ":" + currentUser.getId()));
+
+        authenticateAs(currentUser, workspace.getId());
         assertThrows(BadRequestException.class,
             () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
     }

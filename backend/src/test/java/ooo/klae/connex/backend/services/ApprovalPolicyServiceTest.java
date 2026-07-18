@@ -109,6 +109,16 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void currencyComparisonSurvivesCaseAndWhitespaceVariants() {
+        ApprovalPolicy saved = policy(null, " jpy ", "100", null);
+        assertEquals("JPY", saved.getCurrency());
+
+        Deal deal = jpyDeal();
+        addLine(deal, "500.00", "1", null, null);
+        assertTrue(quote(deal).requiresApproval());
+    }
+
+    @Test
     void totalThresholdMatchesAtTheBoundary() {
         policy(null, "JPY", "500", null);
         Deal below = jpyDeal();
