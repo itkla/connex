@@ -28,6 +28,7 @@ import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/Segme
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
+import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
 import {
     type Campaign,
@@ -36,6 +37,7 @@ import {
     type CampaignAudienceExport,
     type CampaignAudienceRecordType,
     type CampaignAudienceSnapshotSummary,
+    type CampaignEngagement as CampaignEngagementData,
     type CampaignMessage,
     type CampaignSend,
     type SegmentDefinition,
@@ -70,6 +72,7 @@ export default function CampaignDetail({
     initialMessages,
     initialSends,
     initialExports,
+    initialEngagement,
     canManage,
     canSend,
 }: {
@@ -79,6 +82,7 @@ export default function CampaignDetail({
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
     initialExports: CampaignAudienceExport[];
+    initialEngagement: CampaignEngagementData | null;
     canManage: boolean;
     canSend: boolean;
 }) {
@@ -389,6 +393,8 @@ export default function CampaignDetail({
                     canManage={canManage}
                     canSend={canSend}
                 />
+
+                <CampaignEngagement engagement={initialEngagement} />
 
                 <CampaignExportPanel
                     campaignId={campaign.id}

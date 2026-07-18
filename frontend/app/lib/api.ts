@@ -3599,6 +3599,17 @@ export function getCampaignExport(id: number, exportId: number, init: RequestIni
     return getJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports/${exportId}`, init);
 }
 
+export function getCampaignEngagement(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignEngagement>(`/api/campaigns/${id}/engagement`, init);
+}
+
+export function getCampaignEngagementFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.CampaignEngagement>(
+        (init) => getCampaignEngagement(id, init),
+        cookie,
+    );
+}
+
 /**
  * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
  * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.

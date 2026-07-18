@@ -1471,6 +1471,58 @@ export type CampaignSendPayload = {
     scheduledAt?: string | null;
 };
 
+/** Per-channel delivery tally within a campaign's engagement rollup. */
+export type CampaignChannelStat = {
+    channel: string;
+    deliveries: number;
+};
+
+/** Delivery-outcome rollup for a single send within a campaign's engagement view. */
+export type CampaignSendEngagement = {
+    sendId: number;
+    status: string;
+    channel: string;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+};
+
+/**
+ * Campaign-wide engagement rollup aggregated across every send. Rate fields are {@code null} when
+ * they cannot be measured (for example, an SMTP transport that returns no delivery receipts), which
+ * the UI surfaces as "Not measured" rather than a misleading zero.
+ */
+export type CampaignEngagement = {
+    campaignId: number;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    channels: CampaignChannelStat[];
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+    sends: CampaignSendEngagement[];
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */

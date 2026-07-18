@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import {
     getCampaignFromCookie,
     getCampaignAudienceFromCookie,
+    getCampaignEngagement,
     getCampaignExports,
     getCampaignMessages,
     getCampaignSends,
@@ -14,6 +15,7 @@ import {
     type CampaignAudience,
     type CampaignAudienceExport,
     type CampaignAudienceSnapshotSummary,
+    type CampaignEngagement,
     type CampaignMessage,
     type CampaignSend,
 } from "@/app/lib/types";
@@ -41,12 +43,13 @@ export default async function CampaignDetailPage({
     }
 
     const init = { headers: { cookie: cookie ?? "" }, cache: "no-store" } as const;
-    const [audienceResult, snapshots, messages, sends, exports, effectivePermissions]: [
+    const [audienceResult, snapshots, messages, sends, exports, engagement, effectivePermissions]: [
         { ok: true; data: CampaignAudience | undefined } | { ok: false },
         CampaignAudienceSnapshotSummary[],
         CampaignMessage[],
         CampaignSend[],
         CampaignAudienceExport[],
+        CampaignEngagement | null,
         string[],
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
@@ -54,6 +57,7 @@ export default async function CampaignDetailPage({
         getCampaignMessages(id, init).catch(() => []),
         getCampaignSends(id, init).catch(() => []),
         getCampaignExports(id, init).catch(() => []),
+        getCampaignEngagement(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
     ]);
 
@@ -68,6 +72,7 @@ export default async function CampaignDetailPage({
             initialMessages={messages}
             initialSends={sends}
             initialExports={exports}
+            initialEngagement={engagement}
             canManage={effectivePermissions.includes("CAMPAIGN_MANAGE")}
             canSend={effectivePermissions.includes("CAMPAIGN_SEND")}
         />
