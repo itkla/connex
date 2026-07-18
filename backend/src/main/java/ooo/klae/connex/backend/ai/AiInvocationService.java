@@ -86,13 +86,32 @@ public class AiInvocationService {
      * @return parsed or malformed structured outcome
      */
     public <T> AiStructuredOutcome<T> completeStructured(AiInvocation invocation, Class<T> type) {
+        return completeStructured(invocation, type, AiRawOutputGuard.PERMIT_ALL);
+    }
+
+    /**
+     * As {@link #completeStructured(AiInvocation, Class)}, but validates the raw, still-masked output
+     * with {@code guard} before demasking. A rejected output fails closed to
+     * {@link AiStructuredOutcome.Malformed}.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param <T> content type
+     * @return parsed or malformed structured outcome
+     */
+    public <T> AiStructuredOutcome<T> completeStructured(
+            AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
         Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(guard, "guard");
         try (RawInvocation raw = invokeRaw(invocation, true)) {
             AiCompletionResult result = raw.result();
             String stripped = CompletionNormalizer.stripReasoning(result.text());
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
             if (object == null) {
                 return malformed(raw, invocation, result, truncationReason(result.stopReason()));
+            }
+            if (!guard.permits(object)) {
+                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
             }
             int warnings = Demasker.demaskTree(object, invocation.context());
             T value;

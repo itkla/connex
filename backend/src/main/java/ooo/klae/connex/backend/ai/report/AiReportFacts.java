@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.ai.report;
 
-import java.math.BigDecimal;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
@@ -19,10 +17,8 @@ final class AiReportFacts {
             "Executive summary", "Performance commentary", "Key findings");
     private static final List<String> JAPANESE_TITLES = List.of(
             "エグゼクティブサマリー", "パフォーマンス分析", "主な所見");
-    private static final Set<String> CURRENT_STATE_MEASURES = Set.of(
-            "warm_intro_opportunity_value",
-            "warm_intro_reachable_account_count",
-            "reverse_intro_weighted_opportunities");
+    private static final Set<String> WHOLE_METRIC_GROUPS = Set.of(
+            "total", "workspace-wide", "unspecified", "unassigned");
     private static final Map<String, String> ENGLISH_LABELS = Map.ofEntries(
             Map.entry("count", "Count"),
             Map.entry("new_pipeline_value", "New pipeline value"),
@@ -117,131 +113,9 @@ final class AiReportFacts {
         return Set.copyOf(titles());
     }
 
-    static String claim(ReportAppendixRowDto source) {
-        String label = label(source);
-        BigDecimal current = source.value();
-        BigDecimal prior = source.priorValue();
-        if ("attainment".equals(measure(source)) && prior != null) {
-            if (prior.signum() == 0) {
-                return japanese()
-                        ? label + "の目標はゼロのため、達成率は算出されません。"
-                        : label + " has a zero target, so its attainment percentage is undefined.";
-            }
-            int comparison = current.compareTo(prior);
-            if (japanese()) {
-                if (comparison > 0) {
-                    return label + "は目標を上回っています。";
-                }
-                if (comparison < 0) {
-                    return label + "は目標を下回っています。";
-                }
-                return label + "は目標を達成しています。";
-            }
-            if (comparison > 0) {
-                return label + " is ahead of quota.";
-            }
-            if (comparison < 0) {
-                return label + " is behind quota.";
-            }
-            return label + " has met quota.";
-        }
-        if (prior == null) {
-            if (CURRENT_STATE_MEASURES.contains(measure(source))) {
-                return japanese()
-                        ? label + "は生成時点の現在状態を示す確定的なスナップショットです。"
-                        : label + " is a deterministic current-state snapshot as of generation time.";
-            }
-            if (Set.of("forecast_best", "forecast_weighted", "forecast_worst").contains(measure(source))) {
-                return japanese()
-                        ? label + "は確定的に計算された将来予測です。"
-                        : label + " is a deterministic forward forecast.";
-            }
-            return japanese()
-                    ? label + "には当期の確定結果があります。"
-                    : label + " has a deterministic current-period result.";
-        }
-        int comparison = current.compareTo(prior);
-        if (japanese()) {
-            if (comparison > 0) {
-                return label + "は前期間より増加しました。";
-            }
-            if (comparison < 0) {
-                return label + "は前期間より減少しました。";
-            }
-            return label + "は前期間と同水準でした。";
-        }
-        if (comparison > 0) {
-            return label + " increased from the prior period.";
-        }
-        if (comparison < 0) {
-            return label + " decreased from the prior period.";
-        }
-        return label + " was unchanged from the prior period.";
-    }
-
-    static List<String> claims(ReportAppendixRowDto source) {
-        return List.of(fact(source), recommendation(source));
-    }
-
-    /** The deterministic fact sentence for a source (grounding {@code kind = fact}). */
-    static String fact(ReportAppendixRowDto source) {
-        return claim(source);
-    }
-
-    /** The deterministic recommendation sentence for a source (grounding {@code kind = recommendation}). */
-    static String recommendation(ReportAppendixRowDto source) {
-        String label = label(source);
-        String measure = measure(source);
-        String recommendation;
-        if (Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)) {
-            recommendation = japanese()
-                    ? label + "を確認し、追加の関係構築担当者を割り当ててください。"
-                    : "Review " + label + " and assign an additional relationship owner.";
-        } else if (Set.of("warm_intro_opportunity_value", "warm_intro_reachable_account_count")
-                .contains(measure)) {
-            recommendation = japanese()
-                    ? label + "を優先し、適切なコネクターを割り当てて対象となる紹介経路を開始してください。"
-                    : "Prioritize " + label
-                            + " and assign the appropriate connector to activate a qualifying introduction path.";
-        } else if ("reverse_intro_weighted_opportunities".equals(measure)) {
-            recommendation = japanese()
-                    ? label + "を確認し、提案された紹介を記録するか却下してください。"
-                    : "Review " + label + " and record or dismiss the suggested introduction.";
-        } else if (Set.of("single_threaded_deal_count", "single_threaded_deal_value").contains(measure)) {
-            recommendation = japanese()
-                    ? label + "を確認し、案件に追加のステークホルダーを登録してください。"
-                    : "Review " + label + " and add another stakeholder to the deal.";
-        } else if (Set.of("forecast_best", "forecast_weighted", "forecast_worst").contains(measure)) {
-            recommendation = japanese()
-                    ? label + "を期間目標と比較し、加重予測を危うくする進行中案件を特定してください。"
-                    : "Compare " + label
-                            + " with the period target and identify open deals putting the weighted forecast at risk.";
-        } else if ("attainment".equals(measure)) {
-            BigDecimal target = source.priorValue();
-            if (target != null && target.signum() == 0) {
-                recommendation = japanese()
-                        ? label + "のゼロ目標が意図した設定か確認してください。"
-                        : "Confirm whether the zero target for " + label + " is intentional.";
-            } else if (target != null && source.value().compareTo(target) >= 0) {
-                recommendation = japanese()
-                        ? label + "の達成要因を確認し、再現可能な要因を特定してください。"
-                        : "Review what put " + label + " on or ahead of quota and identify repeatable drivers.";
-            } else {
-                recommendation = japanese()
-                        ? label + "の不足分を確認し、差を縮める案件や対応を特定してください。"
-                        : "Review the gap for " + label + " and identify deals or actions that could close it.";
-            }
-        } else {
-            recommendation = japanese()
-                    ? label + "を担当チームで確認し、次の対応を記録してください。"
-                    : "Review " + label + " with the responsible team and record the next action.";
-        }
-        return recommendation;
-    }
-
     /**
      * The localized measure name for a source, derived from the report widget's measure enum (never
-     * tenant data), safe to send to the provider in the clear as selection context.
+     * tenant data), safe to send to the provider in the clear as prose context.
      */
     static String measureLabel(ReportAppendixRowDto source) {
         String measure = measure(source);
@@ -249,12 +123,25 @@ final class AiReportFacts {
         return labels.getOrDefault(measure, measure);
     }
 
-    static String label(ReportAppendixRowDto source) {
+    /** Whether a source is grouped by a distinct value rather than a whole-metric total. */
+    static boolean hasDistinctGroup(ReportAppendixRowDto source) {
+        String group = rawGroup(source);
+        return group != null && !WHOLE_METRIC_GROUPS.contains(group.toLowerCase(Locale.ROOT));
+    }
+
+    /** The localized group value of a source, masked by the caller as tenant data. */
+    static String groupSegment(ReportAppendixRowDto source) {
+        String group = rawGroup(source);
+        if (group == null) {
+            return null;
+        }
         Map<String, String> labels = japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
-        return Arrays.stream(source.label().split(" · ", -1))
-                .map(part -> labels.getOrDefault(part.toLowerCase(Locale.ROOT), part))
-                .reduce((left, right) -> left + " · " + right)
-                .orElse(source.label());
+        return labels.getOrDefault(group.toLowerCase(Locale.ROOT), group);
+    }
+
+    private static String rawGroup(ReportAppendixRowDto source) {
+        String[] parts = source.label().split(" · ", 2);
+        return parts.length < 2 || parts[1].isBlank() ? null : parts[1];
     }
 
     private static String measure(ReportAppendixRowDto source) {
