@@ -154,7 +154,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         group: "utility",
         labelKey: "utility.importCompanies",
         icon: ArrowUpTrayIcon,
-        order: 20,
+        order: 30,
         keywordsKey: "keywords.utility.importCompanies",
         execute: (_context, helpers) => {
             helpers.openOverlay({ kind: "import-companies" });
@@ -165,7 +165,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         group: "utility",
         labelKey: "utility.importContacts",
         icon: ArrowUpTrayIcon,
-        order: 30,
+        order: 40,
         keywordsKey: "keywords.utility.importContacts",
         execute: (_context, helpers) => {
             helpers.openOverlay({ kind: "import-contacts" });
@@ -176,7 +176,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         group: "utility",
         labelKey: "utility.importDeals",
         icon: ArrowUpTrayIcon,
-        order: 40,
+        order: 50,
         keywordsKey: "keywords.utility.importDeals",
         execute: (_context, helpers) => {
             helpers.openOverlay({ kind: "import-deals" });
