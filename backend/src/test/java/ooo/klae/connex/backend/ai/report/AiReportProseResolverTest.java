@@ -109,6 +109,24 @@ class AiReportProseResolverTest {
     }
 
     @Test
+    void wrongDirectionVerbDropsClaimAndFailsClosed() {
+        AiReportContext ctx = context();
+        Optional<AiReportNarrativeContent> resolved = AiReportProseResolver.resolve(
+                one("Won revenue fell to {{num:metric.0.0.current}}.", List.of("metric.0.0")),
+                ctx, figures(ctx));
+        assertTrue(resolved.isEmpty());
+    }
+
+    @Test
+    void correctDirectionVerbIsKept() {
+        AiReportContext ctx = context();
+        Optional<AiReportNarrativeContent> resolved = AiReportProseResolver.resolve(
+                one("Won revenue rose to {{num:metric.0.0.current}}.", List.of("metric.0.0")),
+                ctx, figures(ctx));
+        assertTrue(resolved.isPresent());
+    }
+
+    @Test
     void figuresFormatDeltaAndCurrency() {
         AiReportFigures figures = figures(context());
         assertEquals("$1,000,000", figures.resolve("num:metric.0.0.current"));

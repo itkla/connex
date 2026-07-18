@@ -32,6 +32,12 @@ final class AiReportProseResolver {
     private static final Pattern TOKEN = Pattern.compile("\\{\\{\\s*([^}]*?)\\s*}}");
     private static final Pattern DIGIT = Pattern.compile("\\p{Nd}");
     private static final String UNKNOWN_REFERENCE = "[unknown reference]";
+    private static final List<String> INCREASE_WORDS = List.of(
+            "increased", "rose", "grew", "climbed", "gained", "expanded", "improved",
+            "増加", "上昇", "上回", "拡大");
+    private static final List<String> DECREASE_WORDS = List.of(
+            "decreased", "fell", "dropped", "declined", "shrank", "slipped", "contracted",
+            "減少", "下落", "下回", "縮小", "低下");
 
     private AiReportProseResolver() {
     }
@@ -69,10 +75,10 @@ final class AiReportProseResolver {
 
         List<AiReportNarrativeContent.Section> sections = new ArrayList<>();
         for (AiReportNarrativeContent.Section section : bounded(content.sections(), MAX_SECTIONS)) {
-            resolveSection(section, sources.keySet(), titles, figures, tally).ifPresent(sections::add);
+            resolveSection(section, sources, titles, figures, tally).ifPresent(sections::add);
         }
         List<AiReportNarrativeContent.Claim> findings = resolveClaims(
-                bounded(content.findings(), MAX_FINDINGS), sources.keySet(), figures, tally);
+                bounded(content.findings(), MAX_FINDINGS), sources, figures, tally);
 
         if (sections.isEmpty() || findings.isEmpty()) {
             return Optional.empty();
@@ -87,7 +93,7 @@ final class AiReportProseResolver {
 
     private static Optional<AiReportNarrativeContent.Section> resolveSection(
             AiReportNarrativeContent.Section section,
-            Set<String> sourceIds,
+            Map<String, ReportAppendixRowDto> sources,
             Map<String, String> titles,
             AiReportFigures figures,
             int[] tally) {
@@ -99,7 +105,7 @@ final class AiReportProseResolver {
             return Optional.empty();
         }
         List<AiReportNarrativeContent.Claim> claims = resolveClaims(
-                bounded(section.claims(), MAX_CLAIMS_PER_SECTION), sourceIds, figures, tally);
+                bounded(section.claims(), MAX_CLAIMS_PER_SECTION), sources, figures, tally);
         if (claims.isEmpty()) {
             return Optional.empty();
         }
@@ -109,7 +115,7 @@ final class AiReportProseResolver {
 
     private static List<AiReportNarrativeContent.Claim> resolveClaims(
             List<AiReportNarrativeContent.Claim> claims,
-            Set<String> sourceIds,
+            Map<String, ReportAppendixRowDto> sources,
             AiReportFigures figures,
             int[] tally) {
         if (claims == null) {
@@ -118,7 +124,7 @@ final class AiReportProseResolver {
         List<AiReportNarrativeContent.Claim> resolved = new ArrayList<>();
         for (AiReportNarrativeContent.Claim claim : claims) {
             tally[0]++;
-            AiReportNarrativeContent.Claim grounded = resolveClaim(claim, sourceIds, figures);
+            AiReportNarrativeContent.Claim grounded = resolveClaim(claim, sources, figures);
             if (grounded == null) {
                 tally[1]++;
                 continue;
@@ -129,16 +135,18 @@ final class AiReportProseResolver {
     }
 
     private static AiReportNarrativeContent.Claim resolveClaim(
-            AiReportNarrativeContent.Claim claim, Set<String> sourceIds, AiReportFigures figures) {
+            AiReportNarrativeContent.Claim claim, Map<String, ReportAppendixRowDto> sources,
+            AiReportFigures figures) {
         if (claim == null || claim.text() == null || claim.text().isBlank()
                 || claim.sourceIds() == null || claim.sourceIds().isEmpty()) {
             return null;
         }
         List<String> citations = claim.sourceIds().stream()
-                .filter(sourceIds::contains)
+                .filter(sources::containsKey)
                 .distinct()
                 .toList();
-        if (citations.isEmpty() || claim.text().contains(UNKNOWN_REFERENCE)) {
+        if (citations.isEmpty() || claim.text().contains(UNKNOWN_REFERENCE)
+                || contradictsKnownDirection(claim.text(), citations, sources)) {
             return null;
         }
         String text = fillTokens(claim.text().strip(), figures, Set.copyOf(citations));
@@ -146,6 +154,40 @@ final class AiReportProseResolver {
             return null;
         }
         return new AiReportNarrativeContent.Claim(truncate(text, MAX_CLAIM_CHARS), citations);
+    }
+
+    /**
+     * Best-effort guard against a single-source claim whose directional verb contradicts the
+     * deterministic change. It only fires when the claim cites exactly one source with a known,
+     * non-zero direction and the prose asserts the opposite direction without also asserting the
+     * true one; ambiguous or multi-source claims pass.
+     */
+    private static boolean contradictsKnownDirection(
+            String text, List<String> citations, Map<String, ReportAppendixRowDto> sources) {
+        if (citations.size() != 1) {
+            return false;
+        }
+        ReportAppendixRowDto source = sources.get(citations.getFirst());
+        if (source == null || source.priorValue() == null) {
+            return false;
+        }
+        int direction = source.value().compareTo(source.priorValue());
+        if (direction == 0) {
+            return false;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        boolean saysUp = containsAny(lower, INCREASE_WORDS);
+        boolean saysDown = containsAny(lower, DECREASE_WORDS);
+        return direction > 0 ? saysDown && !saysUp : saysUp && !saysDown;
+    }
+
+    private static boolean containsAny(String text, List<String> words) {
+        for (String word : words) {
+            if (text.contains(word)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String fillTokens(String text, AiReportFigures figures, Set<String> citations) {
