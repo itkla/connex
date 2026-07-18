@@ -341,6 +341,11 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
     const validate = (): RuleRequest | null => {
         setError(null);
         setInvalidStep(null);
+        if (executionMode === "system" && !canRunAsSystem) {
+            setError(tr("systemRunAsRestricted"));
+            setSelection("trigger");
+            return null;
+        }
         if (!name.trim()) {
             setError(tr("nameRequired"));
             return null;
