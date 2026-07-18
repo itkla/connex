@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { isTypingTarget } from '@/app/lib/utils';
 
@@ -32,7 +32,7 @@ export function useRecordListKeys({ orderedIds, peekOpen, enabled, onOpen, onPre
     const [activeId, setActiveId] = useState<number | null>(null);
 
     const stateRef = useRef({ orderedIds, peekOpen, enabled, onOpen, onPrev, onNext, activeId });
-    useEffect(() => {
+    useLayoutEffect(() => {
         stateRef.current = { orderedIds, peekOpen, enabled, onOpen, onPrev, onNext, activeId };
     });
 

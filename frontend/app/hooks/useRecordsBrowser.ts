@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
 
@@ -23,7 +23,6 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
 export function useRecordsBrowser<T extends { id: SelectionId }>(
     { items, storageKey, searchFields, initialDisplayMode = 'table' }: UseRecordsBrowserOptions<T>,
 ) {
-    const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
 
@@ -56,7 +55,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     useEffect(() => {
         if (!initialized) return;
         window.localStorage.setItem(storageKey, displayMode);
-        const params = new URLSearchParams(searchParams.toString());
+        const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
             if (key !== 'view' && key !== PEEK_PARAM) params.delete(key);
@@ -65,9 +64,9 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
             if (values.length) params.set(key, values.join(','));
         }
         const next = params.toString();
-        if (next === searchParams.toString()) return;
-        router.replace(`${pathname}?${next}`, { scroll: false });
-    }, [displayMode, filterState, initialized, pathname, router, searchParams, storageKey]);
+        if (next === window.location.search.replace(/^\?/, '')) return;
+        window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    }, [displayMode, filterState, initialized, pathname, searchParams, storageKey]);
 
     const filteredItems = useMemo(() => {
         const q = query.trim().toLowerCase();

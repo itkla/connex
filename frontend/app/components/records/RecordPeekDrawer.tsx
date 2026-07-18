@@ -170,19 +170,19 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
                             <ArrowTopRightOnSquareIcon className="size-4" />
                             {t('openFull')}
                         </Button>
-                        {getAction('create.note') && (
+                        {data && getAction('create.note') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('create.note', { source: 'programmatic' })} className="justify-start">
                                 <DocumentTextIcon className="size-4" />
                                 {t('addNote')}
                             </Button>
                         )}
-                        {getAction('create.task') && (
+                        {data && getAction('create.task') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('create.task', { source: 'programmatic' })} className="justify-start">
                                 <CheckCircleIcon className="size-4" />
                                 {t('createTask')}
                             </Button>
                         )}
-                        {getAction('record.copy-link') && (
+                        {data && getAction('record.copy-link') && (
                             <Button variant="ghost" size="sm" onClick={() => void run('record.copy-link', { source: 'programmatic' })} className="justify-start">
                                 <LinkIcon className="size-4" />
                                 {t('copyLink')}

@@ -82,8 +82,10 @@ export function useRecordPeek(browserType: PeekType, orderedIds: number[]) {
     );
 
     useEffect(() => {
-        const current = parsePeek(new URLSearchParams(window.location.search).get(PEEK_PARAM));
-        if (current && current.type !== browserType) write(null);
+        const rawParam = new URLSearchParams(window.location.search).get(PEEK_PARAM);
+        if (rawParam === null) return;
+        const current = parsePeek(rawParam);
+        if (!current || current.type !== browserType) write(null);
     }, [searchParams, browserType, write]);
 
     const workspaceRef = useRef(activeWorkspaceId);
