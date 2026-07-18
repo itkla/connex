@@ -51,15 +51,17 @@ const REGISTRY_CREATE = ['create.task', 'create.note', 'create.activity'] as con
  * against the row's record via {@link useActions}'s per-record override so availability reflects the
  * row, not the page. Returns empty until `enabled` (the row's menu has been opened at least once),
  * so rows never interacted with — nearly all of them — pay nothing on a parent re-render; once opened
- * a row keeps computing so its items stay rendered through the menu's exit animation.
+ * a row keeps computing so its items stay rendered through the menu's exit animation. Depends on the
+ * live `actions` list so it recomputes once the provider registers its seed actions (which happens in
+ * a mount effect) rather than caching a registry-less menu.
  */
 function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItemDescriptor[][] {
-    const { getAction, isAvailableForRecord, run } = useActions();
+    const { actions, getAction, isAvailableForRecord, run } = useActions();
     const t = useTranslations('Actions');
     const tr = useTranslations('RecordActionMenu');
 
     return useMemo(() => {
-        if (!enabled) return [];
+        if (!enabled || actions.length === 0) return [];
         const { record, onPeek, onQuickEdit, onDelete } = model;
 
         const registry = (id: ActionId): MenuItemDescriptor | null => {
@@ -90,7 +92,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
             [remove],
         ];
         return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);
-    }, [enabled, model, getAction, isAvailableForRecord, run, t, tr]);
+    }, [enabled, actions, model, getAction, isAvailableForRecord, run, t, tr]);
 }
 
 type MenuItemComponent = ComponentType<{ variant?: 'default' | 'destructive'; onSelect?: (event: Event) => void; children?: ReactNode }>;
