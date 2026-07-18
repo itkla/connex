@@ -68,6 +68,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     renderAvatar?: (item: T) => ReactNode;
     detailPath?: (item: T) => string;
     onRowClick?: (item: T) => void;
+    activeId?: SelectionId | null;
     displayMode: DisplayMode;
     selectedIds: Set<SelectionId>;
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
@@ -99,6 +100,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     renderAvatar,
     detailPath,
     onRowClick,
+    activeId,
     displayMode,
     selectedIds,
     onSelectedIdsChange,
@@ -482,6 +484,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                         <tbody>
                             {pagedData.map((item) => {
                                 const isSelected = selectedIds.has(item.id);
+                                const isActive = activeId != null && item.id === activeId;
                                 const clickable = !!(onRowClick || detailPath);
                                 const stickyBodyBg = isSelected
                                     ? "bg-card before:absolute before:inset-0 before:-z-10 before:bg-brand-light/40 before:transition-colors before:content-[''] group-hover:before:bg-brand-light/55"
@@ -494,6 +497,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             'group border-b border-border transition-colors last:border-b-0',
                                             clickable && 'cursor-pointer',
                                             isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
+                                            isActive && 'ring-2 ring-inset ring-brand',
                                         )}
                                         onClick={() => {
                                             if (onRowClick) onRowClick(item);

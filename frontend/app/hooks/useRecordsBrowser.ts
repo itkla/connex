@@ -35,7 +35,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
-            if (key !== 'view' && value) state[key] = value.split(',');
+            if (key !== 'view' && key !== 'peek' && value) state[key] = value.split(',');
         });
         return state;
     });
@@ -58,7 +58,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         const params = new URLSearchParams(searchParams.toString());
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
-            if (key !== 'view') params.delete(key);
+            if (key !== 'view' && key !== 'peek') params.delete(key);
         }
         for (const [key, values] of Object.entries(filterState)) {
             if (values.length) params.set(key, values.join(','));

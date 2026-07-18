@@ -23,6 +23,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -819,6 +820,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const visibleDeals = deals;
 
+    const peek = useRecordPeekController('deal', visibleDeals);
+
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
@@ -1180,6 +1183,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 );
                             }}
                             detailPath={(item) => `/records/deals/${item.id}`}
+                            onRowClick={(item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
                             displayMode={displayMode}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={setSelectedIds}
@@ -1198,6 +1203,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         />
                     )}
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditDealSheet
                     open={editSheetOpen}
