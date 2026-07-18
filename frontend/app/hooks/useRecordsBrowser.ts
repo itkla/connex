@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
+import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
+
+/** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
+ * deep link, and the server-list state ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
+const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, ...SERVER_RECORDS_URL_KEYS]);
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -35,7 +40,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
-            if (key !== 'view' && key !== PEEK_PARAM && value) state[key] = value.split(',');
+            if (!RESERVED_PARAM_KEYS.has(key) && value) state[key] = value.split(',');
         });
         return state;
     });
@@ -58,7 +63,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
-            if (key !== 'view' && key !== PEEK_PARAM) params.delete(key);
+            if (!RESERVED_PARAM_KEYS.has(key)) params.delete(key);
         }
         for (const [key, values] of Object.entries(filterState)) {
             if (values.length) params.set(key, values.join(','));
