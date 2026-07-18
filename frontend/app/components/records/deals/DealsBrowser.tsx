@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,8 @@ import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
@@ -204,13 +206,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
+    const searchParams = useSearchParams();
+    const pathname = usePathname();
+    const { activeWorkspaceId } = useWorkspace();
     const [deals, setDeals] = useState(initialDeals);
     const [total, setTotal] = useState(initialTotal);
-    const [page, setPage] = useState(1);
-    const [size, setSize] = useState(25);
+    const [page, setPage] = useState(() => parseListInt(searchParams.get('page'), 1));
+    const [size, setSize] = useState(() => parseListInt(searchParams.get('size'), 25, MAX_URL_PAGE_SIZE));
     const [loadingPage, setLoadingPage] = useState(false);
-    const [sortKey, setSortKey] = useState<string | null>(null);
-    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [sortKey, setSortKey] = useState<string | null>(() => searchParams.get('sort') || null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => (searchParams.get('dir') === 'desc' ? 'desc' : 'asc'));
     const [dealMetrics, setDealMetrics] = useState(initialMetrics);
     const [dealFacets, setDealFacets] = useState(initialFacets);
     const [dataRevision, setDataRevision] = useState(0);
@@ -449,6 +454,17 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }, 0);
         return () => window.clearTimeout(timer);
     }, [page, size, deferredQuery, serverFilterKey, activeCurrency, sortKey, sortDir, dataRevision, serverFilters, loadDealsPage]);
+
+    useEffect(() => {
+        writeListStateToUrl(pathname, { sort: sortKey, dir: sortDir, page, size }, 25);
+    }, [pathname, sortKey, sortDir, page, size]);
+
+    const workspaceRef = useRef(activeWorkspaceId);
+    useEffect(() => {
+        if (workspaceRef.current === activeWorkspaceId) return;
+        workspaceRef.current = activeWorkspaceId;
+        setPage(1); setSize(25); setSortKey(null); setSortDir('asc');
+    }, [activeWorkspaceId]);
 
     const changePage = useCallback((nextPage: number) => {
         setSelectedIds(new Set());
