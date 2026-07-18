@@ -90,8 +90,12 @@ public class ProviderConnectionService {
      * Completes the OAuth callback: validates and consumes the session-bound state, exchanges the
      * code server-side, stores the encrypted token bundle under the user scope, and upserts the
      * connection row. Returns the browser redirect target (always the trusted app base URL).
+     *
+     * <p>Deliberately not one transaction: the code exchange is an external call that must not
+     * hold a pooled connection, and the secret write + row upsert are each atomic on their own.
+     * A crash between them leaves only an orphaned secret that the next reconnect overwrites
+     * (the secret store upserts per user + purpose).
      */
-    @Transactional
     public String completeCallback(String provider, String code, String state, String providerError) {
         requireEnabled(provider);
         int userId = workspaceService.getCurrentUserId();
@@ -151,19 +155,24 @@ public class ProviderConnectionService {
     }
 
     /**
-     * Disconnects: best-effort revocation at the provider, deletion of the stored token bundle,
-     * and removal of the connection row. Step-up gated — this destroys a durable credential.
+     * Disconnects: best-effort revocation at the provider, removal of the connection row, and
+     * deletion of the stored token bundle. Step-up gated — this destroys a durable credential.
+     *
+     * <p>Deliberately not one transaction: revocation reads the bundle through the secret store,
+     * whose own transactional failure (e.g. a dangling reference) would poison an enclosing
+     * transaction even when caught — and local disconnection must never be blocked by a broken
+     * secret. Row-then-secret ordering means a crash in between leaves only an invisible orphaned
+     * secret, never a row pointing at a deleted credential.
      */
-    @Transactional
     public void disconnect(String provider) {
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
         ProviderConnection connection = require(userId, provider);
         revokeBestEffort(provider, userId, connection);
+        connectionMapper.delete(userId, provider);
         if (connection.getCredentialRef() != null) {
             secretCipher.deleteTokenBundleReference(provider, userId, connection.getCredentialRef());
         }
-        connectionMapper.delete(userId, provider);
         auditService.record("user.connection.disconnect", "user", userId, provider,
             "Disconnected the " + provider + " account", null);
     }

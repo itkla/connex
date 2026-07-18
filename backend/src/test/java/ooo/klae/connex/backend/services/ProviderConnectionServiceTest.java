@@ -197,6 +197,19 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void disconnectSurvivesADanglingSecretReference() {
+        ProviderConnection dangling = new ProviderConnection();
+        dangling.setUserId(currentUser.getId());
+        dangling.setProvider("google");
+        dangling.setStatus("connected");
+        dangling.setCredentialRef("secret:v1:999999999");
+        providerConnectionMapper.insert(dangling);
+
+        connectionService.disconnect("google");
+        assertTrue(connectionService.getForCurrentUser().isEmpty());
+    }
+
+    @Test
     void tokenBundleIsScopedToItsOwner() {
         stubExchange("refresh-token", "sales@example.com");
         connectionService.completeCallback("google", "code", beginAndExtractState(), null);

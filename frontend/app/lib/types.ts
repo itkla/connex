@@ -2689,9 +2689,27 @@ export type ConnectorConfigPayload = {
 export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
+    connectedAccounts: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
     businessCardImport: boolean;
+};
+
+export type ConnectedAccountProvider = 'google' | 'microsoft';
+
+export type ProviderConnectionStatus = 'connected' | 'paused' | 'error' | 'revoked';
+
+/** A user's OAuth connection to an external mail/calendar provider (masked, no token material). */
+export type ProviderConnection = {
+    provider: ConnectedAccountProvider;
+    status: ProviderConnectionStatus;
+    providerAccountEmail?: string | null;
+    grantedScopes?: string | null;
+    hasCredential: boolean;
+    lastSyncAt?: string | null;
+    errorCode?: string | null;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type BusinessCardAvailability = {

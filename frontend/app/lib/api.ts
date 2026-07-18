@@ -1059,10 +1059,31 @@ export function getCapabilities(init: RequestInit = {}) {
 export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
+    connectedAccounts: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
     businessCardImport: false,
 };
+
+export function getProviderConnections(init: RequestInit = {}) {
+    return getJson<Types.ProviderConnection[]>(`/api/account/connections`, { cache: "no-store", ...init });
+}
+
+export function beginProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<{ url: string }>(`/api/account/connections/${provider}/authorize`, {});
+}
+
+export function pauseProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ProviderConnection>(`/api/account/connections/${provider}/pause`, {});
+}
+
+export function resumeProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ProviderConnection>(`/api/account/connections/${provider}/resume`, {});
+}
+
+export function disconnectProviderConnection(provider: Types.ConnectedAccountProvider, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
+}
 
 export function discoverSso(email: string, init: RequestInit = {}) {
     return getJson<Types.SsoDiscovery>(
