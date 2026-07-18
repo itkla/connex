@@ -385,14 +385,10 @@
   },
   "DealsDocuments": {
     "title": "ドキュメント",
-    "generateFromTemplate": "テンプレートから生成",
-    "noTemplates": "有効なテンプレートがありません",
-    "empty": "ドキュメントはまだありません。テンプレートから生成してください。",
     "generated": "ドキュメントを生成しました",
     "deleted": "ドキュメントを削除しました",
     "actionFailed": "問題が発生しました。もう一度お試しください。",
     "columnDocument": "ドキュメント",
-    "columnType": "種類",
     "columnStatus": "状態",
     "columnTotal": "合計",
     "columnGenerated": "生成日時",
@@ -406,7 +402,6 @@
     "status_final": "確定",
     "status_superseded": "無効化",
     "actions": "操作",
-    "downloadPdf": "PDFをダウンロード",
     "markFinal": "確定にする",
     "markSuperseded": "無効化する",
     "delete": "削除",
@@ -431,6 +426,11 @@
       "notFound": "ドキュメントが見つかりません。",
       "draftWatermark": "下書き",
       "supersededWatermark": "無効"
-    }
+    },
+    "generate": "生成",
+    "createTemplate": "テンプレートを作成",
+    "emptyTitle": "ドキュメントがありません",
+    "emptyBody": "テンプレートから見積書・提案書・注文書・契約書を生成します。明細と合計はその時点で確定されます。",
+    "pdf": "PDF"
   }
 }
