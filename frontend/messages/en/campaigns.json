@@ -63,7 +63,18 @@
         "deleteTitle": "Delete campaign",
         "deleteBody": "This permanently deletes the campaign. Frozen audience snapshots block deletion.",
         "save": "Save",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "tabOverview": "Overview",
+        "tabAudience": "Audience",
+        "tabDelivery": "Delivery",
+        "tabEngagement": "Engagement",
+        "tabExports": "Exports",
+        "detailsTitle": "Details",
+        "glanceTitle": "At a glance",
+        "audienceType": "Audience",
+        "snapshotCount": "Snapshots",
+        "latestSnapshot": "Latest snapshot",
+        "recipientsReached": "Recipients reached"
     },
     "CampaignAudience": {
         "title": "Audience",

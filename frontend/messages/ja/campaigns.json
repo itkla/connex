@@ -63,7 +63,18 @@
         "deleteTitle": "キャンペーンを削除",
         "deleteBody": "キャンペーンを完全に削除します。確定済みのスナップショットがある場合は削除できません。",
         "save": "保存",
-        "saving": "保存中…"
+        "saving": "保存中…",
+        "tabOverview": "概要",
+        "tabAudience": "対象者",
+        "tabDelivery": "配信",
+        "tabEngagement": "エンゲージメント",
+        "tabExports": "エクスポート",
+        "detailsTitle": "詳細",
+        "glanceTitle": "概況",
+        "audienceType": "対象",
+        "snapshotCount": "スナップショット数",
+        "latestSnapshot": "最新スナップショット",
+        "recipientsReached": "到達数"
     },
     "CampaignAudience": {
         "title": "対象者",

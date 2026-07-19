@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import CountUp from "@/app/components/dashboard/CountUp";
 import Panel from "@/app/components/overview/analytics/Panel";
+import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import SendStatusBadge from "@/app/components/marketing/campaigns/SendStatusBadge";
 import {
     type CampaignEngagement as CampaignEngagementData,
@@ -111,27 +112,6 @@ function RateTiles({
                     </div>
                 );
             })}
-        </div>
-    );
-}
-
-function CounterCell({
-    label,
-    value,
-    unavailable,
-    locale,
-}: {
-    label: string;
-    value: number;
-    unavailable: boolean;
-    locale: string;
-}) {
-    return (
-        <div className="flex flex-col">
-            <span className="text-[0.6875rem] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
-            <span className="tabular-nums text-sm font-semibold text-foreground">
-                {unavailable ? "—" : value.toLocaleString(locale)}
-            </span>
         </div>
     );
 }
@@ -289,42 +269,30 @@ export default function CampaignEngagement({
                                             {t("sendLabel", { id: send.sendId })}
                                         </span>
                                     </div>
-                                    <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
-                                        <CounterCell
+                                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-6 sm:gap-4">
+                                        <CampaignCounter
                                             label={t("recipients")}
-                                            value={send.totalRecipients}
-                                            unavailable={false}
-                                            locale={locale}
+                                            value={send.totalRecipients.toLocaleString(locale)}
                                         />
-                                        <CounterCell
+                                        <CampaignCounter
                                             label={t("dispatched")}
-                                            value={send.dispatched}
-                                            unavailable={false}
-                                            locale={locale}
+                                            value={send.dispatched.toLocaleString(locale)}
                                         />
-                                        <CounterCell
+                                        <CampaignCounter
                                             label={t("delivered")}
-                                            value={send.delivered}
-                                            unavailable={!sendReceipts}
-                                            locale={locale}
+                                            value={sendReceipts ? send.delivered.toLocaleString(locale) : "—"}
                                         />
-                                        <CounterCell
+                                        <CampaignCounter
                                             label={t("bounced")}
-                                            value={send.bounced}
-                                            unavailable={!sendReceipts}
-                                            locale={locale}
+                                            value={sendReceipts ? send.bounced.toLocaleString(locale) : "—"}
                                         />
-                                        <CounterCell
+                                        <CampaignCounter
                                             label={t("skipped")}
-                                            value={send.skipped}
-                                            unavailable={false}
-                                            locale={locale}
+                                            value={send.skipped.toLocaleString(locale)}
                                         />
-                                        <CounterCell
+                                        <CampaignCounter
                                             label={t("failed")}
-                                            value={send.failed}
-                                            unavailable={false}
-                                            locale={locale}
+                                            value={send.failed.toLocaleString(locale)}
                                         />
                                     </div>
                                 </li>
