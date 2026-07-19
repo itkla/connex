@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
+import ooo.klae.connex.backend.dto.DealNameUpdateRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
@@ -46,6 +47,7 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.DealValueUpdateRequest;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -480,6 +482,34 @@ public class DealController {
     @PutMapping("/{id}")
     public DealDto updateDeal(@PathVariable int id, @Valid @RequestBody DealDto dto) {
         return DealDto.from(dealService.update(id, dto.toBean()));
+    }
+
+    /**
+     * Changes only a deal's name.
+     * @param id the deal to rename
+     * @param request the replacement name
+     * @return the updated deal
+     */
+    @PutMapping("/{id}/name")
+    public DealDto updateDealName(
+        @PathVariable int id,
+        @Valid @RequestBody DealNameUpdateRequest request
+    ) {
+        return DealDto.from(dealService.updateName(id, request.getName()));
+    }
+
+    /**
+     * Changes only a deal's manually projected value.
+     * @param id the deal whose value should change
+     * @param request the replacement value
+     * @return the updated deal
+     */
+    @PutMapping("/{id}/value")
+    public DealDto updateDealValue(
+        @PathVariable int id,
+        @Valid @RequestBody DealValueUpdateRequest request
+    ) {
+        return DealDto.from(dealService.updateValue(id, request.getValue()));
     }
 
     /**

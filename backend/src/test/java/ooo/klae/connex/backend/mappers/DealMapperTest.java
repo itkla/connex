@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -883,6 +884,97 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals("JPY", found.getCurrency());
         assertEquals(stage2.getId(), found.getStageId());
         assertNull(found.getCompanyId());
+    }
+
+    @Test
+    void updateNameChangesOnlyName() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        User owner = newUser();
+        deal.setOwnerId(owner.getId());
+        deal.setActualValue(750.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        deal.setWon(true);
+        deal.setClosedAt("2026-07-01 12:00:00");
+        deal.setClosedReason("Signed");
+        dealMapper.update(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        assertEquals(1, dealMapper.updateName(workspace.getId(), deal.getId(), "FY27 Renewal"));
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals("FY27 Renewal", after.getName());
+        assertEquals(before.getValue(), after.getValue());
+        assertEquals(before.getActualValue(), after.getActualValue());
+        assertEquals(before.getCurrency(), after.getCurrency());
+        assertEquals(before.getPipelineId(), after.getPipelineId());
+        assertEquals(before.getStageId(), after.getStageId());
+        assertEquals(before.getPosition(), after.getPosition());
+        assertEquals(before.getOwnerId(), after.getOwnerId());
+        assertEquals(before.getCompanyId(), after.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), after.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), after.getClosedAt());
+        assertEquals(before.getClosedReason(), after.getClosedReason());
+        assertEquals(before.getWon(), after.getWon());
+    }
+
+    @Test
+    void updateValueChangesOnlyValue() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        User owner = newUser();
+        deal.setOwnerId(owner.getId());
+        deal.setActualValue(750.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        deal.setWon(false);
+        deal.setClosedAt("2026-07-01 12:00:00");
+        deal.setClosedReason("Budget unavailable");
+        dealMapper.update(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        assertEquals(1, dealMapper.updateValue(
+            workspace.getId(), deal.getId(), new BigDecimal("125000.00")));
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(125000.0, after.getValue());
+        assertEquals(before.getName(), after.getName());
+        assertEquals(before.getActualValue(), after.getActualValue());
+        assertEquals(before.getCurrency(), after.getCurrency());
+        assertEquals(before.getPipelineId(), after.getPipelineId());
+        assertEquals(before.getStageId(), after.getStageId());
+        assertEquals(before.getPosition(), after.getPosition());
+        assertEquals(before.getOwnerId(), after.getOwnerId());
+        assertEquals(before.getCompanyId(), after.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), after.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), after.getClosedAt());
+        assertEquals(before.getClosedReason(), after.getClosedReason());
+        assertEquals(before.getWon(), after.getWon());
+    }
+
+    @Test
+    void targetedLocksAndWritesAreWorkspaceScoped() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        String originalName = deal.getName();
+        double originalValue = deal.getValue();
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-targeted-" + unique());
+        workspaceMapper.insert(other);
+
+        assertNotNull(dealMapper.getDealByIdForUpdate(workspace.getId(), deal.getId()));
+        assertNull(dealMapper.getDealByIdForUpdate(other.getId(), deal.getId()));
+        assertEquals(0, dealMapper.updateName(other.getId(), deal.getId(), "Foreign rename"));
+        assertEquals(0, dealMapper.updateValue(other.getId(), deal.getId(), new BigDecimal("999.00")));
+
+        Deal unchanged = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(originalName, unchanged.getName());
+        assertEquals(originalValue, unchanged.getValue());
     }
 
     /**

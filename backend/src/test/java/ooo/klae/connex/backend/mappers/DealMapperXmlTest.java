@@ -46,6 +46,15 @@ class DealMapperXmlTest {
         assertTrue(singleMemberSql.matches(".*d\\.owner_id IN \\(\\s*\\?\\s*\\).*"));
     }
 
+    @Test
+    void lockedDealLookupUsesTheCompositeForeignKeyIndex() throws Exception {
+        String sql = sql(configuration(), "getDealByIdForUpdate", MemberScope.allTeam());
+
+        assertTrue(sql.contains("FROM deal FORCE INDEX (uq_deal_workspace_id)"));
+        assertTrue(sql.contains("WHERE workspace_id = ? AND id = ?"));
+        assertTrue(sql.endsWith("FOR UPDATE"));
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -64,6 +73,7 @@ class DealMapperXmlTest {
     private static String sql(Configuration configuration, String statement, MemberScope scope) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);
+        parameters.put("id", 17);
         parameters.put("pipelineId", 13);
         parameters.put("memberScope", scope);
         parameters.put("noCompany", false);

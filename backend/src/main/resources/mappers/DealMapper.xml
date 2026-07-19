@@ -801,6 +801,13 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getDealByIdForUpdate" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal FORCE INDEX (uq_deal_workspace_id)
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -885,6 +892,16 @@
         closed_at = #{closedAt},
         closed_reason = #{closedReason},
         won = #{won}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateName">
+    UPDATE deal SET name = #{name}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateValue">
+    UPDATE deal SET value = #{value}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

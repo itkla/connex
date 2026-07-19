@@ -62,6 +62,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -122,6 +123,8 @@ public class DealService {
     private static final int MAX_RISK_CANDIDATES = 1000;
     private static final int MAX_BOARD_DEALS = 2000;
     private static final int MAX_REVENUE_MONTHS = 1200;
+    private static final String LINE_ITEM_VALUE_CONFLICT =
+        "Cannot manually edit the deal value while line items exist; update or remove the line items first";
 
     private static final Set<String> ALL_RISK_LEVELS = Set.of("high", "medium", "low", "none");
 
@@ -171,6 +174,22 @@ public class DealService {
 
     private Deal hydrateReferences(int workspaceId, Deal deal) {
         return referenceService.hydrateDeals(workspaceId, List.of(deal)).get(0);
+    }
+
+    private Deal requireDeal(int workspaceId, int id) {
+        Deal deal = dealMapper.getDealById(workspaceId, id);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + id);
+        }
+        return deal;
+    }
+
+    private Deal requireDealForUpdate(int workspaceId, int id) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, id);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + id);
+        }
+        return deal;
     }
 
     private static Deal mutableCopy(Deal source) {
@@ -732,12 +751,18 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
-        if (deal.getCurrency() != null && !deal.getCurrency().equalsIgnoreCase(before.getCurrency())
+        Deal before = requireDealForUpdate(workspaceId, id);
+        boolean currencyChanged = deal.getCurrency() != null
+            && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
+        boolean valueChanged = BigDecimal.valueOf(before.getValue())
+            .compareTo(BigDecimal.valueOf(deal.getValue())) != 0;
+        if ((currencyChanged || valueChanged)
                 && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
-            throw new BadRequestException(
-                "Cannot change the deal currency while it has line items; remove the line items first");
+            if (currencyChanged) {
+                throw new BadRequestException(
+                    "Cannot change the deal currency while it has line items; remove the line items first");
+            }
+            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
         }
         Boolean previousOutcome = before.getWon();
         deal.setId(id);
@@ -762,11 +787,64 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
-        if (Double.compare(before.getValue(), deal.getValue()) != 0) {
+        if (valueChanged) {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    /**
+     * Changes only a deal's name without rewriting any other deal field.
+     * @param id the deal to rename
+     * @param name the replacement name
+     * @return the refreshed deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateName(int id, String name) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = requireDealForUpdate(workspaceId, id);
+        if (Objects.equals(before.getName(), name)) {
+            return hydrateReferences(workspaceId, before);
+        }
+        dealMapper.updateName(workspaceId, id, name);
+        Deal after = requireDeal(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Renamed deal " + before.getName() + " to " + after.getName(),
+            auditService.singleChange("name", before.getName(), after.getName()));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        return hydrateReferences(workspaceId, after);
+    }
+
+    /**
+     * Changes only a deal's manually projected value when the deal has no line items.
+     * @param id the deal whose value should change
+     * @param value the replacement value
+     * @return the refreshed deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateValue(int id, BigDecimal value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = requireDealForUpdate(workspaceId, id);
+        boolean valueChanged = BigDecimal.valueOf(before.getValue()).compareTo(value) != 0;
+        if (!valueChanged) {
+            return hydrateReferences(workspaceId, before);
+        }
+        if (dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
+            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+        }
+        dealMapper.updateValue(workspaceId, id, value);
+        Deal after = requireDeal(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Updated deal value for " + after.getName(),
+            auditService.singleChange("value", before.getValue(), after.getValue()));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        return hydrateReferences(workspaceId, after);
     }
 
     private void requireVisibleRelations(int workspaceId, Deal deal) {
