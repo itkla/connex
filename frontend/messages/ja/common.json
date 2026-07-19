@@ -137,6 +137,7 @@
   "MobileNav": {
     "barLabel": "メインナビゲーション",
     "more": "その他",
+    "search": "検索",
     "tasksBadge": "{count}件の要対応タスク"
   },
   "ConfirmDiscard": {

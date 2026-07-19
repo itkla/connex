@@ -137,6 +137,7 @@
   "MobileNav": {
     "barLabel": "Primary",
     "more": "More",
+    "search": "Search",
     "tasksBadge": "{count} tasks need attention"
   },
   "ConfirmDiscard": {
