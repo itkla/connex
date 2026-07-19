@@ -14,7 +14,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import { springJiggle, instant } from '@/app/lib/motion';
+import { springJiggle, springSnappy, instant } from '@/app/lib/motion';
 import { getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 
@@ -28,11 +28,15 @@ function openQuickCreate() {
     window.dispatchEvent(new CustomEvent('connex:open-quick-create'));
 }
 
+const slotBase =
+    'relative flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar';
+
 function BarLink({
     href,
     label,
     Icon,
     active,
+    reduce,
     badge,
     badgeLabel,
 }: {
@@ -40,32 +44,33 @@ function BarLink({
     label: string;
     Icon: ComponentType<{ className?: string }>;
     active: boolean;
+    reduce: boolean;
     badge?: number;
     badgeLabel?: string;
 }) {
     return (
-        <Link
-            href={href}
-            aria-current={active ? 'page' : undefined}
-            className={cn(
-                'relative flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-                active ? 'text-brand-dark' : 'text-muted-foreground',
-            )}
-        >
-            <span className="relative">
+        <motion.div whileTap={reduce ? undefined : { scale: 0.88 }} transition={reduce ? instant : springSnappy}>
+            <Link
+                href={href}
+                aria-label={label}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                    slotBase,
+                    active ? 'bg-brand-light text-brand-dark dark:text-brand' : 'hover:text-foreground',
+                )}
+            >
                 <Icon className="size-6" />
                 {badge != null && badge > 0 && (
                     <span
                         aria-hidden
-                        className="absolute -top-1.5 -right-2 min-w-4 rounded-full bg-destructive px-1 text-[10px] leading-4 font-semibold text-white"
+                        className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-sidebar"
                     >
                         {badge > 99 ? '99+' : badge}
                     </span>
                 )}
-            </span>
-            <span className="max-w-full truncate">{label}</span>
-            {badge != null && badge > 0 && badgeLabel && <span className="sr-only">{badgeLabel}</span>}
-        </Link>
+                {badge != null && badge > 0 && badgeLabel && <span className="sr-only">{badgeLabel}</span>}
+            </Link>
+        </motion.div>
     );
 }
 
@@ -73,29 +78,34 @@ function BarButton({
     label,
     Icon,
     onClick,
+    reduce,
 }: {
     label: string;
     Icon: ComponentType<{ className?: string }>;
     onClick: () => void;
+    reduce: boolean;
 }) {
     return (
-        <button
+        <motion.button
             type="button"
             onClick={onClick}
-            className="flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            aria-label={label}
+            whileTap={reduce ? undefined : { scale: 0.88 }}
+            transition={reduce ? instant : springSnappy}
+            className={cn(slotBase, 'hover:text-foreground')}
         >
             <Icon className="size-6" />
-            <span className="max-w-full truncate">{label}</span>
-        </button>
+        </motion.button>
     );
 }
 
 /**
- * Mobile-only bottom action bar: Home · Search · New (prominent center) · Tasks · More. Hidden at the
- * `md` breakpoint (the desktop sidebar takes over). "New" and "Search" drive the shared Quick Create
- * launcher and the command palette via app-shell custom events; "More" opens the existing sidebar
- * drawer. Sits below all overlay backdrops (z-30) so an open sheet/palette covers it, and respects the
- * device safe-area inset.
+ * Mobile-only floating action pill: Home · Search · New (brand-filled) · Tasks · More. Hidden at the
+ * `md` breakpoint where the desktop sidebar takes over. "New" and "Search" drive the shared Quick Create
+ * launcher and the command palette via app-shell custom events; "More" opens the existing sidebar drawer.
+ * Floats above the content with a glass surface and rounded-full shape, centered with side margins, and
+ * sits below all overlay backdrops (z-30) so an open sheet/palette covers it. Respects the device
+ * safe-area inset.
  *
  * @param onOpenMore - opens the full sidebar drawer (workspace/account/all destinations)
  */
@@ -127,35 +137,50 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     return (
         <nav
             aria-label={t('barLabel')}
-            className="fixed inset-x-0 bottom-0 z-30 border-t border-sidebar-border bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 flex justify-center px-4 md:hidden"
         >
-            <div className="mx-auto flex max-w-lg items-stretch gap-0.5 px-2 py-1.5">
-                <BarLink href="/dashboard" label={tNav('navDashboard')} Icon={HomeIcon} active={onDashboard} />
-                <BarButton label={tActions('palette.trigger')} Icon={MagnifyingGlassIcon} onClick={openSearch} />
+            <motion.div
+                initial={reduce ? false : { y: 16, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={reduce ? instant : springSnappy}
+                className="pointer-events-auto flex items-center gap-1 rounded-full border border-sidebar-border bg-sidebar/80 p-1.5 shadow-[0_1px_0_0_rgb(255_255_255/0.06)_inset,0_10px_30px_-8px_rgb(0_0_0/0.35)] backdrop-blur-xl"
+            >
+                <BarLink
+                    href="/dashboard"
+                    label={tNav('navDashboard')}
+                    Icon={HomeIcon}
+                    active={onDashboard}
+                    reduce={reduce}
+                />
+                <BarButton
+                    label={tActions('palette.trigger')}
+                    Icon={MagnifyingGlassIcon}
+                    onClick={openSearch}
+                    reduce={reduce}
+                />
 
-                <div className="flex flex-1 items-center justify-center">
-                    <motion.button
-                        type="button"
-                        onClick={openQuickCreate}
-                        whileTap={reduce ? undefined : { scale: 0.92 }}
-                        transition={reduce ? instant : springJiggle}
-                        aria-label={tActions('quickCreate.trigger')}
-                        className="-mt-5 flex size-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg ring-4 ring-sidebar transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-brand"
-                    >
-                        <PlusIcon className="size-7" />
-                    </motion.button>
-                </div>
+                <motion.button
+                    type="button"
+                    onClick={openQuickCreate}
+                    whileTap={reduce ? undefined : { scale: 0.9 }}
+                    transition={reduce ? instant : springJiggle}
+                    aria-label={tActions('quickCreate.trigger')}
+                    className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-sm transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                >
+                    <PlusIcon className="size-6" />
+                </motion.button>
 
                 <BarLink
                     href="/activity/tasks"
                     label={tNav('navTasks')}
                     Icon={CheckCircleIcon}
                     active={onTasks}
+                    reduce={reduce}
                     badge={attention}
                     badgeLabel={t('tasksBadge', { count: attention })}
                 />
-                <BarButton label={t('more')} Icon={Bars3Icon} onClick={onOpenMore} />
-            </div>
+                <BarButton label={t('more')} Icon={Bars3Icon} onClick={onOpenMore} reduce={reduce} />
+            </motion.div>
         </nav>
     );
 }
