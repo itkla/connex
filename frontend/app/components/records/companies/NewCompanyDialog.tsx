@@ -247,6 +247,7 @@ export default function NewCompanyDialog({
     };
 
     const isDirty =
+        open &&
         !isSuccess &&
         (payload.name.trim() !== '' ||
             (payload.website ?? '').trim() !== '' ||

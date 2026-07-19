@@ -112,6 +112,7 @@ export default function NewContactDialog({
     }, [newContactDialogOpen]);
 
     const isDirty =
+        newContactDialogOpen &&
         !isSuccess &&
         ((newContactPayload.name ?? '').trim() !== '' ||
             (newContactPayload.email ?? '').trim() !== '' ||
