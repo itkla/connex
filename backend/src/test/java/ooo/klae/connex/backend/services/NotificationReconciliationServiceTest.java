@@ -32,7 +32,6 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
-import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationDispatcher;
@@ -373,11 +372,14 @@ class NotificationReconciliationServiceTest {
         PreferenceMapper preferenceMapper
     ) {
         Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
+        NotificationQuietHoursControlAccess quietHoursControlAccess =
+            Mockito.mock(NotificationQuietHoursControlAccess.class);
+        Mockito.lenient().when(quietHoursControlAccess.evaluateForUser(anyInt(), Mockito.any(Instant.class)))
+            .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
         return new NotificationDelivery(
             List.of(dispatcher), notificationMapper, preferenceMapper,
             Mockito.mock(NotificationPushPublisher.class), stateVersions(notificationMapper),
-            Mockito.mock(NotificationQuietHoursMapper.class),
-            Mockito.mock(NotificationQuietHoursEvaluator.class),
+            quietHoursControlAccess,
             Mockito.mock(ooo.klae.connex.backend.notifications.NotificationQuietHoursBypassPolicy.class),
             Clock.systemUTC());
     }

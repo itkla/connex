@@ -21,11 +21,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Notification;
-import ooo.klae.connex.backend.beans.NotificationQuietHours;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
-import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
+import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
 import ooo.klae.connex.backend.services.NotificationQuietHoursEvaluator;
 
 /**
@@ -44,8 +43,7 @@ class NotificationDeliveryTest {
     @Mock private PreferenceMapper preferenceMapper;
     @Mock private NotificationPushPublisher pushPublisher;
     @Mock private NotificationStateVersionService stateVersionService;
-    @Mock private NotificationQuietHoursMapper quietHoursMapper;
-    @Mock private NotificationQuietHoursEvaluator quietHoursEvaluator;
+    @Mock private NotificationQuietHoursControlAccess quietHoursControlAccess;
     @Mock private NotificationQuietHoursBypassPolicy bypassPolicy;
 
     private NotificationDelivery delivery;
@@ -63,9 +61,12 @@ class NotificationDeliveryTest {
         }).when(inApp).dispatch(any());
         lenient().when(notificationMapper.findById(eq(9), anyInt()))
             .thenAnswer(invocation -> existingRow(invocation.getArgument(1), "info", null));
+        lenient().when(quietHoursControlAccess.evaluateForUser(
+                9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
         delivery = new NotificationDelivery(
                 List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
-                stateVersionService, quietHoursMapper, quietHoursEvaluator, bypassPolicy,
+                stateVersionService, quietHoursControlAccess, bypassPolicy,
                 Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC));
     }
 
@@ -280,9 +281,7 @@ class NotificationDeliveryTest {
             return 1;
         }).when(inApp).dispatch(any());
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
-        NotificationQuietHours quietHours = new NotificationQuietHours();
-        when(quietHoursMapper.findByUserId(9)).thenReturn(quietHours);
-        when(quietHoursEvaluator.evaluate(quietHours, Instant.parse("2026-07-20T02:00:00Z")))
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(true, null));
 
         delivery.deliver(n);
@@ -305,9 +304,7 @@ class NotificationDeliveryTest {
             return 1;
         }).when(inApp).dispatch(any());
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "critical", null));
-        NotificationQuietHours quietHours = new NotificationQuietHours();
-        when(quietHoursMapper.findByUserId(9)).thenReturn(quietHours);
-        when(quietHoursEvaluator.evaluate(quietHours, Instant.parse("2026-07-20T02:00:00Z")))
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(true, null));
 
         delivery.deliver(n);
@@ -315,5 +312,21 @@ class NotificationDeliveryTest {
         verify(bypassPolicy).bypasses(n);
         verify(stateVersionService).markChanged(9);
         verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void quietHoursLookupFailureDeliversNormally() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenThrow(new IllegalStateException("control plane unavailable"));
+
+        delivery.deliver(n);
+
+        verify(stateVersionService).markChangedWithDetailedPush(9);
+        verify(stateVersionService, never()).markChanged(9);
+        verify(pushPublisher).created(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
+        verify(email).dispatch(n);
     }
 }

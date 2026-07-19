@@ -9,7 +9,6 @@ import java.util.EnumSet;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NotificationQuietHours;
@@ -17,7 +16,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.NotificationQuietHoursDto;
 import ooo.klae.connex.backend.dto.NotificationQuietHoursRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
 
 /**
  * Authenticated global quiet-hours operations and delivery evaluation.
@@ -30,22 +28,20 @@ public class NotificationQuietHoursService {
     private static final String BYPASS_POLICY = "security_only";
     private static final int ALL_DAYS_MASK = 127;
 
-    private final NotificationQuietHoursMapper quietHoursMapper;
+    private final NotificationQuietHoursControlAccess controlAccess;
     private final AuthService authService;
     private final NotificationQuietHoursEvaluator evaluator;
     private final Clock clock;
 
-    @Transactional(readOnly = true)
     public NotificationQuietHoursDto getCurrent() {
-        User user = authService.getCurrentUser();
-        NotificationQuietHours quietHours = quietHoursMapper.findByUserId(user.getId());
+        User user = authService.getCurrentPrincipal();
+        NotificationQuietHours quietHours = controlAccess.findByUserId(user.getId());
         if (quietHours == null) {
             quietHours = defaults(user);
         }
         return toDto(quietHours, clock.instant());
     }
 
-    @Transactional
     public NotificationQuietHoursDto updateCurrent(NotificationQuietHoursRequest request) {
         if (request == null || request.enabled() == null || request.days() == null) {
             throw new BadRequestException("Quiet hours require enabled, timezone, start, end, and days");
@@ -69,22 +65,18 @@ public class NotificationQuietHoursService {
             days = EnumSet.allOf(DayOfWeek.class);
         }
         NotificationQuietHours quietHours = new NotificationQuietHours();
-        quietHours.setUserId(authService.getCurrentUser().getId());
+        quietHours.setUserId(authService.getCurrentPrincipal().getId());
         quietHours.setEnabled(request.enabled());
         quietHours.setTimezone(timezone);
         quietHours.setStartLocal(start.toString());
         quietHours.setEndLocal(end.toString());
         quietHours.setDaysMask(mask(days));
-        quietHoursMapper.upsert(quietHours);
+        controlAccess.upsert(quietHours);
         return toDto(quietHours, clock.instant());
     }
 
     public NotificationQuietHoursEvaluator.Evaluation evaluateForUser(int userId, Instant asOf) {
-        NotificationQuietHours quietHours = quietHoursMapper.findByUserId(userId);
-        if (quietHours == null) {
-            return new NotificationQuietHoursEvaluator.Evaluation(false, null);
-        }
-        return evaluator.evaluate(quietHours, asOf);
+        return controlAccess.evaluateForUser(userId, asOf);
     }
 
     private NotificationQuietHoursDto toDto(NotificationQuietHours quietHours, Instant asOf) {

@@ -11,12 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
-import ooo.klae.connex.backend.beans.NotificationQuietHours;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
-import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
-import ooo.klae.connex.backend.services.NotificationQuietHoursEvaluator;
+import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
 
 /**
  * The single fan-out point for a generated notification. The {@code in_app}
@@ -59,8 +57,7 @@ public class NotificationDelivery {
     private final PreferenceMapper preferenceMapper;
     private final NotificationPushPublisher pushPublisher;
     private final NotificationStateVersionService stateVersionService;
-    private final NotificationQuietHoursMapper quietHoursMapper;
-    private final NotificationQuietHoursEvaluator quietHoursEvaluator;
+    private final NotificationQuietHoursControlAccess quietHoursControlAccess;
     private final NotificationQuietHoursBypassPolicy bypassPolicy;
     private final Clock clock;
 
@@ -180,12 +177,12 @@ public class NotificationDelivery {
             return false;
         }
         try {
-            NotificationQuietHours quietHours = quietHoursMapper.findByUserId(notification.getRecipientId());
-            return quietHours != null && quietHoursEvaluator.evaluate(quietHours, clock.instant()).active();
+            return quietHoursControlAccess.evaluateForUser(
+                notification.getRecipientId(), clock.instant()).active();
         } catch (RuntimeException exception) {
             log.warn("Quiet-hours evaluation failed for recipient {}: {}",
                 notification.getRecipientId(), exception.getMessage());
-            return true;
+            return false;
         }
     }
 }
