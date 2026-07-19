@@ -139,6 +139,12 @@
     "more": "その他",
     "tasksBadge": "{count}件の要対応タスク"
   },
+  "ConfirmDiscard": {
+    "title": "変更を破棄しますか？",
+    "description": "保存されていない変更があります。ここで閉じると失われます。",
+    "discard": "変更を破棄",
+    "keepEditing": "編集を続ける"
+  },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
     "searching": "検索中...",
