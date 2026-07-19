@@ -80,9 +80,9 @@ const slotVariants: Variants = {
 const slotBase =
     'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
-const indicatorWrap = 'relative flex h-7 w-12 items-center justify-center';
+const indicatorWrap = 'relative z-10 flex h-7 w-12 items-center justify-center';
 
-const labelBase = 'max-w-full truncate text-[10px] leading-none font-medium';
+const labelBase = 'relative z-10 max-w-full truncate text-[10px] leading-none font-medium';
 
 /** Dispatches the app-shell custom event that the always-mounted GlobalSearch listens for. */
 function openSearch() {
@@ -95,18 +95,19 @@ function openQuickCreate() {
 }
 
 /**
- * The active destination's liquid-glass lens: a brand-tinted capsule that springs in behind the icon and
- * blurs out on exit, so navigating reads as the light re-settling rather than a hard swap.
+ * The active destination's liquid-glass lens: a brand-tinted capsule that fills the whole slot (icon and
+ * label) and springs in behind them, blurring out on exit, so navigating reads as the light re-settling
+ * rather than a hard swap.
  */
 function ActiveLens({ reduce }: { reduce: boolean }) {
     return (
         <motion.span
             aria-hidden
-            initial={reduce ? false : { opacity: 0, scale: 0.5, filter: 'blur(5px)' }}
+            initial={reduce ? false : { opacity: 0, scale: 0.85, filter: 'blur(4px)' }}
             animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, filter: 'blur(5px)' }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9, filter: 'blur(4px)' }}
             transition={reduce ? instant : { default: springJiggle, filter: { duration: 0.2, ease: easeOut } }}
-            className="absolute inset-0 rounded-full bg-brand/20 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.35)]"
+            className="absolute inset-0 rounded-2xl bg-brand/20 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.35)]"
         />
     );
 }
@@ -143,8 +144,8 @@ function BarLink({
                 aria-current={active ? 'page' : undefined}
                 className={cn(slotBase, active ? 'text-brand-dark dark:text-brand' : 'hover:text-foreground')}
             >
+                <AnimatePresence>{active && <ActiveLens key="lens" reduce={reduce} />}</AnimatePresence>
                 <span className={indicatorWrap}>
-                    <AnimatePresence>{active && <ActiveLens key="lens" reduce={reduce} />}</AnimatePresence>
                     <Icon className="relative z-10 size-6" />
                     {badge != null && badge > 0 && (
                         <span
