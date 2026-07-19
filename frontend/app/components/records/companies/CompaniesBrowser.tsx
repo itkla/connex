@@ -21,6 +21,7 @@ import {
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
 import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
@@ -576,6 +577,19 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         }
     };
 
+    const inlineEdit = useInlineEdit<Company>();
+    const saveCompany = useCallback(
+        (full: Company) =>
+            updateCompany(full.id, {
+                name: full.name,
+                website: full.website,
+                industry: full.industry,
+                phone: full.phone,
+                address: full.address,
+            }).then(() => {}),
+        [],
+    );
+
     const columns: ColumnDef<Company>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
@@ -595,24 +609,25 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             key: 'website',
             label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
-            copyable: { label: t('columnWebsite'), getValue: (c) => c.website },
+            editable: { getValue: (c) => inlineEdit.value(c, 'website'), save: (c, v) => inlineEdit.commit(c, 'website', v, saveCompany), inputType: 'url' },
         },
         {
             key: 'industry',
             label: t('columnIndustry'),
             getSortValue: (c) => c.industry ?? null,
+            editable: { getValue: (c) => inlineEdit.value(c, 'industry'), save: (c, v) => inlineEdit.commit(c, 'industry', v, saveCompany) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: t('columnPhone'), getValue: (c) => c.phone },
+            editable: { getValue: (c) => inlineEdit.value(c, 'phone'), save: (c, v) => inlineEdit.commit(c, 'phone', v, saveCompany), inputType: 'tel' },
         },
         {
             key: 'address',
             label: t('columnAddress'),
             getSortValue: (c) => c.address ?? null,
-            copyable: { label: t('columnAddress'), getValue: (c) => c.address },
+            editable: { getValue: (c) => inlineEdit.value(c, 'address'), save: (c, v) => inlineEdit.commit(c, 'address', v, saveCompany) },
         },
         {
             key: 'createdAt',
@@ -626,7 +641,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 

@@ -254,11 +254,16 @@
     "revokeFailed": "Could not revoke sharing.",
     "loadFailed": "Could not load shares."
   },
+  "RecordInlineEdit": {
+    "doubleClickToEdit": "Double-click to edit",
+    "saveFailed": "Couldn't save your change"
+  },
   "RecordsRenderView": {
     "selectAllAria": "Select all {entityLabel}s",
     "selectItemAria": "Select {name}",
     "copiedToast": "{label} copied",
     "copyFailedToast": "Failed to copy {label}",
+    "editFieldAria": "Edit {field} for {name}",
     "selectedLabel": "selected",
     "clearSelection": "Clear selection",
     "rowActionsAria": "Actions for {name}",

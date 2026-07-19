@@ -46,6 +46,7 @@ import {
 } from './RecordActionMenu';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
+import EditableCell from './EditableCell';
 
 type SortDirection = 'asc' | 'desc';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -659,6 +660,27 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
+                                            if (col.editable) {
+                                                const editable = col.editable;
+                                                return (
+                                                    <td
+                                                        key={col.key}
+                                                        className={cn(
+                                                            'px-4 py-2.5 whitespace-nowrap text-foreground',
+                                                            colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
+                                                        )}
+                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                    >
+                                                        <EditableCell
+                                                            value={editable.getValue(item)}
+                                                            onCommit={(next) => editable.save(item, next)}
+                                                            inputType={editable.inputType}
+                                                            validate={editable.validate}
+                                                            ariaLabel={t('editFieldAria', { field: col.label, name: item.name ?? entityLabel })}
+                                                        />
+                                                    </td>
+                                                );
+                                            }
                                             if (col.copyable) {
                                                 const { label, getValue } = col.copyable;
                                                 return (
