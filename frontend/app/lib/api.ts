@@ -2428,7 +2428,7 @@ export function getContextNotifications(
     init: RequestInit = {},
 ) {
     return getNotifications(
-        { contextType, contextId, state: "unread", page: 1, size: 50 },
+        { contextType, contextId, status: "unread", page: 1, size: 50 },
         init,
     );
 }
@@ -2449,8 +2449,23 @@ export function restoreNotification(id: number) {
     return postJson<Types.Notification>(`/api/notifications/${id}/restore`);
 }
 
-export function snoozeNotification(id: number, hours: number) {
-    return postJson<Types.Notification>(`/api/notifications/${id}/snooze`, { hours });
+export function snoozeNotification(id: number, body: Types.SnoozeRequest) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/snooze`, body);
+}
+
+export function unsnoozeNotification(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/unsnooze`);
+}
+
+export function getQuietHours(init: RequestInit = {}) {
+    return getJson<Types.QuietHours>("/api/notification-preferences/quiet-hours", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function updateQuietHours(config: Types.QuietHoursConfig) {
+    return putJson<Types.QuietHours>("/api/notification-preferences/quiet-hours", config);
 }
 
 export function markAllNotificationsRead() {

@@ -198,7 +198,7 @@ export default async function Dashboard() {
             getIntroSuggestionsFromCookie(cookie, 4),
             getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
             getDashboardLayoutFromCookie(cookie),
-            getNotifications({ state: 'unread', page: 1, size: 6 }, init)
+            getNotifications({ status: 'unread', page: 1, size: 6 }, init)
                 .catch(() => ({ items: [], total: 0, stateVersion: 0 }) as NotificationPage),
             getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
             getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),

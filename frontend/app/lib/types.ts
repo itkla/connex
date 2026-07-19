@@ -2053,7 +2053,55 @@ export type UpdateTaskPayload = {
     dealId?: number;
 };
 
-export type NotificationState = 'active' | 'unread' | 'history' | 'all';
+export type NotificationState = 'active' | 'unread' | 'snoozed' | 'history' | 'all';
+
+/**
+ * Server-side snooze presets. Exactly one of a preset or an explicit `until`
+ * instant is sent per snooze request, always alongside the caller's IANA timezone.
+ */
+export type SnoozePreset = 'later_today' | 'tomorrow_morning' | 'next_week';
+
+/**
+ * Snooze request body: exactly one of a named preset or an explicit ISO-UTC
+ * `until` instant, plus the caller's IANA timezone.
+ */
+export type SnoozeRequest =
+    | { preset: SnoozePreset; timezone: string }
+    | { until: string; timezone: string };
+
+/**
+ * Day-of-week names used by the quiet-hours contract. The wire format is the
+ * uppercase English day name, independent of the display locale.
+ */
+export type QuietHoursDay =
+    | 'MONDAY'
+    | 'TUESDAY'
+    | 'WEDNESDAY'
+    | 'THURSDAY'
+    | 'FRIDAY'
+    | 'SATURDAY'
+    | 'SUNDAY';
+
+/**
+ * Editable quiet-hours configuration sent to the server as a full replacement.
+ */
+export type QuietHoursConfig = {
+    enabled: boolean;
+    timezone: string;
+    start: string;
+    end: string;
+    days: QuietHoursDay[];
+    bypassPolicy: string;
+};
+
+/**
+ * Quiet-hours state returned by the server: the editable config plus the
+ * server-computed `activeNow` flag and the next start/end transition instant.
+ */
+export type QuietHours = QuietHoursConfig & {
+    activeNow: boolean;
+    nextTransitionAt?: string | null;
+};
 
 export type Notification = {
     id: number;
@@ -2080,6 +2128,7 @@ export type Notification = {
     dismissedAt?: string | null;
     resolvedAt?: string | null;
     snoozedUntil?: string | null;
+    snoozeTimezone?: string | null;
     createdAt: string;
     updatedAt: string;
     stateVersion?: number;
@@ -2087,9 +2136,12 @@ export type Notification = {
 
 export type NotificationCounts = {
     unread: number;
+    snoozed: number;
     stateVersion: number;
     asOf: string;
     nextSnoozeExpiry?: string | null;
+    quietHoursActive: boolean;
+    nextQuietHoursTransition?: string | null;
 };
 
 export type NotificationMarkAllResult = NotificationCounts & {
@@ -2102,7 +2154,9 @@ export type NotificationPage = Page<Notification> & {
 };
 
 export type NotificationParams = {
-    state?: NotificationState;
+    status?: NotificationState;
+    type?: string | string[];
+    workspaceId?: number;
     category?: string;
     contextType?: string;
     contextId?: number;
