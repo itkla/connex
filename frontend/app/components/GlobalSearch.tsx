@@ -211,6 +211,19 @@ export default function GlobalSearch() {
     }, [closePalette]);
 
     useEffect(() => {
+        const onOpenRequest = () => {
+            if (modeRef.current === 'palette') return;
+            const active = document.activeElement;
+            lastFocusedRef.current = active instanceof HTMLElement ? active : null;
+            lastFocusedWasInlineRef.current =
+                active instanceof HTMLElement && containerRef.current?.contains(active) === true;
+            setMode('palette');
+        };
+        window.addEventListener('connex:open-search', onOpenRequest);
+        return () => window.removeEventListener('connex:open-search', onOpenRequest);
+    }, []);
+
+    useEffect(() => {
         if (mode !== 'palette') return;
         const raf = requestAnimationFrame(() => paletteInputRef.current?.focus());
         return () => cancelAnimationFrame(raf);

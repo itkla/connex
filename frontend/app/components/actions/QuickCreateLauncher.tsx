@@ -134,6 +134,12 @@ export default function QuickCreateLauncher() {
 
     const activeIsMobile = presentationIsMobile;
 
+    useEffect(() => {
+        const onOpenRequest = () => openLauncher();
+        window.addEventListener('connex:open-quick-create', onOpenRequest);
+        return () => window.removeEventListener('connex:open-quick-create', onOpenRequest);
+    }, [openLauncher]);
+
     const handlePendingChange = useCallback((next: boolean) => {
         pendingRef.current = next;
     }, []);
