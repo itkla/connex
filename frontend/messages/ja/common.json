@@ -151,6 +151,11 @@
     "resume": "再開",
     "discard": "破棄"
   },
+  "RecordDensity": {
+    "ariaLabel": "行の高さ",
+    "comfortable": "ゆったり",
+    "compact": "コンパクト"
+  },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
     "searching": "検索中...",
