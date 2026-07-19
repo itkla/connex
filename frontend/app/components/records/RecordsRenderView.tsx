@@ -602,7 +602,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         onKeyDown={menuModel ? (event) => handleRowKeyDown(event, item, rowIndex) : undefined}
                                         onFocus={menuModel ? () => setRovingId((prev) => (prev === item.id ? prev : item.id)) : undefined}
                                         className={cn(
-                                            'group border-b border-border outline-hidden transition-colors last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
+                                            'group border-b border-border outline-hidden transition-colors last:border-b-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
+                                            menuModel && '[&:focus-visible>td]:bg-brand-light/40',
                                             clickable && 'cursor-pointer',
                                             isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
                                             isActive && 'ring-2 ring-inset ring-brand',
