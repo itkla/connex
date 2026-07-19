@@ -3,7 +3,8 @@ SET config_json = CASE
     WHEN JSON_TYPE(config_json) = 'OBJECT'
         THEN JSON_SET(config_json, '$.version', 1)
     ELSE JSON_OBJECT('version', 1, 'legacyConfig', config_json)
-END;
+END,
+    updated_at = updated_at;
 
 ALTER TABLE saved_view
     ADD COLUMN visibility VARCHAR(16) NOT NULL DEFAULT 'private' AFTER config_json,

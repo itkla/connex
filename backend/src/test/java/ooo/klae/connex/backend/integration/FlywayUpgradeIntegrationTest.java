@@ -98,6 +98,11 @@ class FlywayUpgradeIntegrationTest {
                 }
                 """);
             assertEquals(expectedConfig, migratedConfig);
+            assertEquals("2025-06-15 12:34:56", stringScalar(connection, """
+                SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s')
+                FROM saved_view
+                WHERE id = 9101
+                """));
             assertEquals(6, scalar(connection, """
                 SELECT COUNT(*)
                 FROM (
@@ -251,11 +256,12 @@ class FlywayUpgradeIntegrationTest {
         try (Connection connection = connection()) {
             execute(connection, """
                 INSERT INTO saved_view (
-                    id, workspace_id, user_id, record_type, name, config_json, position)
+                    id, workspace_id, user_id, record_type, name, config_json, position,
+                    created_at, updated_at)
                 VALUES (
                     9101, 9101, 9101, 'company', 'Legacy saved view',
                     '{"query":"legacy","filters":{"owner":["me"]},"unknown":{"nested":[1,true]}}',
-                    4)
+                    4, '2025-06-15 12:00:00', '2025-06-15 12:34:56')
                 """);
         }
     }

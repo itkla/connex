@@ -54,6 +54,36 @@ class SavedViewServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void unversionedCreateAndUpdateAreStampedAndRoundTrip() {
+        ObjectNode createConfig = objectMapper.createObjectNode();
+        createConfig.set("filters", objectMapper.createObjectNode());
+        createConfig.put("query", "legacy create");
+        createConfig.put("futureCreateField", true);
+
+        SavedView created = service.create(
+            createRequest("company", "Legacy compatible", null, createConfig, null));
+
+        ObjectNode expectedCreateConfig = createConfig.deepCopy();
+        expectedCreateConfig.put("version", 1);
+        assertEquals(expectedCreateConfig, created.getConfig());
+        assertFalse(createConfig.has("version"));
+
+        ObjectNode updateConfig = objectMapper.createObjectNode();
+        updateConfig.set("filters", objectMapper.createObjectNode());
+        updateConfig.put("query", "legacy update");
+        updateConfig.put("futureUpdateField", "preserved");
+
+        SavedView updated = service.update(created.getId(),
+            updateRequest("company", "Legacy compatible", null, updateConfig, null));
+
+        ObjectNode expectedUpdateConfig = updateConfig.deepCopy();
+        expectedUpdateConfig.put("version", 1);
+        assertEquals(expectedUpdateConfig, updated.getConfig());
+        assertEquals(expectedUpdateConfig, service.getById(created.getId()).getConfig());
+        assertFalse(updateConfig.has("version"));
+    }
+
+    @Test
     void allSegmentCatalogRecordTypesAreAccepted() {
         for (String recordType : List.of("company", "person", "deal")) {
             assertNotEquals(0,
@@ -272,10 +302,28 @@ class SavedViewServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void configRejectsMissingVersionNonObjectsAndOversizedUtf8() {
-        ObjectNode missingVersion = objectMapper.createObjectNode();
+    void maximumCatalogSegmentDepthCanBeSaved() {
+        ObjectNode maxDepthConfig = config();
+        maxDepthConfig.set("segments", nestedSegment(4));
+
+        SavedView created = service.create(
+            createRequest("company", "Maximum depth", null, maxDepthConfig, null));
+
+        assertEquals(maxDepthConfig, created.getConfig());
+
+        ObjectNode tooDeepConfig = config();
+        tooDeepConfig.set("segments", nestedSegment(5));
         assertThrows(BadRequestException.class,
-            () -> service.create(createRequest("company", "Missing version", null, missingVersion, null)));
+            () -> service.create(createRequest("company", "Too deep", null, tooDeepConfig, null)));
+    }
+
+    @Test
+    void configRejectsUnsupportedVersionsNonObjectsAndOversizedUtf8() {
+        ObjectNode unsupportedVersion = objectMapper.createObjectNode();
+        unsupportedVersion.put("version", 2);
+        assertThrows(BadRequestException.class,
+            () -> service.create(
+                createRequest("company", "Unsupported version", null, unsupportedVersion, null)));
         assertThrows(BadRequestException.class,
             () -> service.create(createRequest("company", "Array", null, objectMapper.createArrayNode(), null)));
 
@@ -357,6 +405,18 @@ class SavedViewServiceTest extends AbstractServiceTest {
         ObjectNode segment = objectMapper.createObjectNode();
         segment.put("match", "all");
         segment.set("conditions", conditions);
+        return segment;
+    }
+
+    private ObjectNode nestedSegment(int depth) {
+        if (depth == 1) {
+            return segment("name");
+        }
+        ObjectNode segment = objectMapper.createObjectNode();
+        segment.put("match", "all");
+        ArrayNode groups = objectMapper.createArrayNode();
+        groups.add(nestedSegment(depth - 1));
+        segment.set("groups", groups);
         return segment;
     }
 

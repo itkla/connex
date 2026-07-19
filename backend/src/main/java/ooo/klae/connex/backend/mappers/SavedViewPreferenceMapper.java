@@ -75,6 +75,16 @@ public interface SavedViewPreferenceMapper {
 
     void deleteDefaultsForUser(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
 
+    /** Deletes a returning user's residual pins before a fresh membership is created. */
+    void deletePinsForFreshMembership(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    /** Deletes a returning user's residual defaults before a fresh membership is created. */
+    void deleteDefaultsForFreshMembership(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
     /** Deletes a user's pin preferences across every workspace during account erasure. */
     void deletePinsForUserAnywhere(@Param("userId") int userId);
 

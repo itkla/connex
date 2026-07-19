@@ -134,6 +134,11 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </delete>
 
+  <delete id="deleteForFreshMembership">
+    DELETE FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
   <delete id="deleteForUserAnywhere">
     DELETE FROM saved_view WHERE user_id = #{userId}
   </delete>

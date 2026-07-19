@@ -50,6 +50,11 @@ public interface SavedViewMapper {
 
     void deleteForUser(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
 
+    /** Deletes a returning user's residual views before a fresh membership is created. */
+    void deleteForFreshMembership(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
     /** Deletes every saved view owned by a user across all workspaces during account erasure. */
     void deleteForUserAnywhere(@Param("userId") int userId);
 }

@@ -199,6 +199,31 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
     }
 
+    @Test
+    void freshMembershipPurgesResidualSavedViewDataOnlyInTheRejoinedWorkspace() {
+        User returning = newUser();
+        SavedView residualView = savedView(returning);
+        SavedView sharedTarget = savedView(newUser());
+        savedViewPreferenceMapper.insertPin(
+            workspace.getId(), returning.getId(), sharedTarget.getId(), 0);
+        savedViewPreferenceMapper.upsertDefault(
+            workspace.getId(), returning.getId(), "company", sharedTarget.getId());
+        Workspace otherWorkspace = newOtherWorkspace();
+        SavedView retainedView = savedViewInWorkspace(otherWorkspace, returning);
+        workspaceMapper.removeMember(workspace.getId(), returning.getId());
+
+        offboardingService.prepareFreshMembership(workspace.getId(), returning.getId());
+
+        assertNull(savedViewMapper.getAccessibleById(
+            workspace.getId(), returning.getId(), residualView.getId()));
+        assertNull(savedViewPreferenceMapper.getPin(
+            workspace.getId(), returning.getId(), sharedTarget.getId()));
+        assertNull(savedViewPreferenceMapper.getDefault(
+            workspace.getId(), returning.getId(), "company"));
+        assertNotNull(savedViewMapper.getAccessibleById(
+            otherWorkspace.getId(), returning.getId(), retainedView.getId()));
+    }
+
     private Workspace newOtherWorkspace() {
         Workspace other = new Workspace();
         other.setName("Other Workspace");

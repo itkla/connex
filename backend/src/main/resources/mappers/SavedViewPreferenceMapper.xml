@@ -161,6 +161,16 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </delete>
 
+  <delete id="deletePinsForFreshMembership">
+    DELETE FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteDefaultsForFreshMembership">
+    DELETE FROM saved_view_default
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
   <delete id="deletePinsForUserAnywhere">
     DELETE FROM saved_view_pin WHERE user_id = #{userId}
   </delete>

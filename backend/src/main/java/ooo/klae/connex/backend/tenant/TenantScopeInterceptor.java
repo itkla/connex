@@ -166,8 +166,9 @@ public class TenantScopeInterceptor implements Interceptor {
      * back invitation decline and the fresh-membership ghost clean (registration,
      * invites, invite links, SSO JIT provisioning — see
      * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
-     * with no active workspace may reach; both anchor {@code workspace_id} and
-     * the user id in SQL. The recipient
+     * with no active workspace may reach. The fresh-membership saved-view
+     * cleanup follows the same workspace-and-user-bound policy. These statements
+     * anchor {@code workspace_id} and the user id in SQL. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
      * offboarding flows. The AI-output-cache purge (issue #221 cease-of-use) is
@@ -207,7 +208,10 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
+        MAPPERS + "SavedViewMapper.deleteForFreshMembership",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
+        MAPPERS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
+        MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
         MAPPERS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere",
         MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere",
         MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",

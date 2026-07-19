@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Business policy for versioned, shareable saved views and caller-scoped preferences. */
 @Service
@@ -302,23 +303,31 @@ public class SavedViewService {
         if (config == null || !config.isObject()) {
             throw new BadRequestException("View config must be a JSON object");
         }
-        requireConfigSize(config);
-        validateNodeBounds(config, 1);
-        JsonNode version = config.get("version");
-        if (version == null || !version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() != 1) {
+        ObjectNode normalizedConfig = objectMapper.createObjectNode();
+        for (Map.Entry<String, JsonNode> property : config.properties()) {
+            normalizedConfig.set(property.getKey(), property.getValue().deepCopy());
+        }
+        JsonNode version = normalizedConfig.get("version");
+        if (version == null) {
+            normalizedConfig.put("version", 1);
+        } else if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() != 1) {
             throw new BadRequestException("View config version must be 1");
         }
-        validateFilters(config.get("filters"));
-        validateOptionalString(config.get("query"), "query", MAX_QUERY_LENGTH, true);
-        validateSort(config.get("sort"));
-        validateOptionalString(config.get("sortKey"), "sortKey", MAX_IDENTIFIER_LENGTH, true);
-        validateSortDirection(config.get("sortDirection"));
-        validateOptionalString(config.get("displayMode"), "displayMode", 32, false);
-        validateStringArray(config.get("visibleColumns"), "visibleColumns", MAX_ARRAY_ITEMS, MAX_IDENTIFIER_LENGTH);
-        validateStringArray(config.get("columnOrder"), "columnOrder", MAX_ARRAY_ITEMS, MAX_IDENTIFIER_LENGTH);
-        validatePageSize(config.get("pageSize"));
-        validateSegments(recordType, config.get("segments"));
-        return config;
+        requireConfigSize(normalizedConfig);
+        validateNodeBounds(normalizedConfig, 1, true);
+        validateFilters(normalizedConfig.get("filters"));
+        validateOptionalString(normalizedConfig.get("query"), "query", MAX_QUERY_LENGTH, true);
+        validateSort(normalizedConfig.get("sort"));
+        validateOptionalString(normalizedConfig.get("sortKey"), "sortKey", MAX_IDENTIFIER_LENGTH, true);
+        validateSortDirection(normalizedConfig.get("sortDirection"));
+        validateOptionalString(normalizedConfig.get("displayMode"), "displayMode", 32, false);
+        validateStringArray(
+            normalizedConfig.get("visibleColumns"), "visibleColumns", MAX_ARRAY_ITEMS, MAX_IDENTIFIER_LENGTH);
+        validateStringArray(
+            normalizedConfig.get("columnOrder"), "columnOrder", MAX_ARRAY_ITEMS, MAX_IDENTIFIER_LENGTH);
+        validatePageSize(normalizedConfig.get("pageSize"));
+        validateSegments(recordType, normalizedConfig.get("segments"));
+        return normalizedConfig;
     }
 
     private void requireConfigSize(JsonNode config) {
@@ -333,8 +342,8 @@ public class SavedViewService {
         }
     }
 
-    private void validateNodeBounds(JsonNode node, int depth) {
-        if (depth > MAX_CONFIG_DEPTH) {
+    private void validateNodeBounds(JsonNode node, int depth, boolean enforceDepth) {
+        if (enforceDepth && depth > MAX_CONFIG_DEPTH) {
             throw new BadRequestException("View config is nested too deeply");
         }
         if (node.isString() && node.asString().length() > MAX_STRING_LENGTH) {
@@ -348,14 +357,16 @@ public class SavedViewService {
                 if (property.getKey().length() > MAX_IDENTIFIER_LENGTH) {
                     throw new BadRequestException("View config contains a property name that is too long");
                 }
-                validateNodeBounds(property.getValue(), depth + 1);
+                boolean enforceChildDepth = enforceDepth
+                    && !(depth == 1 && "segments".equals(property.getKey()));
+                validateNodeBounds(property.getValue(), depth + 1, enforceChildDepth);
             }
         } else if (node.isArray()) {
             if (node.size() > MAX_ARRAY_ITEMS) {
                 throw new BadRequestException("View config contains too many array items");
             }
             for (JsonNode item : node) {
-                validateNodeBounds(item, depth + 1);
+                validateNodeBounds(item, depth + 1, enforceDepth);
             }
         }
     }

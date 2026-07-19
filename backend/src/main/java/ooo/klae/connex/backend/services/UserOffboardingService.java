@@ -111,21 +111,22 @@ public class UserOffboardingService {
     }
 
     /**
-     * Clears any notification rows addressed to a user who is about to receive
-     * a brand-new membership in the workspace. With the cross-plane cascades
-     * gone (#440 increment 3), a notification inserted while an earlier
-     * removal was committing survives as an orphan; without this clean it
-     * would resurface in the rejoiner's inbox, and a ghost deal-collaborator
-     * seat would silently resurrect access from a previous tenure. Guarded on
-     * the absence of ANY membership row so a pending invitee's legitimate
-     * notifications are never touched. Called by every fresh-membership path:
-     * invites, invite links, and SSO JIT provisioning.
+     * Clears personal workspace data for a user who is about to receive a
+     * brand-new membership. This removes saved views and preferences left by
+     * legacy removal flows, notifications inserted while an earlier removal
+     * was committing, and stale deal-collaborator seats. Guarded on the absence
+     * of any membership row so a pending invitee's legitimate data is never
+     * touched. Called by every fresh-membership path: invites, invite links,
+     * and SSO JIT provisioning.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
         if (!workspaceMapper.isMemberIncludingPending(workspaceId, userId)) {
+            savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
+            savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
+            savedViewMapper.deleteForFreshMembership(workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         }
