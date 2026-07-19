@@ -159,6 +159,12 @@
     "comfortable": "Comfortable rows",
     "compact": "Compact rows"
   },
+  "RecordColumns": {
+    "ariaLabel": "Choose columns",
+    "label": "Columns",
+    "title": "Show columns",
+    "reset": "Reset columns"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",

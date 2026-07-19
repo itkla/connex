@@ -20,6 +20,8 @@ import { useReducedMotion } from 'motion/react';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
@@ -611,6 +613,8 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     const { density, setDensity } = useRecordDensity();
+    const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns);
     const peek = useRecordPeekController('person', contacts, displayMode === 'table');
 
     const recordRef = useCallback(
@@ -683,6 +687,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                     ]}
                                 />
                                 {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {displayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >
@@ -734,7 +746,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 <Rise delay={0.18}>
                     <RecordsRenderView<Contact>
                         data={contacts}
-                        columns={[...columns, ...customColumns]}
+                        columns={visibleColumns}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <ContactCard

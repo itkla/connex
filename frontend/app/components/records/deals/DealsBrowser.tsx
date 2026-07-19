@@ -25,6 +25,8 @@ import { useReducedMotion } from 'motion/react';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
@@ -848,6 +850,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     );
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
+    const mergedColumns = useMemo(
+        () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
+        [columns, customColumns],
+    );
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('deal', mergedColumns);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         const result: ColumnFilterFacet[] = [];
@@ -1135,6 +1142,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 </button>
                             </div>
                             {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                            {displayMode === 'table' && (
+                                <ColumnVisibilityMenu
+                                    toggles={toggles}
+                                    onColumnVisibleChange={setColumnVisible}
+                                    onReset={resetColumns}
+                                    hiddenCount={hiddenCount}
+                                />
+                            )}
                             </div>
                         }
                     >
@@ -1185,7 +1200,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         <RecordsRenderView<Deal>
                             data={visibleDeals}
                             loading={loadingPage}
-                            columns={[...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))]}
+                            columns={visibleColumns}
                             sortState={{ key: sortKey, direction: sortDir, onSortChange: handleSortChange }}
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete }) => (
