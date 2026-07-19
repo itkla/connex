@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowUturnLeftIcon, CheckCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import {
+    ApiError,
     dismissNotification,
     getNotifications,
     markAllNotificationsRead,
@@ -13,9 +14,10 @@ import {
     markNotificationUnread,
     restoreNotification,
     snoozeNotification,
+    unsnoozeNotification,
 } from "@/app/lib/api";
-import { type Notification, type NotificationState } from "@/app/lib/types";
-import { formatRelativeTime } from "@/app/lib/utils";
+import { type Notification, type NotificationState, type SnoozeRequest } from "@/app/lib/types";
+import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
@@ -43,9 +45,11 @@ const PAGE_SIZE = 20;
 
 function matchesState(n: Notification, state: NotificationState): boolean {
     const inactive = Boolean(n.dismissedAt || n.resolvedAt);
-    if (state === "unread") return !inactive && !n.readAt;
+    const snoozed = !inactive && Boolean(n.snoozedUntil);
+    if (state === "snoozed") return snoozed;
+    if (state === "unread") return !inactive && !snoozed && !n.readAt;
     if (state === "history") return inactive;
-    if (state === "active") return !inactive;
+    if (state === "active") return !inactive && !snoozed;
     return true;
 }
 
@@ -56,7 +60,7 @@ function matchesState(n: Notification, state: NotificationState): boolean {
 export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const { recipientId, unread, refreshUnread } = useNotifications();
+    const { recipientId, unread, snoozed, refreshUnread } = useNotifications();
     const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
@@ -73,7 +77,7 @@ export default function NotificationsInbox() {
         const controller = new AbortController();
         const generation = ++loadGenerationRef.current;
         requestRef.current = controller;
-        getNotifications({ state, page, size: PAGE_SIZE }, { signal: controller.signal })
+        getNotifications({ status: state, page, size: PAGE_SIZE }, { signal: controller.signal })
             .then((result) => {
                 if (loadGenerationRef.current !== generation) return;
                 if (result.stateVersion < requiredStateVersionRef.current) return;
@@ -144,17 +148,60 @@ export default function NotificationsInbox() {
         }
     }
 
-    async function snooze(item: Notification, hours: number) {
+    function refetch() {
+        loadGenerationRef.current += 1;
+        requestRef.current?.abort();
+        requestRef.current = null;
+        setLoading(true);
+        setRefreshKey((current) => current + 1);
+    }
+
+    async function snooze(item: Notification, body: SnoozeRequest) {
         try {
-            const updated = await snoozeNotification(item.id, hours);
+            const updated = await snoozeNotification(item.id, body);
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            setTotal((value) => Math.max(0, value - 1));
+            if (matchesState(updated, state)) {
+                setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+            } else {
+                setItems((current) => current.filter((entry) => entry.id !== item.id));
+                setTotal((value) => Math.max(0, value - 1));
+            }
             await refreshUnread();
-        } catch {
-            toastError(t("actionError"));
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409) {
+                toastError(t("snoozeConflict"));
+                refetch();
+            } else if (error instanceof ApiError && error.status === 404) {
+                toastError(t("snoozeGone"));
+                refetch();
+            } else {
+                toastError(t("actionError"));
+            }
+        }
+    }
+
+    async function unsnooze(item: Notification) {
+        try {
+            const updated = await unsnoozeNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
+            if (matchesState(updated, state)) {
+                setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+            } else {
+                setItems((current) => current.filter((entry) => entry.id !== item.id));
+                setTotal((value) => Math.max(0, value - 1));
+            }
+            await refreshUnread();
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) {
+                toastError(t("snoozeGone"));
+                refetch();
+            } else {
+                toastError(t("actionError"));
+            }
         }
     }
 
@@ -243,6 +290,19 @@ export default function NotificationsInbox() {
                         options={[
                             { value: "active", label: t("filter_active") },
                             { value: "unread", label: t("filter_unread") },
+                            {
+                                value: "snoozed",
+                                label: (
+                                    <span className="inline-flex items-center gap-1.5">
+                                        {t("filter_snoozed")}
+                                        {snoozed > 0 ? (
+                                            <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-foreground/10 px-1 text-[10px] font-semibold leading-4 text-foreground">
+                                                {snoozed > 99 ? "99+" : snoozed}
+                                            </span>
+                                        ) : null}
+                                    </span>
+                                ),
+                            },
                             { value: "history", label: t("filter_history") },
                             { value: "all", label: t("filter_all") },
                         ]}
@@ -284,6 +344,7 @@ export default function NotificationsInbox() {
                             const reasons = item.data?.priorityReasons;
                             const hasPriority = Array.isArray(reasons) && reasons.length > 0;
                             const isNudge = item.type === "relationship.cooling";
+                            const isSnoozed = !item.dismissedAt && !item.resolvedAt && Boolean(item.snoozedUntil);
                             return (
                                 <article
                                     key={item.id}
@@ -336,6 +397,20 @@ export default function NotificationsInbox() {
                                                 <ArrowUturnLeftIcon />
                                                 {t("restore")}
                                             </Button>
+                                        ) : isSnoozed ? (
+                                            <>
+                                                <span className="hidden text-xs text-muted-foreground sm:inline">
+                                                    {t("snoozedUntil", { date: formatDateTime(item.snoozedUntil ?? undefined, locale) })}
+                                                </span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => void unsnooze(item)}
+                                                >
+                                                    <BellSnoozeIcon />
+                                                    {t("unsnooze")}
+                                                </Button>
+                                            </>
                                         ) : (
                                             <>
                                                 {isNudge && item.sourceId != null ? (
@@ -354,7 +429,7 @@ export default function NotificationsInbox() {
                                                 >
                                                     {item.readAt ? t("markUnread") : t("markRead")}
                                                 </Button>
-                                                <SnoozeMenu onSnooze={(hours) => void snooze(item, hours)} />
+                                                <SnoozeMenu onSnooze={(body) => void snooze(item, body)} />
                                                 <Button
                                                     variant="ghost"
                                                     size="icon-sm"
