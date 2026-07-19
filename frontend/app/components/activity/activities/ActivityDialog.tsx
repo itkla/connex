@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils';
 import { ApiError, createActivity, createTask, isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
     ACTIVITY_TYPES,
@@ -369,7 +370,16 @@ export function ActivityDialogForm({
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label>{t('typeLabel')}</Label>
                         <ActivityTypePicker

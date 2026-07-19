@@ -32,6 +32,7 @@ import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-s
 import { cn } from '@/lib/utils';
 
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, Note } from '@/app/lib/types';
 
@@ -239,7 +240,16 @@ export function NoteDialogForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && content.trim()) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
                         <div

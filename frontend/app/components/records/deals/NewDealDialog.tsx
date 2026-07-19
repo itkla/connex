@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
@@ -203,7 +204,16 @@ export function NewDealForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !isCreating && !isSuccess) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="deal-name">{t('name')}</Label>
                         <div className="group relative">
