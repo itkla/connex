@@ -93,6 +93,10 @@ Rules for any new AI-powered feature:
 - **Degrade gracefully.** Features return an explicit unavailable result (`available=false`, e.g. `DealBriefDto.unavailable`) when the gate or provider fails — deterministic features (deal risk, warmth) keep working without AI.
 - The masking map is request-scoped and never persisted; masking reduces provider exposure but does not change Connex's APPI handler status (Connex can re-identify). Keep it that way — no token vault.
 
+## Delegated work is plan-first
+
+Any agent dispatched to implement backend work (including codex) must first return a short plan — scope/approach, the exact REST contract (paths, DTOs, error cases, RBAC + tenant scoping), migration DDL with the orchestrator-assigned Flyway version, files per layer (controller/service/mapper/XML/tests), and a test plan — and get it reviewed before editing code (see the root `AGENTS.md` → *Plan-first dispatch*). For codex, run the planning pass with `--sandbox read-only`, then implement with the approved plan embedded. Discovery, review, and verification agents are exempt.
+
 ## Definition of Done (backend) — the verify loop is required
 
 1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`). For business-card scanning, also start the optional private sidecar with `docker compose --profile ocr up -d ocr`, use the same 32+ character `CONNEX_OCR_SERVICE_TOKEN` in both processes, set `CONNEX_OCR_BASE_URL=http://127.0.0.1:8090`, and enable the feature explicitly.
