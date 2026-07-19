@@ -192,11 +192,41 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                 initial={reduce ? false : 'hidden'}
                 animate={reduce ? undefined : 'show'}
                 variants={reduce ? undefined : barVariants}
-                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 rounded-full border border-white/15 bg-sidebar/60 px-1.5 py-1.5 shadow-[inset_0_1px_0.5px_rgb(255_255_255/0.4),inset_0_-1px_1px_rgb(0_0_0/0.12),0_14px_36px_-10px_rgb(0_0_0/0.5)] backdrop-blur-xl backdrop-saturate-150"
+                style={{
+                    WebkitBackdropFilter: 'blur(14px) saturate(1.8)',
+                    backdropFilter: 'url(#connex-liquid-glass) blur(1.5px) saturate(1.8)',
+                }}
+                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 overflow-visible rounded-full border border-white/40 bg-sidebar/45 px-1.5 py-1.5 shadow-[inset_0_1.5px_0.5px_rgb(255_255_255/0.9),inset_0_-1px_1.5px_rgb(0_0_0/0.12),inset_0_0_20px_rgb(255_255_255/0.12),0_18px_44px_-12px_rgb(0_0_0/0.5),0_3px_10px_-3px_rgb(0_0_0/0.26)]"
             >
+                <svg aria-hidden className="pointer-events-none absolute h-0 w-0">
+                    <filter
+                        id="connex-liquid-glass"
+                        x="-20%"
+                        y="-20%"
+                        width="140%"
+                        height="140%"
+                        colorInterpolationFilters="sRGB"
+                    >
+                        <feTurbulence
+                            type="fractalNoise"
+                            baseFrequency="0.006 0.007"
+                            numOctaves={2}
+                            seed={14}
+                            result="noise"
+                        />
+                        <feGaussianBlur in="noise" stdDeviation={1.5} result="soft" />
+                        <feDisplacementMap
+                            in="SourceGraphic"
+                            in2="soft"
+                            scale={56}
+                            xChannelSelector="R"
+                            yChannelSelector="G"
+                        />
+                    </filter>
+                </svg>
                 <span
                     aria-hidden
-                    className="pointer-events-none absolute inset-x-8 top-px h-px rounded-full bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                    className="pointer-events-none absolute inset-x-8 top-px h-px rounded-full bg-gradient-to-r from-transparent via-white/60 to-transparent"
                 />
 
                 <BarLink
@@ -224,7 +254,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     aria-label={tActions('quickCreate.trigger')}
                     className="group flex flex-1 items-center justify-center rounded-2xl focus-visible:outline-none"
                 >
-                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/30 bg-brand/80 text-brand-foreground shadow-[inset_0_1px_1px_rgb(255_255_255/0.6),inset_0_-3px_6px_rgb(0_0_0/0.18),0_6px_18px_-4px_rgb(from_var(--color-brand)_r_g_b_/_0.55)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/85 group-active:bg-brand-hover/85 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
+                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/30 bg-brand/80 text-brand-foreground shadow-[inset_0_1px_1px_rgb(255_255_255/0.6),inset_0_-3px_6px_rgb(0_0_0/0.2),0_4px_12px_-5px_rgb(from_var(--color-brand)_r_g_b_/_0.45)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/85 group-active:bg-brand-hover/85 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
                         <span
                             aria-hidden
                             className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/55 to-transparent"
