@@ -29,7 +29,8 @@
       "analytics": "分析",
       "calendar": "カレンダー",
       "settings": "設定",
-      "organization": "組織"
+      "organization": "組織",
+      "savedView": "保存済みビュー"
     },
     "create": {
       "company": "新しい会社",

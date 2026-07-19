@@ -35,8 +35,8 @@ import {
     BuildingLibraryIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -56,12 +56,16 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useSidebarMode } from '@/app/hooks/useSidebarMode';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePinnedViews } from '@/app/hooks/usePinnedViews';
+import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
 
 type NavItem = {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     disabled?: boolean;
+    /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
+    active?: boolean;
 };
 
 type NavSection = {
@@ -166,7 +170,7 @@ function NavGroup({
         return (
             <ul aria-label={section.label} className="flex flex-col items-center gap-1">
                 {section.items.map((item) => (
-                    <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} rail />
+                    <NavLink key={item.href} item={item} active={item.active ?? isActive(pathname, item.href)} rail />
                 ))}
             </ul>
         );
@@ -191,7 +195,7 @@ function NavGroup({
                         <NavLink
                             key={item.href}
                             item={item}
-                            active={isActive(pathname, item.href)}
+                            active={item.active ?? isActive(pathname, item.href)}
                             rail={false}
                         />
                     ))}
@@ -432,6 +436,21 @@ export default function Sidebar({
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
+    const { pins } = usePinnedViews();
+    const searchParams = useSearchParams();
+    const svParam = searchParams.get("sv");
+    const pinnedSection = useMemo<NavSection | null>(() => {
+        if (pins.length === 0) return null;
+        return {
+            label: t("sectionPinnedViews"),
+            items: pins.map((pin) => ({
+                label: pin.name,
+                href: savedViewHref(pin),
+                icon: savedViewRecordIcon(pin.recordType),
+                active: pathname === `/records/${savedViewRecordPath(pin.recordType)}` && svParam === savedViewToken(pin),
+            })),
+        };
+    }, [pins, t, pathname, svParam]);
     const { mode } = useSidebarMode();
     const isMobile = useIsMobile();
     const rail = !isMobile && mode === "rail";
@@ -475,6 +494,14 @@ export default function Sidebar({
                 <QuickCreateLauncher compact={rail} />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
+                    {pinnedSection && (
+                        <NavGroup
+                            key="pinned-views"
+                            section={pinnedSection}
+                            pathname={pathname}
+                            rail={rail}
+                        />
+                    )}
                     {sections.map((section) => (
                         <NavGroup
                             key={section.label}

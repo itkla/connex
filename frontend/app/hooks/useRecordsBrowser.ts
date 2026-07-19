@@ -5,10 +5,12 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
+import { SAVED_VIEW_URL_KEY } from './listStateUrl';
 
 /** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
- * deep link, and the server-list state ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
-const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, ...SERVER_RECORDS_URL_KEYS]);
+ * deep link, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
+ * ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
+const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, SAVED_VIEW_URL_KEY, ...SERVER_RECORDS_URL_KEYS]);
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];

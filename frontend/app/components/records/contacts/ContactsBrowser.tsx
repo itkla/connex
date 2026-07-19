@@ -71,7 +71,7 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
-export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[] }) {
+export default function ContactsBrowser({ savedViews, defaultView }: { savedViews: SavedView[]; defaultView: SavedView | null }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
     const tf = useTranslations('Filters');
@@ -663,6 +663,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        defaultView={defaultView}
                     />
                 </Rise>
 

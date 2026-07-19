@@ -8,6 +8,29 @@ export const SERVER_RECORDS_URL_KEYS = ['q', 'sort', 'dir', 'page', 'size'] as c
 /** Upper bound applied to a URL-supplied page size so a crafted `?size=` can't request an unbounded page. */
 export const MAX_URL_PAGE_SIZE = 100;
 
+/** URL query key that points at the active/shared saved view as `<workspaceId>:<id>`. Owned by the
+ * SavedViewsBar — a third list-state writer alongside the query/sort and facet-filter writers. */
+export const SAVED_VIEW_URL_KEY = 'sv';
+
+/**
+ * Reflects the active saved-view pointer into the URL via shallow `history.replaceState`, following the
+ * same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
+ * `window.location.search` and only ever set/deletes its own {@link SAVED_VIEW_URL_KEY}, so the
+ * query/sort/pagination and facet-filter params owned by the other writers survive untouched. Passing
+ * `null` clears the pointer (the "All" view or a config that matches no saved view).
+ *
+ * @param pathname - the current path, used to rebuild the URL without a full navigation
+ * @param sv - the `<workspaceId>:<id>` pointer, or null to remove it
+ */
+export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
+    const params = new URLSearchParams(window.location.search);
+    if (sv) params.set(SAVED_VIEW_URL_KEY, sv);
+    else params.delete(SAVED_VIEW_URL_KEY);
+    const next = params.toString();
+    if (next === window.location.search.replace(/^\?/, '')) return;
+    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+}
+
 /**
  * Parses a positive-integer URL param, falling back and clamping to `max` so malformed or hostile
  * values (`?page=-1`, `?size=99999`) never reach the fetcher.

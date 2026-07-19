@@ -29,7 +29,8 @@
       "analytics": "Analytics",
       "calendar": "Calendar",
       "settings": "Settings",
-      "organization": "Organization"
+      "organization": "Organization",
+      "savedView": "Saved view"
     },
     "create": {
       "company": "New company",

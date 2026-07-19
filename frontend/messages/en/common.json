@@ -86,6 +86,7 @@
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",
     "brand": "CONNEX",
+    "sectionPinnedViews": "Pinned views",
     "sectionOverview": "Overview",
     "sectionRecords": "Records",
     "sectionMarketing": "Marketing",

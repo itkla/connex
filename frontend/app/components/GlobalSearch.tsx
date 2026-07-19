@@ -43,15 +43,19 @@ function formatShortcut(chord: string): string {
         .join('');
 }
 
+function actionLabel(action: AppAction, t: (key: string) => string): string {
+    return action.label ?? t(action.labelKey);
+}
+
 function actionSearchText(action: AppAction, t: (key: string) => string): string {
-    const parts = [t(action.labelKey)];
+    const parts = [actionLabel(action, t)];
     if (action.keywords) parts.push(...action.keywords);
     if (action.keywordsKey) parts.push(t(action.keywordsKey));
     return parts.join(' ').toLowerCase();
 }
 
 function rankAction(action: AppAction, lowerQuery: string, t: (key: string) => string): number {
-    return t(action.labelKey).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
+    return actionLabel(action, t).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
 }
 
 function subscribeToViewport(onChange: () => void): () => void {
@@ -506,7 +510,7 @@ export default function GlobalSearch() {
                                                             ) : Icon ? (
                                                                 <Icon className="size-4 text-muted-foreground" />
                                                             ) : null}
-                                                            <span className="flex-1 truncate">{tActions(action.labelKey)}</span>
+                                                            <span className="flex-1 truncate">{action.label ?? tActions(action.labelKey)}</span>
                                                             {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
                                                         </CommandItem>
                                                     );
