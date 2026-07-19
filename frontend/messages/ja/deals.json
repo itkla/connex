@@ -193,6 +193,7 @@
     "currencyCount": "{count} 件",
     "columnName": "名前",
     "columnValue": "金額",
+    "valueInvalid": "小数点以下2桁までの0以上の金額を入力してください",
     "columnActualValue": "実績金額",
     "columnCompany": "会社",
     "columnPipeline": "パイプライン",

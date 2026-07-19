@@ -38,6 +38,7 @@ import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, facetChips, countActiveFilters } from '@/app/components/records/types';
@@ -52,6 +53,7 @@ import {
     closeDeal,
     reopenDeal,
     updateDeal,
+    updateDealValue,
     getCompaniesByIds,
     getDealsPage,
     getDealMetrics,
@@ -214,6 +216,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
     const [deals, setDeals] = useState(initialDeals);
+    const patchDeal = useCallback((id: number, partial: Partial<Deal>) => {
+        setDeals((prev) => prev.map((deal) => (deal.id === id ? { ...deal, ...partial } : deal)));
+    }, []);
+    const inlineEdit = useInlineEdit<Deal>(patchDeal);
     const [total, setTotal] = useState(initialTotal);
     const [page, setPage] = useState(() => parseListInt(searchParams.get('page'), 1));
     const [size, setSize] = useState(() => parseListInt(searchParams.get('size'), 25, MAX_URL_PAGE_SIZE));
@@ -737,6 +743,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             label: t('columnValue'),
             getSortValue: (d) => d.value ?? null,
             render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD', locale),
+            editable: {
+                getValue: (d) => (d.value != null ? String(d.value) : ''),
+                save: (d, v) =>
+                    inlineEdit.commit(d, 'value', Number(v), async (full) => {
+                        await updateDealValue(full.id, full.value ?? 0);
+                    }),
+                validate: (v) => (v !== '' && /^\d+(\.\d{1,2})?$/.test(v) ? null : t('valueInvalid')),
+            },
         },
         {
             key: 'actualValue',
@@ -837,7 +851,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit]);
 
     const visibleDeals = deals;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { fieldInputClass } from '@/components/ui/dialog-status-cover';
@@ -16,12 +16,14 @@ import { toastError } from '@/app/lib/toast';
  */
 export default function EditableCell({
     value,
+    display,
     onCommit,
     inputType = 'text',
     validate,
     ariaLabel,
 }: {
     value: string | undefined | null;
+    display?: ReactNode;
     onCommit: (next: string) => Promise<void>;
     inputType?: 'text' | 'url' | 'tel';
     validate?: (next: string) => string | null;
@@ -76,7 +78,9 @@ export default function EditableCell({
                 saving && 'opacity-60',
             )}
         >
-            {current === '' ? (
+            {display !== undefined ? (
+                display
+            ) : current === '' ? (
                 <span className="text-muted-foreground/50">—</span>
             ) : (
                 <span className="text-foreground">{current}</span>
