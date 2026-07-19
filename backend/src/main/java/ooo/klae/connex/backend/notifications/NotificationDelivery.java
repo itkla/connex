@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.notifications;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 
@@ -10,9 +11,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.NotificationQuietHours;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
+import ooo.klae.connex.backend.services.NotificationQuietHoursEvaluator;
 
 /**
  * The single fan-out point for a generated notification. The {@code in_app}
@@ -24,6 +28,9 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
  * dispatch propagates its failure (it is the load-bearing inbox, and callers such
  * as the rule engine record that failure); secondary channels are isolated so an
  * email outage never blocks in-app delivery.
+ *
+ * <p>During quiet hours the durable in-app write and unread-state version still advance,
+ * while detailed realtime frames and first-occurrence email delivery are suppressed.
  *
  * <p>A single dedupe pre-read serves two purposes. It gates email to the first
  * occurrence, and it classifies the in-app write as <em>created</em> (no prior
@@ -52,6 +59,10 @@ public class NotificationDelivery {
     private final PreferenceMapper preferenceMapper;
     private final NotificationPushPublisher pushPublisher;
     private final NotificationStateVersionService stateVersionService;
+    private final NotificationQuietHoursMapper quietHoursMapper;
+    private final NotificationQuietHoursEvaluator quietHoursEvaluator;
+    private final NotificationQuietHoursBypassPolicy bypassPolicy;
+    private final Clock clock;
 
     /**
      * Delivers a notification across every eligible channel.
@@ -71,11 +82,14 @@ public class NotificationDelivery {
         }
 
         boolean persistedChange = changed || (!firstOccurrence && inAppRows > 1);
+        boolean quietHoursActive = persistedChange && quietHoursActive(notification);
+        boolean recipientCanAccess = true;
         if (persistedChange) {
-            pushRealtime(notification, existing, persistedChange);
+            recipientCanAccess = pushRealtime(
+                notification, existing, persistedChange, quietHoursActive);
         }
 
-        if (!firstOccurrence) {
+        if (!firstOccurrence || quietHoursActive || !recipientCanAccess) {
             return;
         }
         for (NotificationDispatcher dispatcher : dispatchers) {
@@ -97,18 +111,25 @@ public class NotificationDelivery {
                 notification.getWorkspaceId(), notification.getRecipientId(), notification.getDedupeKey());
     }
 
-    private void pushRealtime(
-            Notification notification, Notification existing, boolean persistedChange) {
+    private boolean pushRealtime(
+            Notification notification,
+            Notification existing,
+            boolean persistedChange,
+            boolean quietHoursActive) {
         boolean created = existing == null;
         boolean updated = !created && persistedChange;
         if (!created && !updated) {
-            return;
+            return true;
         }
         int id = created ? notification.getId() : existing.getId();
         Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
         if (persisted == null) {
             stateVersionService.markChanged(notification.getRecipientId());
-            return;
+            return false;
+        }
+        if (quietHoursActive) {
+            stateVersionService.markChanged(notification.getRecipientId());
+            return true;
         }
         stateVersionService.markChangedWithDetailedPush(notification.getRecipientId());
         NotificationDto dto = NotificationDto.from(persisted);
@@ -117,6 +138,7 @@ public class NotificationDelivery {
         } else {
             pushPublisher.updated(notification.getRecipientId(), dto, notification.getDedupeKey());
         }
+        return true;
     }
 
     /**
@@ -150,6 +172,20 @@ public class NotificationDelivery {
         } catch (RuntimeException e) {
             log.warn("Notification dispatch on channel {} failed for recipient {}: {}",
                     dispatcher.channel(), notification.getRecipientId(), e.getMessage());
+        }
+    }
+
+    private boolean quietHoursActive(Notification notification) {
+        if (bypassPolicy.bypasses(notification)) {
+            return false;
+        }
+        try {
+            NotificationQuietHours quietHours = quietHoursMapper.findByUserId(notification.getRecipientId());
+            return quietHours != null && quietHoursEvaluator.evaluate(quietHours, clock.instant()).active();
+        } catch (RuntimeException exception) {
+            log.warn("Quiet-hours evaluation failed for recipient {}: {}",
+                notification.getRecipientId(), exception.getMessage());
+            return true;
         }
     }
 }

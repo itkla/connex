@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private NotificationMapper notificationMapper;
@@ -175,7 +176,6 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.dismiss(recipient.getId(), storedDismissed.getId());
 
         Notification resolved = reminder(recipient, "warning", "2026-01-01 00:00:00");
-        resolved.setSourceId(92);
         resolved.setDedupeKey("task.due:92");
         notificationMapper.upsert(resolved);
         Notification storedResolved = notificationMapper
@@ -280,7 +280,6 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
         Notification other = reminder(recipient, "warning", "2026-06-24 00:00:00");
         other.setWorkspaceId(second.getId());
-        other.setSourceId(777);
         other.setDedupeKey("task.due:777");
         notificationMapper.upsert(other);
 
@@ -483,6 +482,146 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertEquals(1, activeInbox(recipient).size());
     }
 
+    @Test
+    void statusFiltersCountsAndSnoozeMutationsShareOneSnapshot() {
+        User recipient = newUser();
+        User otherRecipient = newUser();
+        Notification active = reminder(recipient, "warning", "2026-07-20 01:00:00", 201);
+        Notification snoozed = reminder(recipient, "critical", "2026-07-20 00:00:00", 202);
+        snoozed.setType("deal.close");
+        snoozed.setCategory("deal");
+        notificationMapper.upsert(active);
+        notificationMapper.upsert(snoozed);
+        assertEquals(1, notificationMapper.snooze(
+            recipient.getId(), snoozed.getId(), "2026-07-20 03:00:00", "America/New_York"));
+
+        String asOf = "2026-07-20 02:00:00";
+        List<Notification> unread = notificationMapper.findPage(
+            recipient.getId(), "unread", null, null, null, null, null, null, asOf, 25, 0);
+        List<Notification> filteredSnoozed = notificationMapper.findPage(
+            recipient.getId(), "snoozed", List.of("deal.close"), List.of("deal"),
+            List.of("critical"), workspace.getId(), null, null, asOf, 25, 0);
+        NotificationCountsDto counts = notificationMapper.getUnreadCounts(recipient.getId(), asOf);
+
+        assertEquals(List.of(active.getId()), unread.stream().map(Notification::getId).toList());
+        assertEquals(List.of(snoozed.getId()),
+            filteredSnoozed.stream().map(Notification::getId).toList());
+        assertEquals(1, counts.getUnread());
+        assertEquals(1, counts.getSnoozed());
+        assertEquals("2026-07-20 03:00:00",
+            notificationMapper.getNextSnoozeExpiry(recipient.getId(), asOf));
+        assertNull(notificationMapper.findById(otherRecipient.getId(), snoozed.getId()));
+        assertEquals(0, notificationMapper.snooze(
+            otherRecipient.getId(), snoozed.getId(), "2026-07-21 03:00:00", "UTC"));
+        assertEquals(0, notificationMapper.unsnooze(otherRecipient.getId(), snoozed.getId()));
+
+        assertEquals(1, notificationMapper.snooze(
+            recipient.getId(), snoozed.getId(), asOf, "UTC"));
+        assertTrue(notificationMapper.findPage(
+            recipient.getId(), "active", null, null, null, null, null, null, asOf, 25, 0)
+            .stream().anyMatch(item -> item.getId() == snoozed.getId()));
+
+        assertEquals(1, notificationMapper.unsnooze(recipient.getId(), snoozed.getId()));
+        Notification unsnoozed = notificationMapper.findById(recipient.getId(), snoozed.getId());
+        assertNull(unsnoozed.getSnoozedUntil());
+        assertNull(unsnoozed.getSnoozeTimezone());
+    }
+
+    @Test
+    void inactiveMembershipAndDeletedSourcesAreInaccessibleToReadsAndMutations() {
+        User recipient = newUser();
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Source task");
+        task.setStatus("todo");
+        task.setAssignedTo(recipient);
+        taskMapper.insert(task);
+        Notification notification = reminder(recipient, "warning", "2026-07-20 01:00:00", task.getId());
+        notification.setSourceType("task");
+        notification.setSourceId(task.getId());
+        notificationMapper.upsert(notification);
+
+        assertNotNull(notificationMapper.findById(recipient.getId(), notification.getId()));
+        taskMapper.delete(workspace.getId(), task.getId());
+        assertNull(notificationMapper.findById(recipient.getId(), notification.getId()));
+        assertEquals(0, notificationMapper.markRead(recipient.getId(), notification.getId()));
+
+        Notification unknownSource = reminder(
+            recipient, "warning", "2026-07-20 01:30:00", 206);
+        unknownSource.setType("unknown.event");
+        unknownSource.setSourceType("unknown");
+        unknownSource.setSourceId(999999);
+        notificationMapper.upsert(unknownSource);
+        assertNull(notificationMapper.findById(recipient.getId(), unknownSource.getId()));
+        assertEquals(0, notificationMapper.markRead(recipient.getId(), unknownSource.getId()));
+        assertEquals(0, notificationMapper.countPage(
+            recipient.getId(), "all", List.of("unknown.event"), null, null, null,
+            null, null, "2026-07-20 02:00:00"));
+
+        Notification membershipNotification = reminder(
+            recipient, "warning", "2026-07-20 02:00:00", 204);
+        notificationMapper.upsert(membershipNotification);
+        workspaceMapper.removeMember(workspace.getId(), recipient.getId());
+        assertNull(notificationMapper.findById(recipient.getId(), membershipNotification.getId()));
+        assertEquals(0, notificationMapper.snooze(
+            recipient.getId(), membershipNotification.getId(), "2026-07-21 03:00:00", "UTC"));
+        assertEquals(0, notificationMapper.unsnooze(
+            recipient.getId(), membershipNotification.getId()));
+    }
+
+    @Test
+    void deletedAndUnknownContextsAreInaccessibleToReadsCountsAndMutations() {
+        User recipient = newUser();
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        Notification deletedContext = reminder(
+            recipient, "warning", "2026-07-20 01:00:00", 207);
+        deletedContext.setContextType("deal");
+        deletedContext.setContextId(deal.getId());
+        notificationMapper.upsert(deletedContext);
+
+        assertNotNull(notificationMapper.findById(recipient.getId(), deletedContext.getId()));
+        dealMapper.delete(workspace.getId(), deal.getId());
+        assertNull(notificationMapper.findById(recipient.getId(), deletedContext.getId()));
+        assertEquals(0, notificationMapper.markRead(recipient.getId(), deletedContext.getId()));
+
+        Notification unknownContext = reminder(
+            recipient, "warning", "2026-07-20 01:30:00", 208);
+        unknownContext.setContextType("unknown");
+        unknownContext.setContextId(999999);
+        notificationMapper.upsert(unknownContext);
+
+        assertNull(notificationMapper.findById(recipient.getId(), unknownContext.getId()));
+        assertEquals(0, notificationMapper.countPage(
+            recipient.getId(), "all", List.of("task.due"), null, null, null,
+            null, null, "2026-07-20 02:00:00"));
+        assertEquals(0, notificationMapper.snooze(
+            recipient.getId(), unknownContext.getId(), "2026-07-21 03:00:00", "UTC"));
+    }
+
+    @Test
+    void workspaceJoinIsVisibleOnlyWhileMembershipIsPendingOrActive() {
+        User recipient = newUser();
+        Workspace invitedWorkspace = new Workspace();
+        invitedWorkspace.setName("Invited WS");
+        invitedWorkspace.setSlug("invited-" + unique());
+        workspaceMapper.insert(invitedWorkspace);
+        workspaceMapper.addPendingMember(invitedWorkspace.getId(), recipient.getId(), "member");
+        Notification invitation = reminder(recipient, "info", "2026-07-20 01:00:00", 205);
+        invitation.setWorkspaceId(invitedWorkspace.getId());
+        invitation.setType("workspace.join");
+        invitation.setCategory("workspace");
+        notificationMapper.upsert(invitation);
+
+        assertNotNull(notificationMapper.findById(recipient.getId(), invitation.getId()));
+        workspaceMapper.removeMember(invitedWorkspace.getId(), recipient.getId());
+        assertNull(notificationMapper.findById(recipient.getId(), invitation.getId()));
+        assertEquals(0, notificationMapper.snooze(
+            recipient.getId(), invitation.getId(), "2026-07-21 03:00:00", "UTC"));
+    }
+
     private List<Notification> activeInbox(User recipient) {
         return notificationMapper.findPage(recipient.getId(), "active", null, null, null, 50, 0);
     }
@@ -510,8 +649,6 @@ class NotificationMapperTest extends AbstractMapperTest {
         notification.setTemplateVersion(1);
         notification.setTitle("Task due");
         notification.setBody("Task body");
-        notification.setSourceType("task");
-        notification.setSourceId(sourceId);
         notification.setSourceLabel("Send proposal");
         notification.setActionUrl("/activity/tasks?taskId=" + sourceId);
         notification.setData("{\"taskId\":" + sourceId + "}");
