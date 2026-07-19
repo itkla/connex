@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewDealDialog, { NewDealForm } from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, { NewDealForm, isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
@@ -106,6 +106,15 @@ export default function DealCreateContainer({
         onOpenChange(next);
     };
 
+    const seedPipelineId = defaults?.pipelineId ?? 0;
+    const seededBaseline: CreateDealPayload = {
+        ...EMPTY_DRAFT,
+        company: defaults?.companyId ?? null,
+        pipeline: seedPipelineId,
+        stage: (seedPipelineId ? stagesByPipeline[seedPipelineId] : undefined)?.[0]?.id ?? 0,
+    };
+    const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
+
     const createNewDeal = async () => {
         setSucceeded(false);
         setCreating(true);
@@ -160,6 +169,7 @@ export default function DealCreateContainer({
             stagesByPipeline={stagesByPipeline}
             isCreating={creating}
             isSuccess={succeeded}
+            isDirty={isDirty}
             createNewDeal={createNewDeal}
         />
     );
