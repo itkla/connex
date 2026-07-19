@@ -166,6 +166,10 @@
     "reset": "Reset columns",
     "sorted": "sorted"
   },
+  "DuplicateWarning": {
+    "heading": "You may already have:",
+    "more": "+{count} more"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",
