@@ -120,6 +120,12 @@ export type AppAction = {
     group: ActionGroup;
     /** Key within the `Actions` next-intl namespace that resolves the display label. */
     labelKey: string;
+    /**
+     * A resolved display label used verbatim when present, taking precedence over {@link labelKey}.
+     * For dynamic actions whose label is data (e.g. a pinned saved view's name) and so cannot be a
+     * translation key; static actions omit it and are localized via {@link labelKey}.
+     */
+    label?: string;
     /** Locale-neutral search aliases (e.g. `csv`, `kanban`). */
     keywords?: readonly string[];
     /** Key within the `Actions` namespace resolving a comma-separated, per-locale alias list. */

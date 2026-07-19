@@ -432,7 +432,7 @@ function TypeSelector({
                         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
-                        <span className="flex-1 text-sm font-medium text-foreground">{t(action.labelKey)}</span>
+                        <span className="flex-1 text-sm font-medium text-foreground">{action.label ?? t(action.labelKey)}</span>
                     </motion.button>
                 );
             })}

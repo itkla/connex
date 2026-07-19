@@ -70,7 +70,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
             const Icon = action.icon;
             return {
                 key: id,
-                label: t(action.labelKey),
+                label: action.label ?? t(action.labelKey),
                 icon: Icon ? <Icon className="size-4 text-muted-foreground" /> : null,
                 onSelect: () => void run(id, { source: 'menu', record }),
             };

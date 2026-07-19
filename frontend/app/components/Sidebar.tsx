@@ -36,7 +36,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -56,6 +56,8 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useSidebarMode } from '@/app/hooks/useSidebarMode';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePinnedViews } from '@/app/hooks/usePinnedViews';
+import { savedViewHref, savedViewRecordIcon } from '@/app/lib/savedViewLink';
 
 type NavItem = {
     label: string;
@@ -432,6 +434,18 @@ export default function Sidebar({
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
+    const { pins } = usePinnedViews();
+    const pinnedSection = useMemo<NavSection | null>(() => {
+        if (pins.length === 0) return null;
+        return {
+            label: t("sectionPinnedViews"),
+            items: pins.map((pin) => ({
+                label: pin.name,
+                href: savedViewHref(pin),
+                icon: savedViewRecordIcon(pin.recordType),
+            })),
+        };
+    }, [pins, t]);
     const { mode } = useSidebarMode();
     const isMobile = useIsMobile();
     const rail = !isMobile && mode === "rail";
@@ -475,6 +489,14 @@ export default function Sidebar({
                 <QuickCreateLauncher compact={rail} />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
+                    {pinnedSection && (
+                        <NavGroup
+                            key="pinned-views"
+                            section={pinnedSection}
+                            pathname={pathname}
+                            rail={rail}
+                        />
+                    )}
                     {sections.map((section) => (
                         <NavGroup
                             key={section.label}
