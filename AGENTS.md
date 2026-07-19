@@ -68,6 +68,8 @@ This repo favors **aggressive parallel fan-out**. Reach for subagents and workfl
 - **Backend work → codex.** Defer backend work to a **gpt-5.6** agent at **xhigh** reasoning effort spawned via the **codex** CLI. Claude handles the frontend and gap-filling where necessary.
 - **Fundamental changes → Fable 5 advisor.** For high-level work that involves fundamental changes, consult a **Fable 5** subagent as an advisor before acting.
 
+**Plan-first dispatch (non-negotiable).** Every subagent dispatched to *implement* something — Claude or codex — must produce a short plan **before** writing code: scope and approach, files to touch, API/data contracts, migration versions (pre-assigned by the orchestrator to avoid Flyway collisions), and a test plan. The orchestrator reviews that plan against the codebase and these guides, corrects it if needed, and only then lets implementation proceed — for codex this means a read-only planning run first, then an implementation run with the approved plan embedded. Pure discovery, review, and verification agents are exempt.
+
 Default to delegating discovery, review, and any wide sweep. Keep synthesis and the actual edits coherent in one place. If you're the fork/subagent, execute directly — don't re-delegate.
 
 ## Coding conventions
