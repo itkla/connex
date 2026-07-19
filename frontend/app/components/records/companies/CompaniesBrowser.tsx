@@ -191,6 +191,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         applySort: applyServerSort,
         revision,
         reload,
+        patchItem,
     } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams, { urlSync: true });
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
@@ -577,7 +578,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         }
     };
 
-    const inlineEdit = useInlineEdit<Company>();
+    const inlineEdit = useInlineEdit<Company>(patchItem);
     const saveCompany = useCallback(
         (full: Company) =>
             updateCompany(full.id, {
@@ -609,25 +610,25 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             key: 'website',
             label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'website'), save: (c, v) => inlineEdit.commit(c, 'website', v, saveCompany), inputType: 'url' },
+            editable: { getValue: (c) => c.website, save: (c, v) => inlineEdit.commit(c, 'website', v, saveCompany), inputType: 'url' },
         },
         {
             key: 'industry',
             label: t('columnIndustry'),
             getSortValue: (c) => c.industry ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'industry'), save: (c, v) => inlineEdit.commit(c, 'industry', v, saveCompany) },
+            editable: { getValue: (c) => c.industry, save: (c, v) => inlineEdit.commit(c, 'industry', v, saveCompany) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'phone'), save: (c, v) => inlineEdit.commit(c, 'phone', v, saveCompany), inputType: 'tel' },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveCompany), inputType: 'tel' },
         },
         {
             key: 'address',
             label: t('columnAddress'),
             getSortValue: (c) => c.address ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'address'), save: (c, v) => inlineEdit.commit(c, 'address', v, saveCompany) },
+            editable: { getValue: (c) => c.address, save: (c, v) => inlineEdit.commit(c, 'address', v, saveCompany) },
         },
         {
             key: 'createdAt',

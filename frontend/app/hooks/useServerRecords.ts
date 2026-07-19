@@ -95,6 +95,10 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
 
     const reload = useCallback(() => setRevision((value) => value + 1), []);
 
+    const patchItem = useCallback((id: number, partial: Partial<T>) => {
+        setItems((prev) => prev.map((item) => ((item as { id?: number }).id === id ? { ...item, ...partial } : item)));
+    }, []);
+
     const changeSize = useCallback((next: number) => { setSize(next); setPage(1); }, []);
 
     const onSortChange = useCallback((key: string) => {
@@ -121,6 +125,6 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         size, setSize: changeSize,
         query, setQuery, applyQuery,
         sortKey, sortDirection, onSortChange, applySort,
-        revision, reload,
+        revision, reload, patchItem,
     };
 }

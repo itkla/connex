@@ -120,6 +120,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         applySort: applyServerSort,
         revision,
         reload,
+        patchItem,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
@@ -486,7 +487,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         }
     };
 
-    const inlineEdit = useInlineEdit<Contact>();
+    const inlineEdit = useInlineEdit<Contact>(patchItem);
     const saveContact = useCallback(
         (full: Contact) =>
             updateContact(full.id, {
@@ -512,13 +513,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'email',
             label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'email'), save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
+            editable: { getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'phone'), save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
         },
         {
             key: 'company',
@@ -531,7 +532,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
-            editable: { getValue: (c) => inlineEdit.value(c, 'title'), save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
+            editable: { getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
         },
         {
             key: 'owner',
