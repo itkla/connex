@@ -19,6 +19,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 /**
  * Migrates representative populated V73 data through the current Flyway lineage on real MySQL.
  */
@@ -74,14 +77,32 @@ class FlywayUpgradeIntegrationTest {
         seedV81Data();
         migrateTo("84");
         seedV84Reservation();
+        migrateTo("110");
+        seedV110SavedView();
 
         Flyway latest = flyway(null);
         latest.migrate();
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
-        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("89")) >= 0);
+        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("111")) >= 0);
         try (Connection connection = connection()) {
+            JsonNode migratedConfig = JsonMapper.builder().build().readTree(
+                stringScalar(connection, "SELECT config_json FROM saved_view WHERE id = 9101"));
+            JsonNode expectedConfig = JsonMapper.builder().build().readTree("""
+                {
+                  "query":"legacy",
+                  "filters":{"owner":["me"]},
+                  "unknown":{"nested":[1,true]},
+                  "version":1
+                }
+                """);
+            assertEquals(expectedConfig, migratedConfig);
+            assertEquals("2025-06-15 12:34:56", stringScalar(connection, """
+                SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s')
+                FROM saved_view
+                WHERE id = 9101
+                """));
             assertEquals(6, scalar(connection, """
                 SELECT COUNT(*)
                 FROM (
@@ -231,6 +252,20 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
+    private static void seedV110SavedView() throws SQLException {
+        try (Connection connection = connection()) {
+            execute(connection, """
+                INSERT INTO saved_view (
+                    id, workspace_id, user_id, record_type, name, config_json, position,
+                    created_at, updated_at)
+                VALUES (
+                    9101, 9101, 9101, 'company', 'Legacy saved view',
+                    '{"query":"legacy","filters":{"owner":["me"]},"unknown":{"nested":[1,true]}}',
+                    4, '2025-06-15 12:00:00', '2025-06-15 12:34:56')
+                """);
+        }
+    }
+
     private static Flyway migrateTo(String version) {
         Flyway flyway = flyway(version);
         flyway.migrate();
@@ -264,6 +299,14 @@ class FlywayUpgradeIntegrationTest {
                 ResultSet resultSet = statement.executeQuery(sql)) {
             resultSet.next();
             return resultSet.getLong(1);
+        }
+    }
+
+    private static String stringScalar(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(sql)) {
+            resultSet.next();
+            return resultSet.getString(1);
         }
     }
 

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,8 +38,10 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
+import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Proves the service-layer offboarding fan-out does what the dropped
@@ -52,6 +55,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private UserOffboardingService offboardingService;
     @Autowired private NotificationMapper notificationMapper;
     @Autowired private SavedViewMapper savedViewMapper;
+    @Autowired private SavedViewPreferenceMapper savedViewPreferenceMapper;
     @Autowired private UserDashboardMapper userDashboardMapper;
     @Autowired private ReportMapper reportMapper;
     @Autowired private RuleMapper ruleMapper;
@@ -59,6 +63,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private ConsentMapper consentMapper;
     @Autowired private SuppressionMapper suppressionMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private ObjectMapper objectMapper;
 
     @Test
     void authoredNoteRefusesDeletion() {
@@ -98,6 +103,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         dealMapper.insertCollaborators(workspace.getId(), deal.getId(), List.of(target.getId()));
         Task task = newTask(target, null, null);
         SavedView view = savedView(target);
+        SavedView anotherView = savedView(newUser());
+        savedViewPreferenceMapper.insertPin(workspace.getId(), target.getId(), anotherView.getId(), 0);
+        savedViewPreferenceMapper.upsertDefault(
+            workspace.getId(), target.getId(), "company", anotherView.getId());
         userDashboardMapper.upsert(dashboard(target));
         newNotification(workspace.getId(), target.getId());
         Rule rule = ruleFor(target);
@@ -119,7 +128,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
-        assertNull(savedViewMapper.getById(workspace.getId(), target.getId(), view.getId()));
+        assertNull(savedViewMapper.getAccessibleById(workspace.getId(), target.getId(), view.getId()));
+        assertNull(savedViewPreferenceMapper.getPin(
+            workspace.getId(), target.getId(), anotherView.getId()));
+        assertNull(savedViewPreferenceMapper.getDefault(workspace.getId(), target.getId(), "company"));
         assertNull(userDashboardMapper.getByWorkspaceAndUser(workspace.getId(), target.getId()));
         assertEquals(0, notificationMapper.countPage(target.getId(), null, null, null, null));
         Rule after = ruleMapper.getById(workspace.getId(), rule.getId());
@@ -157,6 +169,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         newNotification(workspace.getId(), member.getId());
         Task task = newTask(member, null, null);
         Campaign campaign = campaignFor(member);
+        SavedView memberView = savedView(member);
+        SavedView retainedOtherWorkspaceView = savedViewInWorkspace(otherWorkspace, member);
+        SavedView sharedTarget = savedView(newUser());
+        savedViewPreferenceMapper.insertPin(workspace.getId(), member.getId(), sharedTarget.getId(), 0);
+        savedViewPreferenceMapper.upsertDefault(
+            workspace.getId(), member.getId(), "company", sharedTarget.getId());
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
@@ -171,7 +189,39 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
         assertNull(campaignMapper.getCampaign(workspace.getId(), campaign.getId()).getOwnerUserId());
+        assertNull(savedViewMapper.getAccessibleById(
+            workspace.getId(), member.getId(), memberView.getId()));
+        assertNull(savedViewPreferenceMapper.getPin(
+            workspace.getId(), member.getId(), sharedTarget.getId()));
+        assertNull(savedViewPreferenceMapper.getDefault(workspace.getId(), member.getId(), "company"));
+        assertNotNull(savedViewMapper.getAccessibleById(
+            otherWorkspace.getId(), member.getId(), retainedOtherWorkspaceView.getId()));
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
+    }
+
+    @Test
+    void freshMembershipPurgesResidualSavedViewDataOnlyInTheRejoinedWorkspace() {
+        User returning = newUser();
+        SavedView residualView = savedView(returning);
+        SavedView sharedTarget = savedView(newUser());
+        savedViewPreferenceMapper.insertPin(
+            workspace.getId(), returning.getId(), sharedTarget.getId(), 0);
+        savedViewPreferenceMapper.upsertDefault(
+            workspace.getId(), returning.getId(), "company", sharedTarget.getId());
+        Workspace otherWorkspace = newOtherWorkspace();
+        SavedView retainedView = savedViewInWorkspace(otherWorkspace, returning);
+        workspaceMapper.removeMember(workspace.getId(), returning.getId());
+
+        offboardingService.prepareFreshMembership(workspace.getId(), returning.getId());
+
+        assertNull(savedViewMapper.getAccessibleById(
+            workspace.getId(), returning.getId(), residualView.getId()));
+        assertNull(savedViewPreferenceMapper.getPin(
+            workspace.getId(), returning.getId(), sharedTarget.getId()));
+        assertNull(savedViewPreferenceMapper.getDefault(
+            workspace.getId(), returning.getId(), "company"));
+        assertNotNull(savedViewMapper.getAccessibleById(
+            otherWorkspace.getId(), returning.getId(), retainedView.getId()));
     }
 
     private Workspace newOtherWorkspace() {
@@ -202,12 +252,19 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     private SavedView savedView(User owner) {
+        return savedViewInWorkspace(workspace, owner);
+    }
+
+    private SavedView savedViewInWorkspace(Workspace targetWorkspace, User owner) {
         SavedView view = new SavedView();
-        view.setWorkspaceId(workspace.getId());
+        view.setWorkspaceId(targetWorkspace.getId());
         view.setUserId(owner.getId());
         view.setRecordType("company");
         view.setName("View " + unique());
-        view.setConfigJson("{}");
+        var config = objectMapper.createObjectNode();
+        config.put("version", 1);
+        view.setConfig(config);
+        view.setVisibility("private");
         savedViewMapper.insert(view);
         return view;
     }

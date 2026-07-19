@@ -42,6 +42,8 @@ class OffboardingIndexArchTest {
         new String[] {"rule", "run_as_user_id"},
         new String[] {"rule", "created_by_id"},
         new String[] {"saved_view", "user_id"},
+        new String[] {"saved_view_pin", "user_id"},
+        new String[] {"saved_view_default", "user_id"},
         new String[] {"user_dashboard", "user_id"},
         new String[] {"report_definition", "created_by"},
         new String[] {"report_snapshot", "generated_by"},

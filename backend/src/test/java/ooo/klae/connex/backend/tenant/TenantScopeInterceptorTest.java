@@ -48,6 +48,8 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.getAllCompanies"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DealMapper.search"));
         assertTrue(interceptor.requiresResolvedContext(NS + "ReportMapper.getDefinitions"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.getPin"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUser"));
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
         assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
     }
@@ -70,6 +72,13 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "CampaignMapper.clearSnapshotCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ConsentMapper.clearEventCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SuppressionMapper.clearCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewMapper.deleteForFreshMembership"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));
         assertTrue(interceptor.requiresResolvedContext(NS + "PersonMapper.clearMemberOwnership"));
     }

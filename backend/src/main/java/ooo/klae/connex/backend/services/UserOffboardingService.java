@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
+import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -67,6 +68,7 @@ public class UserOffboardingService {
     private final RuleMapper ruleMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
+    private final SavedViewPreferenceMapper savedViewPreferenceMapper;
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
     private final UserMapper userMapper;
@@ -109,21 +111,22 @@ public class UserOffboardingService {
     }
 
     /**
-     * Clears any notification rows addressed to a user who is about to receive
-     * a brand-new membership in the workspace. With the cross-plane cascades
-     * gone (#440 increment 3), a notification inserted while an earlier
-     * removal was committing survives as an orphan; without this clean it
-     * would resurface in the rejoiner's inbox, and a ghost deal-collaborator
-     * seat would silently resurrect access from a previous tenure. Guarded on
-     * the absence of ANY membership row so a pending invitee's legitimate
-     * notifications are never touched. Called by every fresh-membership path:
-     * invites, invite links, and SSO JIT provisioning.
+     * Clears personal workspace data for a user who is about to receive a
+     * brand-new membership. This removes saved views and preferences left by
+     * legacy removal flows, notifications inserted while an earlier removal
+     * was committing, and stale deal-collaborator seats. Guarded on the absence
+     * of any membership row so a pending invitee's legitimate data is never
+     * touched. Called by every fresh-membership path: invites, invite links,
+     * and SSO JIT provisioning.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
         if (!workspaceMapper.isMemberIncludingPending(workspaceId, userId)) {
+            savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
+            savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
+            savedViewMapper.deleteForFreshMembership(workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         }
@@ -133,7 +136,8 @@ public class UserOffboardingService {
      * Detaches a departing member's content within one workspace the way the
      * dropped cross-plane constraints used to: tasks are unassigned and company,
      * contact, and deal ownership is cleared (SET NULL) so authored history survives,
-     * while the member's notifications and deal-collaborator seats are deleted (CASCADE).
+     * while the member's saved-view preferences, owned saved views, notifications, and
+     * deal-collaborator seats are deleted.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction.
      *
@@ -142,6 +146,9 @@ public class UserOffboardingService {
      */
     public void detachMemberContent(int workspaceId, int userId) {
         notificationMapper.lockRecipientMemberships(userId);
+        savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
+        savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
+        savedViewMapper.deleteForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
@@ -154,7 +161,7 @@ public class UserOffboardingService {
     /**
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
-     * (CASCADE — saved views, dashboards, notifications, collaborator seats)
+     * (CASCADE — saved-view preferences, saved views, dashboards, notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
      * campaign ownership, task assignment, uploader, notification actor, report and
      * campaign actors, rule principals, consent/suppression actors, share grantors).
@@ -188,6 +195,8 @@ public class UserOffboardingService {
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
         Set<Integer> actorRecipientIds = new TreeSet<>(locks.actorRecipientIds());
         actorRecipientIds.addAll(notificationMapper.lockRecipientIdsByActor(userId));
+        savedViewPreferenceMapper.deletePinsForUserAnywhere(userId);
+        savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
