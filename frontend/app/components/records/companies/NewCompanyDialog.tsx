@@ -448,14 +448,14 @@ export default function NewCompanyDialog({
                                     className={cn(inputBase, 'pl-9 pr-3', fieldErrors.name && inputError)}
                                     placeholder={t('placeholderName')}
                                     aria-invalid={Boolean(fieldErrors.name)}
-                                    aria-describedby={fieldErrors.name ? 'company-name-error' : undefined}
+                                    aria-describedby={[fieldErrors.name && 'company-name-error', nameMatches.matches.length > 0 && 'company-name-duplicate'].filter(Boolean).join(' ') || undefined}
                                     autoComplete="organization"
                                     autoFocus
                                     required
                                 />
                             </div>
                             {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                            <DuplicateNameWarning kind="company" matches={nameMatches.matches} total={nameMatches.total} />
+                            <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                         </div>
 
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -852,7 +852,7 @@ export function NewCompanyForm({
                             />
                         </div>
                         {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                        <DuplicateNameWarning kind="company" matches={nameMatches.matches} total={nameMatches.total} />
+                        <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>

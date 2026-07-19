@@ -16,10 +16,12 @@ function recordHref(kind: DuplicateKind, id: number): string {
  * when there are no matches.
  */
 export default function DuplicateNameWarning({
+    id,
     kind,
     matches,
     total,
 }: {
+    id?: string;
     kind: DuplicateKind;
     matches: DuplicateMatch[];
     total: number;
@@ -29,7 +31,7 @@ export default function DuplicateNameWarning({
     const extra = total - matches.length;
 
     return (
-        <div className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-500" role="status">
+        <div id={id} className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-500" role="status">
             <ExclamationTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
             <div className="min-w-0">
                 <span>{t('heading')} </span>

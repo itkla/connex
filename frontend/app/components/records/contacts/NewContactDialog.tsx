@@ -765,12 +765,12 @@ function ContactDetailsFields({
                         className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
                         placeholder={t('namePlaceholder')}
                         aria-invalid={Boolean(fieldErrors.name)}
-                        aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                        aria-describedby={[fieldErrors.name && 'name-error', nameMatches.matches.length > 0 && 'contact-name-duplicate'].filter(Boolean).join(' ') || undefined}
                         required
                     />
                 </div>
                 {fieldErrors.name && <p id="name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                <DuplicateNameWarning kind="person" matches={nameMatches.matches} total={nameMatches.total} />
+                <DuplicateNameWarning id="contact-name-duplicate" kind="person" matches={nameMatches.matches} total={nameMatches.total} />
             </div>
 
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
