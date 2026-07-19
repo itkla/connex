@@ -289,6 +289,7 @@ export function ActivityDialogForm({
                             value={type}
                             onChange={setType}
                             getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                            disabled={followUpFailed}
                         />
                     </div>
 
@@ -308,6 +309,7 @@ export function ActivityDialogForm({
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.subject && fieldErrorClass)}
                                 aria-invalid={Boolean(fieldErrors.subject)}
                                 aria-describedby={fieldErrors.subject ? 'activity-subject-error' : undefined}
+                                disabled={followUpFailed}
                                 autoFocus
                                 required
                             />
@@ -324,6 +326,7 @@ export function ActivityDialogForm({
                                 type="datetime-local"
                                 value={when}
                                 onChange={(e) => setWhen(e.target.value)}
+                                disabled={followUpFailed}
                                 className={cn(fieldInputClass, 'pl-9 pr-3')}
                             />
                         </div>
@@ -331,7 +334,7 @@ export function ActivityDialogForm({
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                         <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
-                        <div className="group relative">
+                        <div className={cn('group relative', followUpFailed && 'pointer-events-none opacity-60')}>
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
                             <MentionEditor
                                 id="activity-notes"
@@ -355,6 +358,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-person"
                                     placeholder={t('personPlaceholder')}
+                                    disabled={followUpFailed}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -385,6 +389,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-deal"
                                     placeholder={t('dealPlaceholder')}
+                                    disabled={followUpFailed}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
