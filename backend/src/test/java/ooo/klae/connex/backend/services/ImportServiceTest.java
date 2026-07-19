@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.ColumnMapping;
+import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
 import ooo.klae.connex.backend.dto.ImportRequest;
 import ooo.klae.connex.backend.dto.ImportResult;
@@ -37,6 +39,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
     @Autowired ExportService exportService;
+    @Autowired DealLineItemService dealLineItemService;
     @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
     @Autowired CustomFieldDefinitionMapper customFieldDefinitionMapper;
@@ -153,6 +156,38 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportResult second = importService.commitDeals(req(mapping, rows, "fill_empty"));
         assertEquals(0, second.getCreated());
         assertEquals(1, second.getUpdated());
+    }
+
+    @Test
+    void dealImportPreservesValueWhenMatchedDealHasLineItems() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setName("Imported deal line " + unique());
+        lineItem.setUnitPrice(new BigDecimal("25.00"));
+        lineItem.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), lineItem);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Close", "expectedCloseDate"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Value", "2500.00",
+                "Close", "2027-12-31",
+                "Company", company.getName())),
+            "overwrite"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(1, result.getUpdated());
+        assertTrue(result.getFailed().isEmpty());
+        assertEquals(1000.0, updated.getValue());
+        assertEquals("2027-12-31", updated.getExpectedCloseDate());
     }
 
     @Test

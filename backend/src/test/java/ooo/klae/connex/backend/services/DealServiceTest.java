@@ -12,10 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
@@ -52,6 +58,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
 @RecordApplicationEvents
@@ -64,6 +71,7 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
+    @MockitoSpyBean DealMapper dealMapperSpy;
 
     @Test
     void aggregateReadsAreAssembledAndIsolatedByWorkspace() {
@@ -677,6 +685,23 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void updateNameNoOpSkipsWriteAuditAndEvents() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateName(deal.getId(), deal.getName());
+
+        assertEquals(deal.getName(), updated.getName());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateName(anyInt(), anyInt(), any(String.class));
+    }
+
+    @Test
     void updateValueChangesOnlyValueAndPublishesExistingValueEvent() throws Exception {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -708,6 +733,41 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(125000.0, changes.path("value").path("new").asDouble());
         assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
         assertTrue(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void updateValueNoOpSkipsWriteAuditAndEvents() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
+
+        assertEquals(1000.0, updated.getValue());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
+    }
+
+    @Test
+    void updateValueNoOpRemainsAvailableWithLineItems() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
+
+        assertEquals(1000.0, updated.getValue());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
     }
 
     @Test
@@ -1214,6 +1274,12 @@ class DealServiceTest extends AbstractServiceTest {
             .orElseThrow();
         assertNotNull(audit.getChanges());
         return objectMapper.readTree(audit.getChanges());
+    }
+
+    private long dealUpdateAuditCount(int dealId) {
+        return auditService.forEntity("deal", dealId, 20, 0).stream()
+            .filter(entry -> "deal.update".equals(entry.getAction()))
+            .count();
     }
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {

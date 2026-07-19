@@ -805,6 +805,9 @@ public class DealService {
     public Deal updateName(int id, String name) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = requireDealForUpdate(workspaceId, id);
+        if (Objects.equals(before.getName(), name)) {
+            return hydrateReferences(workspaceId, before);
+        }
         dealMapper.updateName(workspaceId, id, name);
         Deal after = requireDeal(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
@@ -826,10 +829,13 @@ public class DealService {
     public Deal updateValue(int id, BigDecimal value) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = requireDealForUpdate(workspaceId, id);
+        boolean valueChanged = BigDecimal.valueOf(before.getValue()).compareTo(value) != 0;
+        if (!valueChanged) {
+            return hydrateReferences(workspaceId, before);
+        }
         if (dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
             throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
         }
-        boolean valueChanged = BigDecimal.valueOf(before.getValue()).compareTo(value) != 0;
         dealMapper.updateValue(workspaceId, id, value);
         Deal after = requireDeal(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
@@ -837,9 +843,7 @@ public class DealService {
             auditService.singleChange("value", before.getValue(), after.getValue()));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
-        if (valueChanged) {
-            ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
-        }
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
         return hydrateReferences(workspaceId, after);
     }
 
