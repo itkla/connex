@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import {
     Bars3Icon,
     CheckCircleIcon,
@@ -14,7 +14,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import { springJiggle, springSnappy, instant } from '@/app/lib/motion';
+import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/app/lib/motion';
 import { getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 
@@ -28,12 +28,42 @@ function openQuickCreate() {
     window.dispatchEvent(new CustomEvent('connex:open-quick-create'));
 }
 
-const slotBase =
-    'group flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand';
+/** Liquid-glass entrance: the pill rises and settles, then staggers its slots into place. */
+const barVariants: Variants = {
+    hidden: { opacity: 0, y: 18 },
+    show: { opacity: 1, y: 0, transition: { ...springSmooth, staggerChildren: 0.045, delayChildren: 0.05 } },
+};
 
-const indicatorBase = 'relative flex h-7 w-12 items-center justify-center rounded-full transition-colors';
+/** Each slot pops in with a soft overshoot, matching the pill's liquid settle. */
+const slotVariants: Variants = {
+    hidden: { opacity: 0, y: 10, scale: 0.8 },
+    show: { opacity: 1, y: 0, scale: 1, transition: springSnappy },
+};
+
+const slotBase =
+    'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar';
+
+const indicatorWrap = 'relative flex h-7 w-12 items-center justify-center';
 
 const labelBase = 'max-w-full truncate text-[10px] leading-none font-medium';
+
+/**
+ * The active destination's liquid-glass lens: a brand-tinted glass capsule that springs in behind the
+ * icon and blurs out on exit, so navigating between destinations reads as the light re-settling rather
+ * than a hard swap. Rendered inside an {@link AnimatePresence} so it can animate away.
+ */
+function ActiveLens({ reduce }: { reduce: boolean }) {
+    return (
+        <motion.span
+            aria-hidden
+            initial={reduce ? false : { opacity: 0, scale: 0.5, filter: 'blur(5px)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, filter: 'blur(5px)' }}
+            transition={reduce ? instant : { default: springJiggle, filter: { duration: 0.2, ease: easeOut } }}
+            className="absolute inset-0 rounded-full border border-white/25 bg-brand/25 shadow-[inset_0_1px_0_rgb(255_255_255/0.45),inset_0_-1px_2px_rgb(0_0_0/0.12)] backdrop-blur-sm"
+        />
+    );
+}
 
 function BarLink({
     href,
@@ -57,6 +87,7 @@ function BarLink({
     return (
         <motion.div
             className="flex flex-1"
+            variants={reduce ? undefined : slotVariants}
             whileTap={reduce ? undefined : { scale: 0.9 }}
             transition={reduce ? instant : springSnappy}
         >
@@ -66,12 +97,13 @@ function BarLink({
                 aria-current={active ? 'page' : undefined}
                 className={cn(slotBase, active ? 'text-brand-dark dark:text-brand' : 'hover:text-foreground')}
             >
-                <span className={cn(indicatorBase, active && 'bg-brand-light')}>
-                    <Icon className="size-6" />
+                <span className={indicatorWrap}>
+                    <AnimatePresence>{active && <ActiveLens key="lens" reduce={reduce} />}</AnimatePresence>
+                    <Icon className="relative z-10 size-6" />
                     {badge != null && badge > 0 && (
                         <span
                             aria-hidden
-                            className="absolute -top-1 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-sidebar"
+                            className="absolute z-10 -top-1 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-sidebar"
                         >
                             {badge > 99 ? '99+' : badge}
                         </span>
@@ -102,12 +134,13 @@ function BarButton({
             type="button"
             onClick={onClick}
             aria-label={label}
+            variants={reduce ? undefined : slotVariants}
             whileTap={reduce ? undefined : { scale: 0.9 }}
             transition={reduce ? instant : springSnappy}
             className={cn(slotBase, 'hover:text-foreground')}
         >
-            <span className={indicatorBase}>
-                <Icon className="size-6" />
+            <span className={indicatorWrap}>
+                <Icon className="relative z-10 size-6" />
             </span>
             <span className={labelBase}>{caption}</span>
         </motion.button>
@@ -116,11 +149,12 @@ function BarButton({
 
 /**
  * Mobile-only floating action bar spanning the viewport width (inset by the shell padding): Home ·
- * Search · New (brand-filled) · Tasks · More, each an icon with a super-small caption. Hidden at the
- * `md` breakpoint where the desktop sidebar takes over. "New" and "Search" drive the shared Quick Create
- * launcher and the command palette via app-shell custom events; "More" opens the existing sidebar drawer.
- * Floats above the content with a glass surface and rounded-full shape, and sits below all overlay
- * backdrops (z-30) so an open sheet/palette covers it. Respects the device safe-area inset.
+ * Search · New (center liquid-glass circle) · Tasks · More. Hidden at the `md` breakpoint where the
+ * desktop sidebar takes over. The whole surface is an Apple-Liquid-Glass-inspired capsule (web
+ * approximation): translucent, blurred, saturation-boosted, with a specular rim. "New" and "Search"
+ * drive the shared Quick Create launcher and the command palette via app-shell custom events; "More"
+ * opens the existing sidebar drawer. Sits below all overlay backdrops (z-30) so an open sheet/palette
+ * covers it, and respects the device safe-area inset. All motion collapses under reduced-motion.
  *
  * @param onOpenMore - opens the full sidebar drawer (workspace/account/all destinations)
  */
@@ -155,11 +189,16 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
             className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 px-4 md:hidden"
         >
             <motion.div
-                initial={reduce ? false : { y: 16, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={reduce ? instant : springSnappy}
-                className="pointer-events-auto flex w-full items-stretch gap-0.5 rounded-full border border-sidebar-border bg-sidebar/75 px-1.5 py-1.5 shadow-[0_1px_0_0_rgb(255_255_255/0.06)_inset,0_10px_30px_-8px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150"
+                initial={reduce ? false : 'hidden'}
+                animate={reduce ? undefined : 'show'}
+                variants={reduce ? undefined : barVariants}
+                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 rounded-full border border-white/15 bg-sidebar/60 px-1.5 py-1.5 shadow-[inset_0_1px_0.5px_rgb(255_255_255/0.4),inset_0_-1px_1px_rgb(0_0_0/0.12),0_14px_36px_-10px_rgb(0_0_0/0.5)] backdrop-blur-xl backdrop-saturate-150"
             >
+                <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-8 top-px h-px rounded-full bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                />
+
                 <BarLink
                     href="/dashboard"
                     label={tNav('navDashboard')}
@@ -179,17 +218,22 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                 <motion.button
                     type="button"
                     onClick={openQuickCreate}
-                    whileTap={reduce ? undefined : { scale: 0.92 }}
+                    variants={reduce ? undefined : slotVariants}
+                    whileTap={reduce ? undefined : { scale: 0.88 }}
                     transition={reduce ? instant : springJiggle}
                     aria-label={tActions('quickCreate.trigger')}
                     className="group flex flex-1 items-center justify-center rounded-2xl focus-visible:outline-none"
                 >
-                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/25 bg-brand/85 text-brand-foreground shadow-[inset_0_1px_0.5px_rgb(255_255_255/0.55),inset_0_-2px_4px_rgb(0_0_0/0.15),0_6px_16px_-4px_rgb(0_0_0/0.45)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/90 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
+                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/30 bg-brand/80 text-brand-foreground shadow-[inset_0_1px_1px_rgb(255_255_255/0.6),inset_0_-3px_6px_rgb(0_0_0/0.18),0_6px_18px_-4px_rgb(from_var(--color-brand)_r_g_b_/_0.55)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/85 group-active:bg-brand-hover/85 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
                         <span
                             aria-hidden
-                            className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/45 to-transparent"
+                            className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/55 to-transparent"
                         />
-                        <PlusIcon className="relative size-6" />
+                        <span
+                            aria-hidden
+                            className="pointer-events-none absolute -bottom-1/3 left-1/2 h-2/3 w-2/3 -translate-x-1/2 rounded-full bg-white/10 blur-md"
+                        />
+                        <PlusIcon className="relative z-10 size-6" />
                     </span>
                 </motion.button>
 
