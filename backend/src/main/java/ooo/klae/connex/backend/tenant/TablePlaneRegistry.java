@@ -131,6 +131,8 @@ public final class TablePlaneRegistry {
         "rule",
         "rule_execution",
         "saved_view",
+        "saved_view_default",
+        "saved_view_pin",
         "stage",
         "suppression_entry",
         "tag",

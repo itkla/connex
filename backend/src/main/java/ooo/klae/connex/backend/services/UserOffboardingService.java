@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
+import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -67,6 +68,7 @@ public class UserOffboardingService {
     private final RuleMapper ruleMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
+    private final SavedViewPreferenceMapper savedViewPreferenceMapper;
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
     private final UserMapper userMapper;
@@ -133,7 +135,8 @@ public class UserOffboardingService {
      * Detaches a departing member's content within one workspace the way the
      * dropped cross-plane constraints used to: tasks are unassigned and company,
      * contact, and deal ownership is cleared (SET NULL) so authored history survives,
-     * while the member's notifications and deal-collaborator seats are deleted (CASCADE).
+     * while the member's saved-view preferences, owned saved views, notifications, and
+     * deal-collaborator seats are deleted.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction.
      *
@@ -142,6 +145,9 @@ public class UserOffboardingService {
      */
     public void detachMemberContent(int workspaceId, int userId) {
         notificationMapper.lockRecipientMemberships(userId);
+        savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
+        savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
+        savedViewMapper.deleteForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
@@ -154,7 +160,7 @@ public class UserOffboardingService {
     /**
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
-     * (CASCADE — saved views, dashboards, notifications, collaborator seats)
+     * (CASCADE — saved-view preferences, saved views, dashboards, notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
      * campaign ownership, task assignment, uploader, notification actor, report and
      * campaign actors, rule principals, consent/suppression actors, share grantors).
@@ -188,6 +194,8 @@ public class UserOffboardingService {
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
         Set<Integer> actorRecipientIds = new TreeSet<>(locks.actorRecipientIds());
         actorRecipientIds.addAll(notificationMapper.lockRecipientIdsByActor(userId));
+        savedViewPreferenceMapper.deletePinsForUserAnywhere(userId);
+        savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);

@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
+import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -53,6 +54,7 @@ class UserOffboardingOrderTest {
     @Mock private RuleMapper ruleMapper;
     @Mock private ShareMapper shareMapper;
     @Mock private SuppressionMapper suppressionMapper;
+    @Mock private SavedViewPreferenceMapper savedViewPreferenceMapper;
     @Mock private SavedViewMapper savedViewMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
@@ -65,8 +67,12 @@ class UserOffboardingOrderTest {
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
-            notificationMapper, taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
+            notificationMapper, savedViewPreferenceMapper, savedViewMapper,
+            taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
         order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(savedViewPreferenceMapper).deletePinsForUser(7, 9);
+        order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
+        order.verify(savedViewMapper).deleteForUser(7, 9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
         order.verify(companyMapper).clearMemberOwnership(7, 9);
         order.verify(personMapper).clearMemberOwnership(7, 9);
@@ -87,13 +93,17 @@ class UserOffboardingOrderTest {
         service.eraseOrgDataReferences(9);
 
         InOrder order = inOrder(
-            userMapper, notificationMapper, stateVersionService, companyMapper, personMapper, dealMapper);
+            userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
+            stateVersionService, companyMapper, personMapper, dealMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
+        order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
+        order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
+        order.verify(savedViewMapper).deleteForUserAnywhere(9);
         order.verify(notificationMapper).deleteAllForRecipientAnywhere(9);
         order.verify(notificationMapper).clearActorAnywhere(9);
         order.verify(stateVersionService).markChanged(3);
