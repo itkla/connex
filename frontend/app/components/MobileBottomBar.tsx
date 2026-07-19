@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -18,14 +18,51 @@ import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/ap
 import { getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 
-/** Dispatches the app-shell custom event that the always-mounted GlobalSearch listens for. */
-function openSearch() {
-    window.dispatchEvent(new CustomEvent('connex:open-search'));
+const GLASS_FILTER_ID = 'connex-liquid-glass';
+
+/** Base inward displacement (px) applied to the sampled backdrop; edges bend, centre stays put. */
+const DISTORTION = -108;
+/** Per-channel displacement deltas that produce the chromatic-aberration fringe at the glass edge. */
+const GREEN_OFFSET = 9;
+const BLUE_OFFSET = 18;
+/** Displacement-map authoring params: a blurred neutral centre keeps refraction to the rim. */
+const MAP_BRIGHTNESS = 50;
+const MAP_OPACITY = 0.92;
+const MAP_BLUR = 9;
+const MAP_EDGE_RATIO = 0.11;
+
+let svgBackdropSupport: boolean | null = null;
+
+/**
+ * Feature-detects Chromium's (non-standard) support for an SVG filter as a `backdrop-filter`, memoized so
+ * it is a stable snapshot for {@link useSyncExternalStore}.
+ */
+function detectSvgBackdrop(): boolean {
+    if (svgBackdropSupport !== null) return svgBackdropSupport;
+    if (typeof document === 'undefined') return false;
+    const ua = navigator.userAgent;
+    if ((/Safari/.test(ua) && !/Chrome/.test(ua)) || /Firefox/.test(ua)) {
+        svgBackdropSupport = false;
+        return false;
+    }
+    const el = document.createElement('div');
+    el.style.backdropFilter = `url(#${GLASS_FILTER_ID})`;
+    svgBackdropSupport = el.style.backdropFilter !== '';
+    return svgBackdropSupport;
 }
 
-/** Dispatches the app-shell custom event that the always-mounted QuickCreateLauncher listens for. */
-function openQuickCreate() {
-    window.dispatchEvent(new CustomEvent('connex:open-quick-create'));
+/** No-op subscribe: SVG-backdrop support never changes for the lifetime of the document. */
+const subscribeNoop = () => () => {};
+
+/**
+ * Builds the displacement map as a data-URI SVG: a red horizontal and blue vertical gradient encode X/Y
+ * displacement, and a blurred neutral inner rect cancels displacement in the centre so the refraction
+ * concentrates at the rounded edge (a lens bevel) rather than warping the whole backdrop.
+ */
+function buildDisplacementMap(width: number, height: number, radius: number): string {
+    const edge = Math.min(width, height) * MAP_EDGE_RATIO;
+    const svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="r" x1="100%" y1="0%" x2="0%" y2="0%"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="red"/></linearGradient><linearGradient id="b" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="blue"/></linearGradient></defs><rect width="${width}" height="${height}" fill="black"/><rect width="${width}" height="${height}" rx="${radius}" fill="url(#r)"/><rect width="${width}" height="${height}" rx="${radius}" fill="url(#b)" style="mix-blend-mode:difference"/><rect x="${edge}" y="${edge}" width="${width - edge * 2}" height="${height - edge * 2}" rx="${radius}" fill="hsl(0 0% ${MAP_BRIGHTNESS}% / ${MAP_OPACITY})" style="filter:blur(${MAP_BLUR}px)"/></svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 /** Liquid-glass entrance: the pill rises and settles, then staggers its slots into place. */
@@ -41,16 +78,25 @@ const slotVariants: Variants = {
 };
 
 const slotBase =
-    'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar';
+    'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
 const indicatorWrap = 'relative flex h-7 w-12 items-center justify-center';
 
 const labelBase = 'max-w-full truncate text-[10px] leading-none font-medium';
 
+/** Dispatches the app-shell custom event that the always-mounted GlobalSearch listens for. */
+function openSearch() {
+    window.dispatchEvent(new CustomEvent('connex:open-search'));
+}
+
+/** Dispatches the app-shell custom event that the always-mounted QuickCreateLauncher listens for. */
+function openQuickCreate() {
+    window.dispatchEvent(new CustomEvent('connex:open-quick-create'));
+}
+
 /**
- * The active destination's liquid-glass lens: a brand-tinted glass capsule that springs in behind the
- * icon and blurs out on exit, so navigating between destinations reads as the light re-settling rather
- * than a hard swap. Rendered inside an {@link AnimatePresence} so it can animate away.
+ * The active destination's liquid-glass lens: a brand-tinted capsule that springs in behind the icon and
+ * blurs out on exit, so navigating reads as the light re-settling rather than a hard swap.
  */
 function ActiveLens({ reduce }: { reduce: boolean }) {
     return (
@@ -60,7 +106,7 @@ function ActiveLens({ reduce }: { reduce: boolean }) {
             animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, filter: 'blur(5px)' }}
             transition={reduce ? instant : { default: springJiggle, filter: { duration: 0.2, ease: easeOut } }}
-            className="absolute inset-0 rounded-full border border-white/25 bg-brand/25 shadow-[inset_0_1px_0_rgb(255_255_255/0.45),inset_0_-1px_2px_rgb(0_0_0/0.12)] backdrop-blur-sm"
+            className="absolute inset-0 rounded-full bg-brand/20 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.35)]"
         />
     );
 }
@@ -103,7 +149,7 @@ function BarLink({
                     {badge != null && badge > 0 && (
                         <span
                             aria-hidden
-                            className="absolute z-10 -top-1 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-sidebar"
+                            className="absolute z-10 -top-1 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-background"
                         >
                             {badge > 99 ? '99+' : badge}
                         </span>
@@ -149,12 +195,11 @@ function BarButton({
 
 /**
  * Mobile-only floating action bar spanning the viewport width (inset by the shell padding): Home ·
- * Search · New (center liquid-glass circle) · Tasks · More. Hidden at the `md` breakpoint where the
- * desktop sidebar takes over. The whole surface is an Apple-Liquid-Glass-inspired capsule (web
- * approximation): translucent, blurred, saturation-boosted, with a specular rim. "New" and "Search"
- * drive the shared Quick Create launcher and the command palette via app-shell custom events; "More"
- * opens the existing sidebar drawer. Sits below all overlay backdrops (z-30) so an open sheet/palette
- * covers it, and respects the device safe-area inset. All motion collapses under reduced-motion.
+ * Search · New · Tasks · More. Hidden at the `md` breakpoint where the desktop sidebar takes over. The
+ * surface is a real Liquid-Glass approximation (per Apple's iOS 26 material): a nearly-transparent pane
+ * whose backdrop is refracted at the rounded edge via an SVG displacement map, with three-channel
+ * chromatic aberration, rather than a frosted/glossy panel. Chromium renders the refraction; Safari/iOS
+ * and Firefox degrade to a plain frosted blur. All motion collapses under reduced-motion.
  *
  * @param onOpenMore - opens the full sidebar drawer (workspace/account/all destinations)
  */
@@ -165,6 +210,24 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const tNav = useTranslations('CommonSidebar');
     const tActions = useTranslations('Actions');
     const t = useTranslations('MobileNav');
+
+    const barRef = useRef<HTMLDivElement>(null);
+    const [displacementMap, setDisplacementMap] = useState('');
+    const refract = useSyncExternalStore(subscribeNoop, detectSvgBackdrop, () => false);
+
+    useEffect(() => {
+        const el = barRef.current;
+        if (!el) return;
+        const update = () => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            setDisplacementMap(buildDisplacementMap(rect.width, rect.height, rect.height / 2));
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     const [attention, setAttention] = useState(0);
     useEffect(() => {
@@ -183,51 +246,94 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const onDashboard = pathname === '/dashboard';
     const onTasks = pathname === '/activity/tasks' || pathname.startsWith('/activity/tasks/');
 
+    const glassStyle = refract
+        ? {
+              backdropFilter: `url(#${GLASS_FILTER_ID}) saturate(1.4) brightness(1.02)`,
+              WebkitBackdropFilter: `blur(12px) saturate(1.6)`,
+          }
+        : {
+              backdropFilter: `blur(14px) saturate(1.6)`,
+              WebkitBackdropFilter: `blur(14px) saturate(1.6)`,
+          };
+
     return (
         <nav
             aria-label={t('barLabel')}
             className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 px-4 md:hidden"
         >
             <motion.div
+                ref={barRef}
                 initial={reduce ? false : 'hidden'}
                 animate={reduce ? undefined : 'show'}
                 variants={reduce ? undefined : barVariants}
-                style={{
-                    WebkitBackdropFilter: 'blur(14px) saturate(1.8)',
-                    backdropFilter: 'url(#connex-liquid-glass) blur(1.5px) saturate(1.8)',
-                }}
-                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 overflow-visible rounded-full border border-white/40 bg-sidebar/45 px-1.5 py-1.5 shadow-[inset_0_1.5px_0.5px_rgb(255_255_255/0.9),inset_0_-1px_1.5px_rgb(0_0_0/0.12),inset_0_0_20px_rgb(255_255_255/0.12),0_18px_44px_-12px_rgb(0_0_0/0.5),0_3px_10px_-3px_rgb(0_0_0/0.26)]"
+                style={glassStyle}
+                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 rounded-full bg-background/10 px-1.5 py-1.5 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.4),inset_0_0_8px_rgb(255_255_255/0.06),0_8px_28px_-8px_rgb(0_0_0/0.4),0_1px_2px_rgb(0_0_0/0.12)] ring-1 ring-white/10 ring-inset"
             >
                 <svg aria-hidden className="pointer-events-none absolute h-0 w-0">
                     <filter
-                        id="connex-liquid-glass"
-                        x="-20%"
-                        y="-20%"
-                        width="140%"
-                        height="140%"
+                        id={GLASS_FILTER_ID}
                         colorInterpolationFilters="sRGB"
+                        x="0%"
+                        y="0%"
+                        width="100%"
+                        height="100%"
                     >
-                        <feTurbulence
-                            type="fractalNoise"
-                            baseFrequency="0.006 0.007"
-                            numOctaves={2}
-                            seed={14}
-                            result="noise"
+                        <feImage
+                            href={displacementMap || undefined}
+                            x="0"
+                            y="0"
+                            width="100%"
+                            height="100%"
+                            preserveAspectRatio="none"
+                            result="map"
                         />
-                        <feGaussianBlur in="noise" stdDeviation={1.5} result="soft" />
                         <feDisplacementMap
                             in="SourceGraphic"
-                            in2="soft"
-                            scale={56}
+                            in2="map"
+                            scale={DISTORTION}
                             xChannelSelector="R"
                             yChannelSelector="G"
+                            result="dispR"
                         />
+                        <feColorMatrix
+                            in="dispR"
+                            type="matrix"
+                            values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"
+                            result="red"
+                        />
+                        <feDisplacementMap
+                            in="SourceGraphic"
+                            in2="map"
+                            scale={DISTORTION + GREEN_OFFSET}
+                            xChannelSelector="R"
+                            yChannelSelector="G"
+                            result="dispG"
+                        />
+                        <feColorMatrix
+                            in="dispG"
+                            type="matrix"
+                            values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"
+                            result="green"
+                        />
+                        <feDisplacementMap
+                            in="SourceGraphic"
+                            in2="map"
+                            scale={DISTORTION + BLUE_OFFSET}
+                            xChannelSelector="R"
+                            yChannelSelector="G"
+                            result="dispB"
+                        />
+                        <feColorMatrix
+                            in="dispB"
+                            type="matrix"
+                            values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"
+                            result="blue"
+                        />
+                        <feBlend in="red" in2="green" mode="screen" result="rg" />
+                        <feBlend in="rg" in2="blue" mode="screen" result="blended" />
+                        <feGaussianBlur in="blended" stdDeviation="0.4" />
                     </filter>
                 </svg>
-                <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-x-8 top-px h-px rounded-full bg-gradient-to-r from-transparent via-white/60 to-transparent"
-                />
 
                 <BarLink
                     href="/dashboard"
@@ -249,21 +355,13 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     type="button"
                     onClick={openQuickCreate}
                     variants={reduce ? undefined : slotVariants}
-                    whileTap={reduce ? undefined : { scale: 0.88 }}
+                    whileTap={reduce ? undefined : { scale: 0.9 }}
                     transition={reduce ? instant : springJiggle}
                     aria-label={tActions('quickCreate.trigger')}
                     className="group flex flex-1 items-center justify-center rounded-2xl focus-visible:outline-none"
                 >
-                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/30 bg-brand/80 text-brand-foreground shadow-[inset_0_1px_1px_rgb(255_255_255/0.6),inset_0_-3px_6px_rgb(0_0_0/0.2),0_4px_12px_-5px_rgb(from_var(--color-brand)_r_g_b_/_0.45)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/85 group-active:bg-brand-hover/85 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
-                        <span
-                            aria-hidden
-                            className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/55 to-transparent"
-                        />
-                        <span
-                            aria-hidden
-                            className="pointer-events-none absolute -bottom-1/3 left-1/2 h-2/3 w-2/3 -translate-x-1/2 rounded-full bg-white/10 blur-md"
-                        />
-                        <PlusIcon className="relative z-10 size-6" />
+                    <span className="flex size-11 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-[inset_0_0.5px_0_rgb(255_255_255/0.4),0_2px_6px_-2px_rgb(0_0_0/0.35)] transition-colors group-hover:bg-brand-hover group-active:bg-brand-hover group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background">
+                        <PlusIcon className="size-6" />
                     </span>
                 </motion.button>
 
