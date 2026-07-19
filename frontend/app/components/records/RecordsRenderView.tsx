@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -207,6 +207,71 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         },
         [recordRef, onRowClick, onQuickEdit, onDelete],
     );
+
+    const rowRefs = useRef(new Map<SelectionId, HTMLTableRowElement>());
+    const [rovingId, setRovingId] = useState<SelectionId | null>(null);
+
+    const focusRow = useCallback((id: SelectionId) => {
+        setRovingId(id);
+        rowRefs.current.get(id)?.focus();
+    }, []);
+
+    const handleRowKeyDown = useCallback(
+        (event: KeyboardEvent<HTMLTableRowElement>, item: T, rowIndex: number) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === 'ArrowDown') {
+                const next = pagedData[rowIndex + 1];
+                if (next) {
+                    event.preventDefault();
+                    focusRow(next.id);
+                }
+            } else if (event.key === 'ArrowUp') {
+                const prev = pagedData[rowIndex - 1];
+                if (prev) {
+                    event.preventDefault();
+                    focusRow(prev.id);
+                }
+            } else if (event.key === 'Home') {
+                const first = pagedData[0];
+                if (first) {
+                    event.preventDefault();
+                    focusRow(first.id);
+                }
+            } else if (event.key === 'End') {
+                const last = pagedData[pagedData.length - 1];
+                if (last) {
+                    event.preventDefault();
+                    focusRow(last.id);
+                }
+            } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                const el = rowRefs.current.get(item.id);
+                if (el) {
+                    event.preventDefault();
+                    const rect = el.getBoundingClientRect();
+                    el.dispatchEvent(
+                        new MouseEvent('contextmenu', {
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: rect.left + 40,
+                            clientY: rect.top + rect.height / 2,
+                        }),
+                    );
+                }
+            } else if (event.key === 'Enter') {
+                if (onRowClick) {
+                    event.preventDefault();
+                    onRowClick(item);
+                } else if (detailPath) {
+                    event.preventDefault();
+                    router.push(detailPath(item));
+                }
+            }
+        },
+        [pagedData, focusRow, onRowClick, detailPath, router],
+    );
+
+    const rovingRowId =
+        rovingId != null && pagedData.some((d) => d.id === rovingId) ? rovingId : pagedData[0]?.id ?? null;
 
     const [frozenOffsets, setFrozenOffsets] = useState({ avatar: 0, name: 0 });
     const frozenCleanup = useRef<(() => void) | null>(null);
@@ -516,7 +581,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedData.map((item) => {
+                            {pagedData.map((item, rowIndex) => {
                                 const isSelected = selectedIds.has(item.id);
                                 const isActive = activeId != null && item.id === activeId;
                                 const clickable = !!(onRowClick || detailPath);
@@ -527,10 +592,17 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 const row = (
                                     <tr
                                         key={item.id}
+                                        ref={(el) => {
+                                            if (el) rowRefs.current.set(item.id, el);
+                                            else rowRefs.current.delete(item.id);
+                                        }}
                                         data-state={isSelected ? 'selected' : undefined}
-                                        tabIndex={menuModel ? -1 : undefined}
+                                        tabIndex={menuModel ? (item.id === rovingRowId ? 0 : -1) : undefined}
+                                        aria-keyshortcuts={menuModel ? 'Shift+F10' : undefined}
+                                        onKeyDown={menuModel ? (event) => handleRowKeyDown(event, item, rowIndex) : undefined}
+                                        onFocus={menuModel ? () => setRovingId((prev) => (prev === item.id ? prev : item.id)) : undefined}
                                         className={cn(
-                                            'group border-b border-border outline-hidden transition-colors last:border-b-0',
+                                            'group border-b border-border outline-hidden transition-colors last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
                                             clickable && 'cursor-pointer',
                                             isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
                                             isActive && 'ring-2 ring-inset ring-brand',
