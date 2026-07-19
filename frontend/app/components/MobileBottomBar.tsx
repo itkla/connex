@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { springJiggle, instant } from '@/app/lib/motion';
 import { getTaskSummary } from '@/app/lib/api';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
 
 /** Dispatches the app-shell custom event that the always-mounted GlobalSearch listens for. */
 function openSearch() {
@@ -101,12 +102,14 @@ function BarButton({
 export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void }) {
     const pathname = usePathname();
     const reduce = useReducedMotion() ?? false;
+    const isMobile = useIsMobile();
     const tNav = useTranslations('CommonSidebar');
     const tActions = useTranslations('Actions');
     const t = useTranslations('MobileNav');
 
     const [attention, setAttention] = useState(0);
     useEffect(() => {
+        if (!isMobile) return;
         let active = true;
         getTaskSummary()
             .then((summary) => {
@@ -116,7 +119,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
         return () => {
             active = false;
         };
-    }, [pathname]);
+    }, [pathname, isMobile]);
 
     const onDashboard = pathname === '/dashboard';
     const onTasks = pathname === '/activity/tasks' || pathname.startsWith('/activity/tasks/');

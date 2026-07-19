@@ -1,3 +1,4 @@
+import type { Viewport } from "next";
 import Sidebar from "@/app/components/Sidebar";
 import ContentShell from "@/app/components/ContentShell";
 import { getCurrentUserFromCookie, getMyWorkspacesFromCookie } from "@/app/lib/api";
@@ -10,6 +11,11 @@ import { ActionProvider } from "@/app/hooks/useActions";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
+
+/** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
+export const viewport: Viewport = {
+    viewportFit: "cover",
+};
 
 export default async function AppLayout({
     children,

@@ -277,7 +277,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                     exit={reduce ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.97 }}
                     transition={{ duration: 0.24, ease: EASE_OUT }}
-                    className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+                    className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-40 flex justify-center px-4 md:bottom-6"
                 >
                     <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-card py-1.5 pr-1.5 pl-2 shadow-lg ring-1 ring-border">
                         <span className="flex items-center gap-2 pr-1 pl-1">

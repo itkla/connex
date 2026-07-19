@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import { Inter, Instrument_Serif, Noto_Sans_JP } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
@@ -32,11 +32,6 @@ const notoSansJP = Noto_Sans_JP({
 export const metadata: Metadata = {
   title: "Connex",
   description: "Build Meaningful Connections with your Clients",
-};
-
-/** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. */
-export const viewport: Viewport = {
-  viewportFit: "cover",
 };
 
 export default async function RootLayout({
