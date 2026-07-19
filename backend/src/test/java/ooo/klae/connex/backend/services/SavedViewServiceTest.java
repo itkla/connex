@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -29,6 +30,7 @@ import tools.jackson.databind.node.ObjectNode;
 class SavedViewServiceTest extends AbstractServiceTest {
 
     @Autowired private SavedViewService service;
+    @Autowired private SavedViewMapper viewMapper;
     @Autowired private SavedViewPreferenceMapper preferenceMapper;
     @Autowired private ObjectMapper objectMapper;
 
@@ -73,6 +75,27 @@ class SavedViewServiceTest extends AbstractServiceTest {
         authenticateAs(other, workspace.getId());
         assertNotEquals(0,
             service.create(createRequest("company", "Prospects", null, config(), null)).getId());
+    }
+
+    @Test
+    void createQuotaIsPerOwnerAndRecordType() {
+        for (int index = 0; index < 100; index++) {
+            seedView(currentUser, "company", "Quota " + index);
+        }
+
+        BadRequestException quotaFailure = assertThrows(BadRequestException.class,
+            () -> service.create(createRequest(
+                "company", "Over quota", "workspace", config(), null)));
+        assertEquals(
+            "A user cannot have more than 100 saved views per record type in a workspace",
+            quotaFailure.getMessage());
+        assertNotEquals(0,
+            service.create(createRequest("deal", "Deal view", "workspace", config(), null)).getId());
+
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+        assertNotEquals(0,
+            service.create(createRequest("company", "Other owner", "workspace", config(), null)).getId());
     }
 
     @Test
@@ -308,6 +331,19 @@ class SavedViewServiceTest extends AbstractServiceTest {
         config.set("filters", objectMapper.createObjectNode());
         config.put("query", "");
         return config;
+    }
+
+    private SavedView seedView(User owner, String recordType, String name) {
+        SavedView view = new SavedView();
+        view.setWorkspaceId(workspace.getId());
+        view.setUserId(owner.getId());
+        view.setRecordType(recordType);
+        view.setName(name);
+        view.setConfig(config());
+        view.setVisibility("workspace");
+        view.setPosition(0);
+        viewMapper.insert(view);
+        return view;
     }
 
     private ObjectNode segment(String field) {

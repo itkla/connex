@@ -41,6 +41,27 @@ class SavedViewMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void ownedCountIsIsolatedByWorkspaceOwnerAndRecordType() {
+        User owner = newUser();
+        User otherOwner = newUser();
+        Workspace otherWorkspace = newWorkspace();
+        newView(workspace, owner, "company", "Company one", "workspace", 0);
+        newView(workspace, owner, "company", "Company two", "private", 0);
+        newView(workspace, owner, "deal", "Deal", "workspace", 0);
+        newView(workspace, otherOwner, "company", "Other owner", "workspace", 0);
+        newView(otherWorkspace, owner, "company", "Other workspace", "workspace", 0);
+
+        assertEquals(2,
+            viewMapper.countOwnedByRecordType(workspace.getId(), owner.getId(), "company"));
+        assertEquals(1,
+            viewMapper.countOwnedByRecordType(workspace.getId(), owner.getId(), "deal"));
+        assertEquals(1,
+            viewMapper.countOwnedByRecordType(workspace.getId(), otherOwner.getId(), "company"));
+        assertEquals(1,
+            viewMapper.countOwnedByRecordType(otherWorkspace.getId(), owner.getId(), "company"));
+    }
+
+    @Test
     void accessibleReadsEnforceOwnerVisibilityAndWorkspace() {
         User owner = newUser();
         User recipient = newUser();

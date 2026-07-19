@@ -34,6 +34,11 @@ public interface SavedViewMapper {
         @Param("recordType") String recordType,
         @Param("name") String name);
 
+    int countOwnedByRecordType(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("recordType") String recordType);
+
     int insert(SavedView view);
 
     int update(SavedView view);

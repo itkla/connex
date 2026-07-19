@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.dto.SavedViewCreateRequest;
 import ooo.klae.connex.backend.dto.SavedViewUpdateRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.SavedViewService;
@@ -98,6 +99,26 @@ class SavedViewControllerTest {
             .andExpect(jsonPath("$.pinned").value(true))
             .andExpect(jsonPath("$.pinPosition").value(0))
             .andExpect(jsonPath("$.default").value(true));
+    }
+
+    @Test
+    void createQuotaReturnsClearBadRequest() throws Exception {
+        when(service.create(any(SavedViewCreateRequest.class))).thenThrow(new BadRequestException(
+            "A user cannot have more than 100 saved views per record type in a workspace"));
+
+        mockMvc.perform(post("/api/saved-views")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "recordType":"company",
+                      "name":"Over quota",
+                      "visibility":"workspace",
+                      "config":{"version":1}
+                    }
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string(
+                "A user cannot have more than 100 saved views per record type in a workspace"));
     }
 
     @Test

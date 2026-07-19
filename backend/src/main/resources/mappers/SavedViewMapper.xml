@@ -98,6 +98,14 @@
       AND sv.name = #{name}
   </select>
 
+  <select id="countOwnedByRecordType" resultType="int">
+    SELECT COUNT(*)
+    FROM saved_view
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND record_type = #{recordType}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO saved_view
       (workspace_id, user_id, record_type, name, config_json, visibility, position)

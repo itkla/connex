@@ -42,9 +42,12 @@ public class SavedViewService {
     private static final int MAX_FILTERS = 64;
     private static final int MAX_FILTER_VALUES = 100;
     private static final int MAX_FILTER_VALUE_LENGTH = 255;
+    private static final int MAX_SAVED_VIEWS_PER_OWNER_RECORD_TYPE = 100;
     private static final String PRIVATE = "private";
     private static final String WORKSPACE = "workspace";
     private static final String NOT_FOUND = "Saved view not found";
+    private static final String QUOTA_REACHED =
+        "A user cannot have more than 100 saved views per record type in a workspace";
 
     private final SavedViewMapper viewMapper;
     private final SavedViewPreferenceMapper preferenceMapper;
@@ -75,6 +78,10 @@ public class SavedViewService {
         String recordType = requireRecordType(request.getRecordType());
         String name = validateName(request.getName());
         JsonNode config = validateConfig(recordType, request.getConfig());
+        if (viewMapper.countOwnedByRecordType(workspaceId, userId, recordType)
+                >= MAX_SAVED_VIEWS_PER_OWNER_RECORD_TYPE) {
+            throw new BadRequestException(QUOTA_REACHED);
+        }
         String visibility = request.getVisibility() == null ? PRIVATE : requireVisibility(request.getVisibility());
         int position = request.getPosition() == null ? 0 : request.getPosition();
         rejectDuplicateName(workspaceId, userId, recordType, name, null);
