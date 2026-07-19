@@ -57,10 +57,12 @@ export default function ColumnVisibilityMenu({
                     <DropdownMenuCheckboxItem
                         key={toggle.key}
                         checked={toggle.visible}
+                        disabled={toggle.locked}
                         onCheckedChange={(checked) => onColumnVisibleChange(toggle.key, checked === true)}
                         onSelect={(event) => event.preventDefault()}
                     >
-                        {toggle.label}
+                        <span className="flex-1">{toggle.label}</span>
+                        {toggle.locked && <span className="text-xs text-muted-foreground">{t('sorted')}</span>}
                     </DropdownMenuCheckboxItem>
                 ))}
                 {hiddenCount > 0 && (

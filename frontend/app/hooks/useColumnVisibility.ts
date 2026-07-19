@@ -35,6 +35,16 @@ export interface ColumnToggle {
     key: string;
     label: string;
     visible: boolean;
+    locked: boolean;
+}
+
+/** Options for {@link useColumnVisibility}. */
+export interface ColumnVisibilityOptions {
+    /**
+     * A column that must stay visible regardless of the stored preference — typically the active sort
+     * column, so hiding it can never strand the table sorted by an invisible header the user can't reach.
+     */
+    lockedKey?: string | null;
 }
 
 /** The visible column subset plus the controls to change and persist it. */
@@ -52,9 +62,14 @@ export interface ColumnVisibility<T> {
  * browser. The first column is the record's identity — and the frozen column — so it is never hideable.
  * The stored set is read after mount to avoid a hydration mismatch.
  */
-export function useColumnVisibility<T>(entity: string, columns: ColumnDef<T>[]): ColumnVisibility<T> {
+export function useColumnVisibility<T>(
+    entity: string,
+    columns: ColumnDef<T>[],
+    options?: ColumnVisibilityOptions,
+): ColumnVisibility<T> {
     const { context } = useActions();
     const { activeWorkspaceId } = useWorkspace();
+    const lockedKey = options?.lockedKey ?? null;
     const key = columnsStorageKey(entity, context.user?.id ?? null, activeWorkspaceId);
     const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -101,16 +116,22 @@ export function useColumnVisibility<T>(entity: string, columns: ColumnDef<T>[]):
     }, [persist]);
 
     const visibleColumns = useMemo(
-        () => columns.filter((column) => column.key === primaryKey || !hidden.has(column.key)),
-        [columns, hidden, primaryKey],
+        () =>
+            columns.filter(
+                (column) => column.key === primaryKey || column.key === lockedKey || !hidden.has(column.key),
+            ),
+        [columns, hidden, primaryKey, lockedKey],
     );
 
     const toggles = useMemo<ColumnToggle[]>(
         () =>
             columns
                 .filter((column) => column.key !== primaryKey)
-                .map((column) => ({ key: column.key, label: column.label, visible: !hidden.has(column.key) })),
-        [columns, hidden, primaryKey],
+                .map((column) => {
+                    const locked = column.key === lockedKey;
+                    return { key: column.key, label: column.label, visible: locked || !hidden.has(column.key), locked };
+                }),
+        [columns, hidden, primaryKey, lockedKey],
     );
 
     const hiddenCount = toggles.reduce((count, toggle) => (toggle.visible ? count : count + 1), 0);

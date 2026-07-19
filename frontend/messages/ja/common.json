@@ -163,7 +163,8 @@
     "ariaLabel": "列を選択",
     "label": "列",
     "title": "表示する列",
-    "reset": "列をリセット"
+    "reset": "列をリセット",
+    "sorted": "並べ替え中"
   },
   "CommonSearchBar": {
     "placeholder": "何でも検索",

@@ -854,7 +854,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
         [columns, customColumns],
     );
-    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('deal', mergedColumns);
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('deal', mergedColumns, { lockedKey: sortKey });
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         const result: ColumnFilterFacet[] = [];

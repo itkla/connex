@@ -740,7 +740,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
         [columns, customColumns],
     );
-    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns);
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
     const peek = useRecordPeekController('company', companies, displayMode === 'table');
 
     const recordRef = useCallback(

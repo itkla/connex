@@ -614,7 +614,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
-    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns);
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns, { lockedKey: sortKey });
     const peek = useRecordPeekController('person', contacts, displayMode === 'table');
 
     const recordRef = useCallback(

@@ -163,7 +163,8 @@
     "ariaLabel": "Choose columns",
     "label": "Columns",
     "title": "Show columns",
-    "reset": "Reset columns"
+    "reset": "Reset columns",
+    "sorted": "sorted"
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
