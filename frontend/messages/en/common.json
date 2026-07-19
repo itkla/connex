@@ -145,6 +145,12 @@
     "discard": "Discard changes",
     "keepEditing": "Keep editing"
   },
+  "DraftResume": {
+    "activityMessage": "You have an unfinished activity — resume it?",
+    "activityMessageNamed": "Unfinished activity: “{label}” — resume it?",
+    "resume": "Resume",
+    "discard": "Discard"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",

@@ -10,6 +10,7 @@ import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
+import DraftResumeBridge from "@/app/components/DraftResumeBridge";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
 
 /** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
@@ -47,6 +48,7 @@ export default async function AppLayout({
                             userLocale={resolveLocale(user.locale)}
                             cookieLocale={localePreferenceFromCookieHeader(cookie)}
                         />
+                        <DraftResumeBridge />
                         <ContentShell
                             sidebar={
                                 <Sidebar

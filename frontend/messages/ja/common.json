@@ -145,6 +145,12 @@
     "discard": "変更を破棄",
     "keepEditing": "編集を続ける"
   },
+  "DraftResume": {
+    "activityMessage": "未完了のアクティビティがあります。再開しますか？",
+    "activityMessageNamed": "未完了のアクティビティ：「{label}」を再開しますか？",
+    "resume": "再開",
+    "discard": "破棄"
+  },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
     "searching": "検索中...",

@@ -26,6 +26,9 @@ import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import {
     DialogStatusCover,
@@ -46,6 +49,21 @@ import {
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
 import type { Contact, Deal } from '@/app/lib/types';
+
+/** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
+export type ActivityDraftData = {
+    type: ActivityType;
+    subject: string;
+    notes: string;
+    personId: number | null;
+    dealId: number | null;
+};
+
+function activityDraftScope(defaultPerson: Contact | null, defaultDeal: Deal | null): string {
+    if (defaultPerson) return `person:${defaultPerson.id}`;
+    if (defaultDeal) return `deal:${defaultDeal.id}`;
+    return 'global';
+}
 
 type Props = {
     open: boolean;
@@ -99,9 +117,19 @@ export default function ActivityDialog({
     defaultNotes = '',
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
+    const { activeWorkspaceId } = useWorkspace();
     const submittingRef = useRef(false);
     const [isDirty, setIsDirty] = useState(false);
     const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
+    const draft = useFormDraft<ActivityDraftData>({
+        keyParts: {
+            userId: currentUserId,
+            workspaceId: activeWorkspaceId,
+            formType: 'activity',
+            scope: activityDraftScope(defaultPerson, defaultDeal),
+        },
+        version: DRAFT_VERSIONS.activity,
+    });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
@@ -137,12 +165,21 @@ export default function ActivityDialog({
                             submittingRef.current = value;
                         }}
                         onDirtyChange={setIsDirty}
+                        onPersistDraft={draft.persist}
+                        onClearDraft={draft.clear}
                         onCancel={guard.requestClose}
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
             </ResponsiveDialog>
-            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={() => {
+                    draft.clear();
+                    guard.confirm.onDiscard();
+                }}
+            />
         </>
     );
 }
@@ -160,6 +197,10 @@ type ActivityDialogFormProps = {
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
+    /** Persists the current draft snapshot; called while the form holds unsaved edits. */
+    onPersistDraft?: (data: ActivityDraftData) => void;
+    /** Clears the persisted draft; called once the create succeeds. */
+    onClearDraft?: () => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -183,6 +224,8 @@ export function ActivityDialogForm({
     defaultNotes = '',
     onSubmittingChange,
     onDirtyChange,
+    onPersistDraft,
+    onClearDraft,
     onCancel,
     onClose,
 }: ActivityDialogFormProps) {
@@ -231,6 +274,21 @@ export function ActivityDialogForm({
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
+
+    useEffect(() => {
+        if (!dirty) return;
+        onPersistDraft?.({
+            type,
+            subject,
+            notes,
+            personId: selectedPerson?.id ?? null,
+            dealId: selectedDeal?.id ?? null,
+        });
+    }, [dirty, type, subject, notes, selectedPerson, selectedDeal, onPersistDraft]);
+
+    useEffect(() => {
+        if (succeeded) onClearDraft?.();
+    }, [succeeded, onClearDraft]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
