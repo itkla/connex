@@ -187,7 +187,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     <span className="flex h-7 w-12 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-sm transition-colors group-hover:bg-brand-hover">
                         <PlusIcon className="size-6" />
                     </span>
-                    <span className={labelBase}>{tActions('quickCreate.trigger')}</span>
+                    <span aria-hidden className="h-2.5" />
                 </motion.button>
 
                 <BarLink
