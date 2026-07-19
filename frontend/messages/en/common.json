@@ -132,7 +132,9 @@
   },
   "CommonContentShell": {
     "hideSidebar": "Hide sidebar",
-    "showSidebar": "Show sidebar"
+    "showSidebar": "Show sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "MobileNav": {
     "barLabel": "Primary",
