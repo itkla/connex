@@ -6,6 +6,7 @@ import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
+import MobileBottomBar from "@/app/components/MobileBottomBar";
 import { useTranslations } from "next-intl";
 
 export default function ContentShell({
@@ -119,10 +120,12 @@ export default function ContentShell({
                     </div>
                 </div>
 
-                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
+                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6">
                     {children}
                 </main>
             </div>
+
+            {!mobileOpen && <MobileBottomBar onOpenMore={() => setMobileOpen(true)} />}
         </div>
     );
 }

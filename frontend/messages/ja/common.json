@@ -134,6 +134,11 @@
     "hideSidebar": "サイドバーを非表示",
     "showSidebar": "サイドバーを表示"
   },
+  "MobileNav": {
+    "barLabel": "メインナビゲーション",
+    "more": "その他",
+    "tasksBadge": "{count}件の要対応タスク"
+  },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
     "searching": "検索中...",
