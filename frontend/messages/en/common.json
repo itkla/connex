@@ -134,6 +134,11 @@
     "hideSidebar": "Hide sidebar",
     "showSidebar": "Show sidebar"
   },
+  "MobileNav": {
+    "barLabel": "Primary",
+    "more": "More",
+    "tasksBadge": "{count} tasks need attention"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",
