@@ -481,7 +481,7 @@ export default function MentionEditor({
                     return;
                 }
             }
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
                 event.preventDefault();
                 document.execCommand('insertText', false, '\n');
                 emit();
