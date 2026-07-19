@@ -166,6 +166,10 @@
     "reset": "列をリセット",
     "sorted": "並べ替え中"
   },
+  "DuplicateWarning": {
+    "heading": "既に登録されている可能性があります:",
+    "more": "他{count}件"
+  },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
     "searching": "検索中...",

@@ -11,6 +11,8 @@ import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
 import { isFieldError } from '@/app/lib/api';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
+import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
+import { useDuplicateNameCheck } from '@/app/hooks/useDuplicateNameCheck';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -197,6 +199,8 @@ export default function NewCompanyDialog({
         const key = normalizeWebsiteForCompare(payload.website);
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
+
+    const nameMatches = useDuplicateNameCheck('company', payload.name);
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
@@ -451,6 +455,7 @@ export default function NewCompanyDialog({
                                 />
                             </div>
                             {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                            <DuplicateNameWarning kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                         </div>
 
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -709,6 +714,8 @@ export function NewCompanyForm({
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
 
+    const nameMatches = useDuplicateNameCheck('company', payload.name);
+
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
     const status: 'idle' | 'loading' | 'success' | 'error' = isCreating
@@ -845,6 +852,7 @@ export function NewCompanyForm({
                             />
                         </div>
                         {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                        <DuplicateNameWarning kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>

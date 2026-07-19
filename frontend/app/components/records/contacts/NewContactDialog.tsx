@@ -40,6 +40,8 @@ import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { useDuplicateNameCheck, type DuplicateNameResult } from '@/app/hooks/useDuplicateNameCheck';
+import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
@@ -490,6 +492,7 @@ export function NewContactForm({
         || recoveryDecisionRequired;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
+    const nameMatches = useDuplicateNameCheck('person', newContactPayload.name);
     const visibleImagePreview = imageFile ? imagePreview : null;
 
     return (
@@ -590,6 +593,7 @@ export function NewContactForm({
                         isCreating={formPending || recoveryBlocked}
                         nameInputRef={nameInputRef}
                         onListWheel={handleListWheel}
+                        nameMatches={nameMatches}
                     />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '290ms' }}>
@@ -720,6 +724,7 @@ type ContactDetailsFieldsProps = {
     isCreating: boolean;
     nameInputRef: RefObject<HTMLInputElement | null>;
     onListWheel: (event: WheelEvent<HTMLDivElement>) => void;
+    nameMatches: DuplicateNameResult;
 };
 
 function ContactDetailsFields({
@@ -733,6 +738,7 @@ function ContactDetailsFields({
     isCreating,
     nameInputRef,
     onListWheel,
+    nameMatches,
 }: ContactDetailsFieldsProps) {
     const t = useTranslations('ContactsNewContactDialog');
     const disabled = isCreating || businessCard.requiresExactImportRetry;
@@ -764,6 +770,7 @@ function ContactDetailsFields({
                     />
                 </div>
                 {fieldErrors.name && <p id="name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                <DuplicateNameWarning kind="person" matches={nameMatches.matches} total={nameMatches.total} />
             </div>
 
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
