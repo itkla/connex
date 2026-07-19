@@ -19,6 +19,8 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
@@ -731,6 +733,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         [setFilterState, applyQuery, applySort],
     );
 
+    const { density, setDensity } = useRecordDensity();
     const peek = useRecordPeekController('company', companies, displayMode === 'table');
 
     const recordRef = useCallback(
@@ -803,6 +806,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
                                     ]}
                                 />
+                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                             </div>
                         }
                     >
@@ -874,6 +878,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         activeId={peek.activeId}
                         recordRef={recordRef}
                         displayMode={displayMode}
+                        density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}

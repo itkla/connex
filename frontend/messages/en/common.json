@@ -151,6 +151,11 @@
     "resume": "Resume",
     "discard": "Discard"
   },
+  "RecordDensity": {
+    "ariaLabel": "Row density",
+    "comfortable": "Comfortable rows",
+    "compact": "Compact rows"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",

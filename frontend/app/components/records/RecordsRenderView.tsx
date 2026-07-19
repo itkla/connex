@@ -37,6 +37,7 @@ import { useTranslations } from 'next-intl';
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
+import type { RowDensity } from '@/app/hooks/useRecordDensity';
 import {
     RecordActionMenuTrigger,
     RecordActionsTriggerButton,
@@ -76,6 +77,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     onRowClick?: (item: T) => void;
     activeId?: SelectionId | null;
     displayMode: DisplayMode;
+    density?: RowDensity;
     selectedIds: Set<SelectionId>;
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
     onQuickEdit?: (item: T) => void;
@@ -109,6 +111,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onRowClick,
     activeId,
     displayMode,
+    density = 'comfortable',
     selectedIds,
     onSelectedIdsChange,
     onQuickEdit,
@@ -449,7 +452,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         <>
             <div className={cn('relative overflow-hidden rounded-2xl border border-border bg-card', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                 <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing">
-                    <table className="w-full min-w-max border-collapse text-left text-sm">
+                    <table data-density={density} className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>
                             <tr ref={headerRowRef} className="cursor-grab border-b border-border bg-muted/60">
                                 <th className={cn('w-12 px-4 py-2.5 md:sticky md:left-0 md:z-20', stickyHeaderBg)}>

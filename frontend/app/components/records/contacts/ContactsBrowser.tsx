@@ -18,6 +18,8 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
@@ -608,6 +610,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         [setFilterState, applyQuery, applySort],
     );
 
+    const { density, setDensity } = useRecordDensity();
     const peek = useRecordPeekController('person', contacts, displayMode === 'table');
 
     const recordRef = useCallback(
@@ -679,6 +682,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
                                     ]}
                                 />
+                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                             </div>
                         }
                     >
@@ -752,6 +756,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         activeId={peek.activeId}
                         recordRef={recordRef}
                         displayMode={displayMode}
+                        density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}

@@ -23,6 +23,8 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
@@ -837,6 +839,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const visibleDeals = deals;
 
+    const { density, setDensity } = useRecordDensity();
     const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
 
     const recordRef = useCallback(
@@ -1097,6 +1100,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             />
                         }
                         trailing={
+                            <div className="flex items-center gap-2">
                             <div
                                 role="group"
                                 aria-label={t('displayMode')}
@@ -1129,6 +1133,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 >
                                     <ViewColumnsIcon className="size-4" />
                                 </button>
+                            </div>
+                            {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                             </div>
                         }
                     >
@@ -1209,6 +1215,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             activeId={peek.activeId}
                             recordRef={recordRef}
                             displayMode={displayMode}
+                            density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={setSelectedIds}
                             onQuickEdit={quickEditOne}
