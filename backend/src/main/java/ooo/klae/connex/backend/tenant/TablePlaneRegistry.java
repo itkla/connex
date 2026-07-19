@@ -46,6 +46,7 @@ public final class TablePlaneRegistry {
         "data_subject_request",
         "email_change_token",
         "federated_identity",
+        "notification_quiet_hours",
         "notification_preference",
         "notification_recipient_state",
         "object_storage_backend_identity",

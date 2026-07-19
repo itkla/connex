@@ -17,7 +17,7 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 public interface NotificationMapper {
     default List<Notification> findPage(
         int recipientId,
-        String state,
+        String status,
         String category,
         String contextType,
         Integer contextId,
@@ -26,8 +26,11 @@ public interface NotificationMapper {
     ) {
         return findPage(
             recipientId,
-            state,
-            category,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
             contextType,
             contextId,
             getDatabaseUtcTimestamp(),
@@ -38,8 +41,11 @@ public interface NotificationMapper {
 
     List<Notification> findPage(
         @Param("recipientId") int recipientId,
-        @Param("state") String state,
-        @Param("category") String category,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
         @Param("contextType") String contextType,
         @Param("contextId") Integer contextId,
         @Param("asOf") String asOf,
@@ -47,17 +53,45 @@ public interface NotificationMapper {
         @Param("offset") int offset
     );
 
+    default List<Notification> findPage(
+        int recipientId,
+        String status,
+        String category,
+        String contextType,
+        Integer contextId,
+        String asOf,
+        int limit,
+        int offset
+    ) {
+        return findPage(
+            recipientId,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
+            contextType,
+            contextId,
+            asOf,
+            limit,
+            offset
+        );
+    }
+
     default long countPage(
         int recipientId,
-        String state,
+        String status,
         String category,
         String contextType,
         Integer contextId
     ) {
         return countPage(
             recipientId,
-            state,
-            category,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
             contextType,
             contextId,
             getDatabaseUtcTimestamp()
@@ -66,12 +100,36 @@ public interface NotificationMapper {
 
     long countPage(
         @Param("recipientId") int recipientId,
-        @Param("state") String state,
-        @Param("category") String category,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
         @Param("contextType") String contextType,
         @Param("contextId") Integer contextId,
         @Param("asOf") String asOf
     );
+
+    default long countPage(
+        int recipientId,
+        String status,
+        String category,
+        String contextType,
+        Integer contextId,
+        String asOf
+    ) {
+        return countPage(
+            recipientId,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
+            contextType,
+            contextId,
+            asOf
+        );
+    }
 
     NotificationCountsDto getUnreadCounts(
         @Param("recipientId") int recipientId,
@@ -102,6 +160,11 @@ public interface NotificationMapper {
         @Param("id") int id
     );
 
+    Notification findByIdForUpdate(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
     int markRead(
         @Param("recipientId") int recipientId,
         @Param("id") int id
@@ -122,10 +185,20 @@ public interface NotificationMapper {
         @Param("id") int id
     );
 
+    default int snooze(int recipientId, int id, String snoozedUntil) {
+        return snooze(recipientId, id, snoozedUntil, "UTC");
+    }
+
     int snooze(
         @Param("recipientId") int recipientId,
         @Param("id") int id,
-        @Param("snoozedUntil") String snoozedUntil
+        @Param("snoozedUntil") String snoozedUntil,
+        @Param("snoozeTimezone") String snoozeTimezone
+    );
+
+    int unsnooze(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
     );
 
     int markAllRead(
