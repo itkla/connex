@@ -673,6 +673,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     >
                                                         <EditableCell
                                                             value={editable.getValue(item)}
+                                                            display={col.render ? content : undefined}
                                                             onCommit={(next) => editable.save(item, next)}
                                                             inputType={editable.inputType}
                                                             validate={editable.validate}

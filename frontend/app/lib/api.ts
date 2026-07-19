@@ -2287,6 +2287,16 @@ export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
     return putJson<Types.Deal>(`/api/deals/${id}`, payload);
 }
 
+/** Renames a deal without touching any other field (safe against concurrent edits). */
+export function updateDealName(id: number, name: string) {
+    return putJson<Types.Deal>(`/api/deals/${id}/name`, { name });
+}
+
+/** Updates only a deal's projected value; rejected with 409 while the deal has line items. */
+export function updateDealValue(id: number, value: number) {
+    return putJson<Types.Deal>(`/api/deals/${id}/value`, { value });
+}
+
 export function deleteDeal(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/deals/${id}`, init);
 }

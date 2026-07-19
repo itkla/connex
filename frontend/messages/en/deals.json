@@ -193,6 +193,7 @@
     "currencyCount": "{count, plural, one {# deal} other {# deals}}",
     "columnName": "Name",
     "columnValue": "Value",
+    "valueInvalid": "Enter a non-negative amount with up to two decimals",
     "columnActualValue": "Actual value",
     "columnCompany": "Company",
     "columnPipeline": "Pipeline",
