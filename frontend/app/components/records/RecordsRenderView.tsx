@@ -184,6 +184,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     const toggleAll = (checked: boolean) => {
         onSelectedIdsChange(checked ? new Set(sortedData.map((item) => item.id)) : new Set());
+        setSelectionAnchor(null);
     };
 
     const toggleOne = (id: SelectionId, checked: boolean) => {
@@ -191,6 +192,32 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         if (checked) next.add(id);
         else next.delete(id);
         onSelectedIdsChange(next);
+    };
+
+    const [selectionAnchor, setSelectionAnchor] = useState<{ id: SelectionId; selected: boolean } | null>(null);
+    const rangeShiftRef = useRef(false);
+
+    const applyToggle = (id: SelectionId, checked: boolean) => {
+        const shift = rangeShiftRef.current;
+        rangeShiftRef.current = false;
+        const anchor = selectionAnchor;
+        if (shift && anchor != null && anchor.id !== id) {
+            const ids = pagedData.map((item) => item.id);
+            const anchorIndex = ids.indexOf(anchor.id);
+            const targetIndex = ids.indexOf(id);
+            if (anchorIndex !== -1 && targetIndex !== -1) {
+                const [lo, hi] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+                const next = new Set(selectedIds);
+                for (let i = lo; i <= hi; i++) {
+                    if (anchor.selected) next.add(ids[i]);
+                    else next.delete(ids[i]);
+                }
+                onSelectedIdsChange(next);
+                return;
+            }
+        }
+        toggleOne(id, checked);
+        setSelectionAnchor({ id, selected: checked });
     };
 
     const hasRowActions = !!(onQuickEdit || onDelete || recordRef);
@@ -359,7 +386,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                         <span className="h-5 w-px shrink-0 bg-border" />
                         <button
                             type="button"
-                            onClick={() => onSelectedIdsChange(new Set())}
+                            onClick={() => {
+                                onSelectedIdsChange(new Set());
+                                setSelectionAnchor(null);
+                            }}
                             aria-label={t('clearSelection')}
                             className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
                         >
@@ -616,7 +646,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         <td className={cn('px-4 py-2.5 md:sticky md:left-0 md:z-10', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
                                             <Checkbox
                                                 checked={isSelected}
-                                                onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
+                                                onClick={(event) => {
+                                                    rangeShiftRef.current = event.shiftKey;
+                                                }}
+                                                onCheckedChange={(checked) => applyToggle(item.id, checked === true)}
                                                 aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
                                                 className={CHECKBOX_CLASS}
                                             />
