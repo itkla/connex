@@ -39,6 +39,8 @@ import { useRouter } from 'next/navigation';
 import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useDuplicateNameCheck, type DuplicateNameResult } from '@/app/hooks/useDuplicateNameCheck';
 import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
@@ -109,13 +111,30 @@ export default function NewContactDialog({
         submissionPendingRef.current = false;
     }, [newContactDialogOpen]);
 
+    const isDirty =
+        !isSuccess &&
+        ((newContactPayload.name ?? '').trim() !== '' ||
+            (newContactPayload.email ?? '').trim() !== '' ||
+            (newContactPayload.phone ?? '').trim() !== '' ||
+            (newContactPayload.title ?? '').trim() !== '' ||
+            Boolean(imageFile));
+    const guard = useUnsavedChangesGuard({
+        isDirty,
+        onClose: () => setNewContactDialogOpen(false),
+        enabled: !isCreating && !isSuccess,
+    });
+
     const handleOpenChange = (next: boolean) => {
         if (!next && (
             submissionPendingRef.current
             || importRetryRequiredRef.current
             || isCreating
         )) return;
-        setNewContactDialogOpen(next);
+        if (next) {
+            setNewContactDialogOpen(true);
+            return;
+        }
+        guard.onOpenChange(false);
     };
 
     const handleSubmissionPendingChange = (pending: boolean) => {
@@ -131,6 +150,7 @@ export default function NewContactDialog({
     };
 
     return (
+        <>
         <ResponsiveDialog open={newContactDialogOpen} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent
                 className="max-h-[calc(100dvh-1rem)] gap-0 overflow-y-auto p-0 sm:max-w-xl"
@@ -155,6 +175,8 @@ export default function NewContactDialog({
                 />
             </ResponsiveDialogContent>
         </ResponsiveDialog>
+        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 

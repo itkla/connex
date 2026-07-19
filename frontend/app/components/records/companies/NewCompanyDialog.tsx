@@ -30,6 +30,8 @@ import {
 import { ImagePlusIcon, Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError } from '@/app/lib/toast';
 
@@ -244,9 +246,28 @@ export default function NewCompanyDialog({
         setWebsiteFormatError(normalized && !isLikelyUrl(normalized) ? t('websiteInvalid') : null);
     };
 
+    const isDirty =
+        !isSuccess &&
+        (payload.name.trim() !== '' ||
+            (payload.website ?? '').trim() !== '' ||
+            (payload.industry ?? '').trim() !== '' ||
+            (payload.phone ?? '').trim() !== '' ||
+            (payload.address ?? '').trim() !== '' ||
+            pendingContacts.length > 0 ||
+            Boolean(logoPreview));
+    const guard = useUnsavedChangesGuard({
+        isDirty,
+        onClose: () => onOpenChange(false),
+        enabled: !isCreating && !isSuccess,
+    });
+
     const handleOpenChange = (next: boolean) => {
         if (!next && (isCreating || logoSelectionPending)) return;
-        onOpenChange(next);
+        if (next) {
+            onOpenChange(true);
+            return;
+        }
+        guard.onOpenChange(false);
     };
 
     const handleSubmit = async (e: FormEvent) => {
@@ -344,6 +365,7 @@ export default function NewCompanyDialog({
     }, [reduce, open]);
 
     return (
+        <>
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent scrollable={false} className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <motion.div
@@ -639,6 +661,8 @@ export default function NewCompanyDialog({
                 </p>
             </ResponsiveDialogContent>
         </ResponsiveDialog>
+        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
