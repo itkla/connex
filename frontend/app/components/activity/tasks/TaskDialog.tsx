@@ -1,11 +1,14 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
     ResponsiveDialog,
@@ -61,10 +64,12 @@ export default function TaskDialog({
 }: Props) {
     const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const [prevOpen, setPrevOpen] = useState(open);
@@ -72,31 +77,36 @@ export default function TaskDialog({
     if (open !== prevOpen) {
         setPrevOpen(open);
         if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
     }
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <TaskDialogForm
-                    key={openCount}
-                    persons={persons}
-                    deals={deals}
-                    users={users}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultDueDate={defaultDueDate}
-                    defaultDescription={defaultDescription}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onCancel={() => onOpenChange(false)}
-                    onClose={() => onOpenChange(false)}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <TaskDialogForm
+                        key={openCount}
+                        persons={persons}
+                        deals={deals}
+                        users={users}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultDueDate={defaultDueDate}
+                        defaultDescription={defaultDescription}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -110,6 +120,8 @@ type TaskDialogFormProps = {
     defaultDueDate: string;
     defaultDescription: string;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -131,6 +143,7 @@ export function TaskDialogForm({
     defaultDueDate,
     defaultDescription,
     onSubmittingChange,
+    onDirtyChange,
     onCancel,
     onClose,
 }: TaskDialogFormProps) {
@@ -145,6 +158,25 @@ export function TaskDialogForm({
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const [initial] = useState(() => ({
+        description,
+        dueDate,
+        assigneeId: assignee?.id ?? null,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (description.trim() !== initial.description.trim() ||
+            dueDate !== initial.dueDate ||
+            (assignee?.id ?? null) !== initial.assigneeId ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
