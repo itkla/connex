@@ -20,6 +20,7 @@ import { useReducedMotion } from 'motion/react';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
 import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
@@ -119,6 +120,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         applySort: applyServerSort,
         revision,
         reload,
+        patchItem,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
@@ -485,6 +487,19 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         }
     };
 
+    const inlineEdit = useInlineEdit<Contact>(patchItem);
+    const saveContact = useCallback(
+        (full: Contact) =>
+            updateContact(full.id, {
+                name: full.name,
+                email: full.email,
+                phone: full.phone,
+                title: full.title,
+                companyId: full.companyId ?? full.company?.id,
+            }).then(() => {}),
+        [],
+    );
+
     const columns: ColumnDef<Contact>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
@@ -498,13 +513,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'email',
             label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
-            copyable: { label: t('copyableEmail'), getValue: (c) => c.email },
+            editable: { getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: t('copyablePhone'), getValue: (c) => c.phone },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
         },
         {
             key: 'company',
@@ -517,6 +532,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
+            editable: { getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
         },
         {
             key: 'owner',
@@ -536,7 +552,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId, memberById]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 

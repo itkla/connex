@@ -254,11 +254,16 @@
     "revokeFailed": "共有を取り消せませんでした。",
     "loadFailed": "共有を読み込めませんでした。"
   },
+  "RecordInlineEdit": {
+    "doubleClickToEdit": "ダブルクリックして編集",
+    "saveFailed": "変更を保存できませんでした"
+  },
   "RecordsRenderView": {
     "selectAllAria": "すべての {entityLabel} を選択",
     "selectItemAria": "{name} を選択",
     "copiedToast": "{label} をコピーしました",
     "copyFailedToast": "{label} のコピーに失敗しました",
+    "editFieldAria": "{name} の{field}を編集",
     "selectedLabel": "選択中",
     "clearSelection": "選択を解除",
     "rowActionsAria": "{name} の操作",
