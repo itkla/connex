@@ -59,12 +59,6 @@ export type ActivityDraftData = {
     dealId: number | null;
 };
 
-function activityDraftScope(defaultPerson: Contact | null, defaultDeal: Deal | null): string {
-    if (defaultPerson) return `person:${defaultPerson.id}`;
-    if (defaultDeal) return `deal:${defaultDeal.id}`;
-    return 'global';
-}
-
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -126,7 +120,7 @@ export default function ActivityDialog({
             userId: currentUserId,
             workspaceId: activeWorkspaceId,
             formType: 'activity',
-            scope: activityDraftScope(defaultPerson, defaultDeal),
+            scope: 'global',
         },
         version: DRAFT_VERSIONS.activity,
     });
@@ -276,7 +270,7 @@ export function ActivityDialogForm({
     }, [dirty, onDirtyChange]);
 
     useEffect(() => {
-        if (!dirty) return;
+        if (!dirty || (!subject.trim() && !notes.trim())) return;
         onPersistDraft?.({
             type,
             subject,
@@ -287,8 +281,8 @@ export function ActivityDialogForm({
     }, [dirty, type, subject, notes, selectedPerson, selectedDeal, onPersistDraft]);
 
     useEffect(() => {
-        if (succeeded) onClearDraft?.();
-    }, [succeeded, onClearDraft]);
+        if (succeeded || followUpFailed) onClearDraft?.();
+    }, [succeeded, followUpFailed, onClearDraft]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

@@ -36,9 +36,14 @@ export type StoredDraft<T> = {
     data: T;
 };
 
+/** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
+function ownerPrefix(userId: number | null, workspaceId: number | null): string {
+    return `${DRAFT_PREFIX}${userId ?? 'anon'}:${workspaceId ?? 'none'}:`;
+}
+
 /** Builds the stable sessionStorage key for a draft. User + workspace prevent same-tab re-login bleed. */
 export function draftKey({ userId, workspaceId, formType, scope }: DraftKeyParts): string {
-    return `${DRAFT_PREFIX}${userId ?? 'anon'}:${workspaceId ?? 'none'}:${formType}:${scope}`;
+    return `${ownerPrefix(userId, workspaceId)}${formType}:${scope}`;
 }
 
 function safeSession(): Storage | null {
@@ -84,6 +89,8 @@ function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshness
         typeof env === 'object' &&
         env !== null &&
         env.v === expectedVersion &&
+        env.data !== null &&
+        env.data !== undefined &&
         typeof env.savedAt === 'number' &&
         Date.now() - env.savedAt <= freshnessMs
     );
@@ -114,11 +121,20 @@ export function readDraft<T>(key: string, opts: { version: number; freshnessMs?:
     return { key, scope: env.scope, formType: env.formType, savedAt: env.savedAt, data: env.data };
 }
 
-/** Enumerates every fresh, current-version draft in the store, sweeping any that are stale or unknown. */
-export function listFreshDrafts(opts?: { freshnessMs?: number }): StoredDraft<unknown>[] {
+/**
+ * Enumerates the fresh, current-version drafts belonging to one user + workspace, sweeping any that are
+ * stale or malformed. Scoping to the caller's identity is load-bearing: a draft must never surface for a
+ * different user or workspace sharing the tab, or resuming it would create data in the wrong tenant.
+ */
+export function listFreshDrafts(opts: {
+    userId: number | null;
+    workspaceId: number | null;
+    freshnessMs?: number;
+}): StoredDraft<unknown>[] {
     const store = safeSession();
     if (!store) return [];
-    const freshnessMs = opts?.freshnessMs ?? DEFAULT_DRAFT_FRESHNESS_MS;
+    const freshnessMs = opts.freshnessMs ?? DEFAULT_DRAFT_FRESHNESS_MS;
+    const scopedPrefix = ownerPrefix(opts.userId, opts.workspaceId);
     const out: StoredDraft<unknown>[] = [];
     let keys: string[] = [];
     try {
@@ -127,7 +143,7 @@ export function listFreshDrafts(opts?: { freshnessMs?: number }): StoredDraft<un
         return [];
     }
     for (const key of keys) {
-        if (!key.startsWith(DRAFT_PREFIX)) continue;
+        if (!key.startsWith(scopedPrefix)) continue;
         let raw: string | null = null;
         try {
             raw = store.getItem(key);
