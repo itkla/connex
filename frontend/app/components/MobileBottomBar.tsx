@@ -158,7 +158,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                 initial={reduce ? false : { y: 16, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={reduce ? instant : springSnappy}
-                className="pointer-events-auto flex w-full items-stretch gap-0.5 rounded-full border border-sidebar-border bg-sidebar/80 px-1.5 py-1.5 shadow-[0_1px_0_0_rgb(255_255_255/0.06)_inset,0_10px_30px_-8px_rgb(0_0_0/0.35)] backdrop-blur-xl"
+                className="pointer-events-auto flex w-full items-stretch gap-0.5 rounded-full border border-sidebar-border bg-sidebar/75 px-1.5 py-1.5 shadow-[0_1px_0_0_rgb(255_255_255/0.06)_inset,0_10px_30px_-8px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150"
             >
                 <BarLink
                     href="/dashboard"
@@ -179,15 +179,18 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                 <motion.button
                     type="button"
                     onClick={openQuickCreate}
-                    whileTap={reduce ? undefined : { scale: 0.9 }}
+                    whileTap={reduce ? undefined : { scale: 0.92 }}
                     transition={reduce ? instant : springJiggle}
                     aria-label={tActions('quickCreate.trigger')}
-                    className="group flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    className="group flex flex-1 items-center justify-center rounded-2xl focus-visible:outline-none"
                 >
-                    <span className="flex h-7 w-12 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-sm transition-colors group-hover:bg-brand-hover">
-                        <PlusIcon className="size-6" />
+                    <span className="relative flex size-11 items-center justify-center overflow-hidden rounded-full border border-white/25 bg-brand/85 text-brand-foreground shadow-[inset_0_1px_0.5px_rgb(255_255_255/0.55),inset_0_-2px_4px_rgb(0_0_0/0.15),0_6px_16px_-4px_rgb(0_0_0/0.45)] backdrop-blur-md transition-colors group-hover:bg-brand-hover/90 group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-sidebar">
+                        <span
+                            aria-hidden
+                            className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/45 to-transparent"
+                        />
+                        <PlusIcon className="relative size-6" />
                     </span>
-                    <span aria-hidden className="h-2.5" />
                 </motion.button>
 
                 <BarLink
