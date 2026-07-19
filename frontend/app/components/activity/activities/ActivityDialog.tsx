@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 import {
     ResponsiveDialog,
@@ -34,9 +34,10 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createActivity, isFieldError } from '@/app/lib/api';
+import { ApiError, createActivity, createTask, isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
     ACTIVITY_TYPES,
     ActivityTypePicker,
@@ -67,6 +68,20 @@ function nowLocalValue(): string {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** Formats a Date as the `YYYY-MM-DD` local calendar value an `<input type="date">` expects. */
+function toDateInputValue(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Relative-due-date presets for the follow-up task, in days from today. */
+const FOLLOW_UP_PRESETS = [
+    { key: 'today', days: 0 },
+    { key: 'tomorrow', days: 1 },
+    { key: 'inThreeDays', days: 3 },
+    { key: 'nextWeek', days: 7 },
+] as const;
 
 export default function ActivityDialog({
     open,
@@ -170,7 +185,17 @@ export function ActivityDialogForm({
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [followUpEnabled, setFollowUpEnabled] = useState(false);
+    const [followUpDescription, setFollowUpDescription] = useState('');
+    const [followUpDueDate, setFollowUpDueDate] = useState('');
+    const [followUpFailed, setFollowUpFailed] = useState(false);
+    const activityCreatedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const enableFollowUp = () => {
+        setFollowUpEnabled(true);
+        if (!followUpDescription) setFollowUpDescription(subject);
+    };
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -184,16 +209,37 @@ export function ActivityDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createActivity({
-                type,
-                subject: subject.trim(),
-                notes: notes.trim() || undefined,
-                createdById: currentUserId,
-                timestamp: when ? toMysqlDateTime(when) : undefined,
-                personId: selectedPerson?.id ?? undefined,
-                dealId: selectedDeal?.id ?? undefined,
-            });
-            toastSuccess(t('toastCreated'));
+            if (!activityCreatedRef.current) {
+                await createActivity({
+                    type,
+                    subject: subject.trim(),
+                    notes: notes.trim() || undefined,
+                    createdById: currentUserId,
+                    timestamp: when ? toMysqlDateTime(when) : undefined,
+                    personId: selectedPerson?.id ?? undefined,
+                    dealId: selectedDeal?.id ?? undefined,
+                });
+                activityCreatedRef.current = true;
+            }
+            if (followUpEnabled) {
+                try {
+                    await createTask({
+                        description: (followUpDescription.trim() || subject.trim()),
+                        dueDate: followUpDueDate || undefined,
+                        assignedToId: currentUserId,
+                        personId: selectedPerson?.id ?? undefined,
+                        dealId: selectedDeal?.id ?? undefined,
+                    });
+                } catch (taskErr) {
+                    setFollowUpFailed(true);
+                    const message = taskErr instanceof ApiError ? taskErr.message : t('toastFollowUpFailed');
+                    toastError(message);
+                    router.refresh();
+                    return;
+                }
+            }
+            setFollowUpFailed(false);
+            toastSuccess(followUpEnabled ? t('toastCreatedWithTask') : t('toastCreated'));
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
@@ -359,6 +405,82 @@ export function ActivityDialogForm({
                         </div>
                     </div>
 
+                    <div className="ncd-rise grid gap-2" style={{ animationDelay: '315ms' }}>
+                        {!followUpEnabled ? (
+                            <button
+                                type="button"
+                                onClick={enableFollowUp}
+                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            >
+                                <CheckCircleIcon className="size-4" />
+                                {t('followUpAdd')}
+                            </button>
+                        ) : (
+                            <div className="grid gap-3 rounded-xl border border-border bg-muted/40 p-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                        <CheckCircleIcon className="size-4 text-brand" />
+                                        {t('followUpTitle')}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setFollowUpEnabled(false);
+                                            setFollowUpFailed(false);
+                                        }}
+                                        className="text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
+                                    >
+                                        {t('followUpRemove')}
+                                    </button>
+                                </div>
+                                {followUpFailed && (
+                                    <p className="rounded-lg bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">{t('followUpFailedNote')}</p>
+                                )}
+                                <input
+                                    type="text"
+                                    value={followUpDescription}
+                                    onChange={(e) => setFollowUpDescription(e.target.value)}
+                                    placeholder={t('followUpDescriptionPlaceholder')}
+                                    className={cn(fieldInputClass, 'px-3')}
+                                    aria-label={t('followUpDescriptionLabel')}
+                                />
+                                <div className="flex flex-col gap-2">
+                                    <span className="text-xs text-muted-foreground">{t('followUpDueLabel')}</span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        {FOLLOW_UP_PRESETS.map((preset) => {
+                                            const value = toDateInputValue(addDays(startOfDay(new Date()), preset.days));
+                                            const active = followUpDueDate === value;
+                                            return (
+                                                <button
+                                                    key={preset.key}
+                                                    type="button"
+                                                    onClick={() => setFollowUpDueDate(active ? '' : value)}
+                                                    aria-pressed={active}
+                                                    className={cn(
+                                                        'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+                                                        active ? 'bg-brand-light text-brand-dark ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
+                                                    )}
+                                                >
+                                                    {t(`followUp_${preset.key}` as 'followUp_today')}
+                                                </button>
+                                            );
+                                        })}
+                                        <div className="group relative">
+                                            <ClockIcon className={fieldLeadIconClass} />
+                                            <input
+                                                type="date"
+                                                value={followUpDueDate}
+                                                onChange={(e) => setFollowUpDueDate(e.target.value)}
+                                                aria-label={t('followUpDueLabel')}
+                                                className={cn(fieldInputClass, 'h-8 w-40 pl-8 pr-2 text-xs')}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
                         <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
                             {t('cancel')}
@@ -369,7 +491,15 @@ export function ActivityDialogForm({
                             disabled={submitting || succeeded}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
+                            {submitting ? (
+                                <Loader2Icon className="size-4 animate-spin" />
+                            ) : followUpFailed ? (
+                                t('retryFollowUp')
+                            ) : followUpEnabled ? (
+                                t('createWithTask')
+                            ) : (
+                                t('create')
+                            )}
                         </Button>
                     </div>
                 </form>
