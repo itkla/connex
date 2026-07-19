@@ -139,6 +139,12 @@
     "more": "More",
     "tasksBadge": "{count} tasks need attention"
   },
+  "ConfirmDiscard": {
+    "title": "Discard unsaved changes?",
+    "description": "You have unsaved changes. If you leave now, they'll be lost.",
+    "discard": "Discard changes",
+    "keepEditing": "Keep editing"
+  },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
     "searching": "Searching...",

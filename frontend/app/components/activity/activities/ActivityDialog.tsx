@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -24,6 +24,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import {
     DialogStatusCover,
@@ -98,10 +100,12 @@ export default function ActivityDialog({
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const [prevOpen, setPrevOpen] = useState(open);
@@ -112,29 +116,33 @@ export default function ActivityDialog({
     }
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <ActivityDialogForm
-                    key={openCount}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultTimestamp={defaultTimestamp}
-                    defaultType={defaultType}
-                    defaultSubject={defaultSubject}
-                    defaultNotes={defaultNotes}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onCancel={() => onOpenChange(false)}
-                    onClose={() => onOpenChange(false)}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <ActivityDialogForm
+                        key={openCount}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultTimestamp={defaultTimestamp}
+                        defaultType={defaultType}
+                        defaultSubject={defaultSubject}
+                        defaultNotes={defaultNotes}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -149,6 +157,8 @@ type ActivityDialogFormProps = {
     defaultSubject?: string;
     defaultNotes?: string;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -171,6 +181,7 @@ export function ActivityDialogForm({
     defaultSubject = '',
     defaultNotes = '',
     onSubmittingChange,
+    onDirtyChange,
     onCancel,
     onClose,
 }: ActivityDialogFormProps) {
@@ -196,6 +207,28 @@ export function ActivityDialogForm({
         setFollowUpEnabled(true);
         if (!followUpDescription) setFollowUpDescription(subject);
     };
+
+    const [initial] = useState(() => ({
+        subject,
+        notes,
+        type,
+        when,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (subject !== initial.subject ||
+            notes !== initial.notes ||
+            type !== initial.type ||
+            when !== initial.when ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId ||
+            followUpEnabled);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
