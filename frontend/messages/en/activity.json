@@ -53,7 +53,22 @@
     "create": "Create",
     "toastSubjectRequired": "Subject is required",
     "toastCreated": "Activity logged",
-    "toastFailedCreate": "Failed to log activity"
+    "toastFailedCreate": "Failed to log activity",
+    "toastCreatedWithTask": "Activity logged and follow-up task created",
+    "toastFollowUpFailed": "Activity logged, but the follow-up task couldn't be created",
+    "createWithTask": "Log activity + task",
+    "retryFollowUp": "Retry follow-up",
+    "followUpAdd": "Add a follow-up task",
+    "followUpTitle": "Follow-up task",
+    "followUpRemove": "Remove",
+    "followUpFailedNote": "The activity was logged. The follow-up task couldn't be created — retry below.",
+    "followUpDescriptionLabel": "Follow-up description",
+    "followUpDescriptionPlaceholder": "What's the next step?",
+    "followUpDueLabel": "Due",
+    "followUp_today": "Today",
+    "followUp_tomorrow": "Tomorrow",
+    "followUp_inThreeDays": "In 3 days",
+    "followUp_nextWeek": "Next week"
   },
   "ActivityNotes": {
     "title": "Notes",

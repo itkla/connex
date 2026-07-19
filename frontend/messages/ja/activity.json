@@ -53,7 +53,22 @@
     "create": "作成",
     "toastSubjectRequired": "件名は必須です",
     "toastCreated": "アクティビティを記録しました",
-    "toastFailedCreate": "アクティビティを記録できませんでした"
+    "toastFailedCreate": "アクティビティを記録できませんでした",
+    "toastCreatedWithTask": "アクティビティを記録し、フォローアップタスクを作成しました",
+    "toastFollowUpFailed": "アクティビティは記録しましたが、フォローアップタスクを作成できませんでした",
+    "createWithTask": "記録＋タスク作成",
+    "retryFollowUp": "フォローアップを再試行",
+    "followUpAdd": "フォローアップタスクを追加",
+    "followUpTitle": "フォローアップタスク",
+    "followUpRemove": "削除",
+    "followUpFailedNote": "アクティビティは記録されました。フォローアップタスクを作成できませんでした。以下から再試行してください。",
+    "followUpDescriptionLabel": "フォローアップの内容",
+    "followUpDescriptionPlaceholder": "次のステップは？",
+    "followUpDueLabel": "期限",
+    "followUp_today": "今日",
+    "followUp_tomorrow": "明日",
+    "followUp_inThreeDays": "3日後",
+    "followUp_nextWeek": "来週"
   },
   "ActivityNotes": {
     "title": "メモ",
