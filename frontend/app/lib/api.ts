@@ -3,6 +3,8 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
+import { clearAllDrafts } from "@/app/lib/formDrafts";
+
 import type {
     AuthenticationResponseJSON,
     PublicKeyCredentialCreationOptionsJSON,
@@ -891,6 +893,7 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
 }
 
 export function logout() {
+    clearAllDrafts();
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"));
 }
 

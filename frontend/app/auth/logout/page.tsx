@@ -7,7 +7,6 @@ import { LoaderCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { logout } from "@/app/lib/api";
-import { clearAllDrafts } from "@/app/lib/formDrafts";
 
 export default function LogoutPage() {
     const router = useRouter();
@@ -29,7 +28,6 @@ export default function LogoutPage() {
                 const message = err instanceof Error ? err.message : t("errorFallback");
                 toastError(message);
             } finally {
-                clearAllDrafts();
                 router.replace("/");
                 router.refresh();
             }
