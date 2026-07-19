@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/drawer';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { getContacts, getDeals, getUsers } from '@/app/lib/api';
@@ -76,7 +77,7 @@ function useIsClient(): boolean {
  * drawer to finish closing before opening the target one — two drawers transitioning at once desyncs
  * the shared backdrop/dismiss handling and flicks the just-opened dialog straight back down.
  */
-export default function QuickCreateLauncher() {
+export default function QuickCreateLauncher({ compact = false }: { compact?: boolean } = {}) {
     const t = useTranslations('Actions');
     const { run, context } = useActions();
     const createActions = useAvailableActions('create');
@@ -213,22 +214,36 @@ export default function QuickCreateLauncher() {
         />
     );
 
+    const launchButton = (
+        <motion.button
+            ref={triggerRef}
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label={t('quickCreate.trigger')}
+            onClick={() => (open ? closeLauncher() : openLauncher())}
+            whileTap={reduceMotion ? undefined : { scale: 0.95 }}
+            transition={reduceMotion ? instant : springJiggle}
+            className={cn(
+                'inline-flex items-center justify-center rounded-xl bg-brand text-brand-foreground shadow-sm transition-colors duration-150 hover:bg-brand-hover hover:shadow',
+                compact ? 'mx-auto size-9' : 'w-full gap-2 px-3 py-2.5 text-sm font-semibold',
+            )}
+        >
+            <PlusIcon className="size-4" />
+            {!compact && t('quickCreate.trigger')}
+        </motion.button>
+    );
+
     return (
         <div ref={rootRef} className="mb-5 shrink-0">
-            <motion.button
-                ref={triggerRef}
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={open}
-                aria-label={t('quickCreate.trigger')}
-                onClick={() => (open ? closeLauncher() : openLauncher())}
-                whileTap={reduceMotion ? undefined : { scale: 0.95 }}
-                transition={reduceMotion ? instant : springJiggle}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-colors duration-150 hover:bg-brand-hover hover:shadow"
-            >
-                <PlusIcon className="size-4" />
-                {t('quickCreate.trigger')}
-            </motion.button>
+            {compact ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>{launchButton}</TooltipTrigger>
+                    <TooltipContent side="right">{t('quickCreate.trigger')}</TooltipContent>
+                </Tooltip>
+            ) : (
+                launchButton
+            )}
 
             {mounted && activeIsMobile ? (
                 <Drawer

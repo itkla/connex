@@ -132,7 +132,9 @@
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",
-    "showSidebar": "サイドバーを表示"
+    "showSidebar": "サイドバーを表示",
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "expandSidebar": "サイドバーを展開"
   },
   "MobileNav": {
     "barLabel": "メインナビゲーション",

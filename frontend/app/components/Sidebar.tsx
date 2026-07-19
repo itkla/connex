@@ -36,7 +36,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -51,6 +51,10 @@ import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
 import QuickCreateLauncher from '@/app/components/actions/QuickCreateLauncher';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useSidebarMode } from '@/app/hooks/useSidebarMode';
+import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 type NavItem = {
@@ -150,12 +154,23 @@ function isActive(pathname: string, href: string): boolean {
 function NavGroup({
     section,
     pathname,
+    rail,
 }: {
     section: NavSection;
     pathname: string;
+    rail: boolean;
 }) {
     const [open, setOpen] = useState(true);
     const sectionId = `nav-group-${section.label.toLowerCase()}`;
+    if (rail) {
+        return (
+            <ul aria-label={section.label} className="flex flex-col items-center gap-1">
+                {section.items.map((item) => (
+                    <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} rail />
+                ))}
+            </ul>
+        );
+    }
     return (
         <div>
             <button
@@ -176,7 +191,8 @@ function NavGroup({
                         <NavLink
                             key={item.href}
                             item={item}
-                            active={isActive(pathname, item.href)} // TODO: add active state for nested routes (/activity and /activity/tasks both show as active in the Sidebar; unintended behavior)
+                            active={isActive(pathname, item.href)}
+                            rail={false}
                         />
                     ))}
                 </ul>
@@ -185,8 +201,37 @@ function NavGroup({
     );
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail: boolean }) {
     const Icon = item.icon;
+    if (rail) {
+        const link = (
+            <Link
+                href={item.disabled ? "#" : item.href}
+                aria-current={active ? "page" : undefined}
+                aria-label={item.label}
+                className="group flex justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+                <span
+                    className={cn(
+                        "flex size-9 items-center justify-center rounded-lg transition-colors",
+                        active
+                            ? "bg-brand-light text-brand-dark"
+                            : "text-muted-foreground group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground",
+                    )}
+                >
+                    <Icon className="size-4 shrink-0" />
+                </span>
+            </Link>
+        );
+        return (
+            <li className={item.disabled ? "pointer-events-none opacity-50" : ""}>
+                <Tooltip>
+                    <TooltipTrigger asChild>{link}</TooltipTrigger>
+                    <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+            </li>
+        );
+    }
     return (
         <li className={item.disabled ? "opacity-50 disabled cursor-not-allowed" : ""}>
             <Link
@@ -243,7 +288,7 @@ function ThemeSubmenu() {
     );
 }
 
-function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
+function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; rail: boolean }) {
     const t = useTranslations("CommonSidebar");
     const locale = useLocale();
     const router = useRouter();
@@ -267,21 +312,31 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
     return (
         <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-                <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-md p-2 text-left transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
-                >
-                    <UserAvatar user={user} />
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-sidebar-foreground">
-                            {user.displayName}
+                {rail ? (
+                    <button
+                        type="button"
+                        aria-label={user.displayName}
+                        className="flex justify-center rounded-md p-1 transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
+                    >
+                        <UserAvatar user={user} />
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-md p-2 text-left transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
+                    >
+                        <UserAvatar user={user} />
+                        <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-sidebar-foreground">
+                                {user.displayName}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                                @{user.username}
+                            </div>
                         </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                            @{user.username}
-                        </div>
-                    </div>
-                    <EllipsisVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
-                </button>
+                        <EllipsisVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
+                    </button>
+                )}
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
                 <DropdownMenu.Content
@@ -377,6 +432,21 @@ export default function Sidebar({
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
+    const { mode } = useSidebarMode();
+    const isMobile = useIsMobile();
+    const rail = !isMobile && mode === "rail";
+
+    const [transitionsEnabled, setTransitionsEnabled] = useState(false);
+    useEffect(() => {
+        let inner = 0;
+        const outer = requestAnimationFrame(() => {
+            inner = requestAnimationFrame(() => setTransitionsEnabled(true));
+        });
+        return () => {
+            cancelAnimationFrame(outer);
+            cancelAnimationFrame(inner);
+        };
+    }, []);
 
     async function handleLogout() {
         try {
@@ -389,15 +459,20 @@ export default function Sidebar({
     return (
         <div className="p-2 h-dvh">
             <aside
-                className={`flex flex-col min-h-0 ${className ?? ""}`}
+                className={cn(
+                    "flex min-h-0 flex-col",
+                    transitionsEnabled && "transition-[width,padding] duration-300 ease-out motion-reduce:transition-none",
+                    rail ? "w-16 p-3" : "w-64 p-6",
+                    className,
+                )}
                 aria-label={t("ariaPrimarySidebar")}
             >
-                <header className="mb-6 flex shrink-0 items-center justify-between gap-2">
-                    <WorkspaceSwitcher />
+                <header className={cn("mb-6 flex shrink-0 gap-2", rail ? "flex-col items-center" : "items-center justify-between")}>
+                    <WorkspaceSwitcher compact={rail} />
                     <NotificationBell />
                 </header>
 
-                <QuickCreateLauncher />
+                <QuickCreateLauncher compact={rail} />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
                     {sections.map((section) => (
@@ -405,12 +480,13 @@ export default function Sidebar({
                             key={section.label}
                             section={section}
                             pathname={pathname}
+                            rail={rail}
                         />
                     ))}
                 </nav>
 
-                <div className="mt-4 shrink-0 border-t border-sidebar-border pt-4">
-                    <UserMenu user={user} onLogout={handleLogout} />
+                <div className={cn("mt-4 shrink-0 border-t border-sidebar-border pt-4", rail && "flex justify-center")}>
+                    <UserMenu user={user} onLogout={handleLogout} rail={rail} />
                 </div>
             </aside>
         </div>

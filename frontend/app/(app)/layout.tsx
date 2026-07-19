@@ -11,6 +11,7 @@ import { ActionProvider } from "@/app/hooks/useActions";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
 import DraftResumeBridge from "@/app/components/DraftResumeBridge";
+import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
 
 /** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
@@ -49,16 +50,18 @@ export default async function AppLayout({
                             cookieLocale={localePreferenceFromCookieHeader(cookie)}
                         />
                         <DraftResumeBridge />
-                        <ContentShell
-                            sidebar={
-                                <Sidebar
-                                    user={user}
-                                    className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
-                                />
-                            }
-                        >
-                            {children}
-                        </ContentShell>
+                        <SidebarModeProvider>
+                            <ContentShell
+                                sidebar={
+                                    <Sidebar
+                                        user={user}
+                                        className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
+                                    />
+                                }
+                            >
+                                {children}
+                            </ContentShell>
+                        </SidebarModeProvider>
                     </ActionProvider>
                 </NavTrailProvider>
             </NotificationProvider>
