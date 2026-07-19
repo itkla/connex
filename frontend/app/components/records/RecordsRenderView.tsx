@@ -193,6 +193,31 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         onSelectedIdsChange(next);
     };
 
+    const [selectionAnchorId, setSelectionAnchorId] = useState<SelectionId | null>(null);
+    const rangeShiftRef = useRef(false);
+
+    const applyToggle = (id: SelectionId, checked: boolean) => {
+        const shift = rangeShiftRef.current;
+        rangeShiftRef.current = false;
+        if (shift && selectionAnchorId != null && selectionAnchorId !== id) {
+            const ids = pagedData.map((item) => item.id);
+            const anchorIndex = ids.indexOf(selectionAnchorId);
+            const targetIndex = ids.indexOf(id);
+            if (anchorIndex !== -1 && targetIndex !== -1) {
+                const [lo, hi] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+                const next = new Set(selectedIds);
+                for (let i = lo; i <= hi; i++) {
+                    if (checked) next.add(ids[i]);
+                    else next.delete(ids[i]);
+                }
+                onSelectedIdsChange(next);
+                return;
+            }
+        }
+        toggleOne(id, checked);
+        setSelectionAnchorId(id);
+    };
+
     const hasRowActions = !!(onQuickEdit || onDelete || recordRef);
     const buildRecordMenu = useCallback(
         (item: T): RecordMenuModel | null => {
@@ -616,7 +641,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         <td className={cn('px-4 py-2.5 md:sticky md:left-0 md:z-10', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
                                             <Checkbox
                                                 checked={isSelected}
-                                                onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
+                                                onClick={(event) => {
+                                                    rangeShiftRef.current = event.shiftKey;
+                                                }}
+                                                onCheckedChange={(checked) => applyToggle(item.id, checked === true)}
                                                 aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
                                                 className={CHECKBOX_CLASS}
                                             />
