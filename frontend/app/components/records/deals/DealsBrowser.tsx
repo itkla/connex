@@ -41,7 +41,7 @@ import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
-import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
     createDeal,
@@ -1251,6 +1251,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     stagesByPipeline={stagesByPipeline}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
+                    isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, EMPTY_DEAL_DRAFT)}
                     createNewDeal={createNewDeal}
                 />
 
