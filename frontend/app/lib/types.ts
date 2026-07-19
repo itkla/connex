@@ -1337,13 +1337,24 @@ export type SegmentDefinition = {
     negate?: boolean;
 };
 
+/**
+ * The browser's flat working shape of a saved-view configuration. {@link visibleColumns},
+ * {@link columnOrder}, and {@link pageSize} are carried purely so they survive a round-trip through
+ * the persisted config DTO — capturing and applying them in the UI is deferred (issue #412).
+ */
 export type SavedViewConfig = {
     filters?: Record<string, string[]>;
     query?: string;
     sortKey?: string | null;
     sortDirection?: "asc" | "desc";
     segments?: SegmentDefinition;
+    visibleColumns?: string[] | null;
+    columnOrder?: string[] | null;
+    pageSize?: number | null;
 };
+
+/** Who can see a saved view: only its owner, or everyone in the workspace. */
+export type SavedViewVisibility = "private" | "workspace";
 
 export type CampaignStatus =
     | "draft"
@@ -1711,15 +1722,28 @@ export type SegmentCatalog = {
 
 export type SavedView = {
     id: number;
+    workspaceId: number;
     recordType: SavedViewRecordType;
     name: string;
+    visibility: SavedViewVisibility;
+    ownerUserId: number;
+    /** Whether the requesting user owns this view; drives owner-only menu actions. */
+    ownedByCurrentUser: boolean;
     config: SavedViewConfig;
     position: number;
+    pinned: boolean;
+    /** Sort order among the user's pinned views; null when not pinned. */
+    pinPosition: number | null;
+    /** Whether this view is the requesting user's default for its record type. */
+    default: boolean;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type SavedViewInput = {
     recordType: SavedViewRecordType;
     name: string;
+    visibility?: SavedViewVisibility;
     config: SavedViewConfig;
     position?: number;
 };

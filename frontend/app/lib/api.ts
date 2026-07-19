@@ -3129,24 +3129,131 @@ export async function getEntityCustomFieldValuesFromCookie(
 * == Saved views
 */
 
-export function getSavedViews(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
-    return getJson<Types.SavedView[]>(`/api/saved-views?recordType=${recordType}`, { cache: "no-store", ...init });
+/**
+ * The wire shape of a persisted saved-view config: versioned, with a nested {@code sort} object and
+ * the deferred column/paging fields. Kept distinct from the browser's flat {@link Types.SavedViewConfig}
+ * so the two can be mapped without leaking the persisted layout into the UI.
+ */
+type SavedViewConfigDto = {
+    version?: number;
+    filters?: Record<string, string[]>;
+    query?: string;
+    sort?: { key: string | null; direction: "asc" | "desc" } | null;
+    segments?: Types.SegmentDefinition;
+    visibleColumns?: string[] | null;
+    columnOrder?: string[] | null;
+    pageSize?: number | null;
+};
+
+type SavedViewWire = Omit<Types.SavedView, "config"> & { config: SavedViewConfigDto };
+
+/**
+ * Flattens a persisted saved-view config into the browser's working shape. Deferred column/paging
+ * fields are preserved so a later {@link toSavedViewConfigDto} never drops them on write.
+ */
+export function fromSavedViewConfigDto(dto: SavedViewConfigDto): Types.SavedViewConfig {
+    return {
+        filters: dto.filters ?? {},
+        query: dto.query ?? "",
+        sortKey: dto.sort?.key ?? null,
+        sortDirection: dto.sort?.direction ?? "asc",
+        segments: dto.segments,
+        visibleColumns: dto.visibleColumns ?? null,
+        columnOrder: dto.columnOrder ?? null,
+        pageSize: dto.pageSize ?? null,
+    };
+}
+
+/** Expands the browser's flat config into the persisted DTO (version 1, nested sort), preserving deferred fields. */
+export function toSavedViewConfigDto(config: Types.SavedViewConfig): SavedViewConfigDto {
+    return {
+        version: 1,
+        filters: config.filters ?? {},
+        query: config.query ?? "",
+        sort: { key: config.sortKey ?? null, direction: config.sortDirection ?? "asc" },
+        segments: config.segments,
+        visibleColumns: config.visibleColumns ?? null,
+        columnOrder: config.columnOrder ?? null,
+        pageSize: config.pageSize ?? null,
+    };
+}
+
+function fromSavedViewWire(wire: SavedViewWire): Types.SavedView {
+    return { ...wire, config: fromSavedViewConfigDto(wire.config) };
+}
+
+function toSavedViewBody(payload: Types.SavedViewInput) {
+    return {
+        recordType: payload.recordType,
+        name: payload.name,
+        ...(payload.visibility !== undefined ? { visibility: payload.visibility } : {}),
+        config: toSavedViewConfigDto(payload.config),
+        ...(payload.position !== undefined ? { position: payload.position } : {}),
+    };
+}
+
+export async function getSavedViews(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
+    const views = await getJson<SavedViewWire[]>(`/api/saved-views?recordType=${recordType}`, { cache: "no-store", ...init });
+    return views.map(fromSavedViewWire);
 }
 
 export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
     return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
 }
 
-export function createSavedView(payload: Types.SavedViewInput) {
-    return postJson<Types.SavedView>(`/api/saved-views`, payload);
+export async function getSavedView(id: number, init: RequestInit = {}) {
+    return fromSavedViewWire(await getJson<SavedViewWire>(`/api/saved-views/${id}`, { cache: "no-store", ...init }));
 }
 
-export function updateSavedView(id: number, payload: Types.SavedViewInput) {
-    return putJson<Types.SavedView>(`/api/saved-views/${id}`, payload);
+export async function createSavedView(payload: Types.SavedViewInput) {
+    return fromSavedViewWire(await postJson<SavedViewWire>(`/api/saved-views`, toSavedViewBody(payload)));
+}
+
+export async function updateSavedView(id: number, payload: Types.SavedViewInput) {
+    return fromSavedViewWire(await putJson<SavedViewWire>(`/api/saved-views/${id}`, toSavedViewBody(payload)));
 }
 
 export function deleteSavedView(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/saved-views/${id}`, init);
+}
+
+export async function getSavedViewPins(init: RequestInit = {}) {
+    const views = await getJson<SavedViewWire[]>(`/api/saved-views/pins`, { cache: "no-store", ...init });
+    return views.map(fromSavedViewWire);
+}
+
+export function getSavedViewPinsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.SavedView>((init) => getSavedViewPins(init), cookie);
+}
+
+export async function pinSavedView(id: number, position?: number): Promise<void> {
+    await putJson<void>(`/api/saved-views/${id}/pin`, position !== undefined ? { position } : {});
+}
+
+export function unpinSavedView(id: number, init: RequestInit = {}): Promise<void> {
+    return deleteJson<void>(`/api/saved-views/${id}/pin`, init);
+}
+
+export async function getDefaultSavedView(recordType: Types.SavedViewRecordType, init: RequestInit = {}): Promise<Types.SavedView | null> {
+    const result = await getJson<{ view: SavedViewWire | null }>(`/api/saved-views/defaults/${recordType}`, { cache: "no-store", ...init });
+    return result.view ? fromSavedViewWire(result.view) : null;
+}
+
+export async function getDefaultSavedViewFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null): Promise<Types.SavedView | null> {
+    if (!cookie) return null;
+    try {
+        return await getDefaultSavedView(recordType, { headers: { cookie }, cache: "no-store" });
+    } catch {
+        return null;
+    }
+}
+
+export async function setDefaultSavedView(recordType: Types.SavedViewRecordType, savedViewId: number): Promise<void> {
+    await putJson<void>(`/api/saved-views/defaults/${recordType}`, { savedViewId });
+}
+
+export function clearDefaultSavedView(recordType: Types.SavedViewRecordType, init: RequestInit = {}): Promise<void> {
+    return deleteJson<void>(`/api/saved-views/defaults/${recordType}`, init);
 }
 
 /*
