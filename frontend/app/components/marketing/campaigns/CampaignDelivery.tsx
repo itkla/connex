@@ -6,6 +6,8 @@ import { Loader2Icon } from "lucide-react";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Select,
     SelectTrigger,
@@ -14,6 +16,7 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import Panel from "@/app/components/overview/analytics/Panel";
+import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import SendStatusBadge from "@/app/components/marketing/campaigns/SendStatusBadge";
 import NewMessageDialog from "@/app/components/marketing/campaigns/NewMessageDialog";
 import { cn } from "@/lib/utils";
@@ -37,8 +40,6 @@ import {
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 
-const inputBase =
-    "w-full rounded-lg bg-muted py-2 px-3 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand";
 const LOCALES: CampaignMessageLocale[] = ["en", "ja"];
 const EMPTY_MESSAGE_PAYLOAD: CampaignMessagePayload = { name: "", channel: "email" };
 
@@ -50,15 +51,6 @@ type RevisionDraft = {
 };
 
 const EMPTY_REVISION_DRAFT: RevisionDraft = { locale: "en", subject: "", bodyHtml: "", bodyText: "" };
-
-function CounterCell({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex flex-col">
-            <span className="text-[0.6875rem] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
-            <span className="tabular-nums text-sm font-semibold text-foreground">{value}</span>
-        </div>
-    );
-}
 
 /**
  * The message-authoring and send lifecycle surface for a campaign. Holds the messages and sends as
@@ -379,7 +371,7 @@ export default function CampaignDelivery({
                                             {!isSmsMessage && (
                                                 <div className="grid gap-1.5">
                                                     <Label htmlFor="revision-subject">{t("subject")}</Label>
-                                                    <input
+                                                    <Input
                                                         id="revision-subject"
                                                         type="text"
                                                         value={revision.subject}
@@ -389,7 +381,6 @@ export default function CampaignDelivery({
                                                                 subject: e.target.value,
                                                             }))
                                                         }
-                                                        className={inputBase}
                                                         placeholder={t("subjectPlaceholder")}
                                                         maxLength={255}
                                                     />
@@ -399,7 +390,7 @@ export default function CampaignDelivery({
                                         {!isSmsMessage && (
                                             <div className="grid gap-1.5">
                                                 <Label htmlFor="revision-body-html">{t("bodyHtml")}</Label>
-                                                <textarea
+                                                <Textarea
                                                     id="revision-body-html"
                                                     value={revision.bodyHtml}
                                                     onChange={(e) =>
@@ -408,7 +399,7 @@ export default function CampaignDelivery({
                                                             bodyHtml: e.target.value,
                                                         }))
                                                     }
-                                                    className={cn(inputBase, "min-h-40 resize-y font-mono")}
+                                                    className="min-h-40 resize-y font-mono"
                                                     placeholder={t("bodyHtmlPlaceholder")}
                                                 />
                                                 <p className="text-xs text-muted-foreground">
@@ -420,7 +411,7 @@ export default function CampaignDelivery({
                                             <Label htmlFor="revision-body-text">
                                                 {isSmsMessage ? t("smsBody") : t("bodyText")}
                                             </Label>
-                                            <textarea
+                                            <Textarea
                                                 id="revision-body-text"
                                                 value={revision.bodyText}
                                                 onChange={(e) =>
@@ -429,7 +420,7 @@ export default function CampaignDelivery({
                                                         bodyText: e.target.value,
                                                     }))
                                                 }
-                                                className={cn(inputBase, "min-h-24 resize-y")}
+                                                className="min-h-24 resize-y"
                                                 placeholder={
                                                     isSmsMessage
                                                         ? t("smsBodyPlaceholder")
@@ -576,24 +567,22 @@ export default function CampaignDelivery({
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="grid gap-1.5">
                                     <Label htmlFor="send-purpose">{st("purpose")}</Label>
-                                    <input
+                                    <Input
                                         id="send-purpose"
                                         type="text"
                                         value={sendPurpose}
                                         onChange={(e) => setSendPurpose(e.target.value)}
-                                        className={inputBase}
                                         placeholder={st("purposePlaceholder")}
                                         maxLength={32}
                                     />
                                 </div>
                                 <div className="grid gap-1.5">
                                     <Label htmlFor="send-scheduled">{st("scheduledAt")}</Label>
-                                    <input
+                                    <Input
                                         id="send-scheduled"
                                         type="datetime-local"
                                         value={sendScheduledAt}
                                         onChange={(e) => setSendScheduledAt(e.target.value)}
-                                        className={inputBase}
                                     />
                                 </div>
                             </div>
@@ -669,20 +658,20 @@ export default function CampaignDelivery({
                                             </span>
                                         </div>
 
-                                        <div className="grid grid-cols-4 gap-4">
-                                            <CounterCell
+                                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+                                            <CampaignCounter
                                                 label={st("total")}
                                                 value={send.totalRecipients.toLocaleString(locale)}
                                             />
-                                            <CounterCell
+                                            <CampaignCounter
                                                 label={st("dispatched")}
                                                 value={send.dispatchedCount.toLocaleString(locale)}
                                             />
-                                            <CounterCell
+                                            <CampaignCounter
                                                 label={st("skipped")}
                                                 value={send.skippedCount.toLocaleString(locale)}
                                             />
-                                            <CounterCell
+                                            <CampaignCounter
                                                 label={st("failed")}
                                                 value={send.failedCount.toLocaleString(locale)}
                                             />

@@ -13,6 +13,7 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import Panel from "@/app/components/overview/analytics/Panel";
+import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import ExportStatusBadge from "@/app/components/marketing/campaigns/ExportStatusBadge";
 import { ApiError, createCampaignExport } from "@/app/lib/api";
 import {
@@ -23,15 +24,6 @@ import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 
 const CONNECTORS = ["http_list"];
-
-function CounterCell({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex flex-col">
-            <span className="text-[0.6875rem] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
-            <span className="tabular-nums text-sm font-semibold text-foreground">{value}</span>
-        </div>
-    );
-}
 
 /**
  * The audience-export surface for a campaign. Pushes a frozen snapshot to an external connector and
@@ -202,16 +194,16 @@ export default function CampaignExportPanel({
                                     </span>
                                 </div>
 
-                                <div className="grid grid-cols-3 gap-4">
-                                    <CounterCell
+                                <div className="grid grid-cols-3 gap-3 sm:gap-4">
+                                    <CampaignCounter
                                         label={t("total")}
                                         value={entry.totalMembers.toLocaleString(locale)}
                                     />
-                                    <CounterCell
+                                    <CampaignCounter
                                         label={t("pushed")}
                                         value={entry.pushedCount.toLocaleString(locale)}
                                     />
-                                    <CounterCell
+                                    <CampaignCounter
                                         label={t("failed")}
                                         value={entry.failedCount.toLocaleString(locale)}
                                     />

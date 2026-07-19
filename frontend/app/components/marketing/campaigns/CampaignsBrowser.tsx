@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ChevronRightIcon, MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { type Campaign, type CampaignPayload } from "@/app/lib/types";
 import { createCampaign, isFieldError } from "@/app/lib/api";
@@ -61,9 +61,9 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
-                <header className="flex flex-wrap items-end justify-between gap-4">
+                <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
                     <div className="min-w-0">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t("title")}</h1>
+                        <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">{t("title")}</h1>
                         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("subtitle")}</p>
                     </div>
                     <Button variant="brand" onClick={openDialog} className="shrink-0">
@@ -73,7 +73,7 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                 </header>
 
                 {campaigns.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-20 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center sm:py-20">
                         <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-dark">
                             <MegaphoneIcon className="size-6" />
                         </span>
@@ -85,58 +85,73 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                         </Button>
                     </div>
                 ) : (
-                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                                    <th className="px-5 py-3 font-medium">{t("colName")}</th>
-                                    <th className="px-5 py-3 font-medium">{t("colStatus")}</th>
-                                    <th className="px-5 py-3 font-medium">{t("colType")}</th>
-                                    <th className="px-5 py-3 text-right font-medium">{t("colBudget")}</th>
-                                    <th className="hidden px-5 py-3 font-medium md:table-cell">{t("colWindow")}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {campaigns.map((campaign) => (
-                                    <tr
-                                        key={campaign.id}
-                                        className="group border-b border-border/60 transition-colors last:border-0 hover:bg-muted/50"
-                                    >
-                                        <td className="px-5 py-3">
-                                            <Link
-                                                href={`/marketing/campaigns/${campaign.id}`}
-                                                className="font-medium text-foreground underline-offset-2 outline-none focus-visible:underline group-hover:text-brand-hover"
-                                            >
-                                                {campaign.name}
-                                            </Link>
-                                            {campaign.objective && (
-                                                <p className="truncate text-xs text-muted-foreground">
-                                                    {campaign.objective}
+                    <div className="flex flex-col gap-3">
+                        <p className="px-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                            {t("count", { count: campaigns.length })}
+                        </p>
+                        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                            {campaigns.map((campaign) => {
+                                const budget =
+                                    campaign.budgetAmount != null && campaign.budgetCurrency
+                                        ? formatCurrency(
+                                              campaign.budgetAmount,
+                                              campaign.budgetCurrency,
+                                              locale,
+                                          )
+                                        : null;
+                                const window =
+                                    campaign.startAt || campaign.endAt
+                                        ? `${formatShortDate(campaign.startAt ?? undefined, locale)} – ${formatShortDate(campaign.endAt ?? undefined, locale)}`
+                                        : null;
+                                return (
+                                    <li key={campaign.id}>
+                                        <Link
+                                            href={`/marketing/campaigns/${campaign.id}`}
+                                            className="group flex items-center gap-3 px-4 py-3.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:px-5"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate font-medium text-foreground transition-colors group-hover:text-brand-hover">
+                                                    {campaign.name}
                                                 </p>
-                                            )}
-                                        </td>
-                                        <td className="px-5 py-3">
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                                    {campaign.objective && (
+                                                        <span className="max-w-full truncate">
+                                                            {campaign.objective}
+                                                        </span>
+                                                    )}
+                                                    {campaign.objective && (
+                                                        <span aria-hidden className="text-border">
+                                                            ·
+                                                        </span>
+                                                    )}
+                                                    <span>{campaign.type}</span>
+                                                    {budget && (
+                                                        <>
+                                                            <span aria-hidden className="text-border">
+                                                                ·
+                                                            </span>
+                                                            <span className="tabular-nums">{budget}</span>
+                                                        </>
+                                                    )}
+                                                    {window && (
+                                                        <>
+                                                            <span aria-hidden className="hidden text-border sm:inline">
+                                                                ·
+                                                            </span>
+                                                            <span className="hidden tabular-nums sm:inline">
+                                                                {window}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
                                             <CampaignStatusBadge status={campaign.status} />
-                                        </td>
-                                        <td className="px-5 py-3 text-muted-foreground">{campaign.type}</td>
-                                        <td className="px-5 py-3 text-right tabular-nums text-muted-foreground">
-                                            {campaign.budgetAmount != null && campaign.budgetCurrency
-                                                ? formatCurrency(
-                                                      campaign.budgetAmount,
-                                                      campaign.budgetCurrency,
-                                                      locale,
-                                                  )
-                                                : t("noBudget")}
-                                        </td>
-                                        <td className="hidden px-5 py-3 text-muted-foreground md:table-cell">
-                                            {campaign.startAt || campaign.endAt
-                                                ? `${formatShortDate(campaign.startAt ?? undefined, locale)} – ${formatShortDate(campaign.endAt ?? undefined, locale)}`
-                                                : t("noBudget")}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                            <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                                        </Link>
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </div>
                 )}
             </div>

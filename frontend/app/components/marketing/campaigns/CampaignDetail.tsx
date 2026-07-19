@@ -14,16 +14,19 @@ import {
     SelectContent,
     SelectItem,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from "@/components/ui/dialog";
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogClose,
+} from "@/components/ui/responsive-dialog";
 import Panel from "@/app/components/overview/analytics/Panel";
+import InfoRow from "@/app/components/me/InfoRow";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/SegmentBuilder";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
@@ -55,16 +58,18 @@ import { formatCurrency, formatDate } from "@/app/lib/utils";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
 
-function OverviewRow({ label, value }: { label: string; value: string }) {
+function GlanceTile({ label, value }: { label: string; value: string }) {
     return (
-        <div className="flex items-baseline justify-between gap-4 py-2.5">
-            <dt className="text-sm text-muted-foreground">{label}</dt>
-            <dd className="text-sm font-medium text-foreground">{value}</dd>
+        <div className="flex flex-col gap-1.5 bg-card p-4 sm:p-5">
+            <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                {label}
+            </span>
+            <span className="text-2xl leading-none tabular-nums text-foreground">{value}</span>
         </div>
     );
 }
 
-/** Campaign detail: overview plus the smart-segment audience, its estimate, and frozen snapshots. */
+/** Campaign detail: a tabbed workspace over overview, audience, delivery, engagement, and exports. */
 export default function CampaignDetail({
     campaign,
     initialAudience,
@@ -106,6 +111,7 @@ export default function CampaignDetail({
     const [isFreezing, setIsFreezing] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [tab, setTab] = useState("overview");
 
     useEffect(() => {
         let active = true;
@@ -190,10 +196,11 @@ export default function CampaignDetail({
         campaign.startAt || campaign.endAt
             ? `${formatDate(campaign.startAt ?? undefined, locale)} – ${formatDate(campaign.endAt ?? undefined, locale)}`
             : t("noValue");
+    const latestSnapshot = snapshots[0] ?? null;
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
                 <div className="flex flex-col gap-4">
                     <Link
                         href="/marketing/campaigns"
@@ -202,16 +209,18 @@ export default function CampaignDetail({
                         <ArrowLeftIcon className="size-4" />
                         {t("back")}
                     </Link>
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h1 className="text-3xl font-extrabold tracking-tight">{campaign.name}</h1>
+                    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-3">
+                            <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+                                {campaign.name}
+                            </h1>
                             <CampaignStatusBadge status={campaign.status} />
                         </div>
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => setConfirmDelete(true)}
-                            className="text-muted-foreground hover:text-destructive"
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
                         >
                             <TrashIcon className="size-4" />
                             {t("delete")}
@@ -219,30 +228,74 @@ export default function CampaignDetail({
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[20rem_1fr]">
-                    <Panel title={t("overview")} className="h-fit">
-                        <dl className="divide-y divide-border">
-                            <OverviewRow label={t("objective")} value={campaign.objective ?? t("noValue")} />
-                            <OverviewRow label={t("type")} value={campaign.type} />
-                            <OverviewRow label={t("budget")} value={budget} />
-                            <OverviewRow label={t("window")} value={windowText} />
-                            <OverviewRow
-                                label={t("created")}
-                                value={formatDate(campaign.createdAt, locale)}
-                            />
-                            <OverviewRow
-                                label={t("updated")}
-                                value={formatDate(campaign.updatedAt, locale)}
-                            />
-                        </dl>
-                    </Panel>
+                <Tabs value={tab} onValueChange={setTab} className="gap-6">
+                    <div className="-mx-2 overflow-x-auto px-2 pb-px">
+                        <TabsList className="w-max">
+                            <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
+                            <TabsTrigger value="audience">{t("tabAudience")}</TabsTrigger>
+                            <TabsTrigger value="delivery">{t("tabDelivery")}</TabsTrigger>
+                            <TabsTrigger value="engagement">{t("tabEngagement")}</TabsTrigger>
+                            <TabsTrigger value="exports">{t("tabExports")}</TabsTrigger>
+                        </TabsList>
+                    </div>
 
-                    <div className="flex flex-col gap-6">
-                        <Panel
-                            title={at("title")}
-                            subtitle={at("subtitle")}
-                            action={
-                                <div className="flex items-center gap-2">
+                    <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
+                        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                            <div>
+                                <SectionHeader title={t("detailsTitle")} />
+                                <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                    <InfoRow
+                                        label={t("objective")}
+                                        value={campaign.objective ?? t("noValue")}
+                                    />
+                                    <InfoRow label={t("type")} value={campaign.type} />
+                                    <InfoRow label={t("budget")} value={budget} />
+                                    <InfoRow label={t("window")} value={windowText} />
+                                    <InfoRow
+                                        label={t("created")}
+                                        value={formatDate(campaign.createdAt, locale)}
+                                    />
+                                    <InfoRow
+                                        label={t("updated")}
+                                        value={formatDate(campaign.updatedAt, locale)}
+                                    />
+                                </dl>
+                            </div>
+                            <div>
+                                <SectionHeader title={t("glanceTitle")} />
+                                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border">
+                                    <GlanceTile label={t("audienceType")} value={at(recordType)} />
+                                    <GlanceTile
+                                        label={t("snapshotCount")}
+                                        value={snapshots.length.toLocaleString(locale)}
+                                    />
+                                    <GlanceTile
+                                        label={t("latestSnapshot")}
+                                        value={
+                                            latestSnapshot
+                                                ? latestSnapshot.estimatedIncluded.toLocaleString(locale)
+                                                : t("noValue")
+                                        }
+                                    />
+                                    <GlanceTile
+                                        label={t("recipientsReached")}
+                                        value={
+                                            initialEngagement
+                                                ? initialEngagement.totalRecipients.toLocaleString(locale)
+                                                : t("noValue")
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="audience" forceMount className="data-[state=inactive]:hidden">
+                        <div className="flex flex-col gap-6">
+                            <Panel
+                                title={at("title")}
+                                subtitle={at("subtitle")}
+                                action={
                                     <Select
                                         value={recordType}
                                         onValueChange={(value) =>
@@ -260,180 +313,199 @@ export default function CampaignDetail({
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                            }
-                        >
-                            <div className="flex flex-col gap-4">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <SegmentBuilder
-                                        definition={definition}
-                                        fields={segmentFields}
-                                        onChange={changeDefinition}
-                                        recordType={recordType}
-                                        options={null}
-                                        advanced
-                                    />
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={saveAudience}
-                                        disabled={isSaving || audienceSaved}
-                                    >
-                                        {isSaving ? (
-                                            <>
-                                                <Loader2Icon className="size-4 animate-spin" />
-                                                {at("saving")}
-                                            </>
-                                        ) : (
-                                            at("saveAudience")
-                                        )}
-                                    </Button>
-                                    <Button
-                                        variant="brand"
-                                        size="sm"
-                                        onClick={runEstimate}
-                                        disabled={!audienceSaved || isEstimating}
-                                    >
-                                        {isEstimating ? (
-                                            <>
-                                                <Loader2Icon className="size-4 animate-spin" />
-                                                {at("estimating")}
-                                            </>
-                                        ) : (
-                                            at("estimate")
-                                        )}
-                                    </Button>
-                                </div>
+                                }
+                            >
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <SegmentBuilder
+                                            definition={definition}
+                                            fields={segmentFields}
+                                            onChange={changeDefinition}
+                                            recordType={recordType}
+                                            options={null}
+                                            advanced
+                                        />
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={saveAudience}
+                                            disabled={isSaving || audienceSaved}
+                                        >
+                                            {isSaving ? (
+                                                <>
+                                                    <Loader2Icon className="size-4 animate-spin" />
+                                                    {at("saving")}
+                                                </>
+                                            ) : (
+                                                at("saveAudience")
+                                            )}
+                                        </Button>
+                                        <Button
+                                            variant="brand"
+                                            size="sm"
+                                            onClick={runEstimate}
+                                            disabled={!audienceSaved || isEstimating}
+                                        >
+                                            {isEstimating ? (
+                                                <>
+                                                    <Loader2Icon className="size-4 animate-spin" />
+                                                    {at("estimating")}
+                                                </>
+                                            ) : (
+                                                at("estimate")
+                                            )}
+                                        </Button>
+                                    </div>
 
-                                {estimate ? (
-                                    <div className="flex flex-col gap-4 border-t border-border pt-4">
-                                        <div>
-                                            <h3 className="text-sm font-semibold text-foreground">
-                                                {at("estimateTitle")}
-                                            </h3>
-                                            <p className="text-xs text-muted-foreground">
-                                                {at("estimateSubtitle")}
+                                    {estimate ? (
+                                        <div className="flex flex-col gap-4 border-t border-border pt-4">
+                                            <div>
+                                                <h3 className="text-sm font-semibold text-foreground">
+                                                    {at("estimateTitle")}
+                                                </h3>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {at("estimateSubtitle")}
+                                                </p>
+                                            </div>
+                                            <AudienceEstimatePanel
+                                                estimate={estimate}
+                                                recordType={recordType}
+                                            />
+                                            <div>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={freezeSnapshot}
+                                                    disabled={isFreezing}
+                                                >
+                                                    {isFreezing ? (
+                                                        <>
+                                                            <Loader2Icon className="size-4 animate-spin" />
+                                                            {at("freezing")}
+                                                        </>
+                                                    ) : (
+                                                        at("freeze")
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+                                            <p className="text-sm font-medium text-foreground">
+                                                {at("noAudience")}
+                                            </p>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                {at("noAudienceHint")}
                                             </p>
                                         </div>
-                                        <AudienceEstimatePanel estimate={estimate} recordType={recordType} />
-                                        <div>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={freezeSnapshot}
-                                                disabled={isFreezing}
-                                            >
-                                                {isFreezing ? (
-                                                    <>
-                                                        <Loader2Icon className="size-4 animate-spin" />
-                                                        {at("freezing")}
-                                                    </>
-                                                ) : (
-                                                    at("freeze")
-                                                )}
-                                            </Button>
-                                        </div>
-                                    </div>
+                                    )}
+                                </div>
+                            </Panel>
+
+                            <Panel title={at("snapshots")} subtitle={at("snapshotsSubtitle")}>
+                                {snapshots.length === 0 ? (
+                                    <p className="py-4 text-sm text-muted-foreground">
+                                        {at("noSnapshots")}
+                                    </p>
                                 ) : (
-                                    <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
-                                        <p className="text-sm font-medium text-foreground">
-                                            {at("noAudience")}
-                                        </p>
-                                        <p className="mt-1 text-xs text-muted-foreground">
-                                            {at("noAudienceHint")}
-                                        </p>
-                                    </div>
+                                    <ul className="divide-y divide-border">
+                                        {snapshots.map((snapshot) => (
+                                            <li
+                                                key={snapshot.version}
+                                                className="flex flex-wrap items-center justify-between gap-3 py-3"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground ring-1 ring-inset ring-border">
+                                                        {at("version", { version: snapshot.version })}
+                                                    </span>
+                                                    <span className="text-sm text-muted-foreground">
+                                                        {formatDate(snapshot.createdAt, locale)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-3 tabular-nums text-sm">
+                                                    <span className="font-medium text-brand-hover">
+                                                        {at("snapshotIncluded", {
+                                                            count: snapshot.estimatedIncluded.toLocaleString(
+                                                                locale,
+                                                            ),
+                                                        })}
+                                                    </span>
+                                                    <span className="text-muted-foreground">
+                                                        {at("snapshotExcluded", {
+                                                            count: snapshot.excludedTotal.toLocaleString(
+                                                                locale,
+                                                            ),
+                                                        })}
+                                                    </span>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 )}
-                            </div>
-                        </Panel>
+                            </Panel>
+                        </div>
+                    </TabsContent>
 
-                        <Panel title={at("snapshots")} subtitle={at("snapshotsSubtitle")}>
-                            {snapshots.length === 0 ? (
-                                <p className="py-4 text-sm text-muted-foreground">{at("noSnapshots")}</p>
-                            ) : (
-                                <ul className="divide-y divide-border">
-                                    {snapshots.map((snapshot) => (
-                                        <li
-                                            key={snapshot.version}
-                                            className="flex flex-wrap items-center justify-between gap-3 py-3"
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground ring-1 ring-inset ring-border">
-                                                    {at("version", { version: snapshot.version })}
-                                                </span>
-                                                <span className="text-sm text-muted-foreground">
-                                                    {formatDate(snapshot.createdAt, locale)}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-3 tabular-nums text-sm">
-                                                <span className="font-medium text-brand-hover">
-                                                    {at("snapshotIncluded", {
-                                                        count: snapshot.estimatedIncluded.toLocaleString(locale),
-                                                    })}
-                                                </span>
-                                                <span className="text-muted-foreground">
-                                                    {at("snapshotExcluded", {
-                                                        count: snapshot.excludedTotal.toLocaleString(locale),
-                                                    })}
-                                                </span>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </Panel>
-                    </div>
-                </div>
+                    <TabsContent value="delivery" forceMount className="data-[state=inactive]:hidden">
+                        <CampaignDelivery
+                            campaignId={campaign.id}
+                            initialMessages={initialMessages}
+                            initialSends={initialSends}
+                            snapshots={snapshots}
+                            canManage={canManage}
+                            canSend={canSend}
+                        />
+                    </TabsContent>
 
-                <CampaignDelivery
-                    campaignId={campaign.id}
-                    initialMessages={initialMessages}
-                    initialSends={initialSends}
-                    snapshots={snapshots}
-                    canManage={canManage}
-                    canSend={canSend}
-                />
+                    <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
+                        <CampaignEngagement engagement={initialEngagement} />
+                    </TabsContent>
 
-                <CampaignEngagement engagement={initialEngagement} />
-
-                <CampaignExportPanel
-                    campaignId={campaign.id}
-                    initialExports={initialExports}
-                    snapshots={snapshots}
-                    canManage={canManage}
-                />
+                    <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
+                        <CampaignExportPanel
+                            campaignId={campaign.id}
+                            initialExports={initialExports}
+                            snapshots={snapshots}
+                            canManage={canManage}
+                        />
+                    </TabsContent>
+                </Tabs>
             </div>
 
-            <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{t("deleteTitle")}</DialogTitle>
-                        <DialogDescription>{t("deleteBody")}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={isDeleting}>
-                                {t("cancel")}
+            <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+                <ResponsiveDialogContent className="p-0 sm:max-w-md">
+                    <div className="flex flex-col gap-4 p-6">
+                        <ResponsiveDialogHeader>
+                            <ResponsiveDialogTitle className="text-lg font-semibold tracking-tight">
+                                {t("deleteTitle")}
+                            </ResponsiveDialogTitle>
+                            <ResponsiveDialogDescription>{t("deleteBody")}</ResponsiveDialogDescription>
+                        </ResponsiveDialogHeader>
+                        <ResponsiveDialogFooter>
+                            <ResponsiveDialogClose asChild>
+                                <Button type="button" variant="outline" disabled={isDeleting}>
+                                    {t("cancel")}
+                                </Button>
+                            </ResponsiveDialogClose>
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                onClick={removeCampaign}
+                                disabled={isDeleting}
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <Loader2Icon className="size-4 animate-spin" />
+                                        {t("delete")}
+                                    </>
+                                ) : (
+                                    t("delete")
+                                )}
                             </Button>
-                        </DialogClose>
-                        <Button
-                            type="button"
-                            variant="destructive"
-                            onClick={removeCampaign}
-                            disabled={isDeleting}
-                        >
-                            {isDeleting ? (
-                                <>
-                                    <Loader2Icon className="size-4 animate-spin" />
-                                    {t("delete")}
-                                </>
-                            ) : (
-                                t("delete")
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        </ResponsiveDialogFooter>
+                    </div>
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
         </div>
     );
 }
