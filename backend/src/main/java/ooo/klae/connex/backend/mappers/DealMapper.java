@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Deal;
@@ -20,8 +24,6 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
-import java.time.LocalDate;
-import java.util.List;
 
 /**
  * mapper interface for {@code Deal} persistence.
@@ -239,6 +241,7 @@ public interface DealMapper {
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -256,6 +259,16 @@ public interface DealMapper {
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
     int update(Deal deal);
+    int updateName(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("name") String name
+    );
+    int updateValue(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("value") BigDecimal value
+    );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /** Deal ids in a stage, in board order (position, then id), for renumbering a column on a move. */

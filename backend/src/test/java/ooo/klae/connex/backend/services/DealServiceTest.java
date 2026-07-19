@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -15,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -35,6 +38,7 @@ import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpisDto;
+import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
@@ -46,13 +50,17 @@ import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
+@RecordApplicationEvents
 class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
+    @Autowired DealLineItemService dealLineItemService;
     @Autowired AuditService auditService;
+    @Autowired ApplicationEvents applicationEvents;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
@@ -630,6 +638,160 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void updateNameChangesOnlyNameAndRemainsAvailableWithLineItems() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        deal.setValue(125000.0);
+        deal.setActualValue(75000.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        deal.setWon(true);
+        deal.setClosedAt("2026-07-01 12:00:00");
+        deal.setClosedReason("Signed");
+        dealMapper.update(deal);
+        addLineItem(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        Deal updated = dealService.updateName(deal.getId(), "FY27 Renewal");
+
+        assertEquals("FY27 Renewal", updated.getName());
+        assertEquals(before.getValue(), updated.getValue());
+        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(before.getCurrency(), updated.getCurrency());
+        assertEquals(before.getPipelineId(), updated.getPipelineId());
+        assertEquals(before.getStageId(), updated.getStageId());
+        assertEquals(before.getPosition(), updated.getPosition());
+        assertEquals(before.getOwnerId(), updated.getOwnerId());
+        assertEquals(before.getCompanyId(), updated.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), updated.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), updated.getClosedAt());
+        assertEquals(before.getClosedReason(), updated.getClosedReason());
+        assertEquals(before.getWon(), updated.getWon());
+        JsonNode changes = auditChanges(deal.getId(), "deal.update");
+        assertEquals(1, changes.size());
+        assertEquals(before.getName(), changes.path("name").path("old").asText());
+        assertEquals("FY27 Renewal", changes.path("name").path("new").asText());
+        assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void updateValueChangesOnlyValueAndPublishesExistingValueEvent() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        deal.setActualValue(500.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        dealMapper.update(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("125000.00"));
+
+        assertEquals(125000.0, updated.getValue());
+        assertEquals(before.getName(), updated.getName());
+        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(before.getCurrency(), updated.getCurrency());
+        assertEquals(before.getPipelineId(), updated.getPipelineId());
+        assertEquals(before.getStageId(), updated.getStageId());
+        assertEquals(before.getPosition(), updated.getPosition());
+        assertEquals(before.getOwnerId(), updated.getOwnerId());
+        assertEquals(before.getCompanyId(), updated.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), updated.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), updated.getClosedAt());
+        assertEquals(before.getClosedReason(), updated.getClosedReason());
+        assertEquals(before.getWon(), updated.getWon());
+        JsonNode changes = auditChanges(deal.getId(), "deal.update");
+        assertEquals(1, changes.size());
+        assertEquals(before.getValue(), changes.path("value").path("old").asDouble());
+        assertEquals(125000.0, changes.path("value").path("new").asDouble());
+        assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
+        assertTrue(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void updateValueRejectsDealsWithLineItemsAndPreservesValue() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+
+        ConflictException exception = assertThrows(ConflictException.class,
+            () -> dealService.updateValue(deal.getId(), new BigDecimal("125000.00")));
+
+        assertEquals(
+            "Cannot manually edit the deal value while line items exist; update or remove the line items first",
+            exception.getMessage());
+        BigDecimal storedValue = jdbcTemplate.queryForObject(
+            "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
+            BigDecimal.class, workspace.getId(), deal.getId());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void legacyUpdateRejectsChangedValueWhenLineItemsExist() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setValue(125000.0);
+
+        assertThrows(ConflictException.class, () -> dealService.update(deal.getId(), edit));
+
+        BigDecimal storedValue = jdbcTemplate.queryForObject(
+            "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
+            BigDecimal.class, workspace.getId(), deal.getId());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+    }
+
+    @Test
+    void legacyUpdateTreatsScaleEquivalentValueAsUnchanged() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateValue(workspace.getId(), deal.getId(), new BigDecimal("125000.0"));
+        addLineItem(deal);
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setName("Scale-insensitive renewal");
+        edit.setValue(new BigDecimal("125000.00").doubleValue());
+
+        Deal updated = dealService.update(deal.getId(), edit);
+
+        assertEquals("Scale-insensitive renewal", updated.getName());
+        assertEquals(125000.0, updated.getValue());
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void targetedUpdatesReturnNotFoundForMissingAndForeignDeals() {
+        assertThrows(ResourceNotFoundException.class, () -> dealService.updateName(-1, "Missing"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateValue(-1, new BigDecimal("1.00")));
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal local = newDeal(pipeline, stage, newCompany());
+        String originalName = local.getName();
+        double originalValue = local.getValue();
+        Workspace foreignWorkspace = newWorkspace();
+        workspaceMapper.addMember(foreignWorkspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, foreignWorkspace.getId());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateName(local.getId(), "Foreign rename"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateValue(local.getId(), new BigDecimal("999.00")));
+
+        authenticateAs(currentUser, workspace.getId());
+        Deal unchanged = dealMapper.getDealById(workspace.getId(), local.getId());
+        assertEquals(originalName, unchanged.getName());
+        assertEquals(originalValue, unchanged.getValue());
+    }
+
+    @Test
     void move_acrossStages_recordsStageHistory() {
         Pipeline pipeline = newPipeline();
         Stage from = newStage(pipeline, 0);
@@ -949,6 +1111,22 @@ class DealServiceTest extends AbstractServiceTest {
         deal.setStageId(stage.getId());
         deal.setCompanyId(company.getId());
         return deal;
+    }
+
+    private void addLineItem(Deal deal) {
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setName("Ad-hoc line " + unique());
+        request.setUnitPrice(new BigDecimal("25.00"));
+        request.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), request);
+    }
+
+    private boolean hasDealEvent(int dealId, String event) {
+        return applicationEvents.stream(RuleTriggerEvent.class)
+            .anyMatch(trigger -> trigger.workspaceId() == workspace.getId()
+                && trigger.entityId() == dealId
+                && "deal".equals(trigger.recordType())
+                && event.equals(trigger.event()));
     }
 
     private Deal boardDeal(Pipeline pipeline, Stage stage, int position) {
