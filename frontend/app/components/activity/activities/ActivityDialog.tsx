@@ -113,6 +113,7 @@ export default function ActivityDialog({
     if (open !== prevOpen) {
         setPrevOpen(open);
         if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
     }
 
     return (
@@ -219,6 +220,7 @@ export function ActivityDialogForm({
     const dirty =
         !submitting &&
         !succeeded &&
+        !followUpFailed &&
         (subject !== initial.subject ||
             notes !== initial.notes ||
             type !== initial.type ||
