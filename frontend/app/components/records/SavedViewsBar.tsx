@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
     BookmarkIcon,
@@ -138,14 +138,21 @@ export default function SavedViewsBar({
 
     const initialRef = useRef({ onApply, defaultView, activeWorkspaceId, workspaces, runInWorkspace, pathname });
     const resolvedRef = useRef(false);
+    const lastNavigatedSvRef = useRef<string | null>(null);
     useEffect(() => {
         if (resolvedRef.current) return;
         resolvedRef.current = true;
         const snapshot = new URLSearchParams(window.location.search);
         const sv = snapshot.get("sv");
+        lastNavigatedSvRef.current = sv;
         const { onApply: apply, defaultView: fallback, activeWorkspaceId: currentWorkspaceId, workspaces: available, pathname: path } = initialRef.current;
 
         const applyResolved = (view: SavedView) => {
+            if (view.recordType !== recordType) {
+                toastError(t("viewUnavailable"));
+                clearAndFallBack();
+                return;
+            }
             setViews((prev) => upsertView(prev, view));
             setActiveId(view.id);
             apply(view.config);
@@ -190,7 +197,52 @@ export default function SavedViewsBar({
         snapshot.delete("sv");
         if (Array.from(snapshot.keys()).length > 0) return;
         applyDefault();
-    }, [t]);
+    }, [t, recordType]);
+
+    const searchParams = useSearchParams();
+    const svParam = searchParams.get("sv");
+    const activeIdRef = useRef(activeId);
+    const onApplyRef = useRef(onApply);
+    useEffect(() => {
+        activeIdRef.current = activeId;
+        onApplyRef.current = onApply;
+    });
+
+    useEffect(() => {
+        if (!resolvedRef.current) return;
+        if (svParam === lastNavigatedSvRef.current) return;
+        lastNavigatedSvRef.current = svParam;
+        if (!svParam) return;
+        const parsed = parseSavedViewToken(svParam);
+        if (!parsed || parsed.workspaceId !== activeWorkspaceId) return;
+        if (parsed.id === activeIdRef.current) return;
+        let cancelled = false;
+        getSavedView(parsed.id)
+            .then((view) => {
+                if (cancelled) return;
+                if (view.recordType !== recordType) {
+                    toastError(t("viewUnavailable"));
+                    writeSavedViewToUrl(pathname, null);
+                    return;
+                }
+                setViews((prev) => upsertView(prev, view));
+                setActiveId(view.id);
+                onApplyRef.current(view.config);
+                writeSavedViewToUrl(pathname, savedViewToken(view));
+            })
+            .catch(() => {
+                if (cancelled) return;
+                toastError(t("viewUnavailable"));
+                writeSavedViewToUrl(pathname, null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [svParam, activeWorkspaceId, recordType, pathname, t]);
+
+    useEffect(() => {
+        if (modified) writeSavedViewToUrl(pathname, null);
+    }, [modified, pathname]);
 
     const confirmSwitchWorkspace = async () => {
         if (!switchPrompt) return;
