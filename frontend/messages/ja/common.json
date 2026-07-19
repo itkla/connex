@@ -86,6 +86,7 @@
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",
     "brand": "CONNEX",
+    "sectionPinnedViews": "固定したビュー",
     "sectionOverview": "概要",
     "sectionRecords": "レコード",
     "sectionMarketing": "マーケティング",
