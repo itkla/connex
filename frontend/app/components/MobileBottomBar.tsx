@@ -78,7 +78,7 @@ const slotVariants: Variants = {
 };
 
 const slotBase =
-    'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background';
+    'group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-full py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
 const indicatorWrap = 'relative z-10 flex h-7 w-12 items-center justify-center';
 
@@ -107,7 +107,7 @@ function ActiveLens({ reduce }: { reduce: boolean }) {
             animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9, filter: 'blur(4px)' }}
             transition={reduce ? instant : { default: springJiggle, filter: { duration: 0.2, ease: easeOut } }}
-            className="absolute inset-0 rounded-2xl bg-brand/20 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.35)]"
+            className="absolute inset-0 rounded-full bg-brand/20 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.35)]"
         />
     );
 }
