@@ -178,7 +178,7 @@ export default function ReportsBoard({
                                 return (
                                     <div
                                         key={template.key}
-                                        className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-colors hover:border-brand/40"
+                                        className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] duration-200 ease-out hover:border-brand/40 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)]"
                                     >
                                         <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                                             <Icon className="size-5" />
