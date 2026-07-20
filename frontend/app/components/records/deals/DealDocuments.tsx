@@ -233,14 +233,14 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                     {generateMenu}
                 </div>
             ) : (
-                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                    <table className="w-full text-sm">
+                <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+                    <table className="w-full min-w-[32rem] text-sm">
                         <thead>
                             <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
                                 <th className="px-4 py-3 font-medium">{t('columnDocument')}</th>
                                 <th className="w-32 px-4 py-3 font-medium">{t('columnStatus')}</th>
                                 <th className="w-36 px-4 py-3 text-right font-medium">{t('columnTotal')}</th>
-                                <th className="w-40 px-4 py-3 font-medium">{t('columnGenerated')}</th>
+                                <th className="hidden w-40 px-4 py-3 font-medium md:table-cell">{t('columnGenerated')}</th>
                                 <th className="w-24 px-2 py-3" />
                             </tr>
                         </thead>
@@ -269,14 +269,14 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                                     <td className="px-4 py-3 text-right tabular-nums">
                                         {formatCurrency(doc.content.totals.grandTotal, doc.currency, locale)}
                                     </td>
-                                    <td className="px-4 py-3 text-muted-foreground">
+                                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
                                         {formatDateTime(doc.generatedAt, locale)}
                                     </td>
                                     <td className="px-2 py-3">
                                         <div className="flex items-center justify-end gap-1">
                                             <Button variant="outline" size="sm" onClick={() => openPdf(doc)} disabled={busy}>
                                                 <ArrowDownTrayIcon className="size-4" />
-                                                {t('pdf')}
+                                                <span className="hidden sm:inline">{t('pdf')}</span>
                                             </Button>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>

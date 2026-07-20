@@ -67,8 +67,8 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <h1 className="text-3xl font-extrabold sm:text-4xl">{t('title')}</h1>
                         <div className="flex items-center gap-2">
                             <Button variant="outline" onClick={() => router.push('/records/approval-policies')}>
                                 <ShieldCheckIcon className="size-4" />
@@ -83,9 +83,9 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                 </Rise>
 
                 <Rise delay={0.06}>
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <SectionHeader title={t('sectionTemplates')} />
-                        <div className="w-64">
+                        <div className="w-full sm:w-64">
                             <SearchField value={query} onChange={setQuery} onClear={() => setQuery('')}
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')} clearAria={tf('clearSearchAria')} />
@@ -119,29 +119,29 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                                        <th className="px-6 py-3 font-medium">{t('columnName')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnType')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnLocale')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnStatus')}</th>
-                                        <th className="px-6 py-3" />
+                                        <th className="px-4 py-3 font-medium sm:px-6">{t('columnName')}</th>
+                                        <th className="hidden px-4 py-3 font-medium sm:px-6 md:table-cell">{t('columnType')}</th>
+                                        <th className="hidden px-4 py-3 font-medium sm:table-cell sm:px-6">{t('columnLocale')}</th>
+                                        <th className="px-4 py-3 font-medium sm:px-6">{t('columnStatus')}</th>
+                                        <th className="px-4 py-3 sm:px-6" />
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border">
                                     {filtered.map((tpl) => (
                                         <tr key={tpl.id} className="cursor-pointer transition-colors hover:bg-muted/50"
                                             onClick={() => openEdit(tpl.id)}>
-                                            <td className="px-6 py-3">
+                                            <td className="px-4 py-3 sm:px-6">
                                                 <div className="font-medium text-foreground">{tpl.name}</div>
                                                 {tpl.title ? <div className="text-xs text-muted-foreground">{tpl.title}</div> : null}
                                             </td>
-                                            <td className="px-6 py-3 text-muted-foreground">{t(TYPE_KEY[tpl.type])}</td>
-                                            <td className="px-6 py-3 uppercase text-muted-foreground">{tpl.locale}</td>
-                                            <td className="px-6 py-3">
+                                            <td className="hidden px-4 py-3 text-muted-foreground sm:px-6 md:table-cell">{t(TYPE_KEY[tpl.type])}</td>
+                                            <td className="hidden px-4 py-3 uppercase text-muted-foreground sm:table-cell sm:px-6">{tpl.locale}</td>
+                                            <td className="px-4 py-3 sm:px-6">
                                                 <span className={tpl.active ? 'text-chart-won' : 'text-muted-foreground'}>
                                                     {tpl.active ? t('active') : t('inactive')}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-3 text-right">
+                                            <td className="px-4 py-3 text-right sm:px-6">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button variant="ghost" size="icon-xs" aria-label={t('actions')}
