@@ -130,7 +130,7 @@
     "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
     "profilePictureAlt": "{name}さんのプロフィール画像",
     "navProducts": "商品",
-    "navDocumentTemplates": "ドキュメントテンプレート"
+    "navDocuments": "ドキュメント"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",

@@ -108,7 +108,6 @@ function useSections(): NavSection[] {
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
                 { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
-                { label: t("navDocumentTemplates"), href: "/records/document-templates", icon: DocumentDuplicateIcon },
             ],
         },
         {
@@ -128,6 +127,7 @@ function useSections(): NavSection[] {
         {
             label: t("sectionLibrary"),
             items: [
+                { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
                 { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
