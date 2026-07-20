@@ -92,7 +92,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 await createDocumentTemplate(payload);
             }
             toastSuccess(t('saved'));
-            router.push('/records/document-templates');
+            router.push('/library/documents');
             router.refresh();
         } catch (err) {
             toastError(err instanceof ApiError ? err.message : t('saveFailed'));
@@ -175,7 +175,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
         <div className="min-h-full bg-background">
             <div className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
                 <div className="mx-auto flex w-full max-w-[100rem] items-center gap-4 px-4 py-3 sm:px-6">
-                    <Button variant="ghost" size="sm" onClick={() => router.push('/records/document-templates')}>
+                    <Button variant="ghost" size="sm" onClick={() => router.push('/library/documents')}>
                         <ChevronLeftIcon className="size-4" />
                         {t('back')}
                     </Button>

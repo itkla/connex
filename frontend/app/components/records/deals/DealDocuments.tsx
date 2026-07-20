@@ -194,7 +194,7 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-56">
                 {templates.length === 0 ? (
-                    <DropdownMenuItem onSelect={() => router.push('/records/document-templates/new')}>
+                    <DropdownMenuItem onSelect={() => router.push('/library/documents/new')}>
                         <PlusIcon className="size-4" />
                         {t('createTemplate')}
                     </DropdownMenuItem>

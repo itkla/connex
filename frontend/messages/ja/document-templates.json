@@ -1,10 +1,10 @@
 {
   "RecordsDocumentTemplatesLayout": {
-    "title": "ドキュメントテンプレート",
+    "title": "ドキュメント",
     "description": "見積書・提案書・注文書・契約書の再利用可能なテンプレート"
   },
   "DocumentTemplatesBrowser": {
-    "title": "ドキュメントテンプレート",
+    "title": "ドキュメント",
     "newButton": "新規テンプレート",
     "approvalPoliciesLink": "承認ポリシー",
     "sectionTemplates": "テンプレート",

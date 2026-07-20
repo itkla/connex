@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUserFromCookie } from "@/app/lib/api";
-import TemplateBuilder from "@/app/components/records/document-templates/TemplateBuilder";
+import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
 
 export default async function NewDocumentTemplatePage() {
     const cookie = (await headers()).get('cookie');

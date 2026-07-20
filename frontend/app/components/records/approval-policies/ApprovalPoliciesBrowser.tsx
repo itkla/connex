@@ -102,7 +102,7 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={() => router.push('/records/document-templates')}>
+                            <Button variant="outline" onClick={() => router.push('/library/documents')}>
                                 <DocumentDuplicateIcon className="size-4" />
                                 {t('templatesLink')}
                             </Button>

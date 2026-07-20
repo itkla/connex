@@ -1,10 +1,10 @@
 {
   "RecordsDocumentTemplatesLayout": {
-    "title": "Document templates",
+    "title": "Documents",
     "description": "Reusable templates for quotes, proposals, order forms, and contracts"
   },
   "DocumentTemplatesBrowser": {
-    "title": "Document templates",
+    "title": "Documents",
     "newButton": "New template",
     "approvalPoliciesLink": "Approval policies",
     "sectionTemplates": "Templates",

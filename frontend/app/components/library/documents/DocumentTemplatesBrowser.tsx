@@ -45,8 +45,8 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
             [tpl.name, tpl.title, tpl.type].some((v) => v?.toLowerCase().includes(q)));
     }, [templates, query]);
 
-    const openNew = () => router.push('/records/document-templates/new');
-    const openEdit = (id: number) => router.push(`/records/document-templates/${id}`);
+    const openNew = () => router.push('/library/documents/new');
+    const openEdit = (id: number) => router.push(`/library/documents/${id}`);
 
     const confirmRemove = async () => {
         if (!removeTarget) return;
