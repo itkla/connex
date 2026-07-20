@@ -79,13 +79,24 @@ class FlywayUpgradeIntegrationTest {
         seedV84Reservation();
         migrateTo("110");
         seedV110SavedView();
+        migrateTo("115");
+        try (Connection connection = connection()) {
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+        }
+        migrateTo("116");
+        assertWorkflowSchemaAtV116();
 
         Flyway latest = flyway(null);
         latest.migrate();
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
-        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("111")) >= 0);
+        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("116")) >= 0);
         try (Connection connection = connection()) {
             JsonNode migratedConfig = JsonMapper.builder().build().readTree(
                 stringScalar(connection, "SELECT config_json FROM saved_view WHERE id = 9101"));
@@ -182,6 +193,47 @@ class FlywayUpgradeIntegrationTest {
                 VALUES (
                     9101, '33333333-3333-4333-8333-333333333333', NULL, NULL,
                     DATE_ADD(NOW(6), INTERVAL 1 DAY), DATE_ADD(NOW(6), INTERVAL 2 MINUTE), 1)
+                """));
+        }
+    }
+
+    private static void assertWorkflowSchemaAtV116() throws SQLException {
+        try (Connection connection = connection()) {
+            assertEquals(2, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+            assertEquals(1, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'workflow_version'
+                  AND COLUMN_NAME = 'definition_hash'
+                  AND DATA_TYPE = 'binary'
+                  AND CHARACTER_MAXIMUM_LENGTH = 32
+                """));
+            assertEquals(3, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.REFERENTIAL_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                  AND REFERENCED_TABLE_NAME IN ('workspace', 'app_user')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Invalid enabled workflow', TRUE, 'user',
+                    '{"schemaVersion":1}', '{}')
                 """));
         }
     }

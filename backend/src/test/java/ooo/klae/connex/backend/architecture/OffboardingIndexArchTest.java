@@ -54,7 +54,13 @@ class OffboardingIndexArchTest {
         new String[] {"suppression_entry", "created_by_id"},
         new String[] {"company_share", "granted_by"},
         new String[] {"person_share", "granted_by"},
-        new String[] {"pipeline_share", "granted_by"});
+        new String[] {"pipeline_share", "granted_by"},
+        new String[] {"workflow", "draft_run_as_user_id"},
+        new String[] {"workflow", "created_by_id"},
+        new String[] {"workflow", "updated_by_id"},
+        new String[] {"workflow_version", "run_as_user_id"},
+        new String[] {"workflow_version", "created_by_id"},
+        new String[] {"workflow_version", "published_by_id"});
 
     @Autowired private DataSource dataSource;
 

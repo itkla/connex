@@ -139,5 +139,7 @@ public final class TablePlaneRegistry {
         "tag",
         "task",
         "user_dashboard",
-        "warm_path_dismissal");
+        "warm_path_dismissal",
+        "workflow",
+        "workflow_version");
 }
