@@ -17,6 +17,12 @@ public interface RuleMapper {
     /** All rules in the workspace, newest first. */
     List<Rule> getByWorkspace(int workspaceId);
 
+    /** All workspace rules locked in stable id order for startup backfill. */
+    List<Rule> getByWorkspaceForUpdate(@Param("workspaceId") int workspaceId);
+
+    /** Number of rules in one workspace. */
+    int countByWorkspace(@Param("workspaceId") int workspaceId);
+
     /** A single rule scoped to the workspace, or {@code null}. */
     Rule getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
@@ -34,6 +40,9 @@ public interface RuleMapper {
 
     /** Distinct workspace ids with at least one enabled schedule rule (scheduler fan-out; off-thread, cross-workspace). */
     List<Integer> workspaceIdsWithEnabledScheduleRules();
+
+    /** Distinct workspace ids with rules, ordered for catalog-pinned startup fan-out. */
+    List<Integer> workspaceIdsWithRules();
 
     /** Claims a fire by inserting it; the unique {@code (rule_id, dedupe_key)} index enforces idempotency. Populates the id. */
     void insertExecution(RuleExecution execution);

@@ -35,6 +35,9 @@ class WorkflowMapperXmlTest {
         assertScoped(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByLegacyRuleId", legacy);
         assertScoped(configuration, WorkflowMapper.class, "listUnpairedLegacyRules", workspace);
+        assertScoped(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
+        assertScoped(configuration, WorkflowMapper.class, "countUnpairedLegacyRules", workspace);
+        assertScoped(configuration, WorkflowMapper.class, "firstUnpairedLegacyRuleId", workspace);
 
         Workflow workflow = workflow();
         assertScoped(configuration, WorkflowMapper.class, "insert", workflow);
@@ -56,6 +59,40 @@ class WorkflowMapperXmlTest {
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
         assertTrue(legacySql.endsWith("ORDER BY r.id"));
+    }
+
+    @Test
+    void legacyBackfillEnumerationAndLocksAreStableAndContentScoped() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> workspace = Map.of("workspaceId", 7);
+
+        String enumeration = sql(configuration, RuleMapper.class, "workspaceIdsWithRules", Map.of());
+        assertEquals("SELECT DISTINCT workspace_id FROM rule ORDER BY workspace_id", enumeration);
+        assertFalse(enumeration.contains("?"));
+
+        assertScoped(configuration, RuleMapper.class, "getByWorkspaceForUpdate", workspace);
+        String locked = sql(configuration, RuleMapper.class, "getByWorkspaceForUpdate", workspace);
+        assertTrue(locked.contains("WHERE workspace_id = ?"));
+        assertTrue(locked.endsWith("ORDER BY id FOR UPDATE"));
+
+        assertScoped(configuration, RuleMapper.class, "countByWorkspace", workspace);
+        assertEquals(
+            "SELECT COUNT(*) FROM rule WHERE workspace_id = ?",
+            sql(configuration, RuleMapper.class, "countByWorkspace", workspace));
+
+        String linked = sql(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
+        assertTrue(linked.contains("WHERE workspace_id = ?"));
+        assertTrue(linked.contains("legacy_rule_id IS NOT NULL"));
+
+        String unpaired = sql(configuration, WorkflowMapper.class, "countUnpairedLegacyRules", workspace);
+        assertTrue(unpaired.contains("r.workspace_id = ?"));
+        assertTrue(unpaired.contains("w.workspace_id = ?"));
+
+        String firstUnpaired = sql(
+            configuration, WorkflowMapper.class, "firstUnpairedLegacyRuleId", workspace);
+        assertTrue(firstUnpaired.contains("r.workspace_id = ?"));
+        assertTrue(firstUnpaired.contains("w.workspace_id = ?"));
+        assertTrue(firstUnpaired.endsWith("ORDER BY r.id LIMIT 1"));
     }
 
     @Test
@@ -95,7 +132,9 @@ class WorkflowMapperXmlTest {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of(
-                "mappers/WorkflowMapper.xml", "mappers/WorkflowVersionMapper.xml")) {
+                "mappers/RuleMapper.xml",
+                "mappers/WorkflowMapper.xml",
+                "mappers/WorkflowVersionMapper.xml")) {
             try (InputStream input = WorkflowMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();

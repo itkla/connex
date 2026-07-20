@@ -51,7 +51,7 @@ class TenantScopeArchTest {
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
      * it binds {@code #{recipientId}}), the scheduler helpers only enumerate
      * workspace or schedule references while pinned to one catalog for per-workspace
-     * background fan-out (they return no tenant content rows),
+     * background or startup fan-out (they return no tenant content rows),
      * and the org-scoped audit reads are org-filtered ({@code #{orgId}}) and gated by
      * org membership (MULTITENANCY_PLAN §0.6). The {@code count*Anywhere} selects are
      * the account-offboarding guards (#440 increment 3): identity-scoped counts that
@@ -74,6 +74,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.findRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
+        "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithRules",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
         "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",

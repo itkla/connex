@@ -22,6 +22,12 @@ public interface WorkflowMapper {
 
     List<Rule> listUnpairedLegacyRules(@Param("workspaceId") int workspaceId);
 
+    int countLegacyRuleLinks(@Param("workspaceId") int workspaceId);
+
+    int countUnpairedLegacyRules(@Param("workspaceId") int workspaceId);
+
+    Integer firstUnpairedLegacyRuleId(@Param("workspaceId") int workspaceId);
+
     void insert(Workflow workflow);
 
     int updateDraft(Workflow workflow);

@@ -50,6 +50,35 @@
     ORDER BY r.id
   </select>
 
+  <select id="countLegacyRuleLinks" resultType="int">
+    SELECT COUNT(*) FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id IS NOT NULL
+  </select>
+
+  <select id="countUnpairedLegacyRules" resultType="int">
+    SELECT COUNT(*)
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+  </select>
+
+  <select id="firstUnpairedLegacyRuleId" resultType="int">
+    SELECT r.id
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+    ORDER BY r.id
+    LIMIT 1
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow
       (workspace_id, legacy_rule_id, name, description, enabled, draft_revision,

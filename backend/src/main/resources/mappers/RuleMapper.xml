@@ -15,6 +15,17 @@
     ORDER BY created_at DESC, id DESC
   </select>
 
+  <select id="getByWorkspaceForUpdate" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
+  <select id="countByWorkspace" resultType="int">
+    SELECT COUNT(*) FROM rule WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="getById" resultType="Rule">
     SELECT <include refid="columns"/> FROM rule
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -50,6 +61,10 @@
 
   <select id="workspaceIdsWithEnabledScheduleRules" resultType="int">
     SELECT DISTINCT workspace_id FROM rule WHERE trigger_type = 'schedule' AND enabled = TRUE
+  </select>
+
+  <select id="workspaceIdsWithRules" resultType="int">
+    SELECT DISTINCT workspace_id FROM rule ORDER BY workspace_id
   </select>
 
   <insert id="insertExecution" useGeneratedKeys="true" keyProperty="id">

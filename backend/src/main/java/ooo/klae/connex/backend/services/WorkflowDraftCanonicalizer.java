@@ -66,6 +66,17 @@ public class WorkflowDraftCanonicalizer {
         WorkflowDefinition definition = parse(
             definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
         WorkflowCanvas canvas = parse(canvasJson, WorkflowCanvas.class, "Invalid workflow canvas");
+        return canonicalizeDraft(
+            name, description, recordType, executionMode, definition, canvas);
+    }
+
+    CanonicalDraft canonicalizeDraft(
+            String name,
+            String description,
+            String recordType,
+            String executionMode,
+            WorkflowDefinition definition,
+            WorkflowCanvas canvas) {
         validateDefinition(definition);
         validateCanvas(canvas, definition.nodes());
 
