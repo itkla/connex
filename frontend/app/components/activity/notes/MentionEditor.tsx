@@ -595,6 +595,7 @@ export default function MentionEditor({
                 }
                 if (event.key === 'Escape') {
                     event.preventDefault();
+                    event.stopPropagation();
                     closeMenu();
                     return;
                 }
