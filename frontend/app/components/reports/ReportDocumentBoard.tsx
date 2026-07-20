@@ -7,6 +7,7 @@ import {
     ArchiveBoxArrowDownIcon,
     ArrowDownTrayIcon,
     ArrowPathIcon,
+    ChevronDownIcon,
     ClockIcon,
     DocumentTextIcon,
     ExclamationCircleIcon,
@@ -19,6 +20,7 @@ import {
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
+import { useReportLabels } from '@/app/components/reports/reportLabels';
 import ScheduleManager from '@/app/components/reports/ScheduleManager';
 import {
     createReportSnapshot,
@@ -40,9 +42,25 @@ import type {
     ReportSnapshotSummary,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 type DocumentState =
     | { status: 'loading' }
@@ -103,6 +121,7 @@ export default function ReportDocumentBoard({
     const [refreshKey, setRefreshKey] = useState(0);
     const [snapshotting, setSnapshotting] = useState(false);
     const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
+    const [snapshotPendingDelete, setSnapshotPendingDelete] = useState<ReportSnapshotSummary | null>(null);
     const [exporting, setExporting] = useState(false);
     const [exportingPng, setExportingPng] = useState(false);
     const generationInputRef = useRef<ReportGenerateInput>({});
@@ -222,8 +241,9 @@ export default function ReportDocumentBoard({
         }
     };
 
-    const removeSnapshot = async (snapshot: ReportSnapshotSummary) => {
-        if (!window.confirm(t('document.deleteSnapshotConfirm'))) return;
+    const confirmDeleteSnapshot = async () => {
+        const snapshot = snapshotPendingDelete;
+        if (!snapshot) return;
         setDeletingSnapshotId(snapshot.id);
         if (activeSnapshotId === snapshot.id) {
             snapshotRequestRef.current += 1;
@@ -236,6 +256,7 @@ export default function ReportDocumentBoard({
                 setActiveSnapshot(null);
             }
             toastSuccess(t('document.snapshotDeleted'));
+            setSnapshotPendingDelete(null);
         } catch (error) {
             toastError(error instanceof Error ? error.message : t('common.requestFailed'));
         } finally {
@@ -319,18 +340,29 @@ export default function ReportDocumentBoard({
                             <ArchiveBoxArrowDownIcon />
                             {snapshotting ? t('document.snapshotting') : t('document.snapshot')}
                         </Button>
-                        <Button variant="outline" onClick={exportCsv} disabled={!document || exporting}>
-                            <ArrowDownTrayIcon />
-                            {t('document.csv')}
-                        </Button>
-                        <Button variant="outline" onClick={exportPng} disabled={!document || exportingPng}>
-                            <PhotoIcon />
-                            {exportingPng ? t('document.exportingPng') : t('document.png')}
-                        </Button>
-                        <Button variant="outline" onClick={() => window.print()} disabled={!document}>
-                            <PrinterIcon />
-                            {t('document.pdf')}
-                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" disabled={!document || exporting || exportingPng}>
+                                    <ArrowDownTrayIcon />
+                                    {exporting || exportingPng ? t('document.exporting') : t('document.export')}
+                                    <ChevronDownIcon className="size-4 opacity-60" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
+                                    <ArrowDownTrayIcon />
+                                    {t('document.csv')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
+                                    <PhotoIcon />
+                                    {t('document.png')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => window.print()}>
+                                    <PrinterIcon />
+                                    {t('document.pdf')}
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                         {canUpdateReports ? (
                             <Button asChild variant="brand">
                                 <Link href={`/overview/reports/${definition.id}/edit`}>
@@ -360,32 +392,40 @@ export default function ReportDocumentBoard({
                             >
                                 {t('document.live')}
                             </Button>
-                            {snapshots.map((snapshot) => (
-                                <div key={snapshot.id} className="flex shrink-0 items-center rounded-md border border-border">
-                                    <button
-                                        type="button"
-                                        onClick={() => openSnapshot(snapshot)}
-                                        aria-pressed={activeSnapshotId === snapshot.id}
-                                        className={activeSnapshotId === snapshot.id
-                                            ? 'bg-muted px-3 py-1.5 text-sm font-medium text-foreground'
-                                            : 'px-3 py-1.5 text-sm text-foreground hover:bg-muted'}
+                            {snapshots.map((snapshot) => {
+                                const active = activeSnapshotId === snapshot.id;
+                                const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+                                    .format(new Date(snapshot.generatedAt));
+                                return (
+                                    <div
+                                        key={snapshot.id}
+                                        className={cn(
+                                            'flex shrink-0 items-center rounded-full border',
+                                            active ? 'border-brand/40 bg-secondary' : 'border-border',
+                                        )}
                                     >
-                                        {new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(snapshot.generatedAt))}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeSnapshot(snapshot)}
-                                        disabled={deletingSnapshotId === snapshot.id}
-                                        aria-label={t('document.deleteSnapshotNamed', {
-                                            date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-                                                .format(new Date(snapshot.generatedAt)),
-                                        })}
-                                        className="border-l border-border p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                    >
-                                        <TrashIcon className="size-3.5" />
-                                    </button>
-                                </div>
-                            ))}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => openSnapshot(snapshot)}
+                                            aria-pressed={active}
+                                            className="rounded-l-full rounded-r-none hover:bg-transparent"
+                                        >
+                                            {dateLabel}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            onClick={() => setSnapshotPendingDelete(snapshot)}
+                                            disabled={deletingSnapshotId === snapshot.id}
+                                            aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
+                                            className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                        >
+                                            <TrashIcon className="size-3.5" />
+                                        </Button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </section>
                 ) : null}
@@ -422,6 +462,30 @@ export default function ReportDocumentBoard({
                     />
                 ) : null}
             </div>
+
+            <Dialog
+                open={snapshotPendingDelete !== null}
+                onOpenChange={(open) => !open && deletingSnapshotId === null && setSnapshotPendingDelete(null)}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t('document.deleteSnapshotTitle')}</DialogTitle>
+                        <DialogDescription>{t('document.deleteSnapshotConfirm')}</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline" disabled={deletingSnapshotId !== null}>{t('common.cancel')}</Button>
+                        </DialogClose>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmDeleteSnapshot}
+                            disabled={deletingSnapshotId !== null}
+                        >
+                            {deletingSnapshotId !== null ? t('common.deleting') : t('common.delete')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -441,6 +505,7 @@ function ReportPaper({
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const { localizeLabel } = useReportLabels();
     const citationIndex = new Map(document.citations.map((citation, index) => [citation.sourceId, index + 1]));
     const layoutById = new Map(document.definition.config.layout.map((item) => [item.widgetId, item]));
     const measureLabelByWidgetId = new Map(
@@ -466,49 +531,8 @@ function ReportPaper({
     const hasPriorRows = document.appendix.some((row) =>
         measureByWidgetId.get(row.widgetId) !== 'attainment' && row.priorValue != null);
     const hasComparisonRows = document.appendix.some((row) => row.priorValue != null);
-    const localizedSourceLabel = (label: string, widgetId: string) => {
-        const display = sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId));
-        const separator = display.lastIndexOf(' · ');
-        const prefix = separator >= 0 ? display.slice(0, separator + 3) : '';
-        const value = separator >= 0 ? display.slice(separator + 3) : display;
-        const key = value.trim().toLowerCase().replaceAll(' ', '_');
-        if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(value)) {
-            const date = new Date(`${value}${value.length === 7 ? '-01' : ''}T00:00:00Z`);
-            return prefix + new Intl.DateTimeFormat(locale, {
-                timeZone: 'UTC',
-                year: 'numeric',
-                month: 'short',
-                ...(value.length === 10 ? { day: 'numeric' } : {}),
-            }).format(date);
-        }
-        const translated = (() => {
-            switch (key) {
-                case 'open': return t('status.open');
-                case 'won': return t('status.won');
-                case 'lost': return t('status.lost');
-                case 'todo': return t('status.todo');
-                case 'in_progress': return t('status.in_progress');
-                case 'done': return t('status.done');
-                case 'hot': return t('warmth.hot');
-                case 'warm': return t('warmth.warm');
-                case 'cool': return t('warmth.cool');
-                case 'cold': return t('warmth.cold');
-                case 'high': return t('risk.high');
-                case 'medium': return t('risk.medium');
-                case 'low': return t('risk.low');
-                case 'rising': return t('trend.rising');
-                case 'steady': return t('trend.steady');
-                case 'cooling': return t('trend.cooling');
-                case 'total': return t('label.total');
-                case 'unassigned': return t('label.unassigned');
-                case 'unspecified': return t('label.unspecified');
-                case 'other': return t('label.other');
-                case 'workspace-wide': return t('label.workspaceWide');
-                default: return value;
-            }
-        })();
-        return prefix + translated;
-    };
+    const localizedSourceLabel = (label: string, widgetId: string) =>
+        localizeLabel(sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId)));
     return (
         <article ref={paperRef} className="report-paper mx-auto max-w-6xl rounded-2xl border border-border bg-card px-6 py-10 shadow-sm sm:px-10 lg:px-16">
             <header className="border-b border-border pb-8">

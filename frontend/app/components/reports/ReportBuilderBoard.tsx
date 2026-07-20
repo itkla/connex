@@ -6,13 +6,13 @@ import { useTranslations } from 'next-intl';
 import {
     ArrowsPointingInIcon,
     ArrowsPointingOutIcon,
-    ChartBarIcon,
     PlusIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import SortableGrid, { type SortableGridMessages } from '@/app/components/layout/SortableGrid';
+import ReportWidgetRenderer from '@/app/components/reports/ReportWidgetRenderer';
 import {
     REPORT_CHART_TYPES,
     REPORT_DATA_SOURCES,
@@ -23,6 +23,7 @@ import {
     newReportWidget,
     reportGroupsForMeasure,
     reflowReportLayout,
+    sampleReportWidgetData,
 } from '@/app/components/reports/reportConfig';
 import { createReport, updateReport } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -587,19 +588,26 @@ function WidgetEditor({
                         .map((value) => ({ value, label: t(`chart.${value}`) }))}
                 />
             </div>
-            <div className="mt-5 flex min-h-40 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 px-5 text-center">
-                <div>
-                    <ChartBarIcon className="mx-auto size-6 text-muted-foreground" />
-                    <p className="mt-3 text-sm font-medium text-foreground">{t(`chart.${widget.chartType}`)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                        {t('builder.previewDescription', {
-                            measure: t(`measure.${widget.measure}`),
-                            group: t(`group.${widget.groupBy ?? 'none'}`),
-                        })}
-                    </p>
-                </div>
-            </div>
+            <WidgetPreview widget={widget} />
         </section>
+    );
+}
+
+function WidgetPreview({ widget }: { widget: ReportWidgetConfig }) {
+    const t = useTranslations('Reports');
+    const sample = useMemo(() => sampleReportWidgetData(widget), [widget]);
+    return (
+        <div className="mt-5 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    {t('builder.samplePreview')}
+                </span>
+                <span className="text-xs text-muted-foreground">{t(`chart.${widget.chartType}`)}</span>
+            </div>
+            <div className="pointer-events-none select-none" aria-hidden>
+                <ReportWidgetRenderer widget={sample} />
+            </div>
+        </div>
     );
 }
 
