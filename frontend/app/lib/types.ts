@@ -1132,6 +1132,25 @@ export type DealLineItemPayload = {
 
 export type DocumentType = 'quote' | 'proposal' | 'order_form' | 'contract';
 
+/** A mark on a document body text run (bold, italic, link, …), as ProseMirror/Tiptap JSON. */
+export type DocumentBodyMark = {
+    type: string;
+    attrs?: Record<string, unknown>;
+};
+
+/**
+ * One node in a document template's block body (ProseMirror/Tiptap JSON). The block builder
+ * authors this tree; merge tokens live as inline {@code mergeToken} nodes and the line-items table
+ * as a {@code lineItems} placeholder, both resolved server-side at generation.
+ */
+export type DocumentBodyNode = {
+    type: string;
+    attrs?: Record<string, unknown>;
+    content?: DocumentBodyNode[];
+    marks?: DocumentBodyMark[];
+    text?: string;
+};
+
 /** A workspace-scoped commercial-document template. Sections may carry {{merge tokens}}. */
 export type DocumentTemplate = {
     id: number;
@@ -1142,6 +1161,7 @@ export type DocumentTemplate = {
     intro?: string | null;
     terms?: string | null;
     footer?: string | null;
+    body?: string | null;
     active: boolean;
     createdAt: string;
     updatedAt: string;
@@ -1155,6 +1175,7 @@ export type CreateDocumentTemplatePayload = {
     intro?: string | null;
     terms?: string | null;
     footer?: string | null;
+    body?: string | null;
     active?: boolean;
 };
 
@@ -1234,6 +1255,7 @@ export type DocumentContent = {
         terms?: string | null;
         footer?: string | null;
     };
+    body?: DocumentBodyNode | null;
     lineItems: DealLineItem[];
     totals: DealLineItemTotals;
 };
