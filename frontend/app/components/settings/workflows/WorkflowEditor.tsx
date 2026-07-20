@@ -82,7 +82,7 @@ type Selection = "trigger" | "condition" | `action-${number}`;
 
 const NODE_TYPES = { workflowStep: WorkflowNode };
 
-const LIST_URL = "/settings/workflows";
+const LIST_URL = "/workflows";
 
 /**
  * Full-page linear workflow editor over the existing rules engine. The single source of truth is

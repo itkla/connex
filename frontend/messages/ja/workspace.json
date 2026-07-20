@@ -65,8 +65,6 @@
     "subtitle": "このワークスペースにアクセスできる人と、その権限を管理します。",
     "tabMembers": "メンバー",
     "tabRoles": "ロール",
-    "tabRules": "ルール",
-    "tabWorkflows": "ワークフロー",
     "tabCustomFields": "カスタムフィールド",
     "tabEmail": "メール",
     "tabDelivery": "配信"

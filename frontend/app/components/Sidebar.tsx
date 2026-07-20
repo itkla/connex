@@ -33,6 +33,7 @@ import {
     CheckIcon,
     Cog6ToothIcon,
     BuildingLibraryIcon,
+    BoltIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -81,6 +82,7 @@ function useSections(): NavSection[] {
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const workspaceItems: NavItem[] = [
         { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+        { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
         ...(isOrgAdmin
             ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]

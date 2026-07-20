@@ -65,8 +65,6 @@
     "subtitle": "Manage who can access this workspace and what they can do.",
     "tabMembers": "Members",
     "tabRoles": "Roles",
-    "tabRules": "Rules",
-    "tabWorkflows": "Workflows",
     "tabCustomFields": "Custom fields",
     "tabEmail": "Email",
     "tabDelivery": "Delivery"
