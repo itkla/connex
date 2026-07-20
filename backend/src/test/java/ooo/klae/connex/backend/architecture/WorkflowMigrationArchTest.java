@@ -62,7 +62,8 @@ class WorkflowMigrationArchTest {
         assertTrue(compact.contains("FOREIGN KEY (workspace_id, id, active_version_id) REFERENCES workflow_version(workspace_id, workflow_id, id) ON DELETE RESTRICT"));
         assertTrue(compact.contains("draft_revision >= 0"));
         assertTrue(compact.contains("version_number > 0"));
-        assertTrue(compact.contains("enabled = FALSE OR active_version_id IS NOT NULL"));
+        assertTrue(compact.contains("CONSTRAINT chk_workflow_enabled CHECK (enabled IN (FALSE, TRUE))"));
+        assertFalse(compact.contains("enabled = FALSE OR active_version_id IS NOT NULL"));
         assertTrue(compact.contains("JSON_TYPE(draft_definition_json) = 'OBJECT'"));
         assertTrue(compact.contains("JSON_CONTAINS_PATH(draft_definition_json, 'one', '$.schemaVersion') = 1"));
         assertTrue(compact.contains("JSON_TYPE(trigger_config) = 'OBJECT'"));

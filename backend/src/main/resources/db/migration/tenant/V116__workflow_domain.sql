@@ -20,9 +20,7 @@ CREATE TABLE workflow (
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT chk_workflow_revision CHECK (draft_revision >= 0),
-    CONSTRAINT chk_workflow_lifecycle CHECK (
-        enabled IN (FALSE, TRUE) AND (enabled = FALSE OR active_version_id IS NOT NULL)
-    ),
+    CONSTRAINT chk_workflow_enabled CHECK (enabled IN (FALSE, TRUE)),
     CONSTRAINT chk_workflow_draft_mode CHECK (
         draft_execution_mode IN ('user', 'system')
         AND (draft_execution_mode = 'user' OR draft_run_as_user_id IS NULL)

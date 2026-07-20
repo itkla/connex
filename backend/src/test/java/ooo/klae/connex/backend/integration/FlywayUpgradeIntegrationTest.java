@@ -232,7 +232,7 @@ class FlywayUpgradeIntegrationTest {
                     workspace_id, name, enabled, draft_execution_mode,
                     draft_definition_json, draft_canvas_json)
                 VALUES (
-                    9101, 'Invalid enabled workflow', TRUE, 'user',
+                    9101, 'Invalid enabled workflow', 2, 'user',
                     '{"schemaVersion":1}', '{}')
                 """));
         }
