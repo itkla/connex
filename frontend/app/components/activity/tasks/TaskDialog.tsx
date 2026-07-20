@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
@@ -271,6 +272,7 @@ export function TaskDialogForm({
                                 ariaInvalid={Boolean(fieldErrors.description)}
                                 ariaDescribedby={fieldErrors.description ? 'task-description-error' : undefined}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
                             />
                         </div>
