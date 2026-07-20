@@ -13,7 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.Company;
@@ -66,6 +69,7 @@ public class DealDocumentService {
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
+    private static final int MAX_BODY_DEPTH = 50;
 
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
@@ -125,6 +129,7 @@ public class DealDocumentService {
             owner == null ? null : new DocumentContent.PartyRef(nz(owner.getDisplayName()), null),
             new DocumentContent.DealRef(nz(deal.getName()), currency),
             sections,
+            resolveBody(template.getBody(), tokens),
             lines.items(),
             lines.totals());
 
@@ -239,6 +244,68 @@ public class DealDocumentService {
             result = result.replace("{{" + entry.getKey() + "}}", entry.getValue());
         }
         return result;
+    }
+
+    /**
+     * Resolves a template body (ProseMirror/Tiptap JSON) into a frozen snapshot tree: {@code {{tokens}}}
+     * inside text runs are substituted and inline {@code mergeToken} nodes become plain, properly-escaped
+     * text. Rebuilding the tree through Jackson (rather than string-replacing the serialized JSON) keeps a
+     * token value that contains quotes or braces from corrupting the document or injecting structure.
+     */
+    private JsonNode resolveBody(String templateBody, Map<String, String> tokens) {
+        if (templateBody == null || templateBody.isBlank()) return null;
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(templateBody);
+        } catch (RuntimeException invalid) {
+            throw new BadRequestException("Document template body is not valid document content");
+        }
+        return resolveNode(root, tokens, 0);
+    }
+
+    private JsonNode resolveNode(JsonNode node, Map<String, String> tokens, int depth) {
+        if (depth > MAX_BODY_DEPTH) {
+            throw new BadRequestException("Document template body is nested too deeply");
+        }
+        if (node == null || !node.isObject()) {
+            return node;
+        }
+        JsonNode typeNode = node.get("type");
+        String type = typeNode != null && typeNode.isString() ? typeNode.asString() : null;
+        ObjectNode copy = objectMapper.createObjectNode();
+        for (Map.Entry<String, JsonNode> field : node.properties()) {
+            String key = field.getKey();
+            JsonNode value = field.getValue();
+            if ("text".equals(type) && "text".equals(key) && value.isString()) {
+                copy.put("text", resolve(value.asString(), tokens));
+            } else if ("content".equals(key) && value.isArray()) {
+                copy.set("content", resolveContent(value, tokens, depth));
+            } else {
+                copy.set(key, value);
+            }
+        }
+        return copy;
+    }
+
+    private ArrayNode resolveContent(JsonNode content, Map<String, String> tokens, int depth) {
+        ArrayNode out = objectMapper.createArrayNode();
+        for (JsonNode child : content) {
+            JsonNode typeNode = child.isObject() ? child.get("type") : null;
+            String type = typeNode != null && typeNode.isString() ? typeNode.asString() : null;
+            if ("mergeToken".equals(type)) {
+                JsonNode key = child.path("attrs").path("token");
+                String value = key.isString() ? tokens.getOrDefault(key.asString(), "") : "";
+                if (!value.isEmpty()) {
+                    ObjectNode text = objectMapper.createObjectNode();
+                    text.put("type", "text");
+                    text.put("text", value);
+                    out.add(text);
+                }
+            } else {
+                out.add(resolveNode(child, tokens, depth + 1));
+            }
+        }
+        return out;
     }
 
     private DealDocumentDto enrich(int workspaceId, DealDocument document) {

@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.List;
 
+import tools.jackson.databind.JsonNode;
+
 /**
  * The immutable, resolved snapshot stored on a {@code deal_document}. Captured once at generation
  * time so the document stays stable even if the deal, catalog, or template change later. Serialized
@@ -13,6 +15,8 @@ import java.util.List;
  * @param owner       the deal owner (may be null)
  * @param deal        deal reference
  * @param sections    resolved template sections (merge tokens already substituted)
+ * @param body        resolved block-builder body (ProseMirror/Tiptap JSON, merge tokens already
+ *                    substituted); null for templates authored with only the legacy section fields
  * @param lineItems   frozen copy of the deal's line items at generation
  * @param totals      frozen roll-up
  */
@@ -23,6 +27,7 @@ public record DocumentContent(
     PartyRef owner,
     DealRef deal,
     Sections sections,
+    JsonNode body,
     List<DealLineItemDto> lineItems,
     DealLineItemTotalsDto totals
 ) {

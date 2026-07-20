@@ -33,6 +33,7 @@ public class DocumentTemplateDto {
     private String intro;
     private String terms;
     private String footer;
+    private String body;
 
     private Boolean active;
 
@@ -50,6 +51,7 @@ public class DocumentTemplateDto {
         dto.intro = t.getIntro();
         dto.terms = t.getTerms();
         dto.footer = t.getFooter();
+        dto.body = t.getBody();
         dto.active = t.isActive();
         dto.createdAt = t.getCreatedAt();
         dto.updatedAt = t.getUpdatedAt();
@@ -66,6 +68,7 @@ public class DocumentTemplateDto {
         t.setIntro(intro);
         t.setTerms(terms);
         t.setFooter(footer);
+        t.setBody(body);
         t.setActive(active == null ? true : active);
         return t;
     }

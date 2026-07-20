@@ -13,13 +13,14 @@
     <result property="intro"       column="intro"/>
     <result property="terms"       column="terms"/>
     <result property="footer"      column="footer"/>
+    <result property="body"        column="body"/>
     <result property="active"      column="active"/>
     <result property="createdAt"   column="created_at"/>
     <result property="updatedAt"   column="updated_at"/>
   </resultMap>
 
   <sql id="cols">
-    id, workspace_id, name, type, locale, title, intro, terms, footer, active, created_at, updated_at
+    id, workspace_id, name, type, locale, title, intro, terms, footer, body, active, created_at, updated_at
   </sql>
 
   <select id="getAll" resultMap="DocumentTemplateResult">
@@ -33,14 +34,14 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO document_template (workspace_id, name, type, locale, title, intro, terms, footer, active)
-    VALUES (#{workspaceId}, #{name}, #{type}, #{locale}, #{title}, #{intro}, #{terms}, #{footer}, #{active})
+    INSERT INTO document_template (workspace_id, name, type, locale, title, intro, terms, footer, body, active)
+    VALUES (#{workspaceId}, #{name}, #{type}, #{locale}, #{title}, #{intro}, #{terms}, #{footer}, #{body}, #{active})
   </insert>
 
   <update id="update">
     UPDATE document_template SET
       name = #{name}, type = #{type}, locale = #{locale}, title = #{title},
-      intro = #{intro}, terms = #{terms}, footer = #{footer}, active = #{active}
+      intro = #{intro}, terms = #{terms}, footer = #{footer}, body = #{body}, active = #{active}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

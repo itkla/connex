@@ -6,8 +6,10 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.DocumentTemplate;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -23,6 +25,7 @@ public class DocumentTemplateService {
     private final DocumentTemplateMapper templateMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ObjectMapper objectMapper;
 
     private static final Set<String> AUDIT_FIELDS = Set.of(
         "name", "type", "locale", "title", "intro", "terms", "footer", "active");
@@ -37,6 +40,7 @@ public class DocumentTemplateService {
 
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public DocumentTemplate create(DocumentTemplate template) {
+        validateBody(template.getBody());
         template.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         templateMapper.insert(template);
         DocumentTemplate saved = require(template.getWorkspaceId(), template.getId());
@@ -47,6 +51,7 @@ public class DocumentTemplateService {
 
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public DocumentTemplate update(int id, DocumentTemplate template) {
+        validateBody(template.getBody());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         DocumentTemplate before = require(workspaceId, id);
         template.setId(id);
@@ -71,5 +76,14 @@ public class DocumentTemplateService {
         DocumentTemplate template = templateMapper.getById(workspaceId, id);
         if (template == null) throw new ResourceNotFoundException("Document template not found with id: " + id);
         return template;
+    }
+
+    private void validateBody(String body) {
+        if (body == null || body.isBlank()) return;
+        try {
+            objectMapper.readTree(body);
+        } catch (RuntimeException invalid) {
+            throw new BadRequestException("Document template body must be valid document content");
+        }
     }
 }
