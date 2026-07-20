@@ -215,6 +215,30 @@ class DealDocumentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void rejectsNonDocumentTemplateBody() {
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Non-doc body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody("{\"type\":\"paragraph\",\"content\":[]}");
+        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+    }
+
+    @Test
+    void rejectsTooDeeplyNestedTemplateBody() {
+        String node = "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}";
+        for (int i = 0; i < 60; i++) {
+            node = "{\"type\":\"bulletList\",\"content\":[" + node + "]}";
+        }
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Deep body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody("{\"type\":\"doc\",\"content\":[" + node + "]}");
+        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+    }
+
+    @Test
     void generatesWithoutLineItems() {
         Deal deal = jpyDeal();
         DocumentTemplate tpl = template();

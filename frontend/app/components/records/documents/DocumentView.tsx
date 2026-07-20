@@ -131,6 +131,9 @@ export default function DocumentView({ content, type, status, version, generated
             {content.body
                 ? <div className="document-prose max-w-none text-sm leading-relaxed text-foreground">
                     <BodyNodes nodes={content.body.content ?? []} lineItemsTable={lineItemsTable} />
+                    {lineItemsTable && !bodyHasLineItems(content.body) && (
+                        <div className="my-6">{lineItemsTable}</div>
+                    )}
                   </div>
                 : (
                     <>
@@ -159,6 +162,11 @@ export default function DocumentView({ content, type, status, version, generated
                 )}
         </div>
     );
+}
+
+function bodyHasLineItems(node: DocumentBodyNode): boolean {
+    if (node.type === 'lineItems') return true;
+    return (node.content ?? []).some(bodyHasLineItems);
 }
 
 function BodyNodes({ nodes, lineItemsTable }: { nodes: DocumentBodyNode[]; lineItemsTable: ReactNode }) {

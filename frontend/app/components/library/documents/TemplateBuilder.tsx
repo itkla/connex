@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -178,9 +179,9 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                                 </SelectContent>
                             </Select>
                         </div>
-                        <label className="flex items-start gap-2 text-sm text-muted-foreground">
-                            <input type="checkbox" className="mt-0.5" checked={draft.active}
-                                onChange={(e) => patch({ active: e.target.checked })} />
+                        <label htmlFor="tpl-active" className="flex items-start gap-2 text-sm text-muted-foreground">
+                            <Checkbox id="tpl-active" className="mt-0.5" checked={draft.active}
+                                onCheckedChange={(checked) => patch({ active: checked === true })} />
                             {t('active')}
                         </label>
                     </div>

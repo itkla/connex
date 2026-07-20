@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -70,6 +72,7 @@ public class DealDocumentService {
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
     private static final int MAX_BODY_DEPTH = 50;
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("\\{\\{\\s*([\\w.]+)\\s*\\}\\}");
 
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
@@ -239,11 +242,15 @@ public class DealDocumentService {
 
     private String resolve(String template, Map<String, String> tokens) {
         if (template == null) return null;
-        String result = template;
-        for (Map.Entry<String, String> entry : tokens.entrySet()) {
-            result = result.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        Matcher matcher = TOKEN_PATTERN.matcher(template);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String replacement = tokens.containsKey(key) ? tokens.get(key) : matcher.group();
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
-        return result;
+        matcher.appendTail(result);
+        return result.toString();
     }
 
     /**
@@ -272,16 +279,28 @@ public class DealDocumentService {
         }
         JsonNode typeNode = node.get("type");
         String type = typeNode != null && typeNode.isString() ? typeNode.asString() : null;
+        if ("text".equals(type)) {
+            JsonNode textNode = node.get("text");
+            String resolved = textNode != null && textNode.isString() ? resolve(textNode.asString(), tokens) : "";
+            if (resolved.isEmpty()) {
+                return null;
+            }
+            ObjectNode copy = objectMapper.createObjectNode();
+            for (Map.Entry<String, JsonNode> field : node.properties()) {
+                if ("text".equals(field.getKey())) {
+                    copy.put("text", resolved);
+                } else {
+                    copy.set(field.getKey(), field.getValue());
+                }
+            }
+            return copy;
+        }
         ObjectNode copy = objectMapper.createObjectNode();
         for (Map.Entry<String, JsonNode> field : node.properties()) {
-            String key = field.getKey();
-            JsonNode value = field.getValue();
-            if ("text".equals(type) && "text".equals(key) && value.isString()) {
-                copy.put("text", resolve(value.asString(), tokens));
-            } else if ("content".equals(key) && value.isArray()) {
-                copy.set("content", resolveContent(value, tokens, depth));
+            if ("content".equals(field.getKey()) && field.getValue().isArray()) {
+                copy.set("content", resolveContent(field.getValue(), tokens, depth));
             } else {
-                copy.set(key, value);
+                copy.set(field.getKey(), field.getValue());
             }
         }
         return copy;
@@ -302,7 +321,10 @@ public class DealDocumentService {
                     out.add(text);
                 }
             } else {
-                out.add(resolveNode(child, tokens, depth + 1));
+                JsonNode resolved = resolveNode(child, tokens, depth + 1);
+                if (resolved != null) {
+                    out.add(resolved);
+                }
             }
         }
         return out;
