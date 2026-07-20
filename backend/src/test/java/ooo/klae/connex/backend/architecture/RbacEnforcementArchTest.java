@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -17,6 +18,8 @@ import org.springframework.context.annotation.ClassPathScanningCandidateComponen
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.services.WorkflowService;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
@@ -103,5 +106,24 @@ class RbacEnforcementArchTest {
         assertTrue(violations.isEmpty(),
             "Controllers must reach the database through services (where @RequirePermission lives), "
                 + "not a mapper directly; these inject a mapper: " + violations);
+    }
+
+    @Test
+    void everyWorkflowLifecycleMethodRequiresRuleManage() {
+        List<String> violations = new ArrayList<>();
+        int lifecycleMethodCount = 0;
+        for (Method method : WorkflowService.class.getDeclaredMethods()) {
+            if (!Modifier.isPublic(method.getModifiers()) || method.isSynthetic() || method.isBridge()) {
+                continue;
+            }
+            lifecycleMethodCount++;
+            RequirePermission permission = method.getAnnotation(RequirePermission.class);
+            if (permission == null || permission.value() != Permission.RULE_MANAGE) {
+                violations.add(method.getName());
+            }
+        }
+        assertEquals(9, lifecycleMethodCount, "Workflow lifecycle surface changed without updating the RBAC guard");
+        assertTrue(violations.isEmpty(),
+            "Every workflow lifecycle method must require RULE_MANAGE: " + violations);
     }
 }

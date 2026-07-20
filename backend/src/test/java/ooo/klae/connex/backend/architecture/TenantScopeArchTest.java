@@ -45,6 +45,14 @@ class TenantScopeArchTest {
 
     private static final Pattern WORKSPACE_PARAM = Pattern.compile("#\\{\\s*(?:\\w+\\.)?workspaceId\\b");
 
+    @Test
+    void workflowPersistenceRemainsOnTheWorkspaceScopedPlane() {
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowMapper"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowVersionMapper"));
+    }
+
     /**
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
      * Each is provably tenant-safe without it: the notification inbox is
