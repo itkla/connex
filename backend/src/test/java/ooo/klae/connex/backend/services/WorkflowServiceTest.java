@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -44,7 +46,9 @@ import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
@@ -88,6 +92,7 @@ class WorkflowServiceTest {
             definitionCodec);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
+        lenient().when(workspaceMapper.lockActiveMembership(7, 41)).thenReturn(41);
     }
 
     @Test
@@ -109,10 +114,23 @@ class WorkflowServiceTest {
         assertNull(created.activeVersionId());
         assertNull(workflow.getValue().getLegacyRuleId());
         assertEquals(41, workflow.getValue().getCreatedById());
+        verify(workspaceService).lockAndRequireMember(7, 41);
         verifyNoInteractions(ruleMapper, workflowVersionMapper);
         verify(auditService).record(
             eq("workflow.create"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow created"), eq(Map.of("draftRevision", 0, "executionMode", "user")));
+    }
+
+    @Test
+    void userCreateFailsBeforeInsertionWhenTheCreatorMembershipIsNotActive() throws Exception {
+        WorkflowCreateRequest request = createRequest("user");
+        doThrow(new ForbiddenException("User is not an active workspace member"))
+            .when(workspaceService).lockAndRequireMember(7, 41);
+
+        assertThrows(ForbiddenException.class, () -> service.create(request));
+
+        verify(workflowMapper, never()).insert(any());
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
     }
 
     @Test
@@ -127,6 +145,7 @@ class WorkflowServiceTest {
 
         assertNull(created.runAsUserId());
         verify(workspaceService).requireRole(Role.ADMIN);
+        verify(workspaceService, never()).lockAndRequireMember(any(Integer.class), any(Integer.class));
     }
 
     @Test
@@ -219,20 +238,35 @@ class WorkflowServiceTest {
     }
 
     @Test
-    void firstPublishCreatesRuleLinkVersionThenActivePointer() {
+    void validateAndPublishRejectDraftsMissingCanvasPositions() {
+        Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
+        CanonicalDraft incomplete = canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "deal", "user", definitionJson(), missingCanvasJson());
+        workflow.setDraftCanvasJson(incomplete.canvasJson());
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+
+        assertThrows(BadRequestException.class, () -> service.validate(101));
+        assertThrows(BadRequestException.class, () -> service.publish(101, publishRequest(3)));
+
+        verify(definitionValidator, never()).validateDefinition(any(), any(), any(), any(), any());
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
+    void firstPublishCreatesRuleAndVersionThenAssignsBothPointersAtomically() {
         Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
-        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
+        when(workflowVersionMapper.getLatestForUpdate(7, 101)).thenReturn(null);
         doAnswer(invocation -> {
             invocation.<Rule>getArgument(0).setId(77);
             return null;
         }).when(ruleMapper).insert(any(Rule.class));
-        when(workflowMapper.updateLegacyRuleLink(7, 101, 77, 41)).thenReturn(1);
         doAnswer(invocation -> {
             invocation.<WorkflowVersion>getArgument(0).setId(88L);
             return null;
         }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
-        when(workflowMapper.updateActiveVersion(7, 101, 88L, 41)).thenReturn(1);
+        when(workflowMapper.assignFirstPublication(7, 101, 77, 88L, 41, 0)).thenReturn(1);
 
         var published = service.publish(101, publishRequest(0));
 
@@ -252,19 +286,52 @@ class WorkflowServiceTest {
             eq("deal"), any(RuleTrigger.class), eq(null), any(), eq("user"));
         InOrder writes = inOrder(ruleMapper, workflowMapper, workflowVersionMapper);
         writes.verify(ruleMapper).insert(any(Rule.class));
-        writes.verify(workflowMapper).updateLegacyRuleLink(7, 101, 77, 41);
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
-        writes.verify(workflowMapper).updateActiveVersion(7, 101, 88L, 41);
+        writes.verify(workflowMapper).assignFirstPublication(7, 101, 77, 88L, 41, 0);
+        verify(workspaceMapper).lockActiveMembership(7, 41);
         verify(auditService).record(
             eq("workflow.publish"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
     }
 
     @Test
+    void userPublishLocksTheExactPersistedDraftIdentityAndRejectsMissingIdentity() {
+        Workflow inactive = workflow("Workflow", "user", 0, 999, null, null, false);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(inactive);
+        when(workspaceMapper.lockActiveMembership(7, 999)).thenReturn(null);
+
+        assertThrows(ConflictException.class, () -> service.publish(101, publishRequest(0)));
+
+        verify(workspaceMapper).lockActiveMembership(7, 999);
+        verify(workspaceMapper, never()).lockActiveMembership(7, 41);
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+
+        Workflow missing = workflow("Workflow", "user", 0, null, null, null, false);
+        when(workflowMapper.getByIdForUpdate(7, 102)).thenReturn(missing);
+        missing.setId(102);
+
+        assertThrows(ConflictException.class, () -> service.publish(102, publishRequest(0)));
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
+    void systemPublishRequiresAdminForTheCurrentActor() {
+        Workflow workflow = workflow("Workflow", "system", 0, null, null, null, false);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+        doThrow(new ForbiddenException("Requires admin role"))
+            .when(workspaceService).requireRole(Role.ADMIN);
+
+        assertThrows(ForbiddenException.class, () -> service.publish(101, publishRequest(0)));
+
+        verify(workspaceService).requireRole(Role.ADMIN);
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
     void identicalPublishReusesTheActiveVersionAndRefusesRuleDrift() {
         PublishedPair pair = publishedPair("Workflow", false, 4);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(pair.workflow());
-        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(pair.version());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(pair.version());
         when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(pair.rule());
 
         var unchanged = service.publish(101, publishRequest(3));
@@ -272,12 +339,17 @@ class WorkflowServiceTest {
         assertEquals(88L, unchanged.activeVersionId());
         verify(workflowVersionMapper, never()).insert(any());
         verify(ruleMapper, never()).update(any());
-        verify(workflowMapper, never()).updateActiveVersion(any(Integer.class), any(Integer.class), any(Long.class), any());
+        verify(workflowMapper, never()).assignFirstPublication(
+            any(Integer.class), any(Integer.class), any(Integer.class), any(Long.class),
+            any(Integer.class), any(Integer.class));
+        verify(workflowMapper, never()).advancePublication(
+            any(Integer.class), any(Integer.class), any(Integer.class), any(Long.class),
+            any(Long.class), any(Integer.class), any(Integer.class));
         verifyNoInteractions(auditService);
 
         pair.rule().setName("Drifted");
         assertThrows(ConflictException.class, () -> service.publish(101, publishRequest(3)));
-        verify(workflowVersionMapper, never()).getLatest(7, 101);
+        verify(workflowVersionMapper, never()).getLatestForUpdate(7, 101);
     }
 
     @Test
@@ -285,15 +357,15 @@ class WorkflowServiceTest {
         PublishedPair pair = publishedPair("Published", false, 4);
         pair.workflow().setName("Draft rename");
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(pair.workflow());
-        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(pair.version());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(pair.version());
         when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(pair.rule());
-        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(pair.version());
+        when(workflowVersionMapper.getLatestForUpdate(7, 101)).thenReturn(pair.version());
         doAnswer(invocation -> {
             invocation.<WorkflowVersion>getArgument(0).setId(99L);
             return null;
         }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
         when(ruleMapper.update(any(Rule.class))).thenReturn(1);
-        when(workflowMapper.updateActiveVersion(7, 101, 99L, 41)).thenReturn(1);
+        when(workflowMapper.advancePublication(7, 101, 77, 88L, 99L, 41, 3)).thenReturn(1);
 
         service.publish(101, publishRequest(3));
 
@@ -304,7 +376,7 @@ class WorkflowServiceTest {
         InOrder writes = inOrder(workflowVersionMapper, ruleMapper, workflowMapper);
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         writes.verify(ruleMapper).update(any(Rule.class));
-        writes.verify(workflowMapper).updateActiveVersion(7, 101, 99L, 41);
+        writes.verify(workflowMapper).advancePublication(7, 101, 77, 88L, 99L, 41, 3);
     }
 
     @Test
@@ -312,9 +384,9 @@ class WorkflowServiceTest {
         PublishedPair pair = publishedPair("Published", false, 4);
         pair.workflow().setName("Draft rename");
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(pair.workflow());
-        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(pair.version());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(pair.version());
         when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(pair.rule());
-        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(pair.version());
+        when(workflowVersionMapper.getLatestForUpdate(7, 101)).thenReturn(pair.version());
         doAnswer(invocation -> {
             invocation.<WorkflowVersion>getArgument(0).setId(99L);
             return null;
@@ -326,8 +398,31 @@ class WorkflowServiceTest {
         InOrder writes = inOrder(workflowVersionMapper, ruleMapper);
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         writes.verify(ruleMapper).update(any(Rule.class));
-        verify(workflowMapper, never()).updateActiveVersion(
-            any(Integer.class), any(Integer.class), any(Long.class), any());
+        verify(workflowMapper, never()).advancePublication(
+            any(Integer.class), any(Integer.class), any(Integer.class), any(Long.class),
+            any(Long.class), any(Integer.class), any(Integer.class));
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void publicationPointerCompareAndSwapFailureCreatesNoAudit() {
+        Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+        when(workflowVersionMapper.getLatestForUpdate(7, 101)).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<Rule>getArgument(0).setId(77);
+            return null;
+        }).when(ruleMapper).insert(any(Rule.class));
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(88L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(workflowMapper.assignFirstPublication(7, 101, 77, 88L, 41, 0)).thenReturn(0);
+
+        assertThrows(IllegalStateException.class, () -> service.publish(101, publishRequest(0)));
+
+        verify(ruleMapper).insert(any(Rule.class));
+        verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         verifyNoInteractions(auditService);
     }
 
@@ -335,7 +430,7 @@ class WorkflowServiceTest {
     void enableAndDisableSynchronizeBothStatesAndAuditOnlyChanges() {
         PublishedPair disabled = publishedPair("Workflow", false, 4);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(disabled.workflow());
-        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(disabled.version());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(disabled.version());
         when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(disabled.rule());
         when(ruleMapper.updateEnabled(7, 77, true)).thenReturn(1);
         when(workflowMapper.updateLifecycle(7, 101, true, 41)).thenReturn(1);
@@ -364,7 +459,7 @@ class WorkflowServiceTest {
     void disableSynchronizesThePublishedRuleBeforeTheWorkflow() {
         PublishedPair enabled = publishedPair("Workflow", true, 4);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(enabled.workflow());
-        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(enabled.version());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(enabled.version());
         when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(enabled.rule());
         when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
         when(workflowMapper.updateLifecycle(7, 101, false, 41)).thenReturn(1);
@@ -377,6 +472,95 @@ class WorkflowServiceTest {
         writes.verify(workflowMapper).updateLifecycle(7, 101, false, 41);
         verify(auditService).record(
             eq("workflow.disable"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow disabled"), any());
+    }
+
+    @Test
+    void disableRemainsPossibleAndIdempotentWhenThePersistedUserIdentityIsGone() {
+        PublishedPair enabled = publishedPair("Workflow", true, 4, "user", null);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(enabled.workflow());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(enabled.version());
+        when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(enabled.rule());
+        when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
+        when(workflowMapper.updateLifecycle(7, 101, false, 41)).thenReturn(1);
+
+        var disabled = service.disable(101);
+        enabled.rule().setEnabled(false);
+        var unchanged = service.disable(101);
+
+        assertFalse(disabled.enabled());
+        assertFalse(unchanged.enabled());
+        verify(workspaceMapper, never()).lockActiveMembership(any(Integer.class), any(Integer.class));
+        verify(workspaceService, never()).requireRole(Role.ADMIN);
+        verify(ruleMapper, times(1)).updateEnabled(7, 77, false);
+        verify(workflowMapper, times(1)).updateLifecycle(7, 101, false, 41);
+        verify(auditService, times(1)).record(
+            eq("workflow.disable"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow disabled"), any());
+    }
+
+    @Test
+    void enableLocksTheExactPublishedUserIdentityAndNoOpCreatesNoAuditOrWrite() {
+        PublishedPair inactive = publishedPair("Workflow", false, 4, "user", 999);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(inactive.workflow());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L)).thenReturn(inactive.version());
+        when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(inactive.rule());
+        when(workspaceMapper.lockActiveMembership(7, 999)).thenReturn(null);
+
+        assertThrows(ConflictException.class, () -> service.enable(101));
+
+        verify(workspaceMapper).lockActiveMembership(7, 999);
+        verify(workspaceMapper, never()).lockActiveMembership(7, 41);
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
+        verifyNoInteractions(auditService);
+
+        PublishedPair alreadyEnabled = publishedPair("Workflow", true, 4);
+        when(workflowMapper.getByIdForUpdate(7, 102)).thenReturn(alreadyEnabled.workflow());
+        alreadyEnabled.workflow().setId(102);
+        alreadyEnabled.version().setWorkflowId(102);
+        when(workflowVersionMapper.getByIdForUpdate(7, 102, 88L))
+            .thenReturn(alreadyEnabled.version());
+        when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(alreadyEnabled.rule());
+
+        var unchanged = service.enable(102);
+
+        assertTrue(unchanged.enabled());
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verify(workflowMapper, never()).updateLifecycle(7, 102, true, 41);
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void systemEnableRequiresAdminButDisableBypassesIdentityAndAdminChecks() {
+        PublishedPair systemDisabled = publishedPair("Workflow", false, 4, "system", null);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(systemDisabled.workflow());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 88L))
+            .thenReturn(systemDisabled.version());
+        when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(systemDisabled.rule());
+        doThrow(new ForbiddenException("Requires admin role"))
+            .when(workspaceService).requireRole(Role.ADMIN);
+
+        assertThrows(ForbiddenException.class, () -> service.enable(101));
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verifyNoInteractions(auditService);
+
+        PublishedPair systemEnabled = publishedPair("Workflow", true, 4, "system", null);
+        systemEnabled.workflow().setId(102);
+        systemEnabled.version().setWorkflowId(102);
+        when(workflowMapper.getByIdForUpdate(7, 102)).thenReturn(systemEnabled.workflow());
+        when(workflowVersionMapper.getByIdForUpdate(7, 102, 88L))
+            .thenReturn(systemEnabled.version());
+        when(ruleMapper.getByIdForUpdate(7, 77)).thenReturn(systemEnabled.rule());
+        when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
+        when(workflowMapper.updateLifecycle(7, 102, false, 41)).thenReturn(1);
+
+        var disabled = service.disable(102);
+
+        assertFalse(disabled.enabled());
+        verify(workspaceService).requireRole(Role.ADMIN);
+        verify(auditService).record(
+            eq("workflow.disable"), eq("workflow"), eq(102), eq("Workflow 102"),
             eq("Workflow disabled"), any());
     }
 
@@ -462,9 +646,19 @@ class WorkflowServiceTest {
     }
 
     private PublishedPair publishedPair(String publishedName, boolean enabled, int versionNumber) {
-        Workflow workflow = workflow("Workflow", "user", 3, 41, 77, 88L, enabled);
+        return publishedPair(publishedName, enabled, versionNumber, "user", 41);
+    }
+
+    private PublishedPair publishedPair(
+            String publishedName,
+            boolean enabled,
+            int versionNumber,
+            String executionMode,
+            Integer runAsUserId) {
+        Workflow workflow = workflow(
+            "Workflow", executionMode, 3, runAsUserId, 77, 88L, enabled);
         CanonicalDraft published = canonicalizer.canonicalizeDraftJson(
-            publishedName, null, "deal", "user", definitionJson(), canvasJson());
+            publishedName, null, "deal", executionMode, definitionJson(), canvasJson());
         ConvertedWorkflow converted = new ConvertedWorkflow(
             77,
             7,
@@ -473,7 +667,7 @@ class WorkflowServiceTest {
             enabled,
             published.recordType(),
             published.executionMode(),
-            41,
+            runAsUserId,
             41,
             canonicalizer.parseDefinition(published.definitionJson()),
             canonicalizer.parseCanvas(published.canvasJson()));
@@ -534,6 +728,19 @@ class WorkflowServiceTest {
             Map.of(
                 "eventSource", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
                 "notifyOwner", new WorkflowCanvas.Position(BigDecimal.valueOf(300), BigDecimal.ZERO),
+                "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
+            new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
+        try {
+            return JsonMapper.builder().build().writeValueAsString(canvas);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static String missingCanvasJson() {
+        WorkflowCanvas canvas = new WorkflowCanvas(
+            Map.of(
+                "eventSource", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
                 "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {

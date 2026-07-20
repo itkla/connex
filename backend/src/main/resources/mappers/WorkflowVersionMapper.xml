@@ -17,6 +17,14 @@
       AND id = #{id}
   </select>
 
+  <select id="getByIdForUpdate" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="listByWorkflow" resultType="WorkflowVersion">
     SELECT <include refid="columns"/> FROM workflow_version
     WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
@@ -28,6 +36,14 @@
     WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
     ORDER BY version_number DESC, id DESC
     LIMIT 1
+  </select>
+
+  <select id="getLatestForUpdate" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+    ORDER BY version_number DESC, id DESC
+    LIMIT 1
+    FOR UPDATE
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

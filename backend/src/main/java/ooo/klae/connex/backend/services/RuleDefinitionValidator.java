@@ -7,6 +7,7 @@ import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RuleAction;
@@ -52,6 +53,7 @@ public class RuleDefinitionValidator {
 
     private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
+    private final Validator beanValidator;
 
     String validatePreview(RulePreviewRequest request) {
         String recordType = normalize(request.getRecordType());
@@ -82,6 +84,21 @@ public class RuleDefinitionValidator {
             SegmentDefinition condition,
             List<RuleAction> actions,
             String executionMode) {
+        if (trigger == null) {
+            throw new BadRequestException("Rule trigger is required");
+        }
+        if (actions == null || actions.isEmpty() || actions.size() > 16) {
+            throw new BadRequestException("A rule requires between 1 and 16 actions");
+        }
+        if (actions.stream().anyMatch(action -> action == null)) {
+            throw new BadRequestException("Rule action config is required");
+        }
+        requireStructurallyValid(trigger);
+        if (condition != null) {
+            requireStructurallyValid(condition);
+        }
+        actions.forEach(this::requireStructurallyValid);
+
         String recordType = normalize(recordTypeValue);
         if (!RECORD_TYPES.contains(recordType)) {
             throw new BadRequestException("Invalid record type: " + recordTypeValue);
@@ -102,18 +119,15 @@ public class RuleDefinitionValidator {
         if (condition != null) {
             segmentService.validate(recordType, condition);
         }
-        if (trigger == null) {
-            throw new BadRequestException("Rule trigger is required");
-        }
-        if (actions == null || actions.isEmpty() || actions.size() > 16) {
-            throw new BadRequestException("A rule requires between 1 and 16 actions");
-        }
-        if (actions.stream().anyMatch(action -> action == null)) {
-            throw new BadRequestException("Rule action config is required");
-        }
         validateTrigger(trigger, recordType, condition);
         validateActions(actions, recordType);
         requireActionPermissions(actions, recordType);
+    }
+
+    private <T> void requireStructurallyValid(T value) {
+        if (!beanValidator.validate(value).isEmpty()) {
+            throw new BadRequestException("Rule definition is invalid");
+        }
     }
 
     String normalize(String value) {

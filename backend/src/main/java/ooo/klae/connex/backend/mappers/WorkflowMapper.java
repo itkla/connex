@@ -34,11 +34,22 @@ public interface WorkflowMapper {
         @Param("workflow") Workflow workflow,
         @Param("expectedRevision") int expectedRevision);
 
-    int updateLegacyRuleLink(
+    int assignFirstPublication(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("legacyRuleId") int legacyRuleId,
-        @Param("updatedById") Integer updatedById);
+        @Param("activeVersionId") long activeVersionId,
+        @Param("updatedById") Integer updatedById,
+        @Param("expectedRevision") int expectedRevision);
+
+    int advancePublication(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("expectedLegacyRuleId") int expectedLegacyRuleId,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("activeVersionId") long activeVersionId,
+        @Param("updatedById") Integer updatedById,
+        @Param("expectedRevision") int expectedRevision);
 
     int updateLifecycle(
         @Param("workspaceId") int workspaceId,

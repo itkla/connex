@@ -14,11 +14,20 @@ public interface WorkflowVersionMapper {
         @Param("workflowId") int workflowId,
         @Param("id") long id);
 
+    WorkflowVersion getByIdForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId,
+        @Param("id") long id);
+
     List<WorkflowVersion> listByWorkflow(
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId);
 
     WorkflowVersion getLatest(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId);
+
+    WorkflowVersion getLatestForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId);
 

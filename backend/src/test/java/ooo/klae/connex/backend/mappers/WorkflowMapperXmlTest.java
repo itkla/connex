@@ -46,10 +46,22 @@ class WorkflowMapperXmlTest {
         draft.put("expectedRevision", 1);
         assertScoped(configuration, WorkflowMapper.class, "updateDraft", draft);
 
-        Map<String, Object> link = new HashMap<>(identity);
-        link.put("legacyRuleId", 13);
-        link.put("updatedById", 17);
-        assertScoped(configuration, WorkflowMapper.class, "updateLegacyRuleLink", link);
+        Map<String, Object> firstPublication = new HashMap<>(identity);
+        firstPublication.put("legacyRuleId", 13);
+        firstPublication.put("activeVersionId", 19L);
+        firstPublication.put("updatedById", 17);
+        firstPublication.put("expectedRevision", 1);
+        assertScoped(
+            configuration, WorkflowMapper.class, "assignFirstPublication", firstPublication);
+
+        Map<String, Object> laterPublication = new HashMap<>(identity);
+        laterPublication.put("expectedLegacyRuleId", 13);
+        laterPublication.put("expectedActiveVersionId", 19L);
+        laterPublication.put("activeVersionId", 23L);
+        laterPublication.put("updatedById", 17);
+        laterPublication.put("expectedRevision", 1);
+        assertScoped(
+            configuration, WorkflowMapper.class, "advancePublication", laterPublication);
 
         Map<String, Object> lifecycle = new HashMap<>(identity);
         lifecycle.put("enabled", true);
@@ -69,8 +81,19 @@ class WorkflowMapperXmlTest {
         assertFalse(draftSql.contains("active_version_id"));
         assertFalse(draftSql.contains("legacy_rule_id"));
         assertFalse(draftSql.contains("enabled ="));
-        String linkSql = sql(configuration, WorkflowMapper.class, "updateLegacyRuleLink", link);
-        assertTrue(linkSql.contains("legacy_rule_id IS NULL"));
+        String firstPublicationSql = sql(
+            configuration, WorkflowMapper.class, "assignFirstPublication", firstPublication);
+        assertTrue(firstPublicationSql.contains("SET legacy_rule_id = ?, active_version_id = ?"));
+        assertTrue(firstPublicationSql.contains("draft_revision = ?"));
+        assertTrue(firstPublicationSql.contains("legacy_rule_id IS NULL"));
+        assertTrue(firstPublicationSql.contains("active_version_id IS NULL"));
+        assertFalse(firstPublicationSql.contains("draft_revision = draft_revision + 1"));
+        String laterPublicationSql = sql(
+            configuration, WorkflowMapper.class, "advancePublication", laterPublication);
+        assertTrue(laterPublicationSql.contains("draft_revision = ?"));
+        assertTrue(laterPublicationSql.contains("legacy_rule_id = ?"));
+        assertTrue(laterPublicationSql.contains("active_version_id = ?"));
+        assertFalse(laterPublicationSql.contains("draft_revision = draft_revision + 1"));
         String legacySql = sql(configuration, WorkflowMapper.class, "listUnpairedLegacyRules", workspace);
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
@@ -127,19 +150,27 @@ class WorkflowMapperXmlTest {
         Map<String, Object> identity = Map.of("workspaceId", 7, "workflowId", 11, "id", 19L);
         Map<String, Object> workflow = Map.of("workspaceId", 7, "workflowId", 11);
         assertScoped(configuration, WorkflowVersionMapper.class, "getById", identity);
+        assertScoped(configuration, WorkflowVersionMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowVersionMapper.class, "listByWorkflow", workflow);
         assertScoped(configuration, WorkflowVersionMapper.class, "getLatest", workflow);
+        assertScoped(configuration, WorkflowVersionMapper.class, "getLatestForUpdate", workflow);
         assertScoped(configuration, WorkflowVersionMapper.class, "insert", version());
 
         String latestSql = sql(configuration, WorkflowVersionMapper.class, "getLatest", workflow);
         assertTrue(latestSql.contains("ORDER BY version_number DESC, id DESC"));
         assertTrue(latestSql.endsWith("LIMIT 1"));
+        String lockedVersionSql = sql(
+            configuration, WorkflowVersionMapper.class, "getByIdForUpdate", identity);
+        assertTrue(lockedVersionSql.endsWith("FOR UPDATE"));
+        String lockedLatestSql = sql(
+            configuration, WorkflowVersionMapper.class, "getLatestForUpdate", workflow);
+        assertTrue(lockedLatestSql.endsWith("LIMIT 1 FOR UPDATE"));
 
         String xml = resource("mappers/WorkflowVersionMapper.xml");
         assertFalse(xml.contains("<update"));
         assertFalse(xml.contains("<delete"));
         assertEquals(1, occurrences(xml, "<insert"));
-        assertEquals(3, occurrences(xml, "<select"));
+        assertEquals(5, occurrences(xml, "<select"));
     }
 
     @Test

@@ -86,6 +86,9 @@ public class WorkflowService {
             request.getDefinition(),
             request.getCanvas());
         requireSystemAuthor(draft.executionMode());
+        if ("user".equals(draft.executionMode())) {
+            workspaceService.lockAndRequireMember(workspaceId, actorId);
+        }
 
         Workflow workflow = new Workflow();
         workflow.setWorkspaceId(workspaceId);
@@ -176,6 +179,7 @@ public class WorkflowService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Workflow workflow = requireWorkflow(workspaceId, id);
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
+        canonicalizer.requirePublishableCanvas(draft);
         Rule projection = project(workflow, draft);
         validateProjection(projection);
         return new WorkflowValidationDto(workflow.getDraftRevision(), true);
@@ -196,11 +200,14 @@ public class WorkflowService {
         }
 
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
+        canonicalizer.requirePublishableCanvas(draft);
+        requireActiveExecutionIdentity(
+            workspaceId, draft.executionMode(), workflow.getDraftRunAsUserId());
         Rule projection = project(workflow, draft);
         validateProjection(projection);
         PublishedState current = workflow.getActiveVersionId() == null
             ? requireUnpublishedState(workflow)
-            : requirePublishedState(workflow);
+            : requirePublishedState(workflow, false);
         if (current != null && materiallyEquivalent(current.version(), projection, draft)) {
             return toDto(workflow, draft);
         }
@@ -211,12 +218,6 @@ public class WorkflowService {
             if (projection.getId() <= 0) {
                 throw new IllegalStateException("Workflow rule insert did not return an id");
             }
-            int linked = workflowMapper.updateLegacyRuleLink(
-                workspaceId, workflow.getId(), projection.getId(), actorId);
-            if (linked != 1) {
-                throw new IllegalStateException("Workflow rule link was not created");
-            }
-            workflow.setLegacyRuleId(projection.getId());
         }
 
         WorkflowVersion version = version(workflow, projection, draft, versionNumber, actorId);
@@ -231,10 +232,29 @@ public class WorkflowService {
                 throw new IllegalStateException("Workflow rule was not synchronized");
             }
         }
-        if (workflowMapper.updateActiveVersion(
-                workspaceId, workflow.getId(), version.getId(), actorId) != 1) {
-            throw new IllegalStateException("Workflow active version was not advanced");
+        int pointerUpdated;
+        if (current == null) {
+            pointerUpdated = workflowMapper.assignFirstPublication(
+                workspaceId,
+                workflow.getId(),
+                projection.getId(),
+                version.getId(),
+                actorId,
+                workflow.getDraftRevision());
+        } else {
+            pointerUpdated = workflowMapper.advancePublication(
+                workspaceId,
+                workflow.getId(),
+                current.rule().getId(),
+                current.version().getId(),
+                version.getId(),
+                actorId,
+                workflow.getDraftRevision());
         }
+        if (pointerUpdated != 1) {
+            throw new IllegalStateException("Workflow publication pointer was not advanced");
+        }
+        workflow.setLegacyRuleId(projection.getId());
         workflow.setActiveVersionId(version.getId());
         workflow.setUpdatedById(actorId);
         auditService.record(
@@ -276,13 +296,16 @@ public class WorkflowService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
-        if (workflow.isEnabled() == enabled) {
-            if (workflow.getActiveVersionId() != null || workflow.getLegacyRuleId() != null || enabled) {
-                requirePublishedState(workflow);
-            }
+        if (!enabled
+                && !workflow.isEnabled()
+                && workflow.getActiveVersionId() == null
+                && workflow.getLegacyRuleId() == null) {
             return toDto(workflow);
         }
-        PublishedState state = requirePublishedState(workflow);
+        PublishedState state = requirePublishedState(workflow, enabled);
+        if (workflow.isEnabled() == enabled) {
+            return toDto(workflow);
+        }
         if (ruleMapper.updateEnabled(workspaceId, state.rule().getId(), enabled) != 1) {
             throw new IllegalStateException("Workflow rule lifecycle was not synchronized");
         }
@@ -305,7 +328,7 @@ public class WorkflowService {
         if (workflow.getLegacyRuleId() != null || workflow.isEnabled()) {
             throw inconsistentWorkflow();
         }
-        WorkflowVersion latest = workflowVersionMapper.getLatest(
+        WorkflowVersion latest = workflowVersionMapper.getLatestForUpdate(
             workflow.getWorkspaceId(), workflow.getId());
         if (latest != null) {
             throw inconsistentWorkflow();
@@ -313,21 +336,20 @@ public class WorkflowService {
         return null;
     }
 
-    private PublishedState requirePublishedState(Workflow workflow) {
+    private PublishedState requirePublishedState(
+            Workflow workflow, boolean requireExecutionIdentity) {
         Long activeVersionId = workflow.getActiveVersionId();
         Integer legacyRuleId = workflow.getLegacyRuleId();
         if (activeVersionId == null || legacyRuleId == null) {
             throw inconsistentWorkflow();
         }
-        WorkflowVersion active = workflowVersionMapper.getById(
+        WorkflowVersion active = workflowVersionMapper.getByIdForUpdate(
             workflow.getWorkspaceId(), workflow.getId(), activeVersionId);
-        Rule linked = ruleMapper.getByIdForUpdate(workflow.getWorkspaceId(), legacyRuleId);
         if (active == null
                 || active.getId() != activeVersionId
                 || active.getWorkspaceId() != workflow.getWorkspaceId()
                 || active.getWorkflowId() != workflow.getId()
-                || active.getVersionNumber() <= 0
-                || linked == null) {
+                || active.getVersionNumber() <= 0) {
             throw inconsistentWorkflow();
         }
         CanonicalDraft canonical = canonicalPublishedVersion(active);
@@ -349,8 +371,15 @@ public class WorkflowService {
         } catch (BadRequestException exception) {
             throw inconsistentWorkflow();
         }
-        if (!versionMatchesProjection(active, projection)
-                || !ruleMatchesProjection(linked, projection)) {
+        if (!versionMatchesProjection(active, projection)) {
+            throw inconsistentWorkflow();
+        }
+        if (requireExecutionIdentity) {
+            requireActiveExecutionIdentity(
+                workflow.getWorkspaceId(), active.getExecutionMode(), active.getRunAsUserId());
+        }
+        Rule linked = ruleMapper.getByIdForUpdate(workflow.getWorkspaceId(), legacyRuleId);
+        if (linked == null || !ruleMatchesProjection(linked, projection)) {
             throw inconsistentWorkflow();
         }
         return new PublishedState(active, linked);
@@ -456,15 +485,25 @@ public class WorkflowService {
         }
     }
 
+    private void requireActiveExecutionIdentity(
+            int workspaceId, String executionMode, Integer runAsUserId) {
+        if ("system".equals(executionMode)) {
+            workspaceService.requireRole(Role.ADMIN);
+            return;
+        }
+        if (!"user".equals(executionMode)
+                || runAsUserId == null
+                || workspaceMapper.lockActiveMembership(workspaceId, runAsUserId) == null) {
+            throw new ConflictException("Workflow run-as user is not an active workspace member");
+        }
+    }
+
     private int nextVersionNumber(
             int workspaceId, int workflowId, PublishedState current) {
-        WorkflowVersion latest = workflowVersionMapper.getLatest(workspaceId, workflowId);
         if (current == null) {
-            if (latest != null) {
-                throw inconsistentWorkflow();
-            }
             return 1;
         }
+        WorkflowVersion latest = workflowVersionMapper.getLatestForUpdate(workspaceId, workflowId);
         if (latest == null
                 || latest.getVersionNumber() < current.version().getVersionNumber()
                 || latest.getVersionNumber() == Integer.MAX_VALUE) {
@@ -502,12 +541,7 @@ public class WorkflowService {
 
     private boolean materiallyEquivalent(
             WorkflowVersion active, Rule projection, CanonicalDraft draft) {
-        return Objects.equals(active.getName(), projection.getName())
-            && Objects.equals(active.getDescription(), projection.getDescription())
-            && Objects.equals(active.getRecordType(), projection.getRecordType())
-            && Objects.equals(active.getExecutionMode(), projection.getExecutionMode())
-            && Objects.equals(active.getRunAsUserId(), projection.getRunAsUserId())
-            && Objects.equals(active.getCreatedById(), projection.getCreatedById())
+        return versionMatchesProjection(active, projection)
             && Objects.equals(active.getDefinitionJson(), draft.definitionJson())
             && Objects.equals(active.getCanvasJson(), draft.canvasJson())
             && hashesEqual(active.getDefinitionHash(), draft.definitionHash())

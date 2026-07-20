@@ -275,6 +275,21 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
+    void publishableCanvasRequiresExactlyOnePositionPerGraphNode() {
+        WorkflowDraftCanonicalizer.CanonicalDraft incomplete = canonicalize(
+            minimalDefinition(), emptyCanvas());
+        WorkflowDraftCanonicalizer.CanonicalDraft complete = canonicalize(
+            minimalDefinition(), canvas("end"));
+
+        assertThrows(
+            BadRequestException.class,
+            () -> canonicalizer.requirePublishableCanvas(incomplete));
+        assertDoesNotThrow(() -> canonicalizer.requirePublishableCanvas(complete));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            minimalDefinition(), canvas("end", "missing")));
+    }
+
+    @Test
     void canonicalDraftExposesNoMutableGraphAndDefensivelyClonesItsHash() {
         WorkflowDraftCanonicalizer.CanonicalDraft draft = canonicalize(
             minimalDefinition(), canvas("end"));

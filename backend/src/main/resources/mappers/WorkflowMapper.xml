@@ -108,10 +108,26 @@
       AND draft_revision = #{expectedRevision}
   </update>
 
-  <update id="updateLegacyRuleLink">
+  <update id="assignFirstPublication">
     UPDATE workflow
-    SET legacy_rule_id = #{legacyRuleId}, updated_by_id = #{updatedById}
-    WHERE workspace_id = #{workspaceId} AND id = #{id} AND legacy_rule_id IS NULL
+    SET legacy_rule_id = #{legacyRuleId},
+        active_version_id = #{activeVersionId},
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND draft_revision = #{expectedRevision}
+      AND legacy_rule_id IS NULL
+      AND active_version_id IS NULL
+  </update>
+
+  <update id="advancePublication">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND draft_revision = #{expectedRevision}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
   </update>
 
   <update id="updateLifecycle">

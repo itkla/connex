@@ -3,18 +3,23 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -29,6 +34,10 @@ import ooo.klae.connex.backend.tenant.Permission;
 @ExtendWith(MockitoExtension.class)
 class RuleDefinitionValidatorTest {
 
+    private static final ValidatorFactory VALIDATOR_FACTORY =
+        Validation.buildDefaultValidatorFactory();
+    private static final Validator BEAN_VALIDATOR = VALIDATOR_FACTORY.getValidator();
+
     @Mock private SegmentService segmentService;
     @Mock private WorkspaceService workspaceService;
 
@@ -36,7 +45,12 @@ class RuleDefinitionValidatorTest {
 
     @BeforeEach
     void setUp() {
-        validator = new RuleDefinitionValidator(segmentService, workspaceService);
+        validator = new RuleDefinitionValidator(segmentService, workspaceService, BEAN_VALIDATOR);
+    }
+
+    @AfterAll
+    static void closeValidatorFactory() {
+        VALIDATOR_FACTORY.close();
     }
 
     @Test
@@ -174,6 +188,92 @@ class RuleDefinitionValidatorTest {
         BadRequestException nullFailure = assertThrows(
             BadRequestException.class, () -> validator.validate(nullAction));
         assertEquals("Rule action config is required", nullFailure.getMessage());
+    }
+
+    @Test
+    void sharedServiceBoundaryEnforcesTriggerConstraintsBeforeSemanticValidation() {
+        RuleTrigger oversizedEvent = entityChange("x".repeat(33));
+        assertStructurallyInvalid(request("deal", oversizedEvent, "user", action("notify")));
+
+        RuleTrigger tooManyEvents = entityChange("deal.won");
+        tooManyEvents.setEvents(java.util.stream.IntStream.range(0, 9)
+            .mapToObj(index -> "deal.won")
+            .toList());
+        assertStructurallyInvalid(request("deal", tooManyEvents, "user", action("notify")));
+
+        RuleTrigger belowMinimum = entityChange("deal.won");
+        belowMinimum.setThrottleMinutes(0);
+        assertStructurallyInvalid(request("deal", belowMinimum, "user", action("notify")));
+
+        RuleTrigger aboveMaximum = entityChange("deal.won");
+        aboveMaximum.setThrottleMinutes(10081);
+        assertStructurallyInvalid(request("deal", aboveMaximum, "user", action("notify")));
+
+        verify(segmentService, never()).validate(any(), any());
+        verify(workspaceService, never()).requirePermission(any());
+    }
+
+    @Test
+    void sharedServiceBoundaryRecursivelyEnforcesSegmentConstraintsAndNestedValues() {
+        SegmentCondition invalidValue = condition().getConditions().getFirst();
+        invalidValue.setValue("x".repeat(256));
+        SegmentDefinition nested = new SegmentDefinition();
+        nested.setMatch("all");
+        nested.setConditions(List.of(invalidValue));
+        SegmentDefinition root = new SegmentDefinition();
+        root.setMatch("all");
+        root.setGroups(List.of(nested));
+        RuleRequest oversizedNestedValue = request(
+            "company", entityChange("company.updated"), "user", action("notify"));
+        oversizedNestedValue.setCondition(root);
+        assertStructurallyInvalid(oversizedNestedValue);
+
+        SegmentCondition invalidContainerValue = condition().getConditions().getFirst();
+        invalidContainerValue.setValues(List.of("valid", ""));
+        SegmentDefinition invalidValues = new SegmentDefinition();
+        invalidValues.setMatch("all");
+        invalidValues.setConditions(List.of(invalidContainerValue));
+        RuleRequest blankNestedValue = request(
+            "company", entityChange("company.updated"), "user", action("notify"));
+        blankNestedValue.setCondition(invalidValues);
+        assertStructurallyInvalid(blankNestedValue);
+
+        SegmentDefinition nullNestedGroup = new SegmentDefinition();
+        nullNestedGroup.setMatch("all");
+        nullNestedGroup.setGroups(java.util.Arrays.asList((SegmentDefinition) null));
+        RuleRequest nullGroup = request(
+            "company", entityChange("company.updated"), "user", action("notify"));
+        nullGroup.setCondition(nullNestedGroup);
+        assertStructurallyInvalid(nullGroup);
+
+        verify(segmentService, never()).validate(any(), any());
+        verify(workspaceService, never()).requirePermission(any());
+    }
+
+    @Test
+    void sharedServiceBoundaryEnforcesEveryActionConstraint() {
+        RuleAction oversizedTitle = action("notify");
+        oversizedTitle.setTitle("x".repeat(256));
+        assertStructurallyInvalid(request(
+            "deal", entityChange("deal.won"), "user", oversizedTitle));
+
+        RuleAction oversizedBody = action("create_note");
+        oversizedBody.setBody("x".repeat(2001));
+        assertStructurallyInvalid(request(
+            "deal", entityChange("deal.won"), "user", oversizedBody));
+
+        RuleAction missingType = action("notify");
+        missingType.setType(null);
+        assertStructurallyInvalid(request(
+            "deal", entityChange("deal.won"), "user", missingType));
+
+        verify(workspaceService, never()).requirePermission(any());
+    }
+
+    private void assertStructurallyInvalid(RuleRequest request) {
+        BadRequestException exception = assertThrows(
+            BadRequestException.class, () -> validator.validate(request));
+        assertEquals("Rule definition is invalid", exception.getMessage());
     }
 
     private static RuleRequest request(

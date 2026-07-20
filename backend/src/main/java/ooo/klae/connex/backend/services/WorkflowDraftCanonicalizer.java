@@ -138,6 +138,21 @@ public class WorkflowDraftCanonicalizer {
         return parse(canvasJson, WorkflowCanvas.class, "Invalid workflow canvas");
     }
 
+    void requirePublishableCanvas(CanonicalDraft draft) {
+        if (draft == null) {
+            throw new BadRequestException("Workflow draft is required");
+        }
+        WorkflowDefinition definition = parseDefinition(draft.definitionJson());
+        WorkflowCanvas canvas = parseCanvas(draft.canvasJson());
+        Set<String> nodeIds = new HashSet<>();
+        for (WorkflowNode node : definition.nodes()) {
+            nodeIds.add(node.id());
+        }
+        if (!nodeIds.equals(canvas.positions().keySet())) {
+            throw new BadRequestException("Workflow canvas must position every graph node");
+        }
+    }
+
     private static void validateDefinition(WorkflowDefinition definition) {
         if (definition == null || definition.schemaVersion() != 1) {
             throw new BadRequestException("Workflow definition must use schemaVersion 1");
