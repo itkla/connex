@@ -68,6 +68,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "UserDashboardMapper",
         MAPPERS + "SegmentMapper",
         MAPPERS + "RuleMapper",
+        MAPPERS + "WorkflowMapper",
+        MAPPERS + "WorkflowVersionMapper",
         MAPPERS + "CampaignMapper",
         MAPPERS + "ConsentMapper",
         MAPPERS + "SuppressionMapper",

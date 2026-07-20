@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowVersionMapper">
+
+  <sql id="columns">
+    id, workspace_id, workflow_id, version_number, name, description, record_type,
+    trigger_type, trigger_config, condition_json, actions_json, execution_mode,
+    run_as_user_id, created_by_id, published_by_id, definition_json, canvas_json,
+    definition_hash, published_at
+  </sql>
+
+  <select id="getById" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+  </select>
+
+  <select id="listByWorkflow" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+    ORDER BY version_number DESC, id DESC
+  </select>
+
+  <select id="getLatest" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+    ORDER BY version_number DESC, id DESC
+    LIMIT 1
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_version
+      (workspace_id, workflow_id, version_number, name, description, record_type,
+       trigger_type, trigger_config, condition_json, actions_json, execution_mode,
+       run_as_user_id, created_by_id, published_by_id, definition_json, canvas_json,
+       definition_hash)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{versionNumber}, #{name}, #{description}, #{recordType},
+       #{triggerType}, #{triggerConfig}, #{conditionJson}, #{actionsJson}, #{executionMode},
+       #{runAsUserId}, #{createdById}, #{publishedById}, #{definitionJson}, #{canvasJson},
+       #{definitionHash})
+  </insert>
+
+</mapper>

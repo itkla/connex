@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowMapper">
+
+  <sql id="workflowColumns">
+    id, workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+    draft_record_type, draft_execution_mode, draft_run_as_user_id,
+    draft_definition_json, draft_canvas_json, active_version_id,
+    created_by_id, updated_by_id, created_at, updated_at
+  </sql>
+
+  <sql id="legacyRuleColumns">
+    r.id, r.workspace_id, r.name, r.description, r.enabled, r.record_type,
+    r.trigger_type, r.trigger_config, r.condition_json, r.actions_json,
+    r.execution_mode, r.run_as_user_id, r.created_by_id, r.created_at, r.updated_at
+  </sql>
+
+  <select id="listByWorkspace" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="getById" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getByLegacyRuleId" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
+  </select>
+
+  <select id="listUnpairedLegacyRules" resultType="Rule">
+    SELECT <include refid="legacyRuleColumns"/>
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+    ORDER BY r.id
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow
+      (workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+       draft_record_type, draft_execution_mode, draft_run_as_user_id,
+       draft_definition_json, draft_canvas_json, active_version_id,
+       created_by_id, updated_by_id)
+    VALUES
+      (#{workspaceId}, #{legacyRuleId}, #{name}, #{description}, #{enabled}, #{draftRevision},
+       #{draftRecordType}, #{draftExecutionMode}, #{draftRunAsUserId},
+       #{draftDefinitionJson}, #{draftCanvasJson}, #{activeVersionId},
+       #{createdById}, #{updatedById})
+  </insert>
+
+  <update id="updateDraft">
+    UPDATE workflow
+    SET name = #{name},
+        description = #{description},
+        draft_revision = #{draftRevision},
+        draft_record_type = #{draftRecordType},
+        draft_execution_mode = #{draftExecutionMode},
+        draft_run_as_user_id = #{draftRunAsUserId},
+        draft_definition_json = #{draftDefinitionJson},
+        draft_canvas_json = #{draftCanvasJson},
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateLifecycle">
+    UPDATE workflow
+    SET enabled = #{enabled}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateActiveVersion">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+</mapper>
