@@ -155,8 +155,9 @@ class LegacyWorkflowBackfillTransactionTest {
     }
 
     @Test
-    void freshProjectionAcceptsSemanticJsonFormattingButRejectsMetadataNormalization() {
+    void freshProjectionAcceptsSemanticJsonAndBlankDescriptionButRejectsMetadataNormalization() {
         Rule formatted = rule("user", false);
+        formatted.setDescription("   ");
         formatted.setTriggerConfig(
             "{ \"events\" : [ \"deal.won\" ], \"type\" : \"entity_change\" }");
         formatted.setActionsJson(
@@ -175,8 +176,12 @@ class LegacyWorkflowBackfillTransactionTest {
 
         backfill.backfillWorkspace(null, 7);
 
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        verify(workflowMapper).insert(workflow.capture());
+        assertEquals("   ", workflow.getValue().getDescription());
         ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
         verify(workflowVersionMapper).insert(version.capture());
+        assertEquals("   ", version.getValue().getDescription());
         assertEquals(
             "{\"cadence\":null,\"events\":[\"deal.won\"],\"targetStageId\":null,"
                 + "\"throttleMinutes\":null,\"type\":\"entity_change\"}",

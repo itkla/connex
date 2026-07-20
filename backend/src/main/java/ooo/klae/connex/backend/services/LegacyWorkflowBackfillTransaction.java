@@ -75,7 +75,7 @@ public class LegacyWorkflowBackfillTransaction {
             converted.legacyRuleId(),
             converted.workspaceId(),
             draft.name(),
-            draft.description(),
+            converted.description(),
             converted.enabled(),
             draft.recordType(),
             draft.executionMode(),
