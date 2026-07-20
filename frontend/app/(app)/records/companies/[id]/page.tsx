@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
+import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
@@ -99,6 +100,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                     </Link>
 
                     <CrumbLabel value={company.name} />
+                    <RecentRecordBridge type="company" id={company.id} label={company.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <CompanyAvatar company={company} type="2xlarge" />
