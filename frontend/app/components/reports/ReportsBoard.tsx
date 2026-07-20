@@ -178,7 +178,7 @@ export default function ReportsBoard({
                                 return (
                                     <div
                                         key={template.key}
-                                        className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] duration-200 ease-out hover:border-brand/40 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)]"
+                                        className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] duration-200 ease-out hover:border-brand/40 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)] dark:hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.6)]"
                                     >
                                         <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                                             <Icon className="size-5" />
@@ -192,7 +192,7 @@ export default function ReportsBoard({
                                         {shown.length > 0 ? (
                                             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
                                                 <span className="font-medium text-foreground/70">{t('landing.includes')} </span>
-                                                {shown.join(', ')}
+                                                {new Intl.ListFormat(locale, { type: 'unit' }).format(shown)}
                                                 {extra > 0 ? ` ${t('landing.moreMeasures', { count: extra })}` : ''}
                                             </p>
                                         ) : null}
@@ -281,8 +281,8 @@ export default function ReportsBoard({
                                                         <Icon className="size-5" />
                                                     </div>
                                                     <Link href={`/overview/reports/${report.id}`} className="min-w-0 flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <p className="truncate font-medium text-foreground group-hover:text-brand-dark">
+                                                        <div className="flex min-w-0 items-center gap-2">
+                                                            <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-dark">
                                                                 {report.name}
                                                             </p>
                                                             <Badge variant="secondary" className="shrink-0 font-normal">

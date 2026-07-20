@@ -604,7 +604,7 @@ function WidgetPreview({ widget }: { widget: ReportWidgetConfig }) {
                 </span>
                 <span className="text-xs text-muted-foreground">{t(`chart.${widget.chartType}`)}</span>
             </div>
-            <div className="pointer-events-none select-none" aria-hidden>
+            <div className="pointer-events-none select-none" inert>
                 <ReportWidgetRenderer widget={sample} />
             </div>
         </div>
