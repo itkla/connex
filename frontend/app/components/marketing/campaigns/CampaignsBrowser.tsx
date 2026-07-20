@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ChevronRightIcon, MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
+import Rise from "@/app/components/motion/Rise";
 import { type Campaign, type CampaignPayload } from "@/app/lib/types";
 import { createCampaign, isFieldError } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
@@ -60,20 +61,22 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
-                <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-                    <div className="min-w-0">
-                        <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">{t("title")}</h1>
-                        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("subtitle")}</p>
-                    </div>
-                    <Button variant="brand" onClick={openDialog} className="shrink-0">
-                        <PlusIcon className="size-4" />
-                        {t("new")}
-                    </Button>
-                </header>
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+                <Rise>
+                    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+                        <div className="min-w-0">
+                            <h1 className="text-4xl font-extrabold tracking-tight">{t("title")}</h1>
+                            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("subtitle")}</p>
+                        </div>
+                        <Button variant="brand" onClick={openDialog} className="shrink-0">
+                            <PlusIcon className="size-4" />
+                            {t("new")}
+                        </Button>
+                    </header>
+                </Rise>
 
                 {campaigns.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center sm:py-20">
+                    <Rise delay={0.06} className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center sm:py-20">
                         <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-dark">
                             <MegaphoneIcon className="size-6" />
                         </span>
@@ -83,9 +86,9 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                             <PlusIcon className="size-4" />
                             {t("new")}
                         </Button>
-                    </div>
+                    </Rise>
                 ) : (
-                    <div className="flex flex-col gap-3">
+                    <Rise delay={0.06} className="flex flex-col gap-3">
                         <p className="px-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t("count", { count: campaigns.length })}
                         </p>
@@ -152,7 +155,7 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                                 );
                             })}
                         </ul>
-                    </div>
+                    </Rise>
                 )}
             </div>
 

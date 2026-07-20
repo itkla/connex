@@ -25,6 +25,7 @@ import {
     ResponsiveDialogClose,
 } from "@/components/ui/responsive-dialog";
 import Panel from "@/app/components/overview/analytics/Panel";
+import Rise from "@/app/components/motion/Rise";
 import InfoRow from "@/app/components/me/InfoRow";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/SegmentBuilder";
@@ -200,18 +201,18 @@ export default function CampaignDetail({
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-                <div className="flex flex-col gap-4">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <Rise className="flex flex-col gap-4">
                     <Link
                         href="/marketing/campaigns"
-                        className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        className="inline-flex w-fit items-center gap-2 text-base text-brand transition-colors hover:text-brand-hover"
                     >
-                        <ArrowLeftIcon className="size-4" />
+                        <ArrowLeftIcon className="h-4 w-4" />
                         {t("back")}
                     </Link>
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-3">
-                            <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                                 {campaign.name}
                             </h1>
                             <CampaignStatusBadge status={campaign.status} />
@@ -226,9 +227,10 @@ export default function CampaignDetail({
                             {t("delete")}
                         </Button>
                     </div>
-                </div>
+                </Rise>
 
-                <Tabs value={tab} onValueChange={setTab} className="gap-6">
+                <Rise delay={0.06}>
+                    <Tabs value={tab} onValueChange={setTab} className="gap-6">
                     <div className="-mx-2 overflow-x-auto px-2 pb-px">
                         <TabsList className="w-max">
                             <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
@@ -240,7 +242,7 @@ export default function CampaignDetail({
                     </div>
 
                     <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
-                        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                        <div className="flex flex-col gap-8">
                             <div>
                                 <SectionHeader title={t("detailsTitle")} />
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
@@ -263,7 +265,7 @@ export default function CampaignDetail({
                             </div>
                             <div>
                                 <SectionHeader title={t("glanceTitle")} />
-                                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border">
+                                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-4">
                                     <GlanceTile label={t("audienceType")} value={at(recordType)} />
                                     <GlanceTile
                                         label={t("snapshotCount")}
@@ -470,6 +472,7 @@ export default function CampaignDetail({
                         />
                     </TabsContent>
                 </Tabs>
+                </Rise>
             </div>
 
             <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
