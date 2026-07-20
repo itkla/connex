@@ -34,7 +34,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
 
@@ -198,21 +198,19 @@ export default function RolesPanel() {
 
     return (
         <div className="space-y-10">
-            <Rise className="space-y-3">
-                <div>
-                    <SectionHeader
-                        title={t("defaultRolesLabel")}
-                        action={
-                            !loading && (
-                                <Button onClick={openCreate} variant="brand">
-                                    <PlusIcon className="size-4" />
-                                    {t("newRole")}
-                                </Button>
-                            )
-                        }
-                    />
-                    <p className="px-6 text-sm text-muted-foreground">{t("builtInSubtitle")}</p>
-                </div>
+            <Rise className="space-y-4">
+                <SettingsSection
+                    title={t("defaultRolesLabel")}
+                    description={t("builtInSubtitle")}
+                    action={
+                        !loading && (
+                            <Button onClick={openCreate} variant="brand">
+                                <PlusIcon className="size-4" />
+                                {t("newRole")}
+                            </Button>
+                        )
+                    }
+                />
 
                 {loading ? (
                     <RoleSkeleton rows={3} />
@@ -243,14 +241,14 @@ export default function RolesPanel() {
                 )}
             </Rise>
 
-            <Rise className="space-y-3">
-                <SectionHeader
+            <Rise className="space-y-4">
+                <SettingsSection
                     title={t("customRolesLabel")}
                     action={
                         !loading && roles.length > 0 ? (
-                            <span className="text-xs text-muted-foreground">
+                            <Badge variant="secondary" className="tabular-nums">
                                 {t("permissionCount", { count: roles.length })}
-                            </span>
+                            </Badge>
                         ) : undefined
                     }
                 />
