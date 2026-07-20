@@ -11,8 +11,8 @@ import { Markdown } from "tiptap-markdown";
 import { useTranslations } from "next-intl";
 import { Mention, encodeMentions, restoreMentions } from "./editor/Mention";
 import { EditorToolbar } from "./editor/EditorToolbar";
-import { SlashCommand } from "./editor/SlashCommand";
-import { buildSlashCommands } from "./editor/slashCommands";
+import { SlashCommand, setSlashRunAction } from "./editor/SlashCommand";
+import { buildRegistrySlashCommands, buildSlashCommands } from "./editor/slashCommands";
 import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
@@ -32,6 +32,8 @@ type Props = {
     className?: string;
     /** Miniaturized layout for embedding in a dialog: shorter body, condensed toolbar, no drag handle. */
     compact?: boolean;
+    /** Invoked when a registry `run-action` slash command is chosen, with the command's `actionId`. */
+    onRunAction?: (actionId: string) => void;
 };
 
 /**
@@ -47,6 +49,7 @@ export default function RichNoteEditor({
     autofocus = false,
     className,
     compact = false,
+    onRunAction,
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
@@ -76,7 +79,12 @@ export default function RichNoteEditor({
             Callout.configure({ cycleLabel: t("calloutCycleAria") }),
             ToggleSummary,
             Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
-            SlashCommand.configure({ commands: buildSlashCommands(t) }),
+            SlashCommand.configure({
+                commands: [
+                    ...buildSlashCommands(t),
+                    ...buildRegistrySlashCommands(t, Boolean(onRunAction)),
+                ],
+            }),
         ],
         editorProps: {
             attributes: {
@@ -102,6 +110,10 @@ export default function RichNoteEditor({
     useEffect(() => {
         editor?.setEditable(editable);
     }, [editor, editable]);
+
+    useEffect(() => {
+        if (editor) setSlashRunAction(editor, onRunAction);
+    }, [editor, onRunAction]);
 
     const labels = {
         bold: t("bold"),

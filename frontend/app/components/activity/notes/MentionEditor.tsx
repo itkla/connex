@@ -305,12 +305,8 @@ export default function MentionEditor({
 
     const queryText = query?.text ?? '';
     useEffect(() => {
-        if (stageA || queryText.length < 1) {
-            setSearching(false);
-            return;
-        }
+        if (stageA || queryText.length < 1) return;
         let cancelled = false;
-        setSearching(true);
         const handle = window.setTimeout(() => {
             search(queryText)
                 .then((res) => {
@@ -420,6 +416,7 @@ export default function MentionEditor({
                         above,
                     });
                     if (char !== '/') setPickerScope(null);
+                    setSearching(handle.length >= 1);
                     setActiveIndex(0);
                     return;
                 }

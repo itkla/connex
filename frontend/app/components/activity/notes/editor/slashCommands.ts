@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import type { Editor, Range } from "@tiptap/core";
 import {
     ChevronRight,
@@ -8,19 +9,27 @@ import {
     List,
     ListOrdered,
     ListTodo,
-    type LucideIcon,
     Minus,
     SquareCode,
     TextQuote,
     Type,
 } from "lucide-react";
+import {
+    ENTITY_COMMANDS,
+    TASK_COMMAND,
+    type SlashCommandDef,
+} from "../commands/slashCommandRegistry";
+import type { SlashCommandStorage } from "./SlashCommand";
+
+/** Icon component renderable by the slash menu; fits both Lucide and Heroicons glyphs. */
+export type SlashCommandIcon = ComponentType<{ className?: string }>;
 
 export type SlashCommandItem = {
     id: string;
     title: string;
     subtitle: string;
     keywords: string[];
-    icon: LucideIcon;
+    icon: SlashCommandIcon;
     run: (editor: Editor, range: Range) => void;
 };
 
@@ -158,6 +167,48 @@ export function buildSlashCommands(t: Translate): SlashCommandItem[] {
                     .run(),
         },
     ];
+}
+
+function referenceTrigger(def: SlashCommandDef): "@" | "#" {
+    return def.entityTypes?.some((type) => type === "user" || type === "person") ? "@" : "#";
+}
+
+function editorRunAction(editor: Editor): ((actionId: string) => void) | undefined {
+    const storage = (editor.storage as { slashCommand?: SlashCommandStorage }).slashCommand;
+    return storage?.onRunAction;
+}
+
+/**
+ * Map the shared registry commands into the Tiptap {@link SlashCommandItem} shape.
+ * `insert-reference` commands clear the typed `/query` and insert the matching
+ * mention trigger character, handing off to the existing @/# suggestion flow;
+ * `run-action` commands clear the range and notify the host through the
+ * {@link SlashCommandStorage.onRunAction} callback assigned after mount. The
+ * task action is only offered when `includeActions` is set.
+ */
+export function buildRegistrySlashCommands(t: Translate, includeActions = false): SlashCommandItem[] {
+    const defs: SlashCommandDef[] = [...ENTITY_COMMANDS, ...(includeActions ? [TASK_COMMAND] : [])];
+    return defs.flatMap((def): SlashCommandItem[] => {
+        if (def.kind === "insert-text") return [];
+        const run =
+            def.kind === "insert-reference"
+                ? (editor: Editor, range: Range) =>
+                      editor.chain().focus().deleteRange(range).insertContent(referenceTrigger(def)).run()
+                : (editor: Editor, range: Range) => {
+                      editor.chain().focus().deleteRange(range).run();
+                      if (def.actionId) editorRunAction(editor)?.(def.actionId);
+                  };
+        return [
+            {
+                id: def.id,
+                title: t(def.labelKey),
+                subtitle: t(def.subtitleKey),
+                keywords: [...def.aliases],
+                icon: def.icon,
+                run,
+            },
+        ];
+    });
 }
 
 /**
