@@ -195,9 +195,9 @@ function renderNode(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNod
             return <Tag className={cls} style={alignStyle(node)}>{renderInline(node.content)}</Tag>;
         }
         case 'bulletList':
-            return <ul className="my-2.5 list-disc space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderInline(li.content)}</li>)}</ul>;
+            return <ul className="my-2.5 list-disc space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ul>;
         case 'orderedList':
-            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderInline(li.content)}</li>)}</ol>;
+            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ol>;
         case 'blockquote':
             return <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground">{(node.content ?? []).map((child, i) => <Fragment key={i}>{renderNode(child, lineItemsTable)}</Fragment>)}</blockquote>;
         case 'codeBlock':
@@ -209,6 +209,13 @@ function renderNode(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNod
         default:
             return null;
     }
+}
+
+function renderListItem(item: DocumentBodyNode, lineItemsTable: ReactNode): ReactNode {
+    return (item.content ?? []).map((child, index) =>
+        child.type === 'paragraph'
+            ? <Fragment key={index}>{renderInline(child.content)}</Fragment>
+            : <Fragment key={index}>{renderNode(child, lineItemsTable)}</Fragment>);
 }
 
 function renderInline(nodes: DocumentBodyNode[] | undefined): ReactNode {
@@ -237,7 +244,8 @@ function applyMarks(text: string, marks: DocumentBodyMark[] | undefined): ReactN
             case 'code':
                 return <code className="rounded bg-muted px-1 py-0.5 text-[0.85em]">{acc}</code>;
             case 'link': {
-                const href = typeof mark.attrs?.href === 'string' ? mark.attrs.href : undefined;
+                const raw = typeof mark.attrs?.href === 'string' ? mark.attrs.href : '';
+                const href = /^(https?:|mailto:|tel:|\/)/i.test(raw) ? raw : undefined;
                 return <a href={href} className="text-brand underline underline-offset-2">{acc}</a>;
             }
             default:
