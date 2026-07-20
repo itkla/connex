@@ -1,4 +1,4 @@
-import { Extension, type Editor } from "@tiptap/core";
+import { Extension } from "@tiptap/core";
 import { PluginKey } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { createSuggestionRenderer } from "./suggestionRenderer";
@@ -10,44 +10,17 @@ export interface SlashCommandOptions {
 }
 
 /**
- * Mutable per-editor storage for the slash palette. Hosts assign
- * {@link SlashCommandStorage.onRunAction} after the editor mounts so registry
- * `run-action` commands always reach the latest callback without rebuilding
- * the extension.
- */
-export interface SlashCommandStorage {
-    onRunAction?: (actionId: string) => void;
-}
-
-/**
- * Assign the host callback that registry `run-action` slash commands invoke.
- * Call after the editor mounts (and on callback identity changes) so the
- * palette always dispatches to the latest handler.
- */
-export function setSlashRunAction(
-    editor: Editor,
-    onRunAction: ((actionId: string) => void) | undefined,
-): void {
-    const storage = (editor.storage as { slashCommand?: SlashCommandStorage }).slashCommand;
-    if (storage) storage.onRunAction = onRunAction;
-}
-
-/**
  * Notion-style `/` command palette. Reuses the shared suggestion renderer to
  * mount {@link SlashCommandList} at the caret; the trigger only fires at the
  * start of a block or after whitespace (never inside a word or a code block),
  * and selecting a command clears the typed `/query` before applying its block
  * transform.
  */
-export const SlashCommand = Extension.create<SlashCommandOptions, SlashCommandStorage>({
+export const SlashCommand = Extension.create<SlashCommandOptions>({
     name: "slashCommand",
 
     addOptions() {
         return { commands: [] };
-    },
-
-    addStorage() {
-        return { onRunAction: undefined };
     },
 
     addProseMirrorPlugins() {

@@ -105,14 +105,6 @@ export const ACTIVITY_COMMANDS: readonly SlashCommandDef[] = [
     ...ENTITY_COMMANDS,
 ];
 
-/**
- * Return the record-reference commands. Prefer the stable {@link ENTITY_COMMANDS} export when a
- * constant reference is needed; this builder exists for hosts composing a bespoke command set.
- */
-export function buildEntityCommands(): SlashCommandDef[] {
-    return [...ENTITY_COMMANDS];
-}
-
 type Translate = (key: string) => string;
 
 /**

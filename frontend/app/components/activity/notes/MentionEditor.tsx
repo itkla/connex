@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { filterSlashCommands, type SlashCommandDef } from './commands/slashCommandRegistry';
 
 const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file|task|activity):(\d+)\)/g;
-const HANDLE = /[A-Za-z0-9_.\-぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]/;
+const HANDLE = /[A-Za-z0-9_.\-぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟＡ-Ｚａ-ｚ０-９]/;
 const MAX_SUGGESTIONS = 8;
 const MENU_WIDTH = 288;
 const MENU_MAX_HEIGHT = 320;
@@ -259,7 +259,6 @@ export default function MentionEditor({
     const [results, setResults] = useState<SearchResults | null>(null);
     const [query, setQuery] = useState<ActiveQuery | null>(null);
     const [pickerScope, setPickerScope] = useState<NoteReferenceType[] | null>(null);
-    const [searching, setSearching] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
 
     const hasCommands = (commands?.length ?? 0) > 0;
@@ -310,14 +309,9 @@ export default function MentionEditor({
         const handle = window.setTimeout(() => {
             search(queryText)
                 .then((res) => {
-                    if (!cancelled) {
-                        setResults(res);
-                        setSearching(false);
-                    }
+                    if (!cancelled) setResults(res);
                 })
-                .catch(() => {
-                    if (!cancelled) setSearching(false);
-                });
+                .catch(() => {});
         }, SEARCH_DEBOUNCE_MS);
         return () => {
             cancelled = true;
@@ -327,8 +321,12 @@ export default function MentionEditor({
 
     const commandMatches = useMemo(() => {
         if (!stageA || !query || !commands) return [];
-        return filterSlashCommands(commands, query.text, t);
-    }, [stageA, query, commands, t]);
+        const supported = commands.filter(
+            (def) =>
+                def.kind === 'insert-reference' || (def.kind === 'run-action' && onRunAction !== undefined),
+        );
+        return filterSlashCommands(supported, query.text, t);
+    }, [stageA, query, commands, onRunAction, t]);
 
     const suggestions = useMemo(() => {
         if (!query) return [];
@@ -360,7 +358,8 @@ export default function MentionEditor({
     const menuOpen =
         query !== null && (stageA ? commandMatches.length > 0 : stageB ? true : suggestions.length > 0);
     const optionCount = stageA ? commandMatches.length : suggestions.length;
-    const activeOptionId = menuOpen && optionCount > 0 ? `${listboxId}-opt-${activeIndex}` : undefined;
+    const boundedIndex = optionCount > 0 ? Math.min(activeIndex, optionCount - 1) : 0;
+    const activeOptionId = menuOpen && optionCount > 0 ? `${listboxId}-opt-${boundedIndex}` : undefined;
 
     const emit = useCallback(() => {
         const el = editorRef.current;
@@ -373,7 +372,6 @@ export default function MentionEditor({
     const closeMenu = useCallback(() => {
         setQuery(null);
         setPickerScope(null);
-        setSearching(false);
         setActiveIndex(0);
     }, []);
 
@@ -416,7 +414,6 @@ export default function MentionEditor({
                         above,
                     });
                     if (char !== '/') setPickerScope(null);
-                    setSearching(handle.length >= 1);
                     setActiveIndex(0);
                     return;
                 }
@@ -502,79 +499,51 @@ export default function MentionEditor({
         [closeMenu, emit, reduceMotion, query],
     );
 
-    const beginReferencePicker = useCallback(
-        (def: SlashCommandDef) => {
+    const rewriteSlashSpan = useCallback(
+        (keepSlash: boolean): boolean => {
             const el = editorRef.current;
-            if (!el) {
-                closeMenu();
-                return;
-            }
+            if (!el) return false;
             const selection = window.getSelection();
             if (selection && savedRange.current) {
                 el.focus();
                 selection.removeAllRanges();
                 selection.addRange(savedRange.current);
             }
-            if (!selection || selection.rangeCount === 0) {
-                closeMenu();
-                return;
-            }
+            if (!selection || selection.rangeCount === 0) return false;
             const range = selection.getRangeAt(0);
             const node = range.startContainer;
-            if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) {
-                closeMenu();
-                return;
-            }
+            if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) return false;
             const text = node.textContent ?? '';
             const caret = range.startOffset;
             const at = text.lastIndexOf('/', caret - 1);
-            if (at === -1) {
+            if (at === -1) return false;
+            const end = keepSlash ? at + 1 : at;
+            node.textContent = text.slice(0, end) + text.slice(caret);
+            const next = document.createRange();
+            next.setStart(node, end);
+            next.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(next);
+            if (keepSlash) savedRange.current = next.cloneRange();
+            emit();
+            return true;
+        },
+        [emit],
+    );
+
+    const beginReferencePicker = useCallback(
+        (def: SlashCommandDef) => {
+            if (!rewriteSlashSpan(true)) {
                 closeMenu();
                 return;
             }
-            node.textContent = text.slice(0, at + 1) + text.slice(caret);
-            const anchor = document.createRange();
-            anchor.setStart(node, at + 1);
-            anchor.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(anchor);
-            savedRange.current = anchor.cloneRange();
-
             setResults(null);
-            setSearching(false);
             setActiveIndex(0);
             setQuery((current) => (current ? { ...current, text: '' } : current));
             setPickerScope(def.entityTypes ? [...def.entityTypes] : []);
-            emit();
         },
-        [closeMenu, emit],
+        [rewriteSlashSpan, closeMenu],
     );
-
-    const deleteSlashSpan = useCallback(() => {
-        const el = editorRef.current;
-        if (!el) return;
-        const selection = window.getSelection();
-        if (selection && savedRange.current) {
-            el.focus();
-            selection.removeAllRanges();
-            selection.addRange(savedRange.current);
-        }
-        if (!selection || selection.rangeCount === 0) return;
-        const range = selection.getRangeAt(0);
-        const node = range.startContainer;
-        if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) return;
-        const text = node.textContent ?? '';
-        const caret = range.startOffset;
-        const at = text.lastIndexOf('/', caret - 1);
-        if (at === -1) return;
-        node.textContent = text.slice(0, at) + text.slice(caret);
-        const next = document.createRange();
-        next.setStart(node, at);
-        next.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(next);
-        emit();
-    }, [emit]);
 
     const selectCommand = useCallback(
         (def: SlashCommandDef) => {
@@ -583,41 +552,41 @@ export default function MentionEditor({
                 return;
             }
             if (def.kind === 'run-action') {
-                deleteSlashSpan();
+                rewriteSlashSpan(false);
                 closeMenu();
                 if (def.actionId) onRunAction?.(def.actionId);
             }
         },
-        [beginReferencePicker, deleteSlashSpan, closeMenu, onRunAction],
+        [beginReferencePicker, rewriteSlashSpan, closeMenu, onRunAction],
     );
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
             if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (menuOpen) {
-                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
+                if (optionCount > 0 && (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey))) {
                     event.preventDefault();
-                    if (optionCount > 0) setActiveIndex((index) => (index + 1) % optionCount);
+                    setActiveIndex((boundedIndex + 1) % optionCount);
                     return;
                 }
-                if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
+                if (optionCount > 0 && (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey))) {
                     event.preventDefault();
-                    if (optionCount > 0) setActiveIndex((index) => (index - 1 + optionCount) % optionCount);
+                    setActiveIndex((boundedIndex - 1 + optionCount) % optionCount);
                     return;
                 }
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && stageA) {
                     event.preventDefault();
-                    if (stageA) {
-                        const def = commandMatches[activeIndex];
-                        if (def) selectCommand(def);
-                    } else {
-                        const suggestion = suggestions[activeIndex];
-                        if (suggestion) insertReference(suggestion);
-                    }
+                    const def = commandMatches[boundedIndex];
+                    if (def) selectCommand(def);
+                    return;
+                }
+                if (event.key === 'Enter' && !stageA && suggestions[boundedIndex]) {
+                    event.preventDefault();
+                    insertReference(suggestions[boundedIndex]);
                     return;
                 }
                 if (event.key === ' ' && !stageA && query !== null && query.text.length >= 1) {
-                    const suggestion = suggestions[activeIndex];
+                    const suggestion = suggestions[boundedIndex];
                     if (suggestion) {
                         event.preventDefault();
                         insertReference(suggestion);
@@ -636,11 +605,12 @@ export default function MentionEditor({
                 emit();
             }
         },
-        [menuOpen, optionCount, stageA, commandMatches, suggestions, activeIndex, selectCommand, insertReference, closeMenu, emit, query],
+        [menuOpen, optionCount, stageA, commandMatches, suggestions, boundedIndex, selectCommand, insertReference, closeMenu, emit, query],
     );
 
     const showStageBState = stageB && optionCount === 0;
-    const stageBStateLabel = searching
+    const stageBSearchPending = stageB && queryText.length >= 1 && results === null;
+    const stageBStateLabel = stageBSearchPending
         ? t('slashPickerSearching')
         : queryText.length < 1
           ? t('slashPickerPrompt')
@@ -709,7 +679,7 @@ export default function MentionEditor({
                                           key={def.id}
                                           id={optionId}
                                           role="option"
-                                          aria-selected={index === activeIndex}
+                                          aria-selected={index === boundedIndex}
                                       >
                                           <button
                                               type="button"
@@ -721,7 +691,7 @@ export default function MentionEditor({
                                               onMouseEnter={() => setActiveIndex(index)}
                                               className={cn(
                                                   'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
-                                                  index === activeIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
+                                                  index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
                                               )}
                                           >
                                               <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -736,7 +706,7 @@ export default function MentionEditor({
                             : showStageBState
                               ? (
                                   <li role="presentation" className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-                                      {searching && <Loader2Icon className="size-3.5 animate-spin" />}
+                                      {stageBSearchPending && <Loader2Icon className="size-3.5 animate-spin" />}
                                       <span className="truncate">{stageBStateLabel}</span>
                                   </li>
                               )
@@ -748,7 +718,7 @@ export default function MentionEditor({
                                             key={`${suggestion.type}-${suggestion.id}`}
                                             id={optionId}
                                             role="option"
-                                            aria-selected={index === activeIndex}
+                                            aria-selected={index === boundedIndex}
                                         >
                                             <button
                                                 type="button"
@@ -760,7 +730,7 @@ export default function MentionEditor({
                                                 onMouseEnter={() => setActiveIndex(index)}
                                                 className={cn(
                                                     'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
-                                                    index === activeIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
+                                                    index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
                                                 )}
                                             >
                                                 {RecordIcon ? (
