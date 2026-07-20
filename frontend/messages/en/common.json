@@ -130,7 +130,7 @@
     "languageSaveFailed": "Couldn't update your language. Please try again.",
     "profilePictureAlt": "{name}'s profile picture",
     "navProducts": "Products",
-    "navDocumentTemplates": "Document templates"
+    "navDocuments": "Documents"
   },
   "CommonContentShell": {
     "hideSidebar": "Hide sidebar",

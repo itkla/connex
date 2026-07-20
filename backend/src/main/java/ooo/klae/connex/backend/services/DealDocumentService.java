@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -13,7 +15,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.Company;
@@ -66,6 +71,8 @@ public class DealDocumentService {
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
+    private static final int MAX_BODY_DEPTH = 50;
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("\\{\\{\\s*([\\w.]+)\\s*\\}\\}");
 
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
@@ -125,6 +132,7 @@ public class DealDocumentService {
             owner == null ? null : new DocumentContent.PartyRef(nz(owner.getDisplayName()), null),
             new DocumentContent.DealRef(nz(deal.getName()), currency),
             sections,
+            resolveBody(template.getBody(), tokens),
             lines.items(),
             lines.totals());
 
@@ -234,11 +242,92 @@ public class DealDocumentService {
 
     private String resolve(String template, Map<String, String> tokens) {
         if (template == null) return null;
-        String result = template;
-        for (Map.Entry<String, String> entry : tokens.entrySet()) {
-            result = result.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        Matcher matcher = TOKEN_PATTERN.matcher(template);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String replacement = tokens.containsKey(key) ? tokens.get(key) : matcher.group();
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
-        return result;
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    /**
+     * Resolves a template body (ProseMirror/Tiptap JSON) into a frozen snapshot tree: {@code {{tokens}}}
+     * inside text runs are substituted and inline {@code mergeToken} nodes become plain, properly-escaped
+     * text. Rebuilding the tree through Jackson (rather than string-replacing the serialized JSON) keeps a
+     * token value that contains quotes or braces from corrupting the document or injecting structure.
+     */
+    private JsonNode resolveBody(String templateBody, Map<String, String> tokens) {
+        if (templateBody == null || templateBody.isBlank()) return null;
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(templateBody);
+        } catch (RuntimeException invalid) {
+            throw new BadRequestException("Document template body is not valid document content");
+        }
+        return resolveNode(root, tokens, 0);
+    }
+
+    private JsonNode resolveNode(JsonNode node, Map<String, String> tokens, int depth) {
+        if (depth > MAX_BODY_DEPTH) {
+            throw new BadRequestException("Document template body is nested too deeply");
+        }
+        if (node == null || !node.isObject()) {
+            return node;
+        }
+        JsonNode typeNode = node.get("type");
+        String type = typeNode != null && typeNode.isString() ? typeNode.asString() : null;
+        if ("text".equals(type)) {
+            JsonNode textNode = node.get("text");
+            String resolved = textNode != null && textNode.isString() ? resolve(textNode.asString(), tokens) : "";
+            if (resolved.isEmpty()) {
+                return null;
+            }
+            ObjectNode copy = objectMapper.createObjectNode();
+            for (Map.Entry<String, JsonNode> field : node.properties()) {
+                if ("text".equals(field.getKey())) {
+                    copy.put("text", resolved);
+                } else {
+                    copy.set(field.getKey(), field.getValue());
+                }
+            }
+            return copy;
+        }
+        ObjectNode copy = objectMapper.createObjectNode();
+        for (Map.Entry<String, JsonNode> field : node.properties()) {
+            if ("content".equals(field.getKey()) && field.getValue().isArray()) {
+                copy.set("content", resolveContent(field.getValue(), tokens, depth));
+            } else {
+                copy.set(field.getKey(), field.getValue());
+            }
+        }
+        return copy;
+    }
+
+    private ArrayNode resolveContent(JsonNode content, Map<String, String> tokens, int depth) {
+        ArrayNode out = objectMapper.createArrayNode();
+        for (JsonNode child : content) {
+            JsonNode typeNode = child.isObject() ? child.get("type") : null;
+            String type = typeNode != null && typeNode.isString() ? typeNode.asString() : null;
+            if ("mergeToken".equals(type)) {
+                JsonNode key = child.path("attrs").path("token");
+                String value = key.isString() ? tokens.getOrDefault(key.asString(), "") : "";
+                if (!value.isEmpty()) {
+                    ObjectNode text = objectMapper.createObjectNode();
+                    text.put("type", "text");
+                    text.put("text", value);
+                    out.add(text);
+                }
+            } else {
+                JsonNode resolved = resolveNode(child, tokens, depth + 1);
+                if (resolved != null) {
+                    out.add(resolved);
+                }
+            }
+        }
+        return out;
     }
 
     private DealDocumentDto enrich(int workspaceId, DealDocument document) {

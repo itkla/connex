@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,6 +172,70 @@ class DealDocumentServiceTest extends AbstractServiceTest {
             () -> documentService.getOne(other.getId(), doc.id()));
         assertThrows(ResourceNotFoundException.class,
             () -> documentService.updateStatus(other.getId(), doc.id(), "final"));
+    }
+
+    @Test
+    void resolvesBlockBodyTokensAndMergeNodes() {
+        Deal deal = jpyDeal();
+        Product product = product("100.00", "10.000");
+        lineItemService.create(deal.getId(), line(product.getId(), "2"));
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Body template " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setTitle("Body doc");
+        tpl.setBody("{\"type\":\"doc\",\"content\":["
+            + "{\"type\":\"paragraph\",\"attrs\":{\"textAlign\":\"right\"},\"content\":["
+            + "{\"type\":\"text\",\"text\":\"Quote for {{company.name}} by \"},"
+            + "{\"type\":\"mergeToken\",\"attrs\":{\"token\":\"owner.name\"}}]},"
+            + "{\"type\":\"lineItems\"},"
+            + "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Total {{total}}\"}]}]}");
+        DocumentTemplate saved = templateService.create(tpl);
+
+        DealDocumentDto doc = documentService.generate(deal.getId(), saved.getId());
+
+        assertNotNull(doc.content().body());
+        String body = doc.content().body().toString();
+        assertTrue(body.contains(doc.content().company().name()), () -> "body should carry company name: " + body);
+        assertTrue(body.contains(currentUser.getDisplayName()), () -> "mergeToken should resolve to owner: " + body);
+        assertTrue(body.contains("JPY 220.00"), () -> "body should carry resolved total: " + body);
+        assertTrue(body.contains("\"textAlign\":\"right\""), () -> "block alignment must be preserved: " + body);
+        assertFalse(body.contains("{{"), () -> "no unresolved tokens should remain: " + body);
+        assertFalse(body.contains("mergeToken"), () -> "merge nodes must be flattened to text: " + body);
+    }
+
+    @Test
+    void rejectsInvalidTemplateBody() {
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Bad body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody("{ not valid json");
+        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+    }
+
+    @Test
+    void rejectsNonDocumentTemplateBody() {
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Non-doc body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody("{\"type\":\"paragraph\",\"content\":[]}");
+        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+    }
+
+    @Test
+    void rejectsTooDeeplyNestedTemplateBody() {
+        String node = "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}";
+        for (int i = 0; i < 60; i++) {
+            node = "{\"type\":\"bulletList\",\"content\":[" + node + "]}";
+        }
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Deep body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody("{\"type\":\"doc\",\"content\":[" + node + "]}");
+        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
     }
 
     @Test

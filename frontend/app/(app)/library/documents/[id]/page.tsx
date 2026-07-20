@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUserFromCookie, getDocumentTemplateById } from "@/app/lib/api";
 import type { DocumentTemplate } from "@/app/lib/types";
-import TemplateBuilder from "@/app/components/records/document-templates/TemplateBuilder";
+import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
 
 export default async function EditDocumentTemplatePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
