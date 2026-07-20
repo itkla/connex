@@ -12,8 +12,8 @@ CREATE TABLE workflow (
     draft_record_type        VARCHAR(16) NULL,
     draft_execution_mode     VARCHAR(8) NOT NULL,
     draft_run_as_user_id     INT NULL,
-    draft_definition_json    JSON NOT NULL,
-    draft_canvas_json        JSON NOT NULL,
+    draft_definition_json    MEDIUMTEXT NOT NULL,
+    draft_canvas_json        MEDIUMTEXT NOT NULL,
     active_version_id        BIGINT NULL,
     created_by_id            INT NULL,
     updated_by_id            INT NULL,
@@ -26,12 +26,18 @@ CREATE TABLE workflow (
         AND (draft_execution_mode = 'user' OR draft_run_as_user_id IS NULL)
     ),
     CONSTRAINT chk_workflow_draft_definition CHECK (
-        JSON_TYPE(draft_definition_json) = 'OBJECT'
+        JSON_VALID(draft_definition_json) = 1
+        AND JSON_TYPE(draft_definition_json) = 'OBJECT'
         AND JSON_CONTAINS_PATH(draft_definition_json, 'one', '$.schemaVersion') = 1
         AND JSON_TYPE(JSON_EXTRACT(draft_definition_json, '$.schemaVersion')) = 'INTEGER'
         AND JSON_UNQUOTE(JSON_EXTRACT(draft_definition_json, '$.schemaVersion')) = '1'
+        AND OCTET_LENGTH(draft_definition_json) <= 65536
     ),
-    CONSTRAINT chk_workflow_draft_canvas CHECK (JSON_TYPE(draft_canvas_json) = 'OBJECT'),
+    CONSTRAINT chk_workflow_draft_canvas CHECK (
+        JSON_VALID(draft_canvas_json) = 1
+        AND JSON_TYPE(draft_canvas_json) = 'OBJECT'
+        AND OCTET_LENGTH(draft_canvas_json) <= 16384
+    ),
     CONSTRAINT fk_workflow_legacy_rule FOREIGN KEY (workspace_id, legacy_rule_id)
         REFERENCES rule(workspace_id, id) ON DELETE RESTRICT,
     UNIQUE KEY uq_workflow_workspace_id (workspace_id, id),
@@ -59,8 +65,8 @@ CREATE TABLE workflow_version (
     run_as_user_id      INT NULL,
     created_by_id       INT NULL,
     published_by_id     INT NULL,
-    definition_json     JSON NOT NULL,
-    canvas_json         JSON NOT NULL,
+    definition_json     MEDIUMTEXT NOT NULL,
+    canvas_json         MEDIUMTEXT NOT NULL,
     definition_hash     BINARY(32) NOT NULL,
     published_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_workflow_version_number CHECK (version_number > 0),
@@ -74,12 +80,18 @@ CREATE TABLE workflow_version (
         AND (execution_mode = 'user' OR run_as_user_id IS NULL)
     ),
     CONSTRAINT chk_workflow_version_definition CHECK (
-        JSON_TYPE(definition_json) = 'OBJECT'
+        JSON_VALID(definition_json) = 1
+        AND JSON_TYPE(definition_json) = 'OBJECT'
         AND JSON_CONTAINS_PATH(definition_json, 'one', '$.schemaVersion') = 1
         AND JSON_TYPE(JSON_EXTRACT(definition_json, '$.schemaVersion')) = 'INTEGER'
         AND JSON_UNQUOTE(JSON_EXTRACT(definition_json, '$.schemaVersion')) = '1'
+        AND OCTET_LENGTH(definition_json) <= 65536
     ),
-    CONSTRAINT chk_workflow_version_canvas CHECK (JSON_TYPE(canvas_json) = 'OBJECT'),
+    CONSTRAINT chk_workflow_version_canvas CHECK (
+        JSON_VALID(canvas_json) = 1
+        AND JSON_TYPE(canvas_json) = 'OBJECT'
+        AND OCTET_LENGTH(canvas_json) <= 16384
+    ),
     CONSTRAINT fk_workflow_version_workflow FOREIGN KEY (workspace_id, workflow_id)
         REFERENCES workflow(workspace_id, id) ON DELETE CASCADE,
     UNIQUE KEY uq_workflow_version_identity (workspace_id, workflow_id, id),

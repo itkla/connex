@@ -74,17 +74,17 @@ public class LegacyWorkflowBackfillTransaction {
         ConvertedWorkflow normalized = new ConvertedWorkflow(
             converted.legacyRuleId(),
             converted.workspaceId(),
-            converted.name(),
-            converted.description(),
+            draft.name(),
+            draft.description(),
             converted.enabled(),
-            converted.recordType(),
-            converted.executionMode(),
+            draft.recordType(),
+            draft.executionMode(),
             converted.runAsUserId(),
             converted.createdById(),
-            draft.definition(),
-            draft.canvas());
+            converted.definition(),
+            converted.canvas());
         Rule projection = graphConverter.project(normalized);
-        projection.setTriggerType(rule.getTriggerType());
+        requireSourceEquivalent(rule, projection);
         return new Snapshot(projection, draft);
     }
 
@@ -181,20 +181,59 @@ public class LegacyWorkflowBackfillTransaction {
                 || !Objects.equals(active.getRecordType(), expected.getRecordType())
                 || !Objects.equals(active.getTriggerType(), expected.getTriggerType())
                 || !Objects.equals(active.getExecutionMode(), expected.getExecutionMode())
-                || !Objects.equals(active.getRunAsUserId(), expected.getRunAsUserId())) {
+                || !Objects.equals(active.getRunAsUserId(), expected.getRunAsUserId())
+                || !Objects.equals(active.getCreatedById(), expected.getCreatedById())) {
             return false;
         }
-        RuleTrigger activeTrigger = definitionCodec.parse(active.getTriggerConfig(), RuleTrigger.class);
-        RuleTrigger expectedTrigger = definitionCodec.parse(expected.getTriggerConfig(), RuleTrigger.class);
-        if (!Objects.equals(activeTrigger, expectedTrigger)) {
+        return definitionsEquivalent(
+            active.getTriggerConfig(),
+            active.getConditionJson(),
+            active.getActionsJson(),
+            expected.getTriggerConfig(),
+            expected.getConditionJson(),
+            expected.getActionsJson());
+    }
+
+    private void requireSourceEquivalent(Rule source, Rule projection) {
+        if (source.getId() != projection.getId()
+                || source.getWorkspaceId() != projection.getWorkspaceId()
+                || !Objects.equals(source.getName(), projection.getName())
+                || !Objects.equals(source.getDescription(), projection.getDescription())
+                || source.isEnabled() != projection.isEnabled()
+                || !Objects.equals(source.getRecordType(), projection.getRecordType())
+                || !Objects.equals(source.getTriggerType(), projection.getTriggerType())
+                || !Objects.equals(source.getExecutionMode(), projection.getExecutionMode())
+                || !Objects.equals(source.getRunAsUserId(), projection.getRunAsUserId())
+                || !Objects.equals(source.getCreatedById(), projection.getCreatedById())
+                || !definitionsEquivalent(
+                    source.getTriggerConfig(),
+                    source.getConditionJson(),
+                    source.getActionsJson(),
+                    projection.getTriggerConfig(),
+                    projection.getConditionJson(),
+                    projection.getActionsJson())) {
+            throw new IllegalStateException();
+        }
+    }
+
+    private boolean definitionsEquivalent(
+            String firstTriggerJson,
+            String firstConditionJson,
+            String firstActionsJson,
+            String secondTriggerJson,
+            String secondConditionJson,
+            String secondActionsJson) {
+        RuleTrigger firstTrigger = definitionCodec.parse(firstTriggerJson, RuleTrigger.class);
+        RuleTrigger secondTrigger = definitionCodec.parse(secondTriggerJson, RuleTrigger.class);
+        if (!Objects.equals(firstTrigger, secondTrigger)) {
             return false;
         }
-        if (!conditionsEquivalent(active.getConditionJson(), expected.getConditionJson())) {
+        if (!conditionsEquivalent(firstConditionJson, secondConditionJson)) {
             return false;
         }
-        RuleAction[] activeActions = definitionCodec.parse(active.getActionsJson(), RuleAction[].class);
-        RuleAction[] expectedActions = definitionCodec.parse(expected.getActionsJson(), RuleAction[].class);
-        return Arrays.equals(activeActions, expectedActions);
+        RuleAction[] firstActions = definitionCodec.parse(firstActionsJson, RuleAction[].class);
+        RuleAction[] secondActions = definitionCodec.parse(secondActionsJson, RuleAction[].class);
+        return Arrays.equals(firstActions, secondActions);
     }
 
     private boolean conditionsEquivalent(String activeJson, String expectedJson) {

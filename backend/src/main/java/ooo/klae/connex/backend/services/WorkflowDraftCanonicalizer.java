@@ -20,10 +20,14 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.core.StreamWriteFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.DecimalNode;
 import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.type.LogicalType;
 
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
@@ -50,7 +54,12 @@ public class WorkflowDraftCanonicalizer {
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
         .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
+        .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
         .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+        .withCoercionConfig(
+            LogicalType.Integer,
+            config -> config.setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
         .build();
 
     CanonicalDraft canonicalizeDraftJson(
@@ -90,17 +99,11 @@ public class WorkflowDraftCanonicalizer {
         requireInputSize(canonicalCanvasJson, MAX_CANVAS_BYTES, "Workflow canvas is too large");
 
         byte[] hash = hash(canonicalDefinitionJson, canonicalCanvasJson);
-        WorkflowDefinition canonicalDefinition = parse(
-            canonicalDefinitionJson, WorkflowDefinition.class, "Invalid canonical workflow definition");
-        WorkflowCanvas canonicalCanvas = parse(
-            canonicalCanvasJson, WorkflowCanvas.class, "Invalid canonical workflow canvas");
         return new CanonicalDraft(
             normalizedName,
             normalizedDescription,
             normalizedRecordType,
             normalizedExecutionMode,
-            canonicalDefinition,
-            canonicalCanvas,
             canonicalDefinitionJson,
             canonicalCanvasJson,
             hash);
@@ -349,8 +352,6 @@ public class WorkflowDraftCanonicalizer {
         String description,
         String recordType,
         String executionMode,
-        WorkflowDefinition definition,
-        WorkflowCanvas canvas,
         String definitionJson,
         String canvasJson,
         byte[] definitionHash

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 
 /** Verifies deterministic legacy graph conversion and exact reverse runtime projection. */
 class LegacyWorkflowGraphConverterTest {
@@ -49,7 +51,7 @@ class LegacyWorkflowGraphConverterTest {
             converted.canvas().positions().get("action-2"));
         assertEquals(new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE),
             converted.canvas().viewport());
-        assertEquals(41, converted.runAsUserId());
+        assertEquals(999, converted.runAsUserId());
 
         assertProjection(source, converter.project(converted));
     }
@@ -105,6 +107,165 @@ class LegacyWorkflowGraphConverterTest {
         assertProjection(source, converter.project(sorted));
     }
 
+    @Test
+    void preservesNullableUserIdentityAndRejectsSystemIdentity() {
+        Rule user = rule(false, "user", action("notify", "First"));
+        user.setRunAsUserId(null);
+        assertNull(converter.project(converter.convert(user)).getRunAsUserId());
+
+        Rule system = rule(false, "system", action("notify", "First"));
+        system.setRunAsUserId(999);
+        assertThrows(BadRequestException.class, () -> converter.convert(system));
+    }
+
+    @Test
+    void rejectsContradictorySourceTriggerType() {
+        Rule source = rule(false, "user", action("notify", "First"));
+        source.setTriggerType("schedule");
+
+        assertThrows(BadRequestException.class, () -> converter.convert(source));
+    }
+
+    @Test
+    void projectsZeroActionsAndRejectsDisconnectedContent() {
+        LegacyWorkflowGraphConverter.ConvertedWorkflow zeroActions = converter.convert(
+            rule(false, "user"));
+        Rule projected = converter.project(zeroActions);
+
+        assertEquals("[]", projected.getActionsJson());
+        assertEquals(List.of("trigger", "end"),
+            zeroActions.definition().nodes().stream().map(WorkflowNode::id).toList());
+
+        List<WorkflowNode> extraNodes = new ArrayList<>(zeroActions.definition().nodes());
+        extraNodes.add(new WorkflowNode.Action("extra", action("notify", "Extra")));
+        assertRejected(zeroActions, new WorkflowDefinition(
+            1, "trigger", extraNodes, zeroActions.definition().edges()));
+
+        List<WorkflowEdge> extraEdges = new ArrayList<>(zeroActions.definition().edges());
+        extraEdges.add(new WorkflowEdge(
+            "end--next--trigger", "end", "trigger", WorkflowEdge.Outcome.NEXT));
+        assertRejected(zeroActions, new WorkflowDefinition(
+            1, "trigger", zeroActions.definition().nodes(), extraEdges));
+    }
+
+    @Test
+    void rejectsDuplicateEdgeIdsAndNullConfigs() {
+        LegacyWorkflowGraphConverter.ConvertedWorkflow converted = converter.convert(
+            rule(true, "user", action("notify", "First")));
+        List<WorkflowNode> duplicateNodes = new ArrayList<>(converted.definition().nodes());
+        duplicateNodes.add(new WorkflowNode.End("end"));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", duplicateNodes, converted.definition().edges()));
+
+        List<WorkflowEdge> duplicateEdges = new ArrayList<>(converted.definition().edges());
+        WorkflowEdge first = duplicateEdges.getFirst();
+        duplicateEdges.add(new WorkflowEdge(
+            first.id(), first.sourceNodeId(), first.targetNodeId(), first.outcome()));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", converted.definition().nodes(), duplicateEdges));
+
+        List<WorkflowNode> nullTrigger = replaceNode(
+            converted.definition().nodes(), "trigger", new WorkflowNode.Trigger("trigger", null));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", nullTrigger, converted.definition().edges()));
+
+        List<WorkflowNode> nullCondition = replaceNode(
+            converted.definition().nodes(), "condition", new WorkflowNode.Condition("condition", null));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", nullCondition, converted.definition().edges()));
+
+        List<WorkflowNode> nullAction = replaceNode(
+            converted.definition().nodes(), "action-1", new WorkflowNode.Action("action-1", null));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", nullAction, converted.definition().edges()));
+    }
+
+    @Test
+    void rejectsIllegalOutcomesIncomingEdgesAndCycles() {
+        LegacyWorkflowGraphConverter.ConvertedWorkflow converted = converter.convert(
+            rule(false, "user", action("notify", "First")));
+        List<WorkflowEdge> illegalOutcome = replaceEdge(
+            converted.definition().edges(),
+            "trigger--next--action-1",
+            new WorkflowEdge(
+                "trigger--yes--action-1",
+                "trigger",
+                "action-1",
+                WorkflowEdge.Outcome.YES));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", converted.definition().nodes(), illegalOutcome));
+
+        List<WorkflowEdge> incomingTrigger = new ArrayList<>(converted.definition().edges());
+        incomingTrigger.add(new WorkflowEdge(
+            "end--next--trigger", "end", "trigger", WorkflowEdge.Outcome.NEXT));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", converted.definition().nodes(), incomingTrigger));
+
+        List<WorkflowEdge> cycle = replaceEdge(
+            converted.definition().edges(),
+            "action-1--next--end",
+            new WorkflowEdge(
+                "action-1--next--action-1",
+                "action-1",
+                "action-1",
+                WorkflowEdge.Outcome.NEXT));
+        assertRejected(converted, new WorkflowDefinition(
+            1, "trigger", converted.definition().nodes(), cycle));
+
+        LegacyWorkflowGraphConverter.ConvertedWorkflow withCondition = converter.convert(
+            rule(true, "user", action("notify", "First")));
+        List<WorkflowEdge> nonterminalNoBranch = replaceEdge(
+            withCondition.definition().edges(),
+            "condition--no--end",
+            new WorkflowEdge(
+                "condition--no--action-1",
+                "condition",
+                "action-1",
+                WorkflowEdge.Outcome.NO));
+        assertRejected(withCondition, new WorkflowDefinition(
+            1, "trigger", withCondition.definition().nodes(), nonterminalNoBranch));
+    }
+
+    private void assertRejected(
+            LegacyWorkflowGraphConverter.ConvertedWorkflow converted,
+            WorkflowDefinition definition) {
+        LegacyWorkflowGraphConverter.ConvertedWorkflow invalid = withDefinition(converted, definition);
+        assertThrows(BadRequestException.class, () -> converter.project(invalid));
+    }
+
+    private static LegacyWorkflowGraphConverter.ConvertedWorkflow withDefinition(
+            LegacyWorkflowGraphConverter.ConvertedWorkflow converted,
+            WorkflowDefinition definition) {
+        return new LegacyWorkflowGraphConverter.ConvertedWorkflow(
+            converted.legacyRuleId(),
+            converted.workspaceId(),
+            converted.name(),
+            converted.description(),
+            converted.enabled(),
+            converted.recordType(),
+            converted.executionMode(),
+            converted.runAsUserId(),
+            converted.createdById(),
+            definition,
+            converted.canvas());
+    }
+
+    private static List<WorkflowNode> replaceNode(
+            List<WorkflowNode> nodes, String id, WorkflowNode replacement) {
+        List<WorkflowNode> changed = new ArrayList<>(nodes);
+        int index = changed.stream().map(WorkflowNode::id).toList().indexOf(id);
+        changed.set(index, replacement);
+        return changed;
+    }
+
+    private static List<WorkflowEdge> replaceEdge(
+            List<WorkflowEdge> edges, String id, WorkflowEdge replacement) {
+        List<WorkflowEdge> changed = new ArrayList<>(edges);
+        int index = changed.stream().map(WorkflowEdge::id).toList().indexOf(id);
+        changed.set(index, replacement);
+        return changed;
+    }
+
     private void assertProjection(Rule source, Rule projected) {
         assertEquals(source.getId(), projected.getId());
         assertEquals(source.getWorkspaceId(), projected.getWorkspaceId());
@@ -117,8 +278,7 @@ class LegacyWorkflowGraphConverterTest {
         assertEquals(source.getConditionJson(), projected.getConditionJson());
         assertEquals(source.getActionsJson(), projected.getActionsJson());
         assertEquals(source.getExecutionMode(), projected.getExecutionMode());
-        Integer expectedRunAs = "system".equals(source.getExecutionMode()) ? null : source.getCreatedById();
-        assertEquals(expectedRunAs, projected.getRunAsUserId());
+        assertEquals(source.getRunAsUserId(), projected.getRunAsUserId());
         assertEquals(source.getCreatedById(), projected.getCreatedById());
     }
 

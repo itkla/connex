@@ -95,7 +95,7 @@ class LegacyWorkflowBackfillTransactionTest {
         assertEquals(1, workflow.getDraftRevision());
         assertEquals("deal", workflow.getDraftRecordType());
         assertEquals("user", workflow.getDraftExecutionMode());
-        assertEquals(41, workflow.getDraftRunAsUserId());
+        assertEquals(999, workflow.getDraftRunAsUserId());
         assertEquals(41, workflow.getCreatedById());
         assertNull(workflow.getUpdatedById());
         assertNull(workflow.getActiveVersionId());
@@ -111,11 +111,12 @@ class LegacyWorkflowBackfillTransactionTest {
         assertNull(version.getConditionJson());
         assertEquals(rule.getActionsJson(), version.getActionsJson());
         assertEquals("user", version.getExecutionMode());
-        assertEquals(41, version.getRunAsUserId());
+        assertEquals(999, version.getRunAsUserId());
         assertEquals(41, version.getCreatedById());
         assertNull(version.getPublishedById());
         assertEquals(workflow.getDraftDefinitionJson(), version.getDefinitionJson());
         assertEquals(workflow.getDraftCanvasJson(), version.getCanvasJson());
+        assertEquals(expectedDefinition(), version.getDefinitionJson());
         assertEquals(
             "{\"positions\":{\"action-1\":{\"x\":240,\"y\":0},\"end\":{\"x\":480,\"y\":0},"
                 + "\"trigger\":{\"x\":0,\"y\":0}},\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}}",
@@ -137,10 +138,30 @@ class LegacyWorkflowBackfillTransactionTest {
     }
 
     @Test
-    void systemBackfillAlwaysUsesNullRunAsIdentity() {
+    void systemBackfillRejectsPersistedRunAsIdentity() {
         Rule rule = rule("system", false);
         rule.setRunAsUserId(999);
         when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace(null, 7));
+
+        assertEquals(
+            "Legacy workflow backfill failed for catalog=(default) workspace=7 rule=23",
+            exception.getMessage());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
+    void freshProjectionAcceptsSemanticJsonFormattingButRejectsMetadataNormalization() {
+        Rule formatted = rule("user", false);
+        formatted.setTriggerConfig(
+            "{ \"events\" : [ \"deal.won\" ], \"type\" : \"entity_change\" }");
+        formatted.setActionsJson(
+            "[ { \"title\" : \"Notify owner\", \"type\" : \"notify\" } ]");
+        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(formatted));
         doAnswer(invocation -> {
             invocation.<Workflow>getArgument(0).setId(101);
             return null;
@@ -156,9 +177,20 @@ class LegacyWorkflowBackfillTransactionTest {
 
         ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
         verify(workflowVersionMapper).insert(version.capture());
-        assertEquals("system", version.getValue().getExecutionMode());
-        assertNull(version.getValue().getRunAsUserId());
-        verify(workflowMapper, never()).updateLifecycle(eq(7), eq(101), eq(true), any());
+        assertEquals(
+            "{\"cadence\":null,\"events\":[\"deal.won\"],\"targetStageId\":null,"
+                + "\"throttleMinutes\":null,\"type\":\"entity_change\"}",
+            version.getValue().getTriggerConfig());
+
+        Rule changedName = rule("user", false);
+        changedName.setName(" Legacy rule ");
+        when(ruleMapper.getByWorkspaceForUpdate(8)).thenReturn(List.of(changedName));
+        changedName.setWorkspaceId(8);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace(null, 8));
+        verify(workflowMapper, never()).getByLegacyRuleId(8, 23);
     }
 
     @Test
@@ -206,6 +238,37 @@ class LegacyWorkflowBackfillTransactionTest {
         verify(workflowVersionMapper, never()).listByWorkflow(anyInt(), anyInt());
         verify(workflowMapper, never()).insert(any());
         verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
+    void rerunRejectsNoncanonicalActiveDefinitionOrCanvasBytes() {
+        Rule rule = rule("user", true);
+        PersistedPair definitionChanged = pair(rule, 4);
+        definitionChanged.version().setDefinitionJson(
+            " " + definitionChanged.version().getDefinitionJson());
+        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        when(workflowMapper.getByLegacyRuleId(7, 23))
+            .thenReturn(definitionChanged.workflow());
+        when(workflowVersionMapper.getById(7, 101, 204L))
+            .thenReturn(definitionChanged.version());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        PersistedPair canvasChanged = pair(rule, 5);
+        canvasChanged.version().setCanvasJson(
+            "{\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1},\"positions\":"
+                + canvasChanged.version().getCanvasJson().substring(
+                    canvasChanged.version().getCanvasJson().indexOf("{\"action-1\""),
+                    canvasChanged.version().getCanvasJson().indexOf(",\"viewport\""))
+                + "}");
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(canvasChanged.workflow());
+        when(workflowVersionMapper.getById(7, 101, 205L)).thenReturn(canvasChanged.version());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
     }
 
     @Test
@@ -289,17 +352,16 @@ class LegacyWorkflowBackfillTransactionTest {
             new LegacyWorkflowGraphConverter.ConvertedWorkflow(
                 converted.legacyRuleId(),
                 converted.workspaceId(),
-                converted.name(),
-                converted.description(),
+                draft.name(),
+                draft.description(),
                 converted.enabled(),
-                converted.recordType(),
-                converted.executionMode(),
+                draft.recordType(),
+                draft.executionMode(),
                 converted.runAsUserId(),
                 converted.createdById(),
-                draft.definition(),
-                draft.canvas());
+                converted.definition(),
+                converted.canvas());
         Rule projection = converter.project(normalized);
-        projection.setTriggerType(rule.getTriggerType());
 
         Workflow workflow = new Workflow();
         workflow.setId(101);
@@ -358,7 +420,7 @@ class LegacyWorkflowBackfillTransactionTest {
         rule.setConditionJson(null);
         rule.setActionsJson(definitionCodec.serialize(List.of(action)));
         rule.setExecutionMode(executionMode);
-        rule.setRunAsUserId(999);
+        rule.setRunAsUserId("system".equals(executionMode) ? null : 999);
         rule.setCreatedById(41);
         return rule;
     }
@@ -367,6 +429,20 @@ class LegacyWorkflowBackfillTransactionTest {
         when(ruleMapper.countByWorkspace(7)).thenReturn(rules);
         when(workflowMapper.countLegacyRuleLinks(7)).thenReturn(linked);
         when(workflowMapper.countUnpairedLegacyRules(7)).thenReturn(unpaired);
+    }
+
+    private static String expectedDefinition() {
+        return "{\"edges\":[{\"id\":\"action-1--next--end\",\"outcome\":\"next\","
+            + "\"sourceNodeId\":\"action-1\",\"targetNodeId\":\"end\"},{\"id\":"
+            + "\"trigger--next--action-1\",\"outcome\":\"next\",\"sourceNodeId\":\"trigger\","
+            + "\"targetNodeId\":\"action-1\"}],\"entryNodeId\":\"trigger\",\"nodes\":[{"
+            + "\"config\":{\"activityType\":null,\"body\":null,\"dueInDays\":null,"
+            + "\"severity\":null,\"tagId\":null,\"targetStageId\":null,\"targetUserId\":null,"
+            + "\"title\":\"Notify owner\",\"type\":\"notify\"},\"id\":\"action-1\","
+            + "\"type\":\"ACTION\"},{\"id\":\"end\",\"type\":\"END\"},{\"config\":{"
+            + "\"cadence\":null,\"events\":[\"deal.won\"],\"targetStageId\":null,"
+            + "\"throttleMinutes\":null,\"type\":\"entity_change\"},\"id\":\"trigger\","
+            + "\"type\":\"TRIGGER\"}],\"schemaVersion\":1}";
     }
 
     private record PersistedPair(Workflow workflow, WorkflowVersion version) { }

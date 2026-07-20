@@ -214,6 +214,24 @@ class FlywayUpgradeIntegrationTest {
                   AND DATA_TYPE = 'binary'
                   AND CHARACTER_MAXIMUM_LENGTH = 32
                 """));
+            assertEquals(4, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                  AND COLUMN_NAME IN (
+                      'draft_definition_json', 'draft_canvas_json',
+                      'definition_json', 'canvas_json')
+                  AND DATA_TYPE = 'mediumtext'
+                """));
+            assertEquals(3, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'workflow_version'
+                  AND COLUMN_NAME IN ('trigger_config', 'condition_json', 'actions_json')
+                  AND DATA_TYPE = 'json'
+                """));
             assertEquals(3, scalar(connection, """
                 SELECT COUNT(*)
                 FROM information_schema.REFERENTIAL_CONSTRAINTS
@@ -234,6 +252,31 @@ class FlywayUpgradeIntegrationTest {
                 VALUES (
                     9101, 'Invalid enabled workflow', 2, 'user',
                     '{"schemaVersion":1}', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Invalid JSON workflow', FALSE, 'user',
+                    '{', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Coerced schema workflow', FALSE, 'user',
+                    '{"schemaVersion":"1"}', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Oversized definition workflow', FALSE, 'user',
+                    CONCAT('{"schemaVersion":1,"padding":"', REPEAT('a', 65536), '"}'),
+                    '{}')
                 """));
         }
     }

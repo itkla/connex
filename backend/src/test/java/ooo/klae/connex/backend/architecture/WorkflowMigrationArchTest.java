@@ -45,6 +45,10 @@ class WorkflowMigrationArchTest {
         assertTrue(compact.contains("trigger_type VARCHAR(16) NOT NULL"));
         assertTrue(compact.contains("execution_mode VARCHAR(8) NOT NULL"));
         assertTrue(compact.contains("definition_hash BINARY(32) NOT NULL"));
+        assertTrue(compact.contains("trigger_config JSON NOT NULL"));
+        assertTrue(compact.contains("condition_json JSON NULL"));
+        assertTrue(compact.contains("actions_json JSON NOT NULL"));
+        assertEquals(4, occurrences(compact, "MEDIUMTEXT NOT NULL"));
         assertEquals(2, occurrences(compact, "DEFAULT CHARSET=utf8mb4"));
     }
 
@@ -65,12 +69,20 @@ class WorkflowMigrationArchTest {
         assertTrue(compact.contains("CONSTRAINT chk_workflow_enabled CHECK (enabled IN (FALSE, TRUE))"));
         assertFalse(compact.contains("enabled = FALSE OR active_version_id IS NOT NULL"));
         assertTrue(compact.contains("JSON_TYPE(draft_definition_json) = 'OBJECT'"));
+        assertTrue(compact.contains("JSON_VALID(draft_definition_json) = 1"));
         assertTrue(compact.contains("JSON_CONTAINS_PATH(draft_definition_json, 'one', '$.schemaVersion') = 1"));
+        assertTrue(compact.contains("OCTET_LENGTH(draft_definition_json) <= 65536"));
+        assertTrue(compact.contains("JSON_VALID(draft_canvas_json) = 1"));
+        assertTrue(compact.contains("OCTET_LENGTH(draft_canvas_json) <= 16384"));
         assertTrue(compact.contains("JSON_TYPE(trigger_config) = 'OBJECT'"));
         assertTrue(compact.contains("condition_json IS NULL OR JSON_TYPE(condition_json) = 'OBJECT'"));
         assertTrue(compact.contains("JSON_TYPE(actions_json) = 'ARRAY'"));
         assertTrue(compact.contains("JSON_TYPE(definition_json) = 'OBJECT'"));
         assertTrue(compact.contains("JSON_TYPE(canvas_json) = 'OBJECT'"));
+        assertTrue(compact.contains("JSON_VALID(definition_json) = 1"));
+        assertTrue(compact.contains("OCTET_LENGTH(definition_json) <= 65536"));
+        assertTrue(compact.contains("JSON_VALID(canvas_json) = 1"));
+        assertTrue(compact.contains("OCTET_LENGTH(canvas_json) <= 16384"));
         assertFalse(compact.contains("REFERENCES workspace("));
         assertFalse(compact.contains("REFERENCES app_user("));
     }

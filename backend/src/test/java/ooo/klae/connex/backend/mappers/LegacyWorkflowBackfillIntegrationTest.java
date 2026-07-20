@@ -3,8 +3,11 @@ package ooo.klae.connex.backend.mappers;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -30,9 +33,11 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
     @Autowired private ObjectMapper objectMapper;
 
     @Test
-    void createsOneActiveVersionAndReplaysWithoutAdditionalRows() {
+    void createsOneActiveVersionAndReplaysWithoutAdditionalRows() throws Exception {
         int initialLinks = workflowMapper.countLegacyRuleLinks(workspace.getId());
         User creator = newUser();
+        User runAs = newUser();
+        assertNotEquals(creator.getId(), runAs.getId());
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("entity_change");
         trigger.setEvents(List.of("deal.won"));
@@ -51,7 +56,7 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
         rule.setConditionJson(null);
         rule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
         rule.setExecutionMode("user");
-        rule.setRunAsUserId(creator.getId());
+        rule.setRunAsUserId(runAs.getId());
         rule.setCreatedById(creator.getId());
         ruleMapper.insert(rule);
 
@@ -62,7 +67,7 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(rule.getName(), workflow.getName());
         assertEquals(rule.getDescription(), workflow.getDescription());
         assertEquals(rule.isEnabled(), workflow.isEnabled());
-        assertEquals(creator.getId(), workflow.getDraftRunAsUserId());
+        assertEquals(runAs.getId(), workflow.getDraftRunAsUserId());
         assertNotNull(workflow.getActiveVersionId());
         WorkflowVersion active = workflowVersionMapper.getById(
             workspace.getId(), workflow.getId(), workflow.getActiveVersionId());
@@ -70,11 +75,43 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(1, active.getVersionNumber());
         assertEquals(rule.getTriggerConfig(), active.getTriggerConfig());
         assertEquals(rule.getActionsJson(), active.getActionsJson());
-        assertEquals(creator.getId(), active.getRunAsUserId());
+        assertEquals(runAs.getId(), active.getRunAsUserId());
         assertEquals(creator.getId(), active.getCreatedById());
         assertNull(active.getPublishedById());
-        assertArrayEquals(active.getDefinitionHash(), workflowVersionMapper.getById(
-            workspace.getId(), workflow.getId(), active.getId()).getDefinitionHash());
+        String expectedDefinition = "{\"edges\":[{\"id\":\"action-1--next--end\","
+            + "\"outcome\":\"next\",\"sourceNodeId\":\"action-1\",\"targetNodeId\":\"end\"},"
+            + "{\"id\":\"trigger--next--action-1\",\"outcome\":\"next\","
+            + "\"sourceNodeId\":\"trigger\",\"targetNodeId\":\"action-1\"}],"
+            + "\"entryNodeId\":\"trigger\",\"nodes\":[{\"config\":{\"activityType\":null,"
+            + "\"body\":null,\"dueInDays\":null,\"severity\":null,\"tagId\":null,"
+            + "\"targetStageId\":null,\"targetUserId\":null,\"title\":\"Notify owner\","
+            + "\"type\":\"notify\"},\"id\":\"action-1\",\"type\":\"ACTION\"},"
+            + "{\"id\":\"end\",\"type\":\"END\"},{\"config\":{\"cadence\":null,"
+            + "\"events\":[\"deal.won\"],\"targetStageId\":null,\"throttleMinutes\":null,"
+            + "\"type\":\"entity_change\"},\"id\":\"trigger\",\"type\":\"TRIGGER\"}],"
+            + "\"schemaVersion\":1}";
+        String expectedCanvas = "{\"positions\":{\"action-1\":{\"x\":240,\"y\":0},"
+            + "\"end\":{\"x\":480,\"y\":0},\"trigger\":{\"x\":0,\"y\":0}},"
+            + "\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}}";
+        byte[] expectedHash = MessageDigest.getInstance("SHA-256").digest(
+            ("{\"definition\":" + expectedDefinition + ",\"canvas\":" + expectedCanvas + "}")
+                .getBytes(StandardCharsets.UTF_8));
+        assertEquals(expectedDefinition, workflow.getDraftDefinitionJson());
+        assertEquals(expectedCanvas, workflow.getDraftCanvasJson());
+        assertEquals(expectedDefinition, active.getDefinitionJson());
+        assertEquals(expectedCanvas, active.getCanvasJson());
+        assertArrayEquals(
+            expectedDefinition.getBytes(StandardCharsets.UTF_8),
+            active.getDefinitionJson().getBytes(StandardCharsets.UTF_8));
+        assertArrayEquals(
+            expectedCanvas.getBytes(StandardCharsets.UTF_8),
+            active.getCanvasJson().getBytes(StandardCharsets.UTF_8));
+        assertArrayEquals(expectedHash, active.getDefinitionHash());
+        WorkflowVersion reread = workflowVersionMapper.getById(
+            workspace.getId(), workflow.getId(), active.getId());
+        assertEquals(expectedDefinition, reread.getDefinitionJson());
+        assertEquals(expectedCanvas, reread.getCanvasJson());
+        assertArrayEquals(expectedHash, reread.getDefinitionHash());
         assertEquals(initialLinks + 1, workflowMapper.countLegacyRuleLinks(workspace.getId()));
         assertEquals(0, workflowMapper.countUnpairedLegacyRules(workspace.getId()));
 

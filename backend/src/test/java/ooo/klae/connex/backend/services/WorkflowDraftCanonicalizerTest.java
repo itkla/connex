@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -202,6 +204,30 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
+    void rejectsScalarCoercionAndNullPrimitiveCreatorValues() {
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            "{\"schemaVersion\":\"1\",\"entryNodeId\":\"end\","
+                + "\"nodes\":[{\"type\":\"END\",\"id\":\"end\"}],\"edges\":[]}",
+            canvas("end")));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            "{\"schemaVersion\":1.0,\"entryNodeId\":\"end\","
+                + "\"nodes\":[{\"type\":\"END\",\"id\":\"end\"}],\"edges\":[]}",
+            canvas("end")));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            "{\"schemaVersion\":null,\"entryNodeId\":\"end\","
+                + "\"nodes\":[{\"type\":\"END\",\"id\":\"end\"}],\"edges\":[]}",
+            canvas("end")));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            minimalDefinition(),
+            "{\"positions\":{\"end\":{\"x\":\"0\",\"y\":0}},"
+                + "\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}}"));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            minimalDefinition(),
+            "{\"positions\":{\"end\":{\"x\":0,\"y\":0}},"
+                + "\"viewport\":{\"x\":0,\"y\":0,\"zoom\":\"1\"}}"));
+    }
+
+    @Test
     void enforcesUtf8CapsAndHashesTheSpecifiedWrapper() throws Exception {
         String oversizedDefinition = """
             {"schemaVersion":1,"entryNodeId":"action","nodes":[{"type":"ACTION","id":"action","config":{"type":"notify","title":"%s"}}],"edges":[]}
@@ -247,6 +273,32 @@ class WorkflowDraftCanonicalizerTest {
         assertThrows(BadRequestException.class, () -> canonicalize(
             "{\"schemaVersion\":1,\"nodes\":[],\"edges\":[]}",
             emptyCanvas()));
+    }
+
+    @Test
+    void canonicalDraftExposesNoMutableGraphAndDefensivelyClonesItsHash() {
+        WorkflowDraftCanonicalizer.CanonicalDraft draft = canonicalize(
+            minimalDefinition(), canvas("end"));
+
+        assertEquals(
+            List.of(
+                "name",
+                "description",
+                "recordType",
+                "executionMode",
+                "definitionJson",
+                "canvasJson",
+                "definitionHash"),
+            Arrays.stream(WorkflowDraftCanonicalizer.CanonicalDraft.class.getRecordComponents())
+                .map(component -> component.getName())
+                .toList());
+        assertFalse(Arrays.stream(WorkflowDraftCanonicalizer.CanonicalDraft.class.getRecordComponents())
+            .anyMatch(component -> component.getType() == WorkflowDefinition.class
+                || component.getType() == WorkflowCanvas.class));
+        byte[] expected = draft.definitionHash();
+        byte[] exposed = draft.definitionHash();
+        exposed[0] ^= 0x7f;
+        assertArrayEquals(expected, draft.definitionHash());
     }
 
     private WorkflowDraftCanonicalizer.CanonicalDraft canonicalize(
