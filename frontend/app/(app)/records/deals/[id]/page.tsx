@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
+import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import type { ReactNode } from 'react';
 import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
@@ -186,6 +187,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </div>
 
                     <CrumbLabel value={deal.name} />
+                    <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex flex-col gap-2 py-8">
                             <div className="flex flex-row flex-wrap items-center gap-3">

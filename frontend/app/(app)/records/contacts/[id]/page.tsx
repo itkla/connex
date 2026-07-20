@@ -2,6 +2,7 @@ import { getAttachmentsFromCookie, getContactById, getContactConnections, getCon
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
+import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import { type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -97,6 +98,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
+                    <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />

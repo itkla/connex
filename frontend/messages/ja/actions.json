@@ -30,7 +30,8 @@
       "calendar": "カレンダー",
       "settings": "設定",
       "organization": "組織",
-      "savedView": "保存済みビュー"
+      "savedView": "保存済みビュー",
+      "recentRecord": "最近のレコード"
     },
     "create": {
       "company": "新しい会社",

@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActionRecord, useActions } from '@/app/hooks/useActions';
+import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
 import { RECORD_PATHS } from '@/app/lib/actions/seedActions';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
@@ -61,6 +62,7 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
     const locale = useLocale();
     const router = useRouter();
     const { run, getAction } = useActions();
+    const { record: recordRecent } = useRecentRecords();
     const isMobile = useIsMobile();
 
     const [data, setData] = useState<PeekData | null>(null);
@@ -82,6 +84,10 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
         [target, data, label],
     );
     useActionRecord(actionRecord);
+
+    useEffect(() => {
+        if (actionRecord) recordRecent(actionRecord);
+    }, [actionRecord, recordRecent]);
 
     useEffect(() => {
         if (!target) return;
