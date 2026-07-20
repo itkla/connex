@@ -23,8 +23,8 @@ const GLASS_FILTER_ID = 'connex-liquid-glass';
 /** Base inward displacement (px) applied to the sampled backdrop; edges bend, centre stays put. */
 const DISTORTION = -108;
 /** Per-channel displacement deltas that produce the chromatic-aberration fringe at the glass edge. */
-const GREEN_OFFSET = 9;
-const BLUE_OFFSET = 18;
+const GREEN_OFFSET = 6;
+const BLUE_OFFSET = 12;
 /** Displacement-map authoring params: a blurred neutral centre keeps refraction to the rim. */
 const MAP_BRIGHTNESS = 50;
 const MAP_OPACITY = 0.92;
@@ -249,7 +249,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
 
     const glassStyle = refract
         ? {
-              backdropFilter: `url(#${GLASS_FILTER_ID}) saturate(1.4) brightness(1.02)`,
+              backdropFilter: `url(#${GLASS_FILTER_ID}) blur(2px) saturate(1.5) brightness(1.03)`,
               WebkitBackdropFilter: `blur(12px) saturate(1.6)`,
           }
         : {
@@ -268,7 +268,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                 animate={reduce ? undefined : 'show'}
                 variants={reduce ? undefined : barVariants}
                 style={glassStyle}
-                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 rounded-full bg-background/10 px-1.5 py-1.5 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.4),inset_0_0_8px_rgb(255_255_255/0.06),0_8px_28px_-8px_rgb(0_0_0/0.4),0_1px_2px_rgb(0_0_0/0.12)] ring-1 ring-white/10 ring-inset"
+                className="pointer-events-auto relative flex w-full items-stretch gap-0.5 rounded-full bg-background/18 px-1.5 py-1.5 shadow-[inset_0_0.5px_0_rgb(255_255_255/0.4),inset_0_0_8px_rgb(255_255_255/0.06),0_8px_28px_-8px_rgb(0_0_0/0.4),0_1px_2px_rgb(0_0_0/0.12)] ring-1 ring-white/10 ring-inset"
             >
                 <svg aria-hidden className="pointer-events-none absolute h-0 w-0">
                     <filter
