@@ -390,15 +390,15 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const selectableRoles: WorkspaceRole[] = isOwner ? ["member", "admin", "owner"] : ASSIGNABLE;
 
     const trimmedSearch = memberSearch.trim().toLowerCase();
+    const showSearch = !loading && members.length > SEARCH_THRESHOLD;
     const visibleMembers = useMemo(() => {
-        if (!trimmedSearch) return members;
+        if (!showSearch || !trimmedSearch) return members;
         return members.filter(
             (m) =>
                 m.displayName.toLowerCase().includes(trimmedSearch) ||
                 m.email.toLowerCase().includes(trimmedSearch),
         );
-    }, [members, trimmedSearch]);
-    const showSearch = !loading && members.length > SEARCH_THRESHOLD;
+    }, [members, trimmedSearch, showSearch]);
 
     return (
         <div className="space-y-12">
