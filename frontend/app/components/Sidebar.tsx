@@ -57,7 +57,9 @@ import { useSidebarMode } from '@/app/hooks/useSidebarMode';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { usePinnedViews } from '@/app/hooks/usePinnedViews';
+import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
+import { recentRecordHref } from '@/app/lib/recentRecords';
 
 type NavItem = {
     label: string;
@@ -437,6 +439,7 @@ export default function Sidebar({
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
     const { pins } = usePinnedViews();
+    const { recents } = useRecentRecords();
     const searchParams = useSearchParams();
     const svParam = searchParams.get("sv");
     const pinnedSection = useMemo<NavSection | null>(() => {
@@ -451,6 +454,21 @@ export default function Sidebar({
             })),
         };
     }, [pins, t, pathname, svParam]);
+    const recentSection = useMemo<NavSection | null>(() => {
+        if (recents.length === 0) return null;
+        return {
+            label: t("sectionRecent"),
+            items: recents.map((entry) => {
+                const href = recentRecordHref(entry.t, entry.id);
+                return {
+                    label: entry.label,
+                    href,
+                    icon: savedViewRecordIcon(entry.t),
+                    active: pathname === href,
+                };
+            }),
+        };
+    }, [recents, t, pathname]);
     const { mode } = useSidebarMode();
     const isMobile = useIsMobile();
     const rail = !isMobile && mode === "rail";
@@ -498,6 +516,14 @@ export default function Sidebar({
                         <NavGroup
                             key="pinned-views"
                             section={pinnedSection}
+                            pathname={pathname}
+                            rail={rail}
+                        />
+                    )}
+                    {recentSection && (
+                        <NavGroup
+                            key="recent-records"
+                            section={recentSection}
                             pathname={pathname}
                             rail={rail}
                         />

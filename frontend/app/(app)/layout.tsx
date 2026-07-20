@@ -9,9 +9,11 @@ import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
 import { PinnedViewsProvider } from "@/app/hooks/usePinnedViews";
+import { RecentRecordsProvider } from "@/app/hooks/useRecentRecords";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
 import PinnedViewsActionsBridge from "@/app/components/actions/PinnedViewsActionsBridge";
+import RecentRecordsActionsBridge from "@/app/components/actions/RecentRecordsActionsBridge";
 import DraftResumeBridge from "@/app/components/DraftResumeBridge";
 import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
@@ -54,18 +56,21 @@ export default async function AppLayout({
                         <DraftResumeBridge />
                         <PinnedViewsProvider>
                             <PinnedViewsActionsBridge />
-                            <SidebarModeProvider>
-                                <ContentShell
-                                    sidebar={
-                                        <Sidebar
-                                            user={user}
-                                            className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
-                                        />
-                                    }
-                                >
-                                    {children}
-                                </ContentShell>
-                            </SidebarModeProvider>
+                            <RecentRecordsProvider>
+                                <RecentRecordsActionsBridge />
+                                <SidebarModeProvider>
+                                    <ContentShell
+                                        sidebar={
+                                            <Sidebar
+                                                user={user}
+                                                className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
+                                            />
+                                        }
+                                    >
+                                        {children}
+                                    </ContentShell>
+                                </SidebarModeProvider>
+                            </RecentRecordsProvider>
                         </PinnedViewsProvider>
                     </ActionProvider>
                 </NavTrailProvider>

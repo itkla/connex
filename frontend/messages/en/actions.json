@@ -30,7 +30,8 @@
       "calendar": "Calendar",
       "settings": "Settings",
       "organization": "Organization",
-      "savedView": "Saved view"
+      "savedView": "Saved view",
+      "recentRecord": "Recent record"
     },
     "create": {
       "company": "New company",
