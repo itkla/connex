@@ -377,7 +377,20 @@
     "calloutCycleAria": "Change callout style",
     "toggleExpand": "Expand",
     "toggleCollapse": "Collapse",
-    "dragHandleAria": "Drag to move"
+    "dragHandleAria": "Drag to move",
+    "slashFollowUpCmd": "Follow-up task",
+    "slashFollowUpCmdHint": "Add a follow-up task",
+    "slashTaskCmd": "Task",
+    "slashTaskCmdHint": "Create a task",
+    "slashCompanyCmd": "Company",
+    "slashCompanyCmdHint": "Link a company",
+    "slashPersonCmd": "Person",
+    "slashPersonCmdHint": "Link a person",
+    "slashDealCmd": "Deal",
+    "slashDealCmdHint": "Link a deal",
+    "slashPickerSearching": "Searching…",
+    "slashPickerNoResults": "No matches",
+    "slashPickerPrompt": "Type to search"
   },
   "ActivityTaskDetail": {
     "back": "Back to tasks",

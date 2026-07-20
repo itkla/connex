@@ -377,7 +377,20 @@
     "calloutCycleAria": "コールアウトのスタイルを変更",
     "toggleExpand": "展開",
     "toggleCollapse": "折りたたむ",
-    "dragHandleAria": "ドラッグして移動"
+    "dragHandleAria": "ドラッグして移動",
+    "slashFollowUpCmd": "フォローアップ",
+    "slashFollowUpCmdHint": "フォローアップタスクを追加",
+    "slashTaskCmd": "タスク",
+    "slashTaskCmdHint": "タスクを作成",
+    "slashCompanyCmd": "会社",
+    "slashCompanyCmdHint": "会社をリンク",
+    "slashPersonCmd": "担当者",
+    "slashPersonCmdHint": "担当者をリンク",
+    "slashDealCmd": "案件",
+    "slashDealCmdHint": "案件をリンク",
+    "slashPickerSearching": "検索中…",
+    "slashPickerNoResults": "該当なし",
+    "slashPickerPrompt": "入力して検索"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

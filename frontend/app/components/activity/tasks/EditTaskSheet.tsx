@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -142,6 +143,7 @@ export default function EditTaskSheet({
                                 value={draft.description}
                                 onChange={(next) => setDraft((d) => ({ ...d, description: next }))}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                             />
                         </div>

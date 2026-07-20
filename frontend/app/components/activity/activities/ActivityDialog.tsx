@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ACTIVITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
@@ -438,6 +439,10 @@ export function ActivityDialogForm({
                                 value={notes}
                                 onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
+                                commands={ACTIVITY_COMMANDS}
+                                onRunAction={(actionId) => {
+                                    if (actionId === 'followUp') enableFollowUp();
+                                }}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
