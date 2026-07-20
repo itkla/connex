@@ -26,11 +26,20 @@ public interface RuleMapper {
     /** A single rule scoped to the workspace, or {@code null}. */
     Rule getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** A single workspace-scoped rule locked for lifecycle synchronization, or {@code null}. */
+    Rule getByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
     /** Inserts a rule, populating its generated id. */
     void insert(Rule rule);
 
     /** Replaces a rule's mutable fields; returns rows affected. */
     int update(Rule rule);
+
+    /** Synchronizes a rule's enabled state; returns rows affected. */
+    int updateEnabled(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("enabled") boolean enabled);
 
     /** Deletes a rule scoped to the workspace; returns rows affected. */
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

@@ -145,6 +145,37 @@ class RuleDefinitionValidatorTest {
         assertEquals("A preview requires at least one condition", exception.getMessage());
     }
 
+    @Test
+    void sharedServiceBoundaryRejectsNullTriggerAndActionCardinality() {
+        RuleRequest missingTrigger = request(
+            "deal", null, "user", action("notify"));
+        BadRequestException triggerFailure = assertThrows(
+            BadRequestException.class, () -> validator.validate(missingTrigger));
+        assertEquals("Rule trigger is required", triggerFailure.getMessage());
+
+        RuleRequest missingActions = request(
+            "deal", entityChange("deal.won"), "user");
+        BadRequestException emptyFailure = assertThrows(
+            BadRequestException.class, () -> validator.validate(missingActions));
+        assertEquals("A rule requires between 1 and 16 actions", emptyFailure.getMessage());
+
+        RuleRequest tooManyActions = request(
+            "deal",
+            entityChange("deal.won"),
+            "user",
+            java.util.stream.IntStream.range(0, 17)
+                .mapToObj(index -> action("notify"))
+                .toArray(RuleAction[]::new));
+        assertThrows(BadRequestException.class, () -> validator.validate(tooManyActions));
+
+        RuleRequest nullAction = request(
+            "deal", entityChange("deal.won"), "user", action("notify"));
+        nullAction.setActions(java.util.Arrays.asList((RuleAction) null));
+        BadRequestException nullFailure = assertThrows(
+            BadRequestException.class, () -> validator.validate(nullAction));
+        assertEquals("Rule action config is required", nullFailure.getMessage());
+    }
+
     private static RuleRequest request(
             String recordType, RuleTrigger trigger, String executionMode, RuleAction... actions) {
         RuleRequest request = new RuleRequest();

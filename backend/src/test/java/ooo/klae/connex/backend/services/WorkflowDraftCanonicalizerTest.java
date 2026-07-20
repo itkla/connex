@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,7 +78,7 @@ class WorkflowDraftCanonicalizerTest {
         assertTrue(first.canvasJson().contains("\"action-1\":{\"x\":240,\"y\":0}"));
         assertTrue(first.canvasJson().contains("\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}"));
         assertEquals("Workflow", first.name());
-        assertNull(first.description());
+        assertEquals("   ", first.description());
         assertEquals("deal", first.recordType());
         assertEquals("user", first.executionMode());
     }

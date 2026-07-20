@@ -30,7 +30,15 @@ public interface WorkflowMapper {
 
     void insert(Workflow workflow);
 
-    int updateDraft(Workflow workflow);
+    int updateDraft(
+        @Param("workflow") Workflow workflow,
+        @Param("expectedRevision") int expectedRevision);
+
+    int updateLegacyRuleLink(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("legacyRuleId") int legacyRuleId,
+        @Param("updatedById") Integer updatedById);
 
     int updateLifecycle(
         @Param("workspaceId") int workspaceId,

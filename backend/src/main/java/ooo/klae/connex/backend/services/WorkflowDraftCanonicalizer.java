@@ -79,6 +79,25 @@ public class WorkflowDraftCanonicalizer {
             name, description, recordType, executionMode, definition, canvas);
     }
 
+    CanonicalDraft canonicalizeDraftNodes(
+            String name,
+            String description,
+            String recordType,
+            String executionMode,
+            JsonNode definitionNode,
+            JsonNode canvasNode) {
+        byte[] definitionBytes = boundedTree(
+            definitionNode, MAX_DEFINITION_BYTES, "Workflow definition is too large");
+        byte[] canvasBytes = boundedTree(
+            canvasNode, MAX_CANVAS_BYTES, "Workflow canvas is too large");
+        WorkflowDefinition definition = parse(
+            definitionBytes, WorkflowDefinition.class, "Invalid workflow definition");
+        WorkflowCanvas canvas = parse(
+            canvasBytes, WorkflowCanvas.class, "Invalid workflow canvas");
+        return canonicalizeDraft(
+            name, description, recordType, executionMode, definition, canvas);
+    }
+
     CanonicalDraft canonicalizeDraft(
             String name,
             String description,
@@ -107,6 +126,16 @@ public class WorkflowDraftCanonicalizer {
             canonicalDefinitionJson,
             canonicalCanvasJson,
             hash);
+    }
+
+    WorkflowDefinition parseDefinition(String definitionJson) {
+        requireInputSize(definitionJson, MAX_DEFINITION_BYTES, "Workflow definition is too large");
+        return parse(definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
+    }
+
+    WorkflowCanvas parseCanvas(String canvasJson) {
+        requireInputSize(canvasJson, MAX_CANVAS_BYTES, "Workflow canvas is too large");
+        return parse(canvasJson, WorkflowCanvas.class, "Invalid workflow canvas");
     }
 
     private static void validateDefinition(WorkflowDefinition definition) {
@@ -215,7 +244,7 @@ public class WorkflowDraftCanonicalizer {
     }
 
     private static String normalizeDescription(String description) {
-        if (description == null || description.isBlank()) {
+        if (description == null) {
             return null;
         }
         if (description.length() > 512) {
@@ -326,6 +355,29 @@ public class WorkflowDraftCanonicalizer {
     private static <T> T parse(String json, Class<T> type, String message) {
         try {
             return JSON.readValue(json, type);
+        } catch (JacksonException exception) {
+            throw new BadRequestException(message);
+        }
+    }
+
+    private static <T> T parse(byte[] json, Class<T> type, String message) {
+        try {
+            return JSON.readValue(json, type);
+        } catch (JacksonException exception) {
+            throw new BadRequestException(message);
+        }
+    }
+
+    private static byte[] boundedTree(JsonNode node, int maximumBytes, String message) {
+        if (node == null) {
+            throw new BadRequestException(message);
+        }
+        try {
+            byte[] json = JSON.writeValueAsBytes(node);
+            if (json.length > maximumBytes) {
+                throw new BadRequestException(message);
+            }
+            return json;
         } catch (JacksonException exception) {
             throw new BadRequestException(message);
         }

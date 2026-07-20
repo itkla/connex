@@ -41,7 +41,15 @@ class WorkflowMapperXmlTest {
 
         Workflow workflow = workflow();
         assertScoped(configuration, WorkflowMapper.class, "insert", workflow);
-        assertScoped(configuration, WorkflowMapper.class, "updateDraft", workflow);
+        Map<String, Object> draft = new HashMap<>();
+        draft.put("workflow", workflow);
+        draft.put("expectedRevision", 1);
+        assertScoped(configuration, WorkflowMapper.class, "updateDraft", draft);
+
+        Map<String, Object> link = new HashMap<>(identity);
+        link.put("legacyRuleId", 13);
+        link.put("updatedById", 17);
+        assertScoped(configuration, WorkflowMapper.class, "updateLegacyRuleLink", link);
 
         Map<String, Object> lifecycle = new HashMap<>(identity);
         lifecycle.put("enabled", true);
@@ -55,6 +63,14 @@ class WorkflowMapperXmlTest {
 
         String lockSql = sql(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertTrue(lockSql.endsWith("FOR UPDATE"));
+        String draftSql = sql(configuration, WorkflowMapper.class, "updateDraft", draft);
+        assertTrue(draftSql.contains("draft_revision = draft_revision + 1"));
+        assertTrue(draftSql.contains("draft_revision = ?"));
+        assertFalse(draftSql.contains("active_version_id"));
+        assertFalse(draftSql.contains("legacy_rule_id"));
+        assertFalse(draftSql.contains("enabled ="));
+        String linkSql = sql(configuration, WorkflowMapper.class, "updateLegacyRuleLink", link);
+        assertTrue(linkSql.contains("legacy_rule_id IS NULL"));
         String legacySql = sql(configuration, WorkflowMapper.class, "listUnpairedLegacyRules", workspace);
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
@@ -79,6 +95,16 @@ class WorkflowMapperXmlTest {
         assertEquals(
             "SELECT COUNT(*) FROM rule WHERE workspace_id = ?",
             sql(configuration, RuleMapper.class, "countByWorkspace", workspace));
+
+        Map<String, Object> identity = Map.of("workspaceId", 7, "id", 23);
+        assertScoped(configuration, RuleMapper.class, "getByIdForUpdate", identity);
+        assertTrue(sql(configuration, RuleMapper.class, "getByIdForUpdate", identity)
+            .endsWith("FOR UPDATE"));
+
+        Map<String, Object> lifecycle = Map.of("workspaceId", 7, "id", 23, "enabled", true);
+        assertScoped(configuration, RuleMapper.class, "updateEnabled", lifecycle);
+        assertTrue(sql(configuration, RuleMapper.class, "updateEnabled", lifecycle)
+            .contains("enabled <> ?"));
 
         String linked = sql(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
         assertTrue(linked.contains("WHERE workspace_id = ?"));

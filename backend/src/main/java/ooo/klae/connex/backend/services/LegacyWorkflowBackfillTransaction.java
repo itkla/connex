@@ -59,7 +59,7 @@ public class LegacyWorkflowBackfillTransaction {
             insert(expected);
             return;
         }
-        requireEquivalent(existing, expected);
+        requireEquivalent(existing, rule);
     }
 
     private Snapshot snapshot(Rule rule) {
@@ -149,30 +149,58 @@ public class LegacyWorkflowBackfillTransaction {
         }
     }
 
-    private void requireEquivalent(Workflow workflow, Snapshot expected) {
-        Rule projection = expected.projection();
+    private void requireEquivalent(Workflow workflow, Rule source) {
         Long activeVersionId = workflow.getActiveVersionId();
         if (workflow.getId() <= 0
-                || workflow.getWorkspaceId() != projection.getWorkspaceId()
-                || !Objects.equals(workflow.getLegacyRuleId(), projection.getId())
-                || workflow.isEnabled() != projection.isEnabled()
+                || workflow.getWorkspaceId() != source.getWorkspaceId()
+                || !Objects.equals(workflow.getLegacyRuleId(), source.getId())
+                || workflow.isEnabled() != source.isEnabled()
                 || activeVersionId == null) {
             throw new IllegalStateException();
         }
         WorkflowVersion active = workflowVersionMapper.getById(
-            projection.getWorkspaceId(), workflow.getId(), activeVersionId);
+            source.getWorkspaceId(), workflow.getId(), activeVersionId);
         if (active == null
                 || active.getId() <= 0
                 || active.getId() != activeVersionId
-                || active.getWorkspaceId() != projection.getWorkspaceId()
+                || active.getWorkspaceId() != source.getWorkspaceId()
                 || active.getWorkflowId() != workflow.getId()
-                || active.getVersionNumber() <= 0
-                || !runtimeEquivalent(active, projection)
-                || !Objects.equals(active.getDefinitionJson(), expected.draft().definitionJson())
-                || !Objects.equals(active.getCanvasJson(), expected.draft().canvasJson())
-                || !hashesEqual(active.getDefinitionHash(), expected.draft().definitionHash())) {
+                || active.getVersionNumber() <= 0) {
             throw new IllegalStateException();
         }
+        CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
+            active.getName(),
+            active.getDescription(),
+            active.getRecordType(),
+            active.getExecutionMode(),
+            active.getDefinitionJson(),
+            active.getCanvasJson());
+        if (!Objects.equals(active.getName(), canonical.name())
+                || !Objects.equals(active.getDescription(), canonical.description())
+                || !Objects.equals(active.getRecordType(), canonical.recordType())
+                || !Objects.equals(active.getExecutionMode(), canonical.executionMode())
+                || !Objects.equals(active.getDefinitionJson(), canonical.definitionJson())
+                || !Objects.equals(active.getCanvasJson(), canonical.canvasJson())
+                || !hashesEqual(active.getDefinitionHash(), canonical.definitionHash())) {
+            throw new IllegalStateException();
+        }
+        ConvertedWorkflow stored = new ConvertedWorkflow(
+            source.getId(),
+            source.getWorkspaceId(),
+            active.getName(),
+            active.getDescription(),
+            workflow.isEnabled(),
+            active.getRecordType(),
+            active.getExecutionMode(),
+            active.getRunAsUserId(),
+            active.getCreatedById(),
+            canonicalizer.parseDefinition(canonical.definitionJson()),
+            canonicalizer.parseCanvas(canonical.canvasJson()));
+        Rule projection = graphConverter.project(stored);
+        if (!runtimeEquivalent(active, projection)) {
+            throw new IllegalStateException();
+        }
+        requireSourceEquivalent(source, projection);
     }
 
     private boolean runtimeEquivalent(WorkflowVersion active, Rule expected) {

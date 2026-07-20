@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -64,33 +65,59 @@ public class RuleDefinitionValidator {
     }
 
     void validate(RuleRequest request) {
-        String recordType = normalize(request.getRecordType());
-        if (!RECORD_TYPES.contains(recordType)) {
-            throw new BadRequestException("Invalid record type: " + request.getRecordType());
+        if (request == null) {
+            throw new BadRequestException("Rule definition is required");
         }
-        String mode = normalize(request.getExecutionMode());
+        validateDefinition(
+            request.getRecordType(),
+            request.getTrigger(),
+            request.getCondition(),
+            request.getActions(),
+            request.getExecutionMode());
+    }
+
+    void validateDefinition(
+            String recordTypeValue,
+            RuleTrigger trigger,
+            SegmentDefinition condition,
+            List<RuleAction> actions,
+            String executionMode) {
+        String recordType = normalize(recordTypeValue);
+        if (!RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("Invalid record type: " + recordTypeValue);
+        }
+        String mode = normalize(executionMode);
         if (!EXECUTION_MODES.contains(mode)) {
-            throw new BadRequestException("Invalid execution mode: " + request.getExecutionMode());
+            throw new BadRequestException("Invalid execution mode: " + executionMode);
         }
         if ("system".equals(mode)) {
             workspaceService.requireRole(Role.ADMIN);
         }
-        if (request.getCondition() != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
-            throw new BadRequestException("WHEN conditions are not supported for record type: " + request.getRecordType());
+        if (condition != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("WHEN conditions are not supported for record type: " + recordTypeValue);
         }
-        if (request.getCondition() != null && !hasWhen(request.getCondition())) {
+        if (condition != null && !hasWhen(condition)) {
             throw new BadRequestException("A WHEN condition must contain at least one condition");
         }
-        if (request.getCondition() != null) {
-            segmentService.validate(recordType, request.getCondition());
+        if (condition != null) {
+            segmentService.validate(recordType, condition);
         }
-        validateTrigger(request.getTrigger(), recordType, request.getCondition());
-        validateActions(request.getActions(), recordType);
-        requireActionPermissions(request.getActions(), recordType);
+        if (trigger == null) {
+            throw new BadRequestException("Rule trigger is required");
+        }
+        if (actions == null || actions.isEmpty() || actions.size() > 16) {
+            throw new BadRequestException("A rule requires between 1 and 16 actions");
+        }
+        if (actions.stream().anyMatch(action -> action == null)) {
+            throw new BadRequestException("Rule action config is required");
+        }
+        validateTrigger(trigger, recordType, condition);
+        validateActions(actions, recordType);
+        requireActionPermissions(actions, recordType);
     }
 
     String normalize(String value) {
-        return value == null ? null : value.trim().toLowerCase();
+        return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
     }
 
     boolean hasWhen(SegmentDefinition condition) {

@@ -94,22 +94,30 @@
 
   <update id="updateDraft">
     UPDATE workflow
-    SET name = #{name},
-        description = #{description},
-        draft_revision = #{draftRevision},
-        draft_record_type = #{draftRecordType},
-        draft_execution_mode = #{draftExecutionMode},
-        draft_run_as_user_id = #{draftRunAsUserId},
-        draft_definition_json = #{draftDefinitionJson},
-        draft_canvas_json = #{draftCanvasJson},
-        updated_by_id = #{updatedById}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    SET name = #{workflow.name},
+        description = #{workflow.description},
+        draft_revision = draft_revision + 1,
+        draft_record_type = #{workflow.draftRecordType},
+        draft_execution_mode = #{workflow.draftExecutionMode},
+        draft_run_as_user_id = #{workflow.draftRunAsUserId},
+        draft_definition_json = #{workflow.draftDefinitionJson},
+        draft_canvas_json = #{workflow.draftCanvasJson},
+        updated_by_id = #{workflow.updatedById}
+    WHERE workspace_id = #{workflow.workspaceId}
+      AND id = #{workflow.id}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <update id="updateLegacyRuleLink">
+    UPDATE workflow
+    SET legacy_rule_id = #{legacyRuleId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND legacy_rule_id IS NULL
   </update>
 
   <update id="updateLifecycle">
     UPDATE workflow
     SET enabled = #{enabled}, updated_by_id = #{updatedById}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
   </update>
 
   <update id="updateActiveVersion">

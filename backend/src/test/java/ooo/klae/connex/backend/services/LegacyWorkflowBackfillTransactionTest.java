@@ -15,10 +15,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,10 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.WorkflowCanvas;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -214,6 +220,57 @@ class LegacyWorkflowBackfillTransactionTest {
         verify(workflowMapper, never()).updateActiveVersion(
             eq(7), eq(101), eq(204L), any());
         verify(workflowMapper, never()).updateLifecycle(eq(7), eq(101), eq(true), any());
+    }
+
+    @Test
+    void rerunAcceptsCanonicalEditorIdsAndCanvasWhenProjectionStillMatches() {
+        Rule rule = rule("user", true);
+        rule.setDescription("   ");
+        PersistedPair pair = pair(rule, 4);
+        RuleTrigger trigger = definitionCodec.parse(rule.getTriggerConfig(), RuleTrigger.class);
+        RuleAction action = definitionCodec.parse(rule.getActionsJson(), RuleAction[].class)[0];
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1,
+            "eventSource",
+            List.of(
+                new WorkflowNode.Trigger("eventSource", trigger),
+                new WorkflowNode.Action("notifyOwner", action),
+                new WorkflowNode.End("complete")),
+            List.of(
+                new WorkflowEdge(
+                    "edgeA", "eventSource", "notifyOwner", WorkflowEdge.Outcome.NEXT),
+                new WorkflowEdge(
+                    "edgeB", "notifyOwner", "complete", WorkflowEdge.Outcome.NEXT)));
+        WorkflowCanvas canvas = new WorkflowCanvas(
+            Map.of(
+                "eventSource", new WorkflowCanvas.Position(BigDecimal.TEN, BigDecimal.ONE),
+                "notifyOwner", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(350), BigDecimal.valueOf(80)),
+                "complete", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(700), BigDecimal.TEN)),
+            new WorkflowCanvas.Viewport(
+                BigDecimal.valueOf(25), BigDecimal.valueOf(-15), new BigDecimal("1.25")));
+        WorkflowDraftCanonicalizer.CanonicalDraft canonical = new WorkflowDraftCanonicalizer()
+            .canonicalizeDraft(
+                pair.version().getName(),
+                pair.version().getDescription(),
+                pair.version().getRecordType(),
+                pair.version().getExecutionMode(),
+                definition,
+                canvas);
+        pair.version().setDefinitionJson(canonical.definitionJson());
+        pair.version().setCanvasJson(canonical.canvasJson());
+        pair.version().setDefinitionHash(canonical.definitionHash());
+        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(workflowMapper, never()).updateActiveVersion(eq(7), eq(101), any(), any());
     }
 
     @Test
