@@ -28,7 +28,7 @@ const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 /**
- * Workflows list at /settings/workflows: the same automations the legacy rules panel managed,
+ * Workflows list at /workflows: the same automations the legacy rules panel managed,
  * now opening the full-page editor instead of a dialog. Data access is unchanged — rows are
  * rules, toggles/deletes go straight through the rules API.
  */
@@ -112,7 +112,7 @@ export default function WorkflowsPanel() {
                     title={tw("title")}
                     action={
                         !loading && (
-                            <Button onClick={() => router.push("/settings/workflows/new")} variant="brand">
+                            <Button onClick={() => router.push("/workflows/new")} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {tw("newWorkflow")}
                             </Button>
@@ -131,7 +131,7 @@ export default function WorkflowsPanel() {
                     </span>
                     <p className="text-sm font-medium text-foreground">{tw("emptyTitle")}</p>
                     <p className="max-w-xs text-sm text-muted-foreground">{tw("emptyBody")}</p>
-                    <Button onClick={() => router.push("/settings/workflows/new")} variant="outline" className="mt-1">
+                    <Button onClick={() => router.push("/workflows/new")} variant="outline" className="mt-1">
                         <PlusIcon className="size-4" />
                         {tw("newWorkflow")}
                     </Button>
@@ -153,7 +153,7 @@ export default function WorkflowsPanel() {
                             />
                             <button
                                 type="button"
-                                onClick={() => router.push(`/settings/workflows/${rule.id}`)}
+                                onClick={() => router.push(`/workflows/${rule.id}`)}
                                 className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none"
                             >
                                 <span className="flex items-center gap-2">
@@ -186,7 +186,7 @@ export default function WorkflowsPanel() {
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-40">
-                                    <DropdownMenuItem onSelect={() => router.push(`/settings/workflows/${rule.id}`)}>
+                                    <DropdownMenuItem onSelect={() => router.push(`/workflows/${rule.id}`)}>
                                         <PencilSquareIcon className="size-4" />
                                         {t("edit")}
                                     </DropdownMenuItem>

@@ -40,7 +40,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 
 const CHANNEL = "email";
 const SMS_CHANNEL = "sms";
@@ -239,11 +239,8 @@ export default function DeliveryPanel() {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
 
     return (
-        <Rise className="space-y-3">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+        <Rise className="space-y-4">
+            <SettingsSection title={t("title")} description={t("subtitle")} />
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
@@ -596,11 +593,8 @@ function SmsSection() {
     };
 
     return (
-        <div className="space-y-3">
-            <div>
-                <SectionHeader title={t("smsTitle")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("smsSubtitle")}</p>
-            </div>
+        <div className="space-y-4">
+            <SettingsSection title={t("smsTitle")} description={t("smsSubtitle")} />
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
@@ -858,11 +852,8 @@ function ConnectorsSection() {
     };
 
     return (
-        <div className="space-y-3">
-            <div>
-                <SectionHeader title={t("connectorsTitle")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("connectorsSubtitle")}</p>
-            </div>
+        <div className="space-y-4">
+            <SettingsSection title={t("connectorsTitle")} description={t("connectorsSubtitle")} />
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">

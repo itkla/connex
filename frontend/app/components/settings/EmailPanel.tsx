@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 
 type FormState = {
     enabled: boolean;
@@ -181,11 +181,8 @@ export default function EmailPanel() {
     };
 
     return (
-        <Rise className="space-y-3">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+        <Rise className="space-y-4">
+            <SettingsSection title={t("title")} description={t("subtitle")} />
 
             {error ? (
                 <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">

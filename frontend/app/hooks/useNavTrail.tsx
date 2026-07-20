@@ -46,6 +46,7 @@ const ROUTE_LABELS: readonly { prefix: string; key: string }[] = [
     { prefix: '/library/tags', key: 'navTags' },
     { prefix: '/library/files', key: 'navFiles' },
     { prefix: '/users', key: 'navUsers' },
+    { prefix: '/workflows', key: 'navWorkflows' },
     { prefix: '/settings', key: 'navSettings' },
     { prefix: '/admin/logs', key: 'navAuditLog' },
     { prefix: '/docs', key: 'navDocs' },

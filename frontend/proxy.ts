@@ -15,6 +15,7 @@ const PROTECTED_PREFIXES = [
     '/search',
     '/settings',
     '/users',
+    '/workflows',
 ];
 
 const SESSION_COOKIE = 'JSESSIONID';

@@ -82,7 +82,7 @@ type Selection = "trigger" | "condition" | `action-${number}`;
 
 const NODE_TYPES = { workflowStep: WorkflowNode };
 
-const LIST_URL = "/settings/workflows";
+const LIST_URL = "/workflows";
 
 /**
  * Full-page linear workflow editor over the existing rules engine. The single source of truth is
@@ -492,7 +492,7 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="relative grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
-                <div className="hidden h-[calc(100dvh-19rem)] min-h-[480px] overflow-hidden rounded-2xl border border-border bg-muted/20 lg:block">
+                <div className="hidden h-[calc(100dvh-13rem)] min-h-[480px] overflow-hidden rounded-2xl border border-border bg-muted/20 lg:block">
                     <ReactFlow
                         nodes={nodes}
                         edges={edges}
