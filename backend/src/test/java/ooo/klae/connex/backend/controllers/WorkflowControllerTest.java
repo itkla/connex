@@ -211,6 +211,43 @@ class WorkflowControllerTest {
 
     @Test
     @WithMockUser
+    void duplicateJsonFieldsAreRejectedBeforeControllerBinding() throws Exception {
+        mockMvc.perform(post("/api/workflows")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBody().replace(
+                    "\"name\":\"Workflow\",",
+                    "\"name\":\"Workflow\",\"name\":\"Shadow\",")))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Malformed request body"));
+        mockMvc.perform(post("/api/workflows")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBody().replace(
+                    "\"schemaVersion\":1,",
+                    "\"schemaVersion\":1,\"schemaVersion\":2,")))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Malformed request body"));
+        mockMvc.perform(put("/api/workflows/42/draft")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(draftBody().replace(
+                    "\"expectedRevision\":3,",
+                    "\"expectedRevision\":3,\"expectedRevision\":4,")))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Malformed request body"));
+        mockMvc.perform(post("/api/workflows/42/publish")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":3,\"expectedRevision\":4}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Malformed request body"));
+
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    @WithMockUser
     void domainErrorsMapToTheExisting400403404And409Contracts() throws Exception {
         when(workflowService.getById(42))
             .thenThrow(new ResourceNotFoundException("Workflow not found"));

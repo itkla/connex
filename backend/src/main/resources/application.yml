@@ -30,6 +30,8 @@ spring:
             resolve-lazily: true
     jackson:
         default-property-inclusion: non_null
+        read:
+            strict-duplicate-detection: true
 
 connex:
     audit:
