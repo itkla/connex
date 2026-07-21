@@ -141,7 +141,7 @@ function BarLink({
         >
             <Link
                 href={href}
-                aria-label={label}
+                aria-label={badge != null && badge > 0 && badgeLabel ? `${label}, ${badgeLabel}` : label}
                 aria-current={active ? 'page' : undefined}
                 className={cn(slotBase, active ? 'text-brand-dark dark:text-brand' : 'hover:text-foreground')}
             >
@@ -158,7 +158,6 @@ function BarLink({
                     )}
                 </span>
                 <span className={labelBase}>{caption}</span>
-                {badge != null && badge > 0 && badgeLabel && <span className="sr-only">{badgeLabel}</span>}
             </Link>
         </motion.div>
     );
@@ -166,33 +165,52 @@ function BarLink({
 
 function TaskBarLink({
     workspaceId,
+    enabled,
     pathname,
     label,
     active,
     reduce,
     formatBadgeLabel,
 }: {
-    workspaceId: number;
+    workspaceId: number | null;
+    enabled: boolean;
     pathname: string;
     label: string;
     active: boolean;
     reduce: boolean;
     formatBadgeLabel: (count: number) => string;
 }) {
-    const [attention, setAttention] = useState(0);
+    const [attention, setAttention] = useState<{ workspaceId: number; count: number } | null>(null);
 
     useEffect(() => {
+        if (!enabled || workspaceId === null) return;
+
         const controller = new AbortController();
-        getTaskSummary({}, {
-            signal: controller.signal,
-            headers: { 'X-Workspace-Id': String(workspaceId) },
-        })
+        const requestedWorkspaceId = workspaceId;
+        getTaskSummary(
+            {},
+            {
+                signal: controller.signal,
+                headers: { 'X-Workspace-Id': String(requestedWorkspaceId) },
+            },
+        )
             .then((summary) => {
-                if (!controller.signal.aborted) setAttention(summary.overdue + summary.dueSoon);
+                if (!controller.signal.aborted) {
+                    setAttention({
+                        workspaceId: requestedWorkspaceId,
+                        count: summary.overdue + summary.dueSoon,
+                    });
+                }
             })
-            .catch(() => {});
+            .catch(() => {
+                if (!controller.signal.aborted) {
+                    setAttention({ workspaceId: requestedWorkspaceId, count: 0 });
+                }
+            });
         return () => controller.abort();
-    }, [pathname, workspaceId]);
+    }, [enabled, pathname, workspaceId]);
+
+    const badge = enabled && attention?.workspaceId === workspaceId ? attention.count : 0;
 
     return (
         <BarLink
@@ -202,8 +220,8 @@ function TaskBarLink({
             Icon={CheckCircleIcon}
             active={active}
             reduce={reduce}
-            badge={attention}
-            badgeLabel={formatBadgeLabel(attention)}
+            badge={badge}
+            badgeLabel={formatBadgeLabel(badge)}
         />
     );
 }
@@ -398,26 +416,15 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     </span>
                 </motion.button>
 
-                {isMobile && !switching && activeWorkspaceId !== null ? (
-                    <TaskBarLink
-                        key={activeWorkspaceId}
-                        workspaceId={activeWorkspaceId}
-                        pathname={pathname}
-                        label={tNav('navTasks')}
-                        active={onTasks}
-                        reduce={reduce}
-                        formatBadgeLabel={(count) => t('tasksBadge', { count })}
-                    />
-                ) : (
-                    <BarLink
-                        href="/activity/tasks"
-                        label={tNav('navTasks')}
-                        caption={tNav('navTasks')}
-                        Icon={CheckCircleIcon}
-                        active={onTasks}
-                        reduce={reduce}
-                    />
-                )}
+                <TaskBarLink
+                    workspaceId={activeWorkspaceId}
+                    enabled={isMobile && !switching}
+                    pathname={pathname}
+                    label={tNav('navTasks')}
+                    active={onTasks}
+                    reduce={reduce}
+                    formatBadgeLabel={(count) => t('tasksBadge', { count })}
+                />
                 <BarButton
                     label={t('more')}
                     caption={t('more')}
