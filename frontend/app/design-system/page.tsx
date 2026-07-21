@@ -578,7 +578,7 @@ export default function DesignSystemPage() {
                   Command palette
                   <Badge
                     variant="ghost"
-                    className={cn("min-w-14 justify-center font-mono", !shortcutPlatform && "invisible")}
+                    className={cn("w-16 justify-center font-mono", !shortcutPlatform && "invisible")}
                   >
                     {formatShortcut("mod+k", shortcutPlatform ?? "other")}
                   </Badge>
