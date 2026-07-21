@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import {
     emitNotificationStateChanged,
@@ -104,11 +105,8 @@ export function NotificationProvider({
                                 snoozeExpiryTimerRef.current = null;
                             }
                             if (counts.nextSnoozeExpiry) {
-                                const normalized = counts.nextSnoozeExpiry.includes("T")
-                                    ? counts.nextSnoozeExpiry
-                                    : `${counts.nextSnoozeExpiry.replace(" ", "T")}Z`;
-                                const delay = Date.parse(normalized) - Date.now();
-                                if (Number.isFinite(delay)) {
+                                const delay = notificationSnoozeDelayMs(counts.nextSnoozeExpiry, counts.asOf);
+                                if (delay != null) {
                                     snoozeExpiryTimerRef.current = window.setTimeout(
                                         () => {
                                             snoozeExpiryDueRef.current = true;
