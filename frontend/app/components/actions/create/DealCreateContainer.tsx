@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -58,6 +58,15 @@ export default function DealCreateContainer({
     const [payload, setPayload] = useState<CreateDealPayload>(EMPTY_DRAFT);
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const closeTimerRef = useRef<number | null>(null);
+
+    const clearPendingClose = useCallback(() => {
+        if (closeTimerRef.current === null) return;
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+    }, []);
+
+    useEffect(() => () => clearPendingClose(), [clearPendingClose]);
 
     useEffect(() => {
         if (!open || loaded) return;
@@ -105,6 +114,7 @@ export default function DealCreateContainer({
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;
+        if (!next) clearPendingClose();
         onOpenChange(next);
     };
 
@@ -118,6 +128,7 @@ export default function DealCreateContainer({
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
     const createNewDeal = async () => {
+        clearPendingClose();
         setSucceeded(false);
         setCreating(true);
         try {
@@ -138,7 +149,9 @@ export default function DealCreateContainer({
             toastSuccess(t('feedback.dealCreated'));
             setCreating(false);
             setSucceeded(true);
-            setTimeout(() => {
+            closeTimerRef.current = window.setTimeout(() => {
+                closeTimerRef.current = null;
+                if (requestInit?.signal?.aborted) return;
                 onOpenChange(false);
                 router.refresh();
             }, 900);
