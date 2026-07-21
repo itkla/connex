@@ -33,6 +33,7 @@ export default function DealCreateContainer({
     defaults,
     embedded = false,
     onCancel,
+    requestInit,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -41,6 +42,7 @@ export default function DealCreateContainer({
     embedded?: boolean;
     /** Cancel handler for embedded mode — steps back to the launcher selector. */
     onCancel?: () => void;
+    requestInit?: RequestInit;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -61,15 +63,15 @@ export default function DealCreateContainer({
         if (!open || loaded) return;
         let cancelled = false;
         void (async () => {
-            const nextPipelines = await getPipelines().catch(() => [] as Pipeline[]);
-            if (cancelled) return;
+            const nextPipelines = await getPipelines(requestInit).catch(() => [] as Pipeline[]);
+            if (cancelled || requestInit?.signal?.aborted) return;
             setPipelines(nextPipelines);
             const entries = await Promise.all(
                 nextPipelines.map(
-                    async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const,
+                    async (p) => [p.id, await getStagesByPipelineId(p.id, requestInit).catch(() => [] as Stage[])] as const,
                 ),
             );
-            if (cancelled) return;
+            if (cancelled || requestInit?.signal?.aborted) return;
             const nextStages = Object.fromEntries(entries);
             setStagesByPipeline(nextStages);
             setLoaded(true);
@@ -83,7 +85,7 @@ export default function DealCreateContainer({
         return () => {
             cancelled = true;
         };
-    }, [open, loaded, defaults?.pipelineId]);
+    }, [open, loaded, defaults?.pipelineId, requestInit]);
 
     useEffect(() => {
         if (!open) return;
@@ -119,16 +121,20 @@ export default function DealCreateContainer({
         setSucceeded(false);
         setCreating(true);
         try {
-            await createDeal({
-                ...payload,
-                name: payload.name.trim(),
-                value: Number.isFinite(payload.value) ? payload.value : 0,
-                actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : 0,
-                currency: payload.currency.trim() || 'USD',
-                pipeline: payload.pipeline || null,
-                stage: payload.stage || null,
-                expectedCloseDate: payload.expectedCloseDate || undefined,
-            });
+            await createDeal(
+                {
+                    ...payload,
+                    name: payload.name.trim(),
+                    value: Number.isFinite(payload.value) ? payload.value : 0,
+                    actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : 0,
+                    currency: payload.currency.trim() || 'USD',
+                    pipeline: payload.pipeline || null,
+                    stage: payload.stage || null,
+                    expectedCloseDate: payload.expectedCloseDate || undefined,
+                },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             toastSuccess(t('feedback.dealCreated'));
             setCreating(false);
             setSucceeded(true);
@@ -137,6 +143,7 @@ export default function DealCreateContainer({
                 router.refresh();
             }, 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             setCreating(false);
             if (isFieldError(err)) throw err;
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));

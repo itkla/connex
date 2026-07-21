@@ -58,13 +58,14 @@ export type ImportDialogProps = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onImported: () => void;
+    requestInit?: RequestInit;
 };
 
 /**
  * Multi-step CSV import wizard: upload &amp; parse, map columns to Connex fields, review the
  * deduplicated plan, then commit. Parsing is client-side; the backend validates and deduplicates.
  */
-export default function ImportDialog({ entity, open, onOpenChange, onImported }: ImportDialogProps) {
+export default function ImportDialog({ entity, open, onOpenChange, onImported, requestInit }: ImportDialogProps) {
     const t = useTranslations('importExport');
     const reduceMotion = useReducedMotion();
     const [step, setStep] = useState<Step>('upload');
@@ -173,13 +174,19 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         if (!parsed) return;
         setBusy(true);
         try {
-            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links });
+            const data = await previewImport(
+                entity,
+                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             setPreview(data);
             setStep('review');
         } catch (error) {
+            if (requestInit?.signal?.aborted) return;
             toastError(firstFieldError(error, t('errorPreview')));
         } finally {
-            setBusy(false);
+            if (!requestInit?.signal?.aborted) setBusy(false);
         }
     }
 
@@ -187,12 +194,18 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         if (!parsed) return;
         setPreviewing(true);
         try {
-            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action, links: nextLinks });
+            const data = await previewImport(
+                entity,
+                { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action, links: nextLinks },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             setPreview(data);
         } catch (error) {
+            if (requestInit?.signal?.aborted) return;
             toastError(firstFieldError(error, t('errorPreview')));
         } finally {
-            setPreviewing(false);
+            if (!requestInit?.signal?.aborted) setPreviewing(false);
         }
     }
 
@@ -224,15 +237,21 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         if (!parsed) return;
         setBusy(true);
         try {
-            const data = await commitImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links });
+            const data = await commitImport(
+                entity,
+                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             setResult(data);
             setStep('done');
             toastSuccess(t('toastImported', { created: data.created, updated: data.updated }));
             onImported();
         } catch (error) {
+            if (requestInit?.signal?.aborted) return;
             toastError(firstFieldError(error, t('errorImport')));
         } finally {
-            setBusy(false);
+            if (!requestInit?.signal?.aborted) setBusy(false);
         }
     }
 
@@ -265,7 +284,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                         <MapStep parsed={parsed} entity={entity} columns={columns} setColumns={setColumns} mappedCount={mappedCount} />
                     )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} />
+                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
                     </motion.div>
@@ -470,6 +489,7 @@ function ReviewStep({
     linkLabels,
     onLink,
     onUnlink,
+    requestInit,
 }: {
     preview: ImportPreviewResult;
     onDuplicate: ImportDuplicateAction;
@@ -482,6 +502,7 @@ function ReviewStep({
     linkLabels: Record<number, string>;
     onLink: (rowIndex: number, recordId: number, label: string) => void;
     onUnlink: (rowIndex: number) => void;
+    requestInit?: RequestInit;
 }) {
     const t = useTranslations('importExport');
     const shown = preview.rows.filter((r) => r.status !== 'skip').slice(0, 100);
@@ -545,6 +566,7 @@ function ReviewStep({
                                                 linkedLabel={links[row.rowIndex] != null ? linkLabels[row.rowIndex] : undefined}
                                                 onLink={(id, label) => onLink(row.rowIndex, id, label)}
                                                 onClear={() => onUnlink(row.rowIndex)}
+                                                requestInit={requestInit}
                                             />
                                         </td>
                                     </tr>
@@ -563,11 +585,13 @@ function RowLinker({
     linkedLabel,
     onLink,
     onClear,
+    requestInit,
 }: {
     entity: ImportEntity;
     linkedLabel?: string;
     onLink: (recordId: number, label: string) => void;
     onClear: () => void;
+    requestInit?: RequestInit;
 }) {
     const t = useTranslations('importExport');
     const [open, setOpen] = useState(false);
@@ -580,7 +604,7 @@ function RowLinker({
         if (!open || q.length < 2) return;
         let active = true;
         const handle = setTimeout(() => {
-            search(q)
+            search(q, requestInit)
                 .then((r) => {
                     if (!active) return;
                     const items = entity === 'persons' ? r.people : entity === 'companies' ? r.companies : r.deals;
@@ -597,7 +621,7 @@ function RowLinker({
             active = false;
             clearTimeout(handle);
         };
-    }, [query, open, entity]);
+    }, [query, open, entity, requestInit]);
 
     if (linkedLabel) {
         return (

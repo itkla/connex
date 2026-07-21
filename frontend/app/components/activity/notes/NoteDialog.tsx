@@ -47,6 +47,7 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
     defaultContent?: string;
+    requestInit?: RequestInit;
 };
 
 export default function NoteDialog({
@@ -59,6 +60,7 @@ export default function NoteDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultContent = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityNotesDialog');
     const submittingRef = useRef(false);
@@ -93,6 +95,7 @@ export default function NoteDialog({
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
                         defaultContent={defaultContent}
+                        requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -115,6 +118,7 @@ type FormProps = {
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultContent: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (value: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -137,6 +141,7 @@ export function NoteDialogForm({
     defaultPerson,
     defaultDeal,
     defaultContent,
+    requestInit,
     onSubmittingChange,
     onDirtyChange,
     onCancel,
@@ -186,27 +191,37 @@ export function NoteDialogForm({
         onSubmittingChange(true);
         try {
             if (isEdit && note) {
-                await updateNote(note.id, {
-                    content: trimmed,
-                    title: note.title ?? null,
-                    author: note.author,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await updateNote(
+                    note.id,
+                    {
+                        content: trimmed,
+                        title: note.title ?? null,
+                        author: note.author,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastUpdated'));
             } else {
-                await createNote({
-                    content: trimmed,
-                    author: currentUserId,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await createNote(
+                    {
+                        content: trimmed,
+                        author: currentUserId,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -222,8 +237,10 @@ export function NoteDialogForm({
                 isEdit ? t('toastFailedSave') : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
