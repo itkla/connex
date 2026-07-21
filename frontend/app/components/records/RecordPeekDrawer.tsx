@@ -200,7 +200,12 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
                             {t('openFull')}
                         </Button>
                         {canLogActivity && logActivityAction && (
-                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.activity')} className="justify-start">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => runRecordAction('create.activity')}
+                                className="col-span-2 justify-start sm:col-span-1"
+                            >
                                 {LogActivityIcon && <LogActivityIcon className="size-4" />}
                                 {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
                             </Button>
@@ -218,7 +223,12 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
                             </Button>
                         )}
                         {canCopyLink && (
-                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('record.copy-link')} className="justify-start">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => runRecordAction('record.copy-link')}
+                                className={canLogActivity ? 'col-span-2 justify-start sm:col-span-1' : 'justify-start'}
+                            >
                                 <LinkIcon className="size-4" />
                                 {t('copyLink')}
                             </Button>
