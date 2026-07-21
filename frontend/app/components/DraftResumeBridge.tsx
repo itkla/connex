@@ -51,10 +51,11 @@ function isActivityDraftData(value: unknown): value is ActivityDraftData {
 export default function DraftResumeBridge() {
     const t = useTranslations('DraftResume');
     const { openOverlay, context } = useActions();
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, switching } = useWorkspace();
     const userId = context.user?.id ?? null;
 
     useEffect(() => {
+        if (switching) return;
         const drafts: StoredDraft<ActivityDraftData>[] = [];
         for (const stored of listFreshDrafts({ userId, workspaceId: activeWorkspaceId })) {
             if (stored.formType !== 'activity') continue;
@@ -101,7 +102,7 @@ export default function DraftResumeBridge() {
             window.clearTimeout(timer);
             for (const stored of drafts) toast.dismiss(stored.key);
         };
-    }, [openOverlay, t, userId, activeWorkspaceId]);
+    }, [openOverlay, t, userId, activeWorkspaceId, switching]);
 
     return null;
 }
