@@ -155,6 +155,10 @@
     "activityMessage": "You have an unfinished activity — resume it?",
     "activityMessageNamed": "Unfinished activity: “{label}” — resume it?",
     "taskMessageNamed": "Unfinished task: “{label}” — resume it?",
+    "resumeActivity": "Resume activity",
+    "discardActivity": "Discard activity",
+    "resumeTask": "Resume task",
+    "discardTask": "Discard task",
     "resume": "Resume",
     "discard": "Discard"
   },

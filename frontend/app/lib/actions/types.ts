@@ -89,7 +89,7 @@ export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft }
+    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraft?: boolean }
     | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft }
     | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
     | { kind: "create-company"; defaults?: CreateDefaults }

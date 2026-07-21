@@ -122,7 +122,7 @@ export default function DraftResumeBridge() {
                         id: stored.key,
                         duration: Infinity,
                         action: {
-                            label: t('resume'),
+                            label: t('resumeActivity'),
                             onClick: () => {
                                 if (!active) return;
                                 openOverlay({
@@ -134,7 +134,7 @@ export default function DraftResumeBridge() {
                             },
                         },
                         cancel: {
-                            label: t('discard'),
+                            label: t('discardActivity'),
                             onClick: () => {
                                 if (!active) return;
                                 clearDraft(stored.key);
@@ -149,15 +149,15 @@ export default function DraftResumeBridge() {
                         id: stored.key,
                         duration: Infinity,
                         action: {
-                            label: t('resume'),
+                            label: t('resumeTask'),
                             onClick: () => {
                                 if (!active) return;
-                                openOverlay({ kind: 'create-task', draft: data });
+                                openOverlay({ kind: 'create-task', draft: data, restoredDraft: true });
                                 toast.dismiss(stored.key);
                             },
                         },
                         cancel: {
-                            label: t('discard'),
+                            label: t('discardTask'),
                             onClick: () => {
                                 if (!active) return;
                                 clearDraft(stored.key);

@@ -63,6 +63,7 @@ type Props = {
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
 };
 
@@ -89,6 +90,7 @@ function ScopedTaskDialog({
     defaultDeal = null,
     defaultDueDate = '',
     defaultDescription = '',
+    ownsInitialDraft = false,
     requestInit,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
@@ -136,6 +138,7 @@ function ScopedTaskDialog({
                         defaultDeal={defaultDeal}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
+                        ownsInitialDraft={ownsInitialDraft}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
@@ -170,6 +173,7 @@ type TaskDialogFormProps = {
     defaultDeal: Deal | null;
     defaultDueDate: string;
     defaultDescription: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
@@ -199,6 +203,7 @@ export function TaskDialogForm({
     defaultDeal,
     defaultDueDate,
     defaultDescription,
+    ownsInitialDraft = false,
     requestInit,
     onSubmittingChange,
     onDirtyChange,
@@ -219,7 +224,8 @@ export function TaskDialogForm({
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
-    const ownsDraftRef = useRef(false);
+    const ownsDraftRef = useRef(ownsInitialDraft);
+    const hasChangedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [initial] = useState(() => ({
@@ -243,8 +249,13 @@ export function TaskDialogForm({
 
     useEffect(() => {
         const meaningful = description.trim().length > 0;
-        if (dirty && meaningful) ownsDraftRef.current = true;
-        if (!ownsDraftRef.current || succeeded) return;
+        if (dirty) hasChangedRef.current = true;
+        if (!hasChangedRef.current || succeeded) return;
+        if (meaningful) {
+            ownsDraftRef.current = true;
+        } else if (!ownsDraftRef.current) {
+            return;
+        }
         if (!meaningful) {
             onClearDraft?.();
             return;

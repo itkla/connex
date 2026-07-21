@@ -216,6 +216,7 @@ export default function ActionOverlayHost({
                         defaultDeal={taskDefaultDeal}
                         defaultDueDate={taskDraft?.dueDate ?? ""}
                         defaultDescription={taskDraft?.description ?? ""}
+                        ownsInitialDraft={rendered.request.restoredDraft === true}
                         requestInit={requestInit}
                     />
                 ) : null}
