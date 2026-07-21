@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import { clearDraft, draftKey, writeDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
+import {
+    clearDraft,
+    draftKey,
+    getDraftStoreGeneration,
+    writeDraft,
+    type DraftKeyParts,
+} from '@/app/lib/formDrafts';
 
 const DRAFT_DEBOUNCE_MS = 400;
 
@@ -12,6 +18,7 @@ type UseFormDraftOptions = {
 };
 
 type PendingDraft<T> = {
+    generation: number;
     key: string;
     version: number;
     scope: string;
@@ -60,20 +67,27 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
         if (pendingRef.current !== null) {
             const pending = pendingRef.current;
             pendingRef.current = null;
-            writeDraft(pending.key, pending);
+            if (pending.generation === getDraftStoreGeneration()) writeDraft(pending.key, pending);
         }
     }, []);
 
     const persist = useCallback(
         (snapshot: T) => {
-            pendingRef.current = { key, version, scope, formType, data: snapshot };
+            pendingRef.current = {
+                generation: getDraftStoreGeneration(),
+                key,
+                version,
+                scope,
+                formType,
+                data: snapshot,
+            };
             if (timerRef.current !== null) window.clearTimeout(timerRef.current);
             timerRef.current = window.setTimeout(() => {
                 timerRef.current = null;
                 if (pendingRef.current === null) return;
                 const pending = pendingRef.current;
                 pendingRef.current = null;
-                writeDraft(pending.key, pending);
+                if (pending.generation === getDraftStoreGeneration()) writeDraft(pending.key, pending);
             }, DRAFT_DEBOUNCE_MS);
         },
         [key, version, scope, formType],

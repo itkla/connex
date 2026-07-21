@@ -1,4 +1,5 @@
 const DRAFT_PREFIX = 'connex:draft:';
+let draftStoreGeneration = 0;
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -35,6 +36,11 @@ export type StoredDraft<T> = {
     savedAt: number;
     data: T;
 };
+
+/** Returns the current in-memory draft-store generation used to invalidate pending writes after logout. */
+export function getDraftStoreGeneration(): number {
+    return draftStoreGeneration;
+}
 
 /** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
 function ownerPrefix(userId: number | null, workspaceId: number | null): string {
@@ -208,6 +214,7 @@ export function listFreshDrafts(opts: {
 
 /** Removes every draft in the store. Call on logout so note/activity drafts never survive a re-login. */
 export function clearAllDrafts(): void {
+    draftStoreGeneration += 1;
     const store = safeSession();
     if (!store) return;
     let keys: string[] = [];
