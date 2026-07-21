@@ -47,9 +47,10 @@ public class LegacyWorkflowBackfillTransaction {
     public void backfillWorkspace(String catalog, int workspaceId) {
         List<BackfillCandidate> candidates = discover(catalog, workspaceId);
         int firstRuleId = candidates.isEmpty() ? 0 : candidates.getFirst().rule().getId();
-        TreeSet<Integer> lockedPrincipalIds = principalIds(candidates);
-        for (int userId : lockedPrincipalIds) {
-            if (userMapper.lockById(userId) == null) {
+        TreeSet<Integer> discoveredPrincipalIds = principalIds(candidates);
+        TreeSet<Integer> requiredPrincipalIds = requiredPrincipalIds(candidates);
+        for (int userId : discoveredPrincipalIds) {
+            if (userMapper.lockById(userId) == null && requiredPrincipalIds.contains(userId)) {
                 throw failure(catalog, workspaceId, firstRuleId);
             }
         }
@@ -60,7 +61,7 @@ public class LegacyWorkflowBackfillTransaction {
         lockVersions(catalog, workspaceId, candidates);
         Map<Integer, Rule> lockedRules = lockRules(catalog, workspaceId, candidates);
         requireLockedPrincipals(
-            catalog, workspaceId, candidates, lockedRules, lockedPrincipalIds);
+            catalog, workspaceId, candidates, lockedRules, discoveredPrincipalIds);
         for (BackfillCandidate candidate : candidates) {
             Rule rule = lockedRules.get(candidate.rule().getId());
             try {
@@ -313,7 +314,8 @@ public class LegacyWorkflowBackfillTransaction {
                 || active.getWorkspaceId() != source.getWorkspaceId()
                 || active.getWorkflowId() != workflow.getId()
                 || active.getVersionNumber() <= 0
-                || !Objects.equals(workflow.getCreatedById(), active.getCreatedById())) {
+                || !redactedPrincipalMatches(
+                    workflow.getCreatedById(), active.getCreatedById(), !workflow.isEnabled())) {
             throw new IllegalStateException();
         }
         CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
@@ -348,7 +350,7 @@ public class LegacyWorkflowBackfillTransaction {
         if (!runtimeEquivalent(active, projection)) {
             throw new IllegalStateException();
         }
-        requireSourceEquivalent(source, projection);
+        requireSourceEquivalent(source, projection, !workflow.isEnabled());
     }
 
     private boolean runtimeEquivalent(WorkflowVersion active, Rule expected) {
@@ -371,6 +373,11 @@ public class LegacyWorkflowBackfillTransaction {
     }
 
     private void requireSourceEquivalent(Rule source, Rule projection) {
+        requireSourceEquivalent(source, projection, false);
+    }
+
+    private void requireSourceEquivalent(
+            Rule source, Rule projection, boolean allowRedactedPrincipals) {
         if (source.getId() != projection.getId()
                 || source.getWorkspaceId() != projection.getWorkspaceId()
                 || !Objects.equals(source.getName(), projection.getName())
@@ -379,8 +386,14 @@ public class LegacyWorkflowBackfillTransaction {
                 || !Objects.equals(source.getRecordType(), projection.getRecordType())
                 || !Objects.equals(source.getTriggerType(), projection.getTriggerType())
                 || !Objects.equals(source.getExecutionMode(), projection.getExecutionMode())
-                || !Objects.equals(source.getRunAsUserId(), projection.getRunAsUserId())
-                || !Objects.equals(source.getCreatedById(), projection.getCreatedById())
+                || !redactedPrincipalMatches(
+                    source.getRunAsUserId(),
+                    projection.getRunAsUserId(),
+                    allowRedactedPrincipals)
+                || !redactedPrincipalMatches(
+                    source.getCreatedById(),
+                    projection.getCreatedById(),
+                    allowRedactedPrincipals)
                 || !definitionsEquivalent(
                     source.getTriggerConfig(),
                     source.getConditionJson(),
@@ -390,6 +403,12 @@ public class LegacyWorkflowBackfillTransaction {
                     projection.getActionsJson())) {
             throw new IllegalStateException();
         }
+    }
+
+    private static boolean redactedPrincipalMatches(
+            Integer mutableId, Integer immutableId, boolean allowRedactedPrincipal) {
+        return Objects.equals(mutableId, immutableId)
+            || allowRedactedPrincipal && mutableId == null;
     }
 
     private boolean definitionsEquivalent(
@@ -453,6 +472,16 @@ public class LegacyWorkflowBackfillTransaction {
             addPrincipal(ids, candidate.rule().getRunAsUserId());
             addWorkflowPrincipals(ids, candidate.workflow());
             addVersionPrincipals(ids, candidate.version());
+        }
+        return ids;
+    }
+
+    private static TreeSet<Integer> requiredPrincipalIds(List<BackfillCandidate> candidates) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        for (BackfillCandidate candidate : candidates) {
+            addPrincipal(ids, candidate.rule().getCreatedById());
+            addPrincipal(ids, candidate.rule().getRunAsUserId());
+            addWorkflowPrincipals(ids, candidate.workflow());
         }
         return ids;
     }

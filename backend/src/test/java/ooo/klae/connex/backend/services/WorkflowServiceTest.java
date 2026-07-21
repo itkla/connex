@@ -590,6 +590,62 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void userPublishAllowsMissingImmutableAttributionWithAnActiveRunAs() {
+        PublishedPair pair = publishedPair("Workflow", false, 4, "user", 55, 88L);
+        pair.workflow().setName("Recovered");
+        pair.workflow().setCreatedById(null);
+        pair.version().setCreatedById(66);
+        pair.version().setPublishedById(67);
+        pair.rule().setCreatedById(null);
+        stubPublishedMutation(pair, pair.version(), true);
+        when(principalLockService.lockUserMutation(
+                7, 41, Set.of(41, 55, 66, 67), Set.of(55)))
+            .thenReturn(principals(Set.of(41, 55, 66, 67), Set.of(41, 55)));
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(99L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(ruleMapper.update(any(Rule.class))).thenReturn(1);
+        when(workflowMapper.advancePublication(7, 101, 77, 88L, 99L, 41, 3)).thenReturn(1);
+
+        var published = service.publish(101, publishRequest(3));
+
+        assertEquals(99L, published.activeVersionId());
+        ArgumentCaptor<Rule> rule = ArgumentCaptor.forClass(Rule.class);
+        ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
+        verify(ruleMapper).update(rule.capture());
+        verify(workflowVersionMapper).insert(version.capture());
+        assertEquals("user", rule.getValue().getExecutionMode());
+        assertEquals(55, rule.getValue().getRunAsUserId());
+        assertNull(rule.getValue().getCreatedById());
+        assertEquals("user", version.getValue().getExecutionMode());
+        assertEquals(55, version.getValue().getRunAsUserId());
+        assertNull(version.getValue().getCreatedById());
+        assertEquals(41, version.getValue().getPublishedById());
+    }
+
+    @Test
+    void userEnableAllowsRedactedCreatorAndMissingPublisherWithAnActiveRunAs() {
+        PublishedPair pair = publishedPair("Workflow", false, 4, "user", 55, 88L);
+        pair.workflow().setCreatedById(null);
+        pair.version().setCreatedById(66);
+        pair.version().setPublishedById(67);
+        pair.rule().setCreatedById(null);
+        stubPublishedMutation(pair, null, false);
+        when(principalLockService.lockUserMutation(
+                7, 41, Set.of(41, 55, 66, 67), Set.of(55)))
+            .thenReturn(principals(Set.of(41, 55, 66, 67), Set.of(41, 55)));
+        when(ruleMapper.updateEnabled(7, 77, true)).thenReturn(1);
+        when(workflowMapper.updateLifecycle(7, 101, true, 41)).thenReturn(1);
+
+        var enabled = service.enable(101);
+
+        assertTrue(enabled.enabled());
+        verify(ruleMapper).updateEnabled(7, 77, true);
+        verify(workflowMapper).updateLifecycle(7, 101, true, 41);
+    }
+
+    @Test
     void enableAndDisableSynchronizeBothStatesAndAuditOnlyChanges() {
         PublishedPair disabled = publishedPair("Workflow", false, 4);
         stubPublishedMutation(disabled, null, false);

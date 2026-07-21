@@ -115,8 +115,11 @@ public class LegacyRuleWorkflowService {
         }
         principals.requirePermissions(requiredPermissions);
 
+        boolean allowBrokenPrincipals = !discovery.workflow().isEnabled()
+            && !discovery.rule().isEnabled();
         LockedAggregate aggregate = lockAggregate(discovery, principals, false);
-        Rule currentProjection = requireConsistentPublished(aggregate);
+        Rule currentProjection = requireConsistentPublished(
+            aggregate, allowBrokenPrincipals);
         Integer runAsUserId = requestedRunAs(aggregate.activeVersion(), executionMode);
         if (!Objects.equals(discoveredRunAs, runAsUserId)) {
             throw new ConflictException("Rule execution identity changed during authorization");
@@ -251,18 +254,21 @@ public class LegacyRuleWorkflowService {
         if (!sameRule(expectedRule, rule)) {
             throw new ConflictException("Rule changed during authorization");
         }
-        TreeSet<Integer> currentPrincipalIds = principalIds(rule, workflow, versions.values());
+        TreeSet<Integer> mutablePrincipalIds = mutablePrincipalIds(rule, workflow);
+        TreeSet<Integer> immutablePrincipalIds = versionPrincipalIds(versions.values());
+        principals.requireDiscoveredReferences(immutablePrincipalIds);
         if (allowMissingPrincipals) {
-            principals.requireDiscoveredReferences(currentPrincipalIds);
+            principals.requireDiscoveredReferences(mutablePrincipalIds);
         } else {
-            principals.requireCurrentReferences(currentPrincipalIds);
+            principals.requireCurrentReferences(mutablePrincipalIds);
         }
         WorkflowVersion active = versions.get(workflow.getActiveVersionId());
         return new LockedAggregate(
             rule, workflow, Collections.unmodifiableMap(new LinkedHashMap<>(versions)), active);
     }
 
-    private Rule requireConsistentPublished(LockedAggregate aggregate) {
+    private Rule requireConsistentPublished(
+            LockedAggregate aggregate, boolean allowBrokenPrincipals) {
         Workflow workflow = aggregate.workflow();
         WorkflowVersion active = aggregate.activeVersion();
         Rule rule = aggregate.rule();
@@ -273,7 +279,10 @@ public class LegacyRuleWorkflowService {
                 || active.getWorkflowId() != workflow.getId()
                 || active.getVersionNumber() <= 0
                 || !Objects.equals(workflow.getLegacyRuleId(), rule.getId())
-                || !Objects.equals(workflow.getCreatedById(), active.getCreatedById())) {
+                || !redactedPrincipalMatches(
+                    workflow.getCreatedById(),
+                    active.getCreatedById(),
+                    allowBrokenPrincipals)) {
             throw inconsistentAggregate();
         }
         CanonicalDraft canonical;
@@ -312,7 +321,10 @@ public class LegacyRuleWorkflowService {
             throw inconsistentAggregate();
         }
         try {
-            if (!versionMatches(active, projection) || !ruleMatches(rule, projection)) {
+            if (!versionMatches(active, projection)
+                    || !(allowBrokenPrincipals
+                        ? ruleMatchesRedactedPrincipals(rule, projection)
+                        : ruleMatches(rule, projection))) {
                 throw inconsistentAggregate();
             }
         } catch (BadRequestException exception) {
@@ -518,10 +530,35 @@ public class LegacyRuleWorkflowService {
     }
 
     private boolean ruleMatches(Rule rule, Rule projection) {
+        return ruleMatchesIgnoringPrincipals(rule, projection)
+            && Objects.equals(rule.getRunAsUserId(), projection.getRunAsUserId())
+            && Objects.equals(rule.getCreatedById(), projection.getCreatedById());
+    }
+
+    private boolean ruleMatchesIgnoringPrincipals(Rule rule, Rule projection) {
         return rule.getId() == projection.getId()
             && rule.getWorkspaceId() == projection.getWorkspaceId()
             && rule.isEnabled() == projection.isEnabled()
-            && semanticallyEquivalent(rule, projection);
+            && Objects.equals(rule.getName(), projection.getName())
+            && Objects.equals(rule.getDescription(), projection.getDescription())
+            && Objects.equals(rule.getRecordType(), projection.getRecordType())
+            && Objects.equals(rule.getTriggerType(), projection.getTriggerType())
+            && Objects.equals(rule.getExecutionMode(), projection.getExecutionMode())
+            && definitionsEquivalent(rule, projection);
+    }
+
+    private boolean ruleMatchesRedactedPrincipals(Rule rule, Rule projection) {
+        return ruleMatchesIgnoringPrincipals(rule, projection)
+            && redactedPrincipalMatches(
+                rule.getRunAsUserId(), projection.getRunAsUserId(), true)
+            && redactedPrincipalMatches(
+                rule.getCreatedById(), projection.getCreatedById(), true);
+    }
+
+    private static boolean redactedPrincipalMatches(
+            Integer mutableId, Integer immutableId, boolean allowRedactedPrincipal) {
+        return Objects.equals(mutableId, immutableId)
+            || allowRedactedPrincipal && mutableId == null;
     }
 
     private boolean definitionsEquivalent(WorkflowVersion version, Rule rule) {
@@ -679,6 +716,27 @@ public class LegacyRuleWorkflowService {
         addPrincipal(ids, workflow.getCreatedById());
         addPrincipal(ids, workflow.getUpdatedById());
         addPrincipal(ids, workflow.getDraftRunAsUserId());
+        for (WorkflowVersion version : versions) {
+            addPrincipal(ids, version.getCreatedById());
+            addPrincipal(ids, version.getPublishedById());
+            addPrincipal(ids, version.getRunAsUserId());
+        }
+        return ids;
+    }
+
+    private static TreeSet<Integer> mutablePrincipalIds(Rule rule, Workflow workflow) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        addPrincipal(ids, rule.getCreatedById());
+        addPrincipal(ids, rule.getRunAsUserId());
+        addPrincipal(ids, workflow.getCreatedById());
+        addPrincipal(ids, workflow.getUpdatedById());
+        addPrincipal(ids, workflow.getDraftRunAsUserId());
+        return ids;
+    }
+
+    private static TreeSet<Integer> versionPrincipalIds(
+            Collection<WorkflowVersion> versions) {
+        TreeSet<Integer> ids = new TreeSet<>();
         for (WorkflowVersion version : versions) {
             addPrincipal(ids, version.getCreatedById());
             addPrincipal(ids, version.getPublishedById());

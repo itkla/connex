@@ -247,12 +247,18 @@ public class WorkflowService {
         }
         Rule projection = project(workflow, draft);
         principals.requirePermissions(validateProjectionForMutation(projection));
+        boolean allowBrokenPrincipals = !workflow.isEnabled();
+        PrincipalMatchPolicy principalMatchPolicy = allowBrokenPrincipals
+            ? PrincipalMatchPolicy.REDACTED_ALL
+            : PrincipalMatchPolicy.STRICT;
         LockedVersionState lockedVersions = lockDiscoveredVersions(
-            workflow, discovery, principals, false);
-        Rule linkedRule = lockDiscoveredRule(workflow, discovery, principals, false);
+            workflow, discovery, principals);
+        Rule linkedRule = lockDiscoveredRule(
+            workflow, discovery, principals, allowBrokenPrincipals);
         PublishedState current = workflow.getActiveVersionId() == null
             ? requireUnpublishedState(workflow, lockedVersions.latest())
-            : requirePublishedState(workflow, lockedVersions.active(), linkedRule, false);
+            : requirePublishedState(
+                workflow, lockedVersions.active(), linkedRule, principalMatchPolicy);
         if (current != null && materiallyEquivalent(current.version(), projection, draft)) {
             return toDto(workflow, draft);
         }
@@ -364,7 +370,13 @@ public class WorkflowService {
         }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
-        if (enabled) {
+        PrincipalMatchPolicy principalMatchPolicy = !enabled
+            ? PrincipalMatchPolicy.IGNORE
+            : "user".equals(executionMode)
+                ? PrincipalMatchPolicy.REDACTED_CREATOR
+                : PrincipalMatchPolicy.STRICT;
+        boolean allowBrokenPrincipals = principalMatchPolicy != PrincipalMatchPolicy.STRICT;
+        if (!allowBrokenPrincipals) {
             principals.requireCurrentReferences(workflowPrincipalIds(workflow));
         } else {
             principals.requireDiscoveredReferences(workflowPrincipalIds(workflow));
@@ -376,10 +388,11 @@ public class WorkflowService {
             return toDto(workflow);
         }
         LockedVersionState versions = lockDiscoveredVersions(
-            workflow, discovery, principals, !enabled);
-        Rule linkedRule = lockDiscoveredRule(workflow, discovery, principals, !enabled);
+            workflow, discovery, principals);
+        Rule linkedRule = lockDiscoveredRule(
+            workflow, discovery, principals, allowBrokenPrincipals);
         PublishedState state = requirePublishedState(
-            workflow, versions.active(), linkedRule, !enabled);
+            workflow, versions.active(), linkedRule, principalMatchPolicy);
         if (workflow.isEnabled() == enabled) {
             return toDto(workflow);
         }
@@ -416,7 +429,7 @@ public class WorkflowService {
             Workflow workflow,
             WorkflowVersion active,
             Rule linked,
-            boolean allowBrokenPrincipals) {
+            PrincipalMatchPolicy principalMatchPolicy) {
         Long activeVersionId = workflow.getActiveVersionId();
         Integer legacyRuleId = workflow.getLegacyRuleId();
         if (activeVersionId == null || legacyRuleId == null) {
@@ -452,9 +465,7 @@ public class WorkflowService {
             throw inconsistentWorkflow();
         }
         if (linked == null
-                || !(allowBrokenPrincipals
-                    ? ruleMatchesProjectionIgnoringPrincipals(linked, projection)
-                    : ruleMatchesProjection(linked, projection))) {
+                || !ruleMatchesProjection(linked, projection, principalMatchPolicy)) {
             throw inconsistentWorkflow();
         }
         return new PublishedState(active, linked);
@@ -636,8 +647,7 @@ public class WorkflowService {
     private LockedVersionState lockDiscoveredVersions(
             Workflow workflow,
             MutationDiscovery discovery,
-            LockedPrincipals principals,
-            boolean allowMissingPrincipals) {
+            LockedPrincipals principals) {
         if (workflow.getActiveVersionId() != null
                 && !discovery.versions().containsKey(workflow.getActiveVersionId())) {
             throw new ConflictException("Workflow version state changed during authorization");
@@ -652,11 +662,7 @@ public class WorkflowService {
                     || current.getId() != versionId) {
                 throw inconsistentWorkflow();
             }
-            if (allowMissingPrincipals) {
-                principals.requireDiscoveredReferences(versionPrincipalIds(current));
-            } else {
-                principals.requireCurrentReferences(versionPrincipalIds(current));
-            }
+            principals.requireDiscoveredReferences(versionPrincipalIds(current));
             locked.put(versionId, current);
         }
         WorkflowVersion active = workflow.getActiveVersionId() == null
@@ -800,6 +806,27 @@ public class WorkflowService {
         return ruleMatchesProjectionIgnoringPrincipals(rule, projection)
             && Objects.equals(rule.getRunAsUserId(), projection.getRunAsUserId())
             && Objects.equals(rule.getCreatedById(), projection.getCreatedById());
+    }
+
+    private boolean ruleMatchesProjection(
+            Rule rule, Rule projection, PrincipalMatchPolicy principalMatchPolicy) {
+        return switch (principalMatchPolicy) {
+            case STRICT -> ruleMatchesProjection(rule, projection);
+            case REDACTED_CREATOR -> ruleMatchesProjectionIgnoringPrincipals(rule, projection)
+                && Objects.equals(rule.getRunAsUserId(), projection.getRunAsUserId())
+                && redactedPrincipalMatches(
+                    rule.getCreatedById(), projection.getCreatedById());
+            case REDACTED_ALL -> ruleMatchesProjectionIgnoringPrincipals(rule, projection)
+                && redactedPrincipalMatches(
+                    rule.getRunAsUserId(), projection.getRunAsUserId())
+                && redactedPrincipalMatches(
+                    rule.getCreatedById(), projection.getCreatedById());
+            case IGNORE -> ruleMatchesProjectionIgnoringPrincipals(rule, projection);
+        };
+    }
+
+    private static boolean redactedPrincipalMatches(Integer mutableId, Integer immutableId) {
+        return mutableId == null || Objects.equals(mutableId, immutableId);
     }
 
     private boolean ruleMatchesProjectionIgnoringPrincipals(Rule rule, Rule projection) {
@@ -957,4 +984,11 @@ public class WorkflowService {
         WorkflowVersion latest) { }
 
     private record PublishedState(WorkflowVersion version, Rule rule) { }
+
+    private enum PrincipalMatchPolicy {
+        STRICT,
+        REDACTED_CREATOR,
+        REDACTED_ALL,
+        IGNORE
+    }
 }

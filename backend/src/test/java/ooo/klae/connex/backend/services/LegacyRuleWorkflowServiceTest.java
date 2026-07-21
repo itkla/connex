@@ -270,6 +270,45 @@ class LegacyRuleWorkflowServiceTest {
     }
 
     @Test
+    void userUpdateAllowsMissingImmutableAttributionWithAnActiveRunAs() {
+        PersistedAggregate aggregate = persistedAggregate(false);
+        aggregate.rule().setCreatedById(null);
+        aggregate.rule().setRunAsUserId(3);
+        aggregate.workflow().setCreatedById(null);
+        aggregate.workflow().setUpdatedById(null);
+        aggregate.workflow().setDraftRunAsUserId(3);
+        aggregate.version().setRunAsUserId(3);
+        stubAggregate(aggregate);
+        when(principalLockService.lockUserMutation(
+                7, 9, Set.of(1, 2, 3), Set.of(3)))
+            .thenReturn(new LockedPrincipals(Set.of(1, 2, 3, 9), Set.of(3, 9)));
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(303L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(ruleMapper.update(any(Rule.class))).thenReturn(1);
+        when(workflowMapper.replaceLegacyPublication(
+                any(Workflow.class), eq(303L), eq(23), eq(202L), eq(4)))
+            .thenReturn(1);
+
+        service.update(7, 9, 23, request("Recovered", true, "user", "deal.won"));
+
+        ArgumentCaptor<Rule> rule = ArgumentCaptor.forClass(Rule.class);
+        ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
+        verify(ruleMapper).update(rule.capture());
+        verify(workflowVersionMapper).insert(version.capture());
+        assertEquals("user", rule.getValue().getExecutionMode());
+        assertNull(rule.getValue().getCreatedById());
+        assertEquals(3, rule.getValue().getRunAsUserId());
+        assertEquals("user", version.getValue().getExecutionMode());
+        assertNull(version.getValue().getCreatedById());
+        assertEquals(3, version.getValue().getRunAsUserId());
+        assertEquals(9, version.getValue().getPublishedById());
+        assertEquals(1, aggregate.version().getCreatedById());
+        assertEquals(3, aggregate.version().getRunAsUserId());
+    }
+
+    @Test
     void deleteUnlinksWorkflowBeforeCascadingVersionsAndRuleExecutions() {
         PersistedAggregate aggregate = persistedAggregate(false);
         stubAggregate(aggregate);

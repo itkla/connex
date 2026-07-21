@@ -255,6 +255,44 @@ class LegacyWorkflowBackfillTransactionTest {
     }
 
     @Test
+    void rerunAcceptsDisabledOffboardingRedactionAndMissingAttributionRoots() {
+        Rule rule = rule("user", false);
+        PersistedPair pair = pair(rule, 4);
+        rule.setCreatedById(null);
+        rule.setRunAsUserId(null);
+        pair.workflow().setCreatedById(null);
+        pair.workflow().setDraftRunAsUserId(null);
+        pair.version().setPublishedById(88);
+        rules(7, rule);
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
+        when(userMapper.lockById(41)).thenReturn(null);
+        when(userMapper.lockById(88)).thenReturn(null);
+        when(userMapper.lockById(999)).thenReturn(null);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(workflowMapper, never()).updateActiveVersion(eq(7), eq(101), any(), any());
+    }
+
+    @Test
+    void enabledUserBackfillRejectsAMissingOperationalRunAsRoot() {
+        Rule rule = rule("user", true);
+        rules(7, rule);
+        when(userMapper.lockById(999)).thenReturn(null);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
     void locksSortedPrincipalsWorkspaceWorkflowVersionAndRuleBeforeVerification() {
         Rule rule = rule("user", true);
         PersistedPair pair = pair(rule, 4);
