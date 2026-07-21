@@ -191,7 +191,8 @@ export default function DraftResumeBridge() {
         function refreshActivityToast(stored: StoredDraft<ActivityDraftData>) {
             const keyGeneration = getDraftKeyGeneration(stored.key);
             const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
-            const delay = current && !sameActivityDraft(current, stored) ? 0 : DRAFT_DEBOUNCE_MS;
+            const delay =
+                current && !sameActivityDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
             deferRefresh(() => {
                 const latestGeneration = getDraftKeyGeneration(stored.key);
                 if (latestGeneration !== keyGeneration) {
@@ -258,7 +259,7 @@ export default function DraftResumeBridge() {
         function refreshTaskToast(stored: StoredDraft<TaskDraftData>) {
             const keyGeneration = getDraftKeyGeneration(stored.key);
             const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
-            const delay = current && !sameTaskDraft(current, stored) ? 0 : DRAFT_DEBOUNCE_MS;
+            const delay = current && !sameTaskDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
             deferRefresh(() => {
                 const latestGeneration = getDraftKeyGeneration(stored.key);
                 if (latestGeneration !== keyGeneration) {
