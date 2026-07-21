@@ -12,6 +12,7 @@ import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortc
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
+import { formatShortcut, resolveShortcutPlatform, type ShortcutPlatform } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
@@ -21,8 +22,6 @@ const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 250;
 
 const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate', 'workspace'];
-
-const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
 
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
@@ -35,12 +34,18 @@ const PILL_INPUT =
 
 type Mode = 'inline' | 'palette';
 type ScopedResults = { query: string; data: SearchResults };
+type ShortcutPlatformSnapshot = ShortcutPlatform | null;
 
-function formatShortcut(chord: string): string {
-    return chord
-        .split('+')
-        .map((part) => SHORTCUT_GLYPHS[part] ?? part.toUpperCase())
-        .join('');
+function subscribeToShortcutPlatform(): () => void {
+    return () => {};
+}
+
+function shortcutPlatformSnapshot(): ShortcutPlatformSnapshot {
+    return resolveShortcutPlatform(navigator.platform);
+}
+
+function shortcutPlatformServerSnapshot(): ShortcutPlatformSnapshot {
+    return null;
 }
 
 function actionLabel(action: AppAction, t: (key: string) => string): string {
@@ -101,6 +106,11 @@ export default function GlobalSearch() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
+    const shortcutPlatform = useSyncExternalStore(
+        subscribeToShortcutPlatform,
+        shortcutPlatformSnapshot,
+        shortcutPlatformServerSnapshot,
+    );
     const currentViewport = useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => '0:0:0:0');
     const [viewportOffsetLeft, viewportOffsetTop, currentViewportWidth, currentViewportHeight] = currentViewport.split(':').map(Number);
     const reduceMotion = useReducedMotion() ?? false;
@@ -519,7 +529,9 @@ export default function GlobalSearch() {
                                                                     </span>
                                                                 ) : null}
                                                             </span>
-                                                            {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
+                                                            {action.shortcut && shortcutPlatform ? (
+                                                                <CommandShortcut>{formatShortcut(action.shortcut, shortcutPlatform)}</CommandShortcut>
+                                                            ) : null}
                                                         </CommandItem>
                                                     );
                                                 })}
