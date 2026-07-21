@@ -3024,6 +3024,10 @@ export function getRuleById(id: number, init: RequestInit = {}) {
     return getJson<Types.Rule>(`/api/rules/${id}`, init);
 }
 
+export function getRuleExecutions(id: number, init: RequestInit = {}) {
+    return getJson<Types.RuleExecution[]>(`/api/rules/${id}/executions`, { cache: "no-store", ...init });
+}
+
 export function deleteRule(id: number) {
     return deleteJson<void>(`/api/rules/${id}`);
 }

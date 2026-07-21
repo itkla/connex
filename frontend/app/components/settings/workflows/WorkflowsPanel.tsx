@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BoltIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { BoltIcon, ClockIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 
 import type { Rule } from "@/app/lib/types";
 import { deleteRule, getRules, updateRule } from "@/app/lib/api";
@@ -23,6 +23,7 @@ import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { ruleSummary, ruleToRequest } from "@/app/components/settings/RulesPanel";
+import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
 
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
@@ -43,7 +44,10 @@ export default function WorkflowsPanel() {
     const [loading, setLoading] = useState(true);
     const [accessDenied, setAccessDenied] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Rule | null>(null);
+    const [runsTarget, setRunsTarget] = useState<{ workspaceId: number; rule: Rule } | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+
+    const runsRule = runsTarget?.workspaceId === activeWorkspaceId ? runsTarget.rule : null;
 
     useEffect(() => {
         if (!activeWorkspaceId) return;
@@ -190,6 +194,15 @@ export default function WorkflowsPanel() {
                                         <PencilSquareIcon className="size-4" />
                                         {t("edit")}
                                     </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            if (activeWorkspaceId == null) return;
+                                            requestAnimationFrame(() => setRunsTarget({ workspaceId: activeWorkspaceId, rule }));
+                                        }}
+                                    >
+                                        <ClockIcon className="size-4" />
+                                        {tw("runs.view")}
+                                    </DropdownMenuItem>
                                     <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(rule)}>
                                         <TrashIcon className="size-4" />
                                         {t("delete")}
@@ -200,6 +213,17 @@ export default function WorkflowsPanel() {
                     ))}
                 </ul>
             )}
+
+            {runsRule && activeWorkspaceId != null ? (
+                <WorkflowRunsDialog
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setRunsTarget(null);
+                    }}
+                    rule={runsRule}
+                    workspaceId={activeWorkspaceId}
+                />
+            ) : null}
 
             <DeleteRecordDialog
                 open={removeTarget !== null}

@@ -2587,6 +2587,19 @@ export type RulePreview = {
     sample: RuleRecordLabel[];
 };
 
+/** Current lifecycle states emitted by the legacy rule execution engine. */
+export type RuleExecutionStatus = "running" | "matched" | "partial" | "skipped" | "failed";
+
+/** A bounded recent execution returned by the rule audit-log endpoint. */
+export type RuleExecution = {
+    id: number;
+    triggerEntityType: string | null;
+    triggerEntityId: number | null;
+    status: RuleExecutionStatus;
+    dedupeKey: string;
+    executedAt: string;
+};
+
 export type Rule = {
     id: number;
     name: string;

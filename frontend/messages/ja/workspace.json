@@ -345,7 +345,30 @@
     "saveFailed": "ワークフローを保存できませんでした",
     "notFound": "このワークフローは存在しないか、削除されました。",
     "backToList": "ワークフロー一覧へ戻る",
-    "save": "保存"
+    "save": "保存",
+    "runs": {
+      "view": "実行履歴を表示",
+      "title": "最近の実行履歴",
+      "description": "{name} の最新50件の実行を確認できます。",
+      "emptyTitle": "実行履歴はまだありません",
+      "emptyBody": "このワークフローの実行はまだ記録されていません。",
+      "errorTitle": "実行履歴を読み込めませんでした",
+      "errorBody": "もう一度試して、最近の実行履歴を読み込んでください。",
+      "retry": "再試行",
+      "close": "閉じる",
+      "targetLabel": "対象",
+      "dedupeLabel": "重複排除キー",
+      "scheduledTarget": "定期評価",
+      "recordFallback": "レコード",
+      "target": "{record} #{id}",
+      "status": {
+        "running": "実行中",
+        "matched": "完了",
+        "partial": "一部完了",
+        "skipped": "スキップ",
+        "failed": "失敗"
+      }
+    }
   },
   "WorkspaceCustomFields": {
     "newField": "フィールドを追加",
