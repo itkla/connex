@@ -97,14 +97,42 @@ public class RuleDefinitionValidator {
         requireCurrentPermissions(required);
     }
 
+    void validateWorkflowDefinition(
+            String recordTypeValue,
+            RuleTrigger trigger,
+            List<SegmentDefinition> conditions,
+            List<RuleAction> actions,
+            String executionMode) {
+        Set<Permission> required = validateWorkflowDefinitionForMutation(
+            recordTypeValue, trigger, conditions, actions, executionMode);
+        requireCurrentSystemRole(executionMode);
+        requireCurrentPermissions(required);
+    }
+
     Set<Permission> validateDefinitionForMutation(
             String recordTypeValue,
             RuleTrigger trigger,
             SegmentDefinition condition,
             List<RuleAction> actions,
             String executionMode) {
+        List<SegmentDefinition> conditions = condition == null
+            ? List.of()
+            : List.of(condition);
+        return validateWorkflowDefinitionForMutation(
+            recordTypeValue, trigger, conditions, actions, executionMode);
+    }
+
+    Set<Permission> validateWorkflowDefinitionForMutation(
+            String recordTypeValue,
+            RuleTrigger trigger,
+            List<SegmentDefinition> conditions,
+            List<RuleAction> actions,
+            String executionMode) {
         if (trigger == null) {
             throw new BadRequestException("Rule trigger is required");
+        }
+        if (conditions == null || conditions.stream().anyMatch(condition -> condition == null)) {
+            throw new BadRequestException("Workflow condition config is required");
         }
         if (actions == null || actions.isEmpty() || actions.size() > 16) {
             throw new BadRequestException("A rule requires between 1 and 16 actions");
@@ -113,9 +141,7 @@ public class RuleDefinitionValidator {
             throw new BadRequestException("Rule action config is required");
         }
         requireStructurallyValid(trigger);
-        if (condition != null) {
-            requireStructurallyValid(condition);
-        }
+        conditions.forEach(this::requireStructurallyValid);
         actions.forEach(this::requireStructurallyValid);
 
         String recordType = normalize(recordTypeValue);
@@ -126,16 +152,16 @@ public class RuleDefinitionValidator {
         if (!EXECUTION_MODES.contains(mode)) {
             throw new BadRequestException("Invalid execution mode: " + executionMode);
         }
-        if (condition != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
+        if (!conditions.isEmpty() && !SEGMENT_RECORD_TYPES.contains(recordType)) {
             throw new BadRequestException("WHEN conditions are not supported for record type: " + recordTypeValue);
         }
-        if (condition != null && !hasWhen(condition)) {
-            throw new BadRequestException("A WHEN condition must contain at least one condition");
-        }
-        if (condition != null) {
+        for (SegmentDefinition condition : conditions) {
+            if (!hasWhen(condition)) {
+                throw new BadRequestException("A WHEN condition must contain at least one condition");
+            }
             segmentService.validate(recordType, condition);
         }
-        validateTrigger(trigger, recordType, condition);
+        validateTrigger(trigger, recordType, !conditions.isEmpty());
         validateActions(actions, recordType);
         return actionPermissions(actions, recordType);
     }
@@ -196,7 +222,7 @@ public class RuleDefinitionValidator {
         };
     }
 
-    private void validateTrigger(RuleTrigger trigger, String recordType, SegmentDefinition condition) {
+    private void validateTrigger(RuleTrigger trigger, String recordType, boolean hasCondition) {
         String type = normalize(trigger.getType());
         if (!TRIGGER_TYPES.contains(type)) {
             throw new BadRequestException("Invalid trigger type: " + trigger.getType());
@@ -227,7 +253,7 @@ public class RuleDefinitionValidator {
             if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
                 throw new BadRequestException("A schedule rule requires a valid cadence");
             }
-            if (!hasWhen(condition)) {
+            if (!hasCondition) {
                 throw new BadRequestException("A schedule rule requires a WHEN condition");
             }
         }

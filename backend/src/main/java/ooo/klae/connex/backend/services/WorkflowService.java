@@ -54,8 +54,8 @@ public class WorkflowService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final WorkflowDraftCanonicalizer canonicalizer;
+    private final WorkflowDefinitionValidator workflowDefinitionValidator;
     private final LegacyWorkflowGraphConverter graphConverter;
-    private final RuleDefinitionValidator definitionValidator;
     private final RuleDefinitionCodec definitionCodec;
 
     /** Lists workflows in the active workspace using the existing deterministic mapper order. */
@@ -201,8 +201,11 @@ public class WorkflowService {
         Workflow workflow = requireWorkflow(workspaceId, id);
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
         canonicalizer.requirePublishableCanvas(draft);
-        Rule projection = project(workflow, draft);
-        validateProjection(projection);
+        workflowDefinitionValidator.validate(
+            draft.recordType(),
+            draft.executionMode(),
+            canonicalizer.parseDefinition(draft.definitionJson()));
+        project(workflow, draft);
         return new WorkflowValidationDto(workflow.getDraftRevision(), true);
     }
 
@@ -245,8 +248,12 @@ public class WorkflowService {
         if (!Objects.equals(discoveredExecutionMode, draft.executionMode())) {
             throw new ConflictException("Workflow execution mode changed during authorization");
         }
+        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateForMutation(
+            draft.recordType(),
+            draft.executionMode(),
+            canonicalizer.parseDefinition(draft.definitionJson()));
         Rule projection = project(workflow, draft);
-        principals.requirePermissions(validateProjectionForMutation(projection));
+        principals.requirePermissions(requiredPermissions);
         boolean allowBrokenPrincipals = !workflow.isEnabled();
         PrincipalMatchPolicy principalMatchPolicy = allowBrokenPrincipals
             ? PrincipalMatchPolicy.REDACTED_ALL
@@ -534,34 +541,6 @@ public class WorkflowService {
             canonicalizer.parseDefinition(draft.definitionJson()),
             canonicalizer.parseCanvas(draft.canvasJson()));
         return graphConverter.project(converted);
-    }
-
-    private void validateProjection(Rule projection) {
-        RuleTrigger trigger = definitionCodec.parse(projection.getTriggerConfig(), RuleTrigger.class);
-        SegmentDefinition condition = projection.getConditionJson() == null
-            ? null
-            : definitionCodec.parse(projection.getConditionJson(), SegmentDefinition.class);
-        RuleAction[] actions = definitionCodec.parse(projection.getActionsJson(), RuleAction[].class);
-        definitionValidator.validateDefinition(
-            projection.getRecordType(),
-            trigger,
-            condition,
-            Arrays.asList(actions),
-            projection.getExecutionMode());
-    }
-
-    private Set<Permission> validateProjectionForMutation(Rule projection) {
-        RuleTrigger trigger = definitionCodec.parse(projection.getTriggerConfig(), RuleTrigger.class);
-        SegmentDefinition condition = projection.getConditionJson() == null
-            ? null
-            : definitionCodec.parse(projection.getConditionJson(), SegmentDefinition.class);
-        RuleAction[] actions = definitionCodec.parse(projection.getActionsJson(), RuleAction[].class);
-        return definitionValidator.validateDefinitionForMutation(
-            projection.getRecordType(),
-            trigger,
-            condition,
-            Arrays.asList(actions),
-            projection.getExecutionMode());
     }
 
     private Integer resolveDraftRunAs(Workflow existing, String executionMode) {

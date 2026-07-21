@@ -42,6 +42,8 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
@@ -68,7 +70,7 @@ class WorkflowServiceTest {
     @Mock private WorkflowPrincipalLockService principalLockService;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
-    @Mock private RuleDefinitionValidator definitionValidator;
+    @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -87,13 +89,13 @@ class WorkflowServiceTest {
             workspaceService,
             auditService,
             canonicalizer,
+            workflowDefinitionValidator,
             graphConverter,
-            definitionValidator,
             definitionCodec);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
-        lenient().when(definitionValidator.validateDefinitionForMutation(
-            any(), any(), any(), any(), any())).thenReturn(Set.of());
+        lenient().when(workflowDefinitionValidator.validateForMutation(
+            any(), any(), any())).thenReturn(Set.of());
     }
 
     @Test
@@ -254,9 +256,33 @@ class WorkflowServiceTest {
 
         assertTrue(result.valid());
         assertEquals(3, result.draftRevision());
-        verify(definitionValidator).validateDefinition(
-            eq("deal"), any(RuleTrigger.class), eq(null), any(), eq("user"));
+        verify(workflowDefinitionValidator).validate(
+            eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verify(workflowMapper, never()).updateDraft(any(), any(Integer.class));
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
+    void validateKeepsBranchingClosedUntilTheCanonicalRuntimeCutover() {
+        Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
+        CanonicalDraft branching = canonicalizer.canonicalizeDraftJson(
+            "Workflow",
+            null,
+            "deal",
+            "user",
+            branchingDefinitionJson(),
+            branchingCanvasJson());
+        workflow.setDraftDefinitionJson(branching.definitionJson());
+        workflow.setDraftCanvasJson(branching.canvasJson());
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+
+        BadRequestException exception = assertThrows(
+            BadRequestException.class,
+            () -> service.validate(101));
+
+        assertEquals("Legacy workflow condition no branch must end", exception.getMessage());
+        verify(workflowDefinitionValidator).validate(
+            eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
     }
 
@@ -274,7 +300,7 @@ class WorkflowServiceTest {
         assertThrows(BadRequestException.class, () -> service.validate(101));
         assertThrows(BadRequestException.class, () -> service.publish(101, publishRequest(3)));
 
-        verify(definitionValidator, never()).validateDefinition(any(), any(), any(), any(), any());
+        verify(workflowDefinitionValidator, never()).validate(any(), any(), any());
         verifyNoInteractions(ruleMapper);
         verify(workflowVersionMapper).getLatest(7, 101);
         verify(workflowVersionMapper, never()).getByIdForUpdate(
@@ -367,8 +393,8 @@ class WorkflowServiceTest {
         assertEquals(1, version.getValue().getVersionNumber());
         assertEquals(41, version.getValue().getCreatedById());
         assertEquals(41, version.getValue().getPublishedById());
-        verify(definitionValidator).validateDefinitionForMutation(
-            eq("deal"), any(RuleTrigger.class), eq(null), any(), eq("user"));
+        verify(workflowDefinitionValidator).validateForMutation(
+            eq("deal"), eq("user"), any(WorkflowDefinition.class));
         InOrder writes = inOrder(ruleMapper, workflowVersionMapper, workflowMapper);
         writes.verify(ruleMapper).insert(any(Rule.class));
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
@@ -388,8 +414,8 @@ class WorkflowServiceTest {
         when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
             .thenReturn(new LockedPrincipals(
                 Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
-        when(definitionValidator.validateDefinitionForMutation(
-            any(), any(), any(), any(), any())).thenReturn(Set.of(Permission.TASK_CREATE));
+        when(workflowDefinitionValidator.validateForMutation(
+            any(), any(), any())).thenReturn(Set.of(Permission.TASK_CREATE));
 
         assertThrows(
             ForbiddenException.class,
@@ -1062,6 +1088,74 @@ class WorkflowServiceTest {
             Map.of(
                 "eventSource", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
                 "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
+            new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
+        try {
+            return JsonMapper.builder().build().writeValueAsString(canvas);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static String branchingDefinitionJson() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.won"));
+        SegmentCondition field = new SegmentCondition();
+        field.setType("field");
+        field.setField("name");
+        field.setOp("contains");
+        field.setValue("Acme");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of(field));
+        RuleAction yesAction = new RuleAction();
+        yesAction.setType("notify");
+        yesAction.setTitle("Yes branch");
+        RuleAction noAction = new RuleAction();
+        noAction.setType("notify");
+        noAction.setTitle("No branch");
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1,
+            "trigger",
+            List.of(
+                new ooo.klae.connex.backend.dto.WorkflowNode.Trigger("trigger", trigger),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Condition("condition", condition),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Action("yesAction", yesAction),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Action("noAction", noAction),
+                new ooo.klae.connex.backend.dto.WorkflowNode.End("end")),
+            List.of(
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "trigger-condition", "trigger", "condition",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "condition-yes", "condition", "yesAction",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.YES),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "condition-no", "condition", "noAction",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NO),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "yes-end", "yesAction", "end",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "no-end", "noAction", "end",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT)));
+        try {
+            return JsonMapper.builder().build().writeValueAsString(definition);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static String branchingCanvasJson() {
+        WorkflowCanvas canvas = new WorkflowCanvas(
+            Map.of(
+                "trigger", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
+                "condition", new WorkflowCanvas.Position(BigDecimal.valueOf(240), BigDecimal.ZERO),
+                "yesAction", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(480), BigDecimal.valueOf(-120)),
+                "noAction", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(480), BigDecimal.valueOf(120)),
+                "end", new WorkflowCanvas.Position(BigDecimal.valueOf(720), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {
             return JsonMapper.builder().build().writeValueAsString(canvas);

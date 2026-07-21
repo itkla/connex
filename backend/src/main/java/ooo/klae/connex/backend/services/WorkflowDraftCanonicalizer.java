@@ -105,7 +105,7 @@ public class WorkflowDraftCanonicalizer {
             String executionMode,
             WorkflowDefinition definition,
             WorkflowCanvas canvas) {
-        validateDefinition(definition);
+        validateDefinitionStructure(definition);
         validateCanvas(canvas, definition.nodes());
 
         String normalizedName = normalizeName(name);
@@ -133,6 +133,13 @@ public class WorkflowDraftCanonicalizer {
         return parse(definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
     }
 
+    static WorkflowDefinition snapshotDefinition(WorkflowDefinition definition) {
+        validateDefinitionStructure(definition);
+        String definitionJson = canonicalDefinition(definition);
+        requireInputSize(definitionJson, MAX_DEFINITION_BYTES, "Workflow definition is too large");
+        return parse(definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
+    }
+
     WorkflowCanvas parseCanvas(String canvasJson) {
         requireInputSize(canvasJson, MAX_CANVAS_BYTES, "Workflow canvas is too large");
         return parse(canvasJson, WorkflowCanvas.class, "Invalid workflow canvas");
@@ -153,7 +160,7 @@ public class WorkflowDraftCanonicalizer {
         }
     }
 
-    private static void validateDefinition(WorkflowDefinition definition) {
+    static void validateDefinitionStructure(WorkflowDefinition definition) {
         if (definition == null || definition.schemaVersion() != 1) {
             throw new BadRequestException("Workflow definition must use schemaVersion 1");
         }
