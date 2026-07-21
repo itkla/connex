@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import { toastInfo } from '@/app/lib/toast';
-import { clearDraft, listFreshDrafts, type StoredDraft } from '@/app/lib/formDrafts';
+import { clearDraft, DRAFT_VERSIONS, listFreshDrafts, readDraft, type StoredDraft } from '@/app/lib/formDrafts';
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActivityDraftData } from '@/app/components/activity/activities/ActivityDialog';
@@ -80,6 +80,56 @@ type ResumeDraft =
     | { kind: 'activity'; stored: StoredDraft<ActivityDraftData> }
     | { kind: 'task'; stored: StoredDraft<TaskDraftData> };
 
+function readCurrentActivityDraft(
+    stored: StoredDraft<ActivityDraftData>,
+    userId: number | null,
+    workspaceId: number | null,
+): StoredDraft<ActivityDraftData> | null {
+    const current = readDraft(
+        { userId, workspaceId, formType: 'activity', scope: stored.scope },
+        { version: DRAFT_VERSIONS.activity },
+    );
+    if (!current || !isActivityDraftData(current.data) || (!current.data.subject.trim() && !current.data.notes.trim())) {
+        return null;
+    }
+    return { ...current, data: current.data };
+}
+
+function readCurrentTaskDraft(
+    stored: StoredDraft<TaskDraftData>,
+    userId: number | null,
+    workspaceId: number | null,
+): StoredDraft<TaskDraftData> | null {
+    const current = readDraft(
+        { userId, workspaceId, formType: 'task', scope: stored.scope },
+        { version: DRAFT_VERSIONS.task },
+    );
+    if (!current || !isTaskDraftData(current.data) || !current.data.description.trim()) return null;
+    return { ...current, data: current.data };
+}
+
+function sameActivityDraft(left: StoredDraft<ActivityDraftData>, right: StoredDraft<ActivityDraftData>): boolean {
+    return (
+        left.savedAt === right.savedAt &&
+        left.data.type === right.data.type &&
+        left.data.subject === right.data.subject &&
+        left.data.notes === right.data.notes &&
+        left.data.personId === right.data.personId &&
+        left.data.dealId === right.data.dealId
+    );
+}
+
+function sameTaskDraft(left: StoredDraft<TaskDraftData>, right: StoredDraft<TaskDraftData>): boolean {
+    return (
+        left.savedAt === right.savedAt &&
+        left.data.description === right.data.description &&
+        left.data.dueDate === right.data.dueDate &&
+        left.data.assigneeId === right.data.assigneeId &&
+        left.data.personId === right.data.personId &&
+        left.data.dealId === right.data.dealId
+    );
+}
+
 /**
  * Render-nothing shell bridge that surfaces the current user + workspace's unfinished composer draft on
  * load, offering to resume it (reopening the composer prefilled) or discard it. Mounted inside the
@@ -114,9 +164,9 @@ export default function DraftResumeBridge() {
         let active = true;
         const timer = window.setTimeout(() => {
             for (const draft of drafts) {
-                const stored = draft.stored;
                 if (draft.kind === 'activity') {
-                    const data = draft.stored.data;
+                    const stored = draft.stored;
+                    const data = stored.data;
                     const label = data.subject.trim() || data.notes.trim();
                     toastInfo(t('activityMessageNamed', { label: shorten(label) }), {
                         id: stored.key,
@@ -125,10 +175,23 @@ export default function DraftResumeBridge() {
                             label: t('resumeActivity'),
                             onClick: () => {
                                 if (!active) return;
+                                const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+                                if (!current) {
+                                    toast.dismiss(stored.key);
+                                    return;
+                                }
+                                const currentData = current.data;
                                 openOverlay({
                                     kind: 'create-activity',
-                                    defaults: { personId: data.personId ?? undefined, dealId: data.dealId ?? undefined },
-                                    draft: { type: data.type, subject: data.subject, notes: data.notes },
+                                    defaults: {
+                                        personId: currentData.personId ?? undefined,
+                                        dealId: currentData.dealId ?? undefined,
+                                    },
+                                    draft: {
+                                        type: currentData.type,
+                                        subject: currentData.subject,
+                                        notes: currentData.notes,
+                                    },
                                 });
                                 toast.dismiss(stored.key);
                             },
@@ -137,13 +200,15 @@ export default function DraftResumeBridge() {
                             label: t('discardActivity'),
                             onClick: () => {
                                 if (!active) return;
-                                clearDraft(stored.key);
+                                const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+                                if (current && sameActivityDraft(current, stored)) clearDraft(stored.key);
                                 toast.dismiss(stored.key);
                             },
                         },
                     });
                 } else {
-                    const data = draft.stored.data;
+                    const stored = draft.stored;
+                    const data = stored.data;
                     const label = shorten(noteContentToPlainText(data.description));
                     toastInfo(t('taskMessageNamed', { label }), {
                         id: stored.key,
@@ -152,7 +217,12 @@ export default function DraftResumeBridge() {
                             label: t('resumeTask'),
                             onClick: () => {
                                 if (!active) return;
-                                openOverlay({ kind: 'create-task', draft: data, restoredDraft: true });
+                                const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+                                if (!current) {
+                                    toast.dismiss(stored.key);
+                                    return;
+                                }
+                                openOverlay({ kind: 'create-task', draft: current.data, restoredDraft: true });
                                 toast.dismiss(stored.key);
                             },
                         },
@@ -160,7 +230,8 @@ export default function DraftResumeBridge() {
                             label: t('discardTask'),
                             onClick: () => {
                                 if (!active) return;
-                                clearDraft(stored.key);
+                                const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+                                if (current && sameTaskDraft(current, stored)) clearDraft(stored.key);
                                 toast.dismiss(stored.key);
                             },
                         },
