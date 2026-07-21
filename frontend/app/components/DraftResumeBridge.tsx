@@ -9,7 +9,9 @@ import { clearDraft, listFreshDrafts, type StoredDraft } from '@/app/lib/formDra
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActivityDraftData } from '@/app/components/activity/activities/ActivityDialog';
+import type { TaskDraftData } from '@/app/components/activity/tasks/TaskDialog';
 import { ACTIVITY_TYPES } from '@/app/components/activity/activities/activityTypeMeta';
+import { noteContentToPlainText } from '@/app/lib/references';
 
 const MAX_LABEL = 48;
 /** Defer the toast past the mount/hydration tick so the sonner Toaster has subscribed before it fires. */
@@ -22,6 +24,21 @@ function shorten(value: string): string {
 
 function isNullableId(value: unknown): value is number | null {
     return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0);
+}
+
+function isDateInputValue(value: unknown): value is string {
+    if (value === '') return true;
+    if (typeof value !== 'string') return false;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1) return false;
+    const date = new Date(0);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCFullYear(year, month - 1, day);
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function isActivityDraftData(value: unknown): value is ActivityDraftData {
@@ -42,6 +59,27 @@ function isActivityDraftData(value: unknown): value is ActivityDraftData {
     );
 }
 
+function isTaskDraftData(value: unknown): value is TaskDraftData {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'description' in value &&
+        typeof value.description === 'string' &&
+        'dueDate' in value &&
+        isDateInputValue(value.dueDate) &&
+        'assigneeId' in value &&
+        isNullableId(value.assigneeId) &&
+        'personId' in value &&
+        isNullableId(value.personId) &&
+        'dealId' in value &&
+        isNullableId(value.dealId)
+    );
+}
+
+type ResumeDraft =
+    | { kind: 'activity'; stored: StoredDraft<ActivityDraftData> }
+    | { kind: 'task'; stored: StoredDraft<TaskDraftData> };
+
 /**
  * Render-nothing shell bridge that surfaces the current user + workspace's unfinished composer draft on
  * load, offering to resume it (reopening the composer prefilled) or discard it. Mounted inside the
@@ -56,51 +94,84 @@ export default function DraftResumeBridge() {
 
     useEffect(() => {
         if (switching) return;
-        const drafts: StoredDraft<ActivityDraftData>[] = [];
+        const drafts: ResumeDraft[] = [];
         for (const stored of listFreshDrafts({ userId, workspaceId: activeWorkspaceId })) {
-            if (stored.formType !== 'activity') continue;
-            if (!isActivityDraftData(stored.data) || (!stored.data.subject.trim() && !stored.data.notes.trim())) {
-                clearDraft(stored.key);
-                continue;
+            if (stored.formType === 'activity') {
+                if (!isActivityDraftData(stored.data) || (!stored.data.subject.trim() && !stored.data.notes.trim())) {
+                    clearDraft(stored.key);
+                    continue;
+                }
+                drafts.push({ kind: 'activity', stored: { ...stored, data: stored.data } });
+            } else if (stored.formType === 'task') {
+                if (!isTaskDraftData(stored.data) || !stored.data.description.trim()) {
+                    clearDraft(stored.key);
+                    continue;
+                }
+                drafts.push({ kind: 'task', stored: { ...stored, data: stored.data } });
             }
-            drafts.push({ ...stored, data: stored.data });
         }
         if (drafts.length === 0) return;
         let active = true;
         const timer = window.setTimeout(() => {
-            for (const stored of drafts) {
-                const data = stored.data;
-                const label = data.subject?.trim() || data.notes?.trim() || '';
-                toastInfo(t('activityMessageNamed', { label: shorten(label) }), {
-                    id: stored.key,
-                    duration: Infinity,
-                    action: {
-                        label: t('resume'),
-                        onClick: () => {
-                            if (!active) return;
-                            openOverlay({
-                                kind: 'create-activity',
-                                defaults: { personId: data.personId ?? undefined, dealId: data.dealId ?? undefined },
-                                draft: { type: data.type, subject: data.subject, notes: data.notes },
-                            });
-                            toast.dismiss(stored.key);
+            for (const draft of drafts) {
+                const stored = draft.stored;
+                if (draft.kind === 'activity') {
+                    const data = draft.stored.data;
+                    const label = data.subject.trim() || data.notes.trim();
+                    toastInfo(t('activityMessageNamed', { label: shorten(label) }), {
+                        id: stored.key,
+                        duration: Infinity,
+                        action: {
+                            label: t('resume'),
+                            onClick: () => {
+                                if (!active) return;
+                                openOverlay({
+                                    kind: 'create-activity',
+                                    defaults: { personId: data.personId ?? undefined, dealId: data.dealId ?? undefined },
+                                    draft: { type: data.type, subject: data.subject, notes: data.notes },
+                                });
+                                toast.dismiss(stored.key);
+                            },
                         },
-                    },
-                    cancel: {
-                        label: t('discard'),
-                        onClick: () => {
-                            if (!active) return;
-                            clearDraft(stored.key);
-                            toast.dismiss(stored.key);
+                        cancel: {
+                            label: t('discard'),
+                            onClick: () => {
+                                if (!active) return;
+                                clearDraft(stored.key);
+                                toast.dismiss(stored.key);
+                            },
                         },
-                    },
-                });
+                    });
+                } else {
+                    const data = draft.stored.data;
+                    const label = shorten(noteContentToPlainText(data.description));
+                    toastInfo(t('taskMessageNamed', { label }), {
+                        id: stored.key,
+                        duration: Infinity,
+                        action: {
+                            label: t('resume'),
+                            onClick: () => {
+                                if (!active) return;
+                                openOverlay({ kind: 'create-task', draft: data });
+                                toast.dismiss(stored.key);
+                            },
+                        },
+                        cancel: {
+                            label: t('discard'),
+                            onClick: () => {
+                                if (!active) return;
+                                clearDraft(stored.key);
+                                toast.dismiss(stored.key);
+                            },
+                        },
+                    });
+                }
             }
         }, DRAFT_TOAST_DELAY_MS);
         return () => {
             active = false;
             window.clearTimeout(timer);
-            for (const stored of drafts) toast.dismiss(stored.key);
+            for (const draft of drafts) toast.dismiss(draft.stored.key);
         };
     }, [openOverlay, t, userId, activeWorkspaceId, switching]);
 

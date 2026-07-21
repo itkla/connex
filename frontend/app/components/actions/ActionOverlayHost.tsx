@@ -187,6 +187,16 @@ export default function ActionOverlayHost({
     const deals = references?.deals ?? [];
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
+    const taskDraft = rendered?.request.kind === "create-task" ? rendered.request.draft : undefined;
+    const taskDefaultAssignee = taskDraft?.assigneeId == null
+        ? null
+        : users?.find((candidate) => candidate.id === taskDraft.assigneeId) ?? null;
+    const taskDefaultPerson = taskDraft && taskDraft.personId !== undefined
+        ? persons.find((candidate) => candidate.id === taskDraft.personId) ?? null
+        : defaultPerson;
+    const taskDefaultDeal = taskDraft && taskDraft.dealId !== undefined
+        ? deals.find((candidate) => candidate.id === taskDraft.dealId) ?? null
+        : defaultDeal;
     const activityDraft = rendered?.request.kind === "create-activity" ? rendered.request.draft : undefined;
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
@@ -201,10 +211,11 @@ export default function ActionOverlayHost({
                         deals={deals}
                         users={users}
                         currentUserId={user.id}
-                        defaultPerson={defaultPerson}
-                        defaultDeal={defaultDeal}
-                        defaultDueDate={rendered.request.draft?.dueDate ?? ""}
-                        defaultDescription={rendered.request.draft?.description ?? ""}
+                        defaultAssignee={taskDefaultAssignee}
+                        defaultPerson={taskDefaultPerson}
+                        defaultDeal={taskDefaultDeal}
+                        defaultDueDate={taskDraft?.dueDate ?? ""}
+                        defaultDescription={taskDraft?.description ?? ""}
                         requestInit={requestInit}
                     />
                 ) : null}
