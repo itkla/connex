@@ -11,6 +11,14 @@ type UseFormDraftOptions = {
     version: number;
 };
 
+type PendingDraft<T> = {
+    key: string;
+    version: number;
+    scope: string;
+    formType: string;
+    data: T;
+};
+
 /** Persists a composer draft, and clears it, both scoped to one stable storage key. */
 export type FormDraftControls<T> = {
     /** Schedules a debounced write of the current snapshot; call while the form holds unsaved edits. */
@@ -34,7 +42,7 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
     );
 
     const timerRef = useRef<number | null>(null);
-    const pendingRef = useRef<T | null>(null);
+    const pendingRef = useRef<PendingDraft<T> | null>(null);
 
     const cancel = useCallback(() => {
         if (timerRef.current !== null) {
@@ -50,22 +58,22 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
             timerRef.current = null;
         }
         if (pendingRef.current !== null) {
-            const data = pendingRef.current;
+            const pending = pendingRef.current;
             pendingRef.current = null;
-            writeDraft(key, { version, scope, formType, data });
+            writeDraft(pending.key, pending);
         }
-    }, [key, version, scope, formType]);
+    }, []);
 
     const persist = useCallback(
         (snapshot: T) => {
-            pendingRef.current = snapshot;
+            pendingRef.current = { key, version, scope, formType, data: snapshot };
             if (timerRef.current !== null) window.clearTimeout(timerRef.current);
             timerRef.current = window.setTimeout(() => {
                 timerRef.current = null;
                 if (pendingRef.current === null) return;
-                const data = pendingRef.current;
+                const pending = pendingRef.current;
                 pendingRef.current = null;
-                writeDraft(key, { version, scope, formType, data });
+                writeDraft(pending.key, pending);
             }, DRAFT_DEBOUNCE_MS);
         },
         [key, version, scope, formType],

@@ -55,6 +55,37 @@ function safeSession(): Storage | null {
     }
 }
 
+function parseDraftEnvelope(raw: string): DraftEnvelope<unknown> | null {
+    let value: unknown;
+    try {
+        value = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('v' in value) ||
+        typeof value.v !== 'number' ||
+        !('savedAt' in value) ||
+        typeof value.savedAt !== 'number' ||
+        !('scope' in value) ||
+        typeof value.scope !== 'string' ||
+        !('formType' in value) ||
+        typeof value.formType !== 'string' ||
+        !('data' in value)
+    ) {
+        return null;
+    }
+    return {
+        v: value.v,
+        savedAt: value.savedAt,
+        scope: value.scope,
+        formType: value.formType,
+        data: value.data,
+    };
+}
+
 /** Persists a draft envelope under `key`. No-op when storage is unavailable (SSR, private mode, quota). */
 export function writeDraft<T>(key: string, params: { version: number; scope: string; formType: string; data: T }): void {
     const store = safeSession();
@@ -97,7 +128,7 @@ function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshness
 }
 
 /** Reads a draft by key, validating version + freshness; drops and returns null if invalid or expired. */
-export function readDraft<T>(key: string, opts: { version: number; freshnessMs?: number }): StoredDraft<T> | null {
+export function readDraft(key: string, opts: { version: number; freshnessMs?: number }): StoredDraft<unknown> | null {
     const store = safeSession();
     if (!store) return null;
     const freshnessMs = opts.freshnessMs ?? DEFAULT_DRAFT_FRESHNESS_MS;
@@ -108,13 +139,8 @@ export function readDraft<T>(key: string, opts: { version: number; freshnessMs?:
         return null;
     }
     if (raw === null) return null;
-    let env: DraftEnvelope<T> | null = null;
-    try {
-        env = JSON.parse(raw) as DraftEnvelope<T>;
-    } catch {
-        env = null;
-    }
-    if (!env || !isFresh(env, opts.version, freshnessMs)) {
+    const env = parseDraftEnvelope(raw);
+    if (!env || !key.endsWith(`:${env.formType}:${env.scope}`) || !isFresh(env, opts.version, freshnessMs)) {
         clearDraft(key);
         return null;
     }
@@ -150,14 +176,17 @@ export function listFreshDrafts(opts: {
         } catch {
             continue;
         }
-        let env: DraftEnvelope<unknown> | null = null;
-        try {
-            env = raw ? (JSON.parse(raw) as DraftEnvelope<unknown>) : null;
-        } catch {
-            env = null;
-        }
+        const env = raw ? parseDraftEnvelope(raw) : null;
         const expectedVersion = env && typeof env === 'object' ? DRAFT_VERSIONS[env.formType] : undefined;
-        if (!env || expectedVersion === undefined || !isFresh(env, expectedVersion, freshnessMs)) {
+        const expectedKey = env
+            ? draftKey({
+                  userId: opts.userId,
+                  workspaceId: opts.workspaceId,
+                  formType: env.formType,
+                  scope: env.scope,
+              })
+            : null;
+        if (!env || expectedKey !== key || expectedVersion === undefined || !isFresh(env, expectedVersion, freshnessMs)) {
             clearDraft(key);
             continue;
         }
