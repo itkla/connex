@@ -159,7 +159,6 @@ export default function WorkflowsPanel() {
                     {rules.map((rule) => (
                         <li
                             key={rule.id}
-                            aria-busy={duplicatingRuleId === rule.id}
                             className="group flex items-center gap-3 px-4 py-3.5"
                         >
                             <Switch
@@ -219,19 +218,22 @@ export default function WorkflowsPanel() {
                                 <DropdownMenuTrigger asChild>
                                     <button
                                         type="button"
+                                        aria-busy={duplicatingRuleId === rule.id}
                                         aria-label={
                                             duplicatingRuleId === rule.id
                                                 ? tw("duplicatingRule", { name: rule.name })
                                                 : tw("rowActions", { name: rule.name })
                                         }
-                                        disabled={duplicatingRuleId === rule.id}
                                         className={rowActionTrigger}
                                     >
                                         <EllipsisHorizontalIcon className="size-5" />
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-40">
-                                    <DropdownMenuItem onSelect={() => router.push(`/workflows/${rule.id}`)}>
+                                    <DropdownMenuItem
+                                        disabled={duplicatingRuleId === rule.id}
+                                        onSelect={() => router.push(`/workflows/${rule.id}`)}
+                                    >
                                         <PencilSquareIcon className="size-4" />
                                         {t("edit")}
                                     </DropdownMenuItem>
@@ -245,6 +247,7 @@ export default function WorkflowsPanel() {
                                         </DropdownMenuItem>
                                     )}
                                     <DropdownMenuItem
+                                        disabled={duplicatingRuleId === rule.id}
                                         onSelect={() => {
                                             if (activeWorkspaceId == null) return;
                                             requestAnimationFrame(() => setRunsTarget({ workspaceId: activeWorkspaceId, rule }));
@@ -253,7 +256,11 @@ export default function WorkflowsPanel() {
                                         <ClockIcon className="size-4" />
                                         {tw("runs.view")}
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(rule)}>
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        disabled={duplicatingRuleId === rule.id}
+                                        onSelect={() => setRemoveTarget(rule)}
+                                    >
                                         <TrashIcon className="size-4" />
                                         {t("delete")}
                                     </DropdownMenuItem>
