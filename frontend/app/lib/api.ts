@@ -82,7 +82,10 @@ if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
         if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
             invalidateClientRequestIdentity();
-            if (event.newValue?.startsWith("refresh:")) {
+            if (event.newValue?.startsWith("logout:")) {
+                clearAllDrafts();
+                window.location.reload();
+            } else if (event.newValue?.startsWith("refresh:")) {
                 window.location.reload();
             }
         }
@@ -145,22 +148,23 @@ function invalidateClientRequestIdentity() {
     inFlightReportRequests.clear();
 }
 
-function broadcastClientRequestIdentityTransition(refreshTabs: boolean) {
+type ClientIdentityTransition = "invalidate" | "refresh" | "logout";
+
+function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
     try {
         const eventId = typeof window.crypto.randomUUID === "function"
             ? window.crypto.randomUUID()
             : `${Date.now()}:${clientRequestIdentityEpoch}`;
-        const action = refreshTabs ? "refresh" : "invalidate";
         window.localStorage.setItem(CLIENT_IDENTITY_EVENT_KEY, `${action}:${eventId}`);
     } catch {
         return;
     }
 }
 
-function signalClientRequestIdentityTransition(refreshTabs: boolean) {
+function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
     invalidateClientRequestIdentity();
-    broadcastClientRequestIdentityTransition(refreshTabs);
+    broadcastClientRequestIdentityTransition(action);
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
@@ -178,7 +182,7 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
         invalidateClientRequestIdentity();
         if (serverIdentityChanged) {
-            broadcastClientRequestIdentityTransition(true);
+            broadcastClientRequestIdentityTransition("refresh");
         }
     }
     csrfTokenCache = currentCsrf;
@@ -272,11 +276,14 @@ function businessCardRequestInit(
     return { ...init, headers };
 }
 
-async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
-    signalClientRequestIdentityTransition(false);
+async function withClientRequestIdentityReset<T>(
+    request: () => Promise<T>,
+    successTransition: ClientIdentityTransition = "refresh",
+): Promise<T> {
+    signalClientRequestIdentityTransition("invalidate");
     try {
         const result = await request();
-        signalClientRequestIdentityTransition(true);
+        signalClientRequestIdentityTransition(successTransition);
         return result;
     } catch (error) {
         invalidateClientRequestIdentity();
@@ -894,7 +901,7 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
 
 export function logout() {
     clearAllDrafts();
-    return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"));
+    return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
 }
 
 /**
