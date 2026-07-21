@@ -61,6 +61,8 @@ import { usePinnedViews } from '@/app/hooks/usePinnedViews';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
 import { recentRecordHref } from '@/app/lib/recentRecords';
+import type { SidebarSectionId } from '@/app/lib/sidebarSections';
+import { useSidebarSections } from '@/app/hooks/useSidebarSections';
 
 type NavItem = {
     label: string;
@@ -72,6 +74,7 @@ type NavItem = {
 };
 
 type NavSection = {
+    id: SidebarSectionId;
     label: string;
     items: NavItem[];
 };
@@ -91,6 +94,7 @@ function useSections(): NavSection[] {
     ];
     return [
         {
+            id: "overview",
             label: t("sectionOverview"),
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
@@ -103,6 +107,7 @@ function useSections(): NavSection[] {
             ]
         },
         {
+            id: "records",
             label: t("sectionRecords"),
             items: [
                 { label: t("navCompanies"), href: "/records/companies", icon: BuildingOffice2Icon },
@@ -113,12 +118,14 @@ function useSections(): NavSection[] {
             ],
         },
         {
+            id: "marketing",
             label: t("sectionMarketing"),
             items: [
                 { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
             ],
         },
         {
+            id: "activity",
             label: t("sectionActivity"),
             items: [
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
@@ -127,6 +134,7 @@ function useSections(): NavSection[] {
             ],
         },
         {
+            id: "library",
             label: t("sectionLibrary"),
             items: [
                 { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
@@ -135,10 +143,12 @@ function useSections(): NavSection[] {
             ],
         },
         {
+            id: "workspace",
             label: t("sectionWorkspace"),
             items: workspaceItems,
         },
         {
+            id: "help",
             label: t("sectionHelp"),
             items: [{ label: t("navDocs"), href: "/docs", icon: BookOpenIcon }],
         },
@@ -163,13 +173,21 @@ function NavGroup({
     section,
     pathname,
     rail,
+    collapsed,
+    navigationKey,
+    onCollapsedChange,
 }: {
     section: NavSection;
     pathname: string;
     rail: boolean;
+    collapsed: boolean;
+    navigationKey: string;
+    onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
-    const [open, setOpen] = useState(true);
-    const sectionId = `nav-group-${section.label.toLowerCase()}`;
+    const groupActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
+    const [manualState, setManualState] = useState<{ navigationKey: string; open: boolean } | null>(null);
+    const open = manualState?.navigationKey === navigationKey ? manualState.open : groupActive || !collapsed;
+    const sectionId = `nav-group-${section.id}`;
     if (rail) {
         return (
             <ul aria-label={section.label} className="flex flex-col items-center gap-1">
@@ -183,10 +201,17 @@ function NavGroup({
         <div>
             <button
                 type="button"
-                onClick={() => setOpen((o) => !o)}
+                onClick={() => {
+                    const nextOpen = !open;
+                    setManualState({ navigationKey, open: nextOpen });
+                    onCollapsedChange(section.id, !nextOpen);
+                }}
                 aria-expanded={open}
                 aria-controls={sectionId}
-                className="flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground"
+                className={cn(
+                    "flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground",
+                    groupActive && "text-foreground",
+                )}
             >
                 <span>{section.label}</span>
                 <ChevronDownIcon
@@ -440,13 +465,17 @@ export default function Sidebar({
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
+    const { activeWorkspaceId } = useWorkspace();
+    const { isCollapsed, setCollapsed } = useSidebarSections(user.id, activeWorkspaceId);
     const { pins } = usePinnedViews();
     const { recents } = useRecentRecords();
     const searchParams = useSearchParams();
     const svParam = searchParams.get("sv");
+    const navigationKey = `${user.id}:${activeWorkspaceId ?? "none"}:${pathname}:${svParam ?? ""}`;
     const pinnedSection = useMemo<NavSection | null>(() => {
         if (pins.length === 0) return null;
         return {
+            id: "pinned-views",
             label: t("sectionPinnedViews"),
             items: pins.map((pin) => ({
                 label: pin.name,
@@ -459,6 +488,7 @@ export default function Sidebar({
     const recentSection = useMemo<NavSection | null>(() => {
         if (recents.length === 0) return null;
         return {
+            id: "recent-records",
             label: t("sectionRecent"),
             items: recents.map((entry) => {
                 const href = recentRecordHref(entry.t, entry.id);
@@ -516,26 +546,35 @@ export default function Sidebar({
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
                     {pinnedSection && (
                         <NavGroup
-                            key="pinned-views"
+                            key={pinnedSection.id}
                             section={pinnedSection}
                             pathname={pathname}
                             rail={rail}
+                            collapsed={isCollapsed(pinnedSection.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
                         />
                     )}
                     {recentSection && (
                         <NavGroup
-                            key="recent-records"
+                            key={recentSection.id}
                             section={recentSection}
                             pathname={pathname}
                             rail={rail}
+                            collapsed={isCollapsed(recentSection.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
                         />
                     )}
                     {sections.map((section) => (
                         <NavGroup
-                            key={section.label}
+                            key={section.id}
                             section={section}
                             pathname={pathname}
                             rail={rail}
+                            collapsed={isCollapsed(section.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
                         />
                     ))}
                 </nav>
