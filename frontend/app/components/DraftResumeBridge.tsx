@@ -14,6 +14,7 @@ import {
     type StoredDraft,
 } from '@/app/lib/formDrafts';
 import { useActions } from '@/app/hooks/useActions';
+import { DRAFT_DEBOUNCE_MS } from '@/app/hooks/useFormDraft';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActivityDraftData } from '@/app/components/activity/activities/ActivityDialog';
 import type { TaskDraftData } from '@/app/components/activity/tasks/TaskDialog';
@@ -177,14 +178,31 @@ export default function DraftResumeBridge() {
         }
         if (drafts.length === 0) return;
         let active = true;
+        const refreshTimers = new Set<number>();
+
+        function deferRefresh(refresh: () => void, delay: number) {
+            const timer = window.setTimeout(() => {
+                refreshTimers.delete(timer);
+                if (active) refresh();
+            }, delay);
+            refreshTimers.add(timer);
+        }
 
         function refreshActivityToast(stored: StoredDraft<ActivityDraftData>) {
+            const keyGeneration = getDraftKeyGeneration(stored.key);
             const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
-            if (current && !sameActivityDraft(current, stored)) {
-                showActivityToast(current, getDraftKeyGeneration(stored.key));
-                return;
-            }
-            toast.dismiss(stored.key);
+            const delay = current && !sameActivityDraft(current, stored) ? 0 : DRAFT_DEBOUNCE_MS;
+            deferRefresh(() => {
+                const latestGeneration = getDraftKeyGeneration(stored.key);
+                if (latestGeneration !== keyGeneration) {
+                    refreshActivityToast(stored);
+                    return;
+                }
+                const latest = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+                if (latest && !sameActivityDraft(latest, stored)) {
+                    showActivityToast(latest, latestGeneration);
+                }
+            }, delay);
         }
 
         function showActivityToast(stored: StoredDraft<ActivityDraftData>, keyGeneration: number) {
@@ -238,12 +256,20 @@ export default function DraftResumeBridge() {
         }
 
         function refreshTaskToast(stored: StoredDraft<TaskDraftData>) {
+            const keyGeneration = getDraftKeyGeneration(stored.key);
             const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
-            if (current && !sameTaskDraft(current, stored)) {
-                showTaskToast(current, getDraftKeyGeneration(stored.key));
-                return;
-            }
-            toast.dismiss(stored.key);
+            const delay = current && !sameTaskDraft(current, stored) ? 0 : DRAFT_DEBOUNCE_MS;
+            deferRefresh(() => {
+                const latestGeneration = getDraftKeyGeneration(stored.key);
+                if (latestGeneration !== keyGeneration) {
+                    refreshTaskToast(stored);
+                    return;
+                }
+                const latest = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+                if (latest && !sameTaskDraft(latest, stored)) {
+                    showTaskToast(latest, latestGeneration);
+                }
+            }, delay);
         }
 
         function showTaskToast(stored: StoredDraft<TaskDraftData>, keyGeneration: number) {
@@ -296,6 +322,7 @@ export default function DraftResumeBridge() {
         return () => {
             active = false;
             window.clearTimeout(timer);
+            for (const refreshTimer of refreshTimers) window.clearTimeout(refreshTimer);
             for (const draft of drafts) toast.dismiss(draft.stored.key);
         };
     }, [openOverlay, t, userId, activeWorkspaceId, switching]);

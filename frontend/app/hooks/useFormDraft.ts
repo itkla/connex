@@ -12,7 +12,8 @@ import {
     type DraftKeyParts,
 } from '@/app/lib/formDrafts';
 
-const DRAFT_DEBOUNCE_MS = 400;
+/** Delay used to coalesce draft writes while a composer is changing. */
+export const DRAFT_DEBOUNCE_MS = 400;
 
 type UseFormDraftOptions = {
     keyParts: DraftKeyParts;
