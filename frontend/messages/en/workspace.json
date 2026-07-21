@@ -331,6 +331,7 @@
     "rowActions": "Actions for {name}",
     "duplicate": "Duplicate",
     "duplicating": "Duplicating…",
+    "duplicatingRule": "Duplicating {name}",
     "copyName": "{name} (copy)",
     "duplicated": "{name} was duplicated",
     "duplicateFailed": "Couldn't duplicate the workflow",

@@ -331,6 +331,7 @@
     "rowActions": "{name} の操作",
     "duplicate": "複製",
     "duplicating": "複製中…",
+    "duplicatingRule": "{name} を複製中",
     "copyName": "{name}（コピー）",
     "duplicated": "{name} を複製しました",
     "duplicateFailed": "ワークフローを複製できませんでした",

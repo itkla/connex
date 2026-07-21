@@ -26,13 +26,20 @@ type WorkflowDuplicationOptions = {
 };
 
 function fitDuplicatedRuleName(name: string, format: (value: string) => string): string {
-    let baseName = name.trim();
-    let copyName = format(baseName);
-    if (copyName.length <= MAX_RULE_NAME_LENGTH) return copyName;
+    const affixLength = format("").length;
+    const baseName = truncateUtf16(name.trim(), Math.max(0, MAX_RULE_NAME_LENGTH - affixLength)).trimEnd();
+    return truncateUtf16(format(baseName), MAX_RULE_NAME_LENGTH);
+}
 
-    baseName = baseName.slice(0, Math.max(0, baseName.length - (copyName.length - MAX_RULE_NAME_LENGTH))).trimEnd();
-    copyName = format(baseName);
-    return copyName.slice(0, MAX_RULE_NAME_LENGTH);
+function truncateUtf16(value: string, maximumLength: number): string {
+    let length = 0;
+    let result = "";
+    for (const character of value) {
+        if (length + character.length > maximumLength) break;
+        result += character;
+        length += character.length;
+    }
+    return result;
 }
 
 /**
@@ -117,16 +124,17 @@ export function useWorkflowDuplication({
                 && currentScope.pathname === operation.pathname
                 && !controller.signal.aborted;
         };
-        const requestInit: RequestInit = {
+        const workspaceHeaders = { "X-Workspace-Id": String(operation.workspaceId) };
+        const sourceRequestInit: RequestInit = {
             cache: "no-store",
             signal: controller.signal,
-            headers: { "X-Workspace-Id": String(operation.workspaceId) },
+            headers: workspaceHeaders,
         };
 
         duplicateOperationRef.current = operation;
         setDuplicatingRuleId(rule.id);
         try {
-            const source = await getRuleById(rule.id, requestInit);
+            const source = await getRuleById(rule.id, sourceRequestInit);
             if (!isCurrent()) return;
             if (source.executionMode === "system" && !duplicateScopeRef.current.canRunAsSystem) {
                 toastError(tw("duplicateSystemRestricted"));
@@ -139,7 +147,7 @@ export function useWorkflowDuplication({
                     name: fitDuplicatedRuleName(source.name, (name) => tw("copyName", { name })),
                     enabled: false,
                 },
-                requestInit,
+                { headers: workspaceHeaders },
             );
             if (!isCurrent()) return;
             toastSuccess(tw("duplicated", { name: created.name }));

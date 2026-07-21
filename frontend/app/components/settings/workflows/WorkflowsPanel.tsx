@@ -157,11 +157,18 @@ export default function WorkflowsPanel() {
             ) : (
                 <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                     {rules.map((rule) => (
-                        <li key={rule.id} className="group flex items-center gap-3 px-4 py-3.5">
+                        <li
+                            key={rule.id}
+                            aria-busy={duplicatingRuleId === rule.id}
+                            className="group flex items-center gap-3 px-4 py-3.5"
+                        >
                             <Switch
                                 checked={rule.enabled}
                                 onCheckedChange={() => toggleEnabled(rule)}
-                                disabled={rule.executionMode === "system" && !canRunAsSystem}
+                                disabled={
+                                    duplicatingRuleId === rule.id
+                                    || (rule.executionMode === "system" && !canRunAsSystem)
+                                }
                                 aria-label={t("toggleEnabled", { name: rule.name })}
                                 aria-describedby={
                                     rule.executionMode === "system" && !canRunAsSystem
@@ -172,7 +179,8 @@ export default function WorkflowsPanel() {
                             <button
                                 type="button"
                                 onClick={() => router.push(`/workflows/${rule.id}`)}
-                                className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none"
+                                disabled={duplicatingRuleId === rule.id}
+                                className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"
                             >
                                 <span className="flex items-center gap-2">
                                     <span className="truncate text-sm font-medium text-foreground group-hover:underline">
@@ -189,6 +197,16 @@ export default function WorkflowsPanel() {
                                             {t("disabledBadge")}
                                         </Badge>
                                     )}
+                                    {duplicatingRuleId === rule.id && (
+                                        <Badge
+                                            role="status"
+                                            aria-label={tw("duplicatingRule", { name: rule.name })}
+                                            variant="outline"
+                                            className="text-muted-foreground"
+                                        >
+                                            {tw("duplicating")}
+                                        </Badge>
+                                    )}
                                 </span>
                                 <span className="block truncate text-xs text-muted-foreground">{ruleSummary(rule, t)}</span>
                                 {rule.executionMode === "system" && !canRunAsSystem ? (
@@ -199,7 +217,16 @@ export default function WorkflowsPanel() {
                             </button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <button type="button" aria-label={tw("rowActions", { name: rule.name })} className={rowActionTrigger}>
+                                    <button
+                                        type="button"
+                                        aria-label={
+                                            duplicatingRuleId === rule.id
+                                                ? tw("duplicatingRule", { name: rule.name })
+                                                : tw("rowActions", { name: rule.name })
+                                        }
+                                        disabled={duplicatingRuleId === rule.id}
+                                        className={rowActionTrigger}
+                                    >
                                         <EllipsisHorizontalIcon className="size-5" />
                                     </button>
                                 </DropdownMenuTrigger>
