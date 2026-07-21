@@ -17,6 +17,7 @@ import { useActions } from '@/app/hooks/useActions';
 import { DRAFT_DEBOUNCE_MS } from '@/app/hooks/useFormDraft';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActivityDraftData } from '@/app/components/activity/activities/ActivityDialog';
+import type { NoteDraftData } from '@/app/components/activity/notes/NoteDialog';
 import type { TaskDraftData } from '@/app/components/activity/tasks/TaskDialog';
 import { ACTIVITY_TYPES } from '@/app/components/activity/activities/activityTypeMeta';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -84,8 +85,22 @@ function isTaskDraftData(value: unknown): value is TaskDraftData {
     );
 }
 
+function isNoteDraftData(value: unknown): value is NoteDraftData {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'content' in value &&
+        typeof value.content === 'string' &&
+        'personId' in value &&
+        isNullableId(value.personId) &&
+        'dealId' in value &&
+        isNullableId(value.dealId)
+    );
+}
+
 type ResumeDraft =
     | { kind: 'activity'; keyGeneration: number; stored: StoredDraft<ActivityDraftData> }
+    | { kind: 'note'; keyGeneration: number; stored: StoredDraft<NoteDraftData> }
     | { kind: 'task'; keyGeneration: number; stored: StoredDraft<TaskDraftData> };
 
 function readCurrentActivityDraft(
@@ -116,6 +131,19 @@ function readCurrentTaskDraft(
     return { ...current, data: current.data };
 }
 
+function readCurrentNoteDraft(
+    stored: StoredDraft<NoteDraftData>,
+    userId: number | null,
+    workspaceId: number | null,
+): StoredDraft<NoteDraftData> | null {
+    const current = readDraft(
+        { userId, workspaceId, formType: 'note', scope: stored.scope },
+        { version: DRAFT_VERSIONS.note },
+    );
+    if (!current || !isNoteDraftData(current.data) || !noteContentToPlainText(current.data.content).trim()) return null;
+    return { ...current, data: current.data };
+}
+
 function sameActivityDraft(left: StoredDraft<ActivityDraftData>, right: StoredDraft<ActivityDraftData>): boolean {
     return (
         left.savedAt === right.savedAt &&
@@ -133,6 +161,15 @@ function sameTaskDraft(left: StoredDraft<TaskDraftData>, right: StoredDraft<Task
         left.data.description === right.data.description &&
         left.data.dueDate === right.data.dueDate &&
         left.data.assigneeId === right.data.assigneeId &&
+        left.data.personId === right.data.personId &&
+        left.data.dealId === right.data.dealId
+    );
+}
+
+function sameNoteDraft(left: StoredDraft<NoteDraftData>, right: StoredDraft<NoteDraftData>): boolean {
+    return (
+        left.savedAt === right.savedAt &&
+        left.data.content === right.data.content &&
         left.data.personId === right.data.personId &&
         left.data.dealId === right.data.dealId
     );
@@ -161,6 +198,20 @@ export default function DraftResumeBridge() {
                 }
                 drafts.push({
                     kind: 'activity',
+                    keyGeneration: getDraftKeyGeneration(stored.key),
+                    stored: { ...stored, data: stored.data },
+                });
+            } else if (stored.formType === 'note') {
+                if (
+                    stored.scope !== 'global' ||
+                    !isNoteDraftData(stored.data) ||
+                    !noteContentToPlainText(stored.data.content).trim()
+                ) {
+                    clearDraft(stored.key);
+                    continue;
+                }
+                drafts.push({
+                    kind: 'note',
                     keyGeneration: getDraftKeyGeneration(stored.key),
                     stored: { ...stored, data: stored.data },
                 });
@@ -256,6 +307,61 @@ export default function DraftResumeBridge() {
             });
         }
 
+        function refreshNoteToast(stored: StoredDraft<NoteDraftData>) {
+            const keyGeneration = getDraftKeyGeneration(stored.key);
+            const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
+            const delay = current && !sameNoteDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
+            deferRefresh(() => {
+                const latestGeneration = getDraftKeyGeneration(stored.key);
+                if (latestGeneration !== keyGeneration) {
+                    refreshNoteToast(stored);
+                    return;
+                }
+                const latest = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
+                if (latest && !sameNoteDraft(latest, stored)) {
+                    showNoteToast(latest, latestGeneration);
+                }
+            }, delay);
+        }
+
+        function showNoteToast(stored: StoredDraft<NoteDraftData>, keyGeneration: number) {
+            const label = shorten(noteContentToPlainText(stored.data.content));
+            toastInfo(t('noteMessageNamed', { label }), {
+                id: stored.key,
+                duration: Infinity,
+                action: {
+                    label: t('resumeNote'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshNoteToast(stored);
+                            return;
+                        }
+                        const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
+                        if (!current) {
+                            toast.dismiss(stored.key);
+                            return;
+                        }
+                        openOverlay({ kind: 'create-note', draft: current.data, restoredDraft: true });
+                        toast.dismiss(stored.key);
+                    },
+                },
+                cancel: {
+                    label: t('discardNote'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshNoteToast(stored);
+                            return;
+                        }
+                        const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
+                        if (current && sameNoteDraft(current, stored)) clearDraft(stored.key);
+                        toast.dismiss(stored.key);
+                    },
+                },
+            });
+        }
+
         function refreshTaskToast(stored: StoredDraft<TaskDraftData>) {
             const keyGeneration = getDraftKeyGeneration(stored.key);
             const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
@@ -315,6 +421,8 @@ export default function DraftResumeBridge() {
             for (const draft of drafts) {
                 if (draft.kind === 'activity') {
                     showActivityToast(draft.stored, draft.keyGeneration);
+                } else if (draft.kind === 'note') {
+                    showNoteToast(draft.stored, draft.keyGeneration);
                 } else {
                     showTaskToast(draft.stored, draft.keyGeneration);
                 }

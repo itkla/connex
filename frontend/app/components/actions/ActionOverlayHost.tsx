@@ -197,6 +197,13 @@ export default function ActionOverlayHost({
     const taskDefaultDeal = taskDraft && taskDraft.dealId !== undefined
         ? deals.find((candidate) => candidate.id === taskDraft.dealId) ?? null
         : defaultDeal;
+    const noteDraft = rendered?.request.kind === "create-note" ? rendered.request.draft : undefined;
+    const noteDefaultPerson = noteDraft && noteDraft.personId !== undefined
+        ? persons.find((candidate) => candidate.id === noteDraft.personId) ?? null
+        : defaultPerson;
+    const noteDefaultDeal = noteDraft && noteDraft.dealId !== undefined
+        ? deals.find((candidate) => candidate.id === noteDraft.dealId) ?? null
+        : defaultDeal;
     const activityDraft = rendered?.request.kind === "create-activity" ? rendered.request.draft : undefined;
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
@@ -228,9 +235,10 @@ export default function ActionOverlayHost({
                         persons={persons}
                         deals={deals}
                         currentUserId={user.id}
-                        defaultPerson={defaultPerson}
-                        defaultDeal={defaultDeal}
-                        defaultContent={rendered.request.draft?.content ?? ""}
+                        defaultPerson={noteDefaultPerson}
+                        defaultDeal={noteDefaultDeal}
+                        defaultContent={noteDraft?.content ?? ""}
+                        ownsInitialDraft={rendered.request.restoredDraft === true}
                         requestInit={requestInit}
                     />
                 ) : null}
