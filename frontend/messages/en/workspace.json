@@ -345,7 +345,32 @@
     "saveFailed": "Couldn't save the workflow",
     "notFound": "This workflow doesn't exist or was deleted.",
     "backToList": "Back to workflows",
-    "save": "Save"
+    "save": "Save",
+    "runs": {
+      "view": "View runs",
+      "title": "Recent runs",
+      "description": "Review the latest 50 executions for {name}.",
+      "emptyTitle": "No runs yet",
+      "emptyBody": "This workflow has not recorded an execution yet.",
+      "errorTitle": "Runs could not be loaded",
+      "errorBody": "Try again to load the recent execution log.",
+      "retry": "Try again",
+      "close": "Close",
+      "loading": "Loading recent runs",
+      "loaded": "{count, plural, =0 {No runs loaded} one {# run loaded} other {# runs loaded}}",
+      "targetLabel": "Target",
+      "idLabel": "Run ID",
+      "scheduledTarget": "Scheduled evaluation",
+      "recordFallback": "Record",
+      "target": "{record} #{id}",
+      "status": {
+        "running": "Running",
+        "matched": "Matched",
+        "partial": "Partially completed",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      }
+    }
   },
   "WorkspaceCustomFields": {
     "newField": "Add field",

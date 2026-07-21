@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RuleExecutionDto;
 import ooo.klae.connex.backend.dto.RulePreviewDto;
 import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -55,9 +56,12 @@ public class RuleService {
     }
 
     @RequirePermission(Permission.RULE_MANAGE)
-    public List<RuleExecution> executions(int id) {
+    public List<RuleExecutionDto> executions(int id) {
         requireRule(id);
-        return ruleMapper.getExecutionsByRule(workspaceService.getCurrentWorkspaceId(), id, 50);
+        return ruleMapper.getExecutionsByRule(workspaceService.getCurrentWorkspaceId(), id, 50)
+            .stream()
+            .map(this::toExecutionDto)
+            .toList();
     }
 
     /**
@@ -130,6 +134,15 @@ public class RuleService {
         dto.setCreatedAt(rule.getCreatedAt());
         dto.setUpdatedAt(rule.getUpdatedAt());
         return dto;
+    }
+
+    private RuleExecutionDto toExecutionDto(RuleExecution execution) {
+        return new RuleExecutionDto(
+            execution.getId(),
+            execution.getTriggerEntityType(),
+            execution.getTriggerEntityId(),
+            execution.getStatus(),
+            execution.getExecutedAt());
     }
 
 }

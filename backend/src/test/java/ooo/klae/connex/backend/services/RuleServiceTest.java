@@ -16,11 +16,14 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RuleExecutionDto;
 import ooo.klae.connex.backend.dto.RulePreviewDto;
 import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -131,6 +134,47 @@ class RuleServiceTest extends AbstractServiceTest {
         assertEquals("no_activity", fetched.getCondition().getConditions().get(0).getKey());
         assertEquals("add_tag", fetched.getActions().get(0).getType());
         assertEquals(currentUser.getId(), fetched.getRunAsUserId());
+    }
+
+    @Test
+    void executionsReturnsSafeFieldsAndRejectsForeignWorkspaceRule() {
+        int ruleId = ruleService.create(req("deal", entityChange("deal.won"), "user", action("notify"))).getId();
+        RuleExecution execution = new RuleExecution();
+        execution.setWorkspaceId(workspace.getId());
+        execution.setRuleId(ruleId);
+        execution.setTriggerEntityType("deal");
+        execution.setTriggerEntityId(23);
+        execution.setStatus("failed");
+        execution.setDedupeKey("23:deal.won:internal-key");
+        execution.setDetail("{\"message\":\"internal provider failure\"}");
+        ruleMapper.insertExecution(execution);
+
+        RuleExecutionDto result = ruleService.executions(ruleId).getFirst();
+
+        assertEquals(execution.getId(), result.id());
+        assertEquals("deal", result.triggerEntityType());
+        assertEquals(23, result.triggerEntityId());
+        assertEquals("failed", result.status());
+        assertNotNull(result.executedAt());
+
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        workspaceMapper.addMember(other.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, other.getId());
+
+        assertThrows(ResourceNotFoundException.class, () -> ruleService.executions(ruleId));
+    }
+
+    @Test
+    void executionsRequiresRuleManagePermission() {
+        int ruleId = ruleService.create(req("deal", entityChange("deal.won"), "user", action("notify"))).getId();
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> ruleService.executions(ruleId));
     }
 
     @Test
