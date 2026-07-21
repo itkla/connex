@@ -5,7 +5,14 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import { toastInfo } from '@/app/lib/toast';
-import { clearDraft, DRAFT_VERSIONS, listFreshDrafts, readDraft, type StoredDraft } from '@/app/lib/formDrafts';
+import {
+    clearDraft,
+    DRAFT_VERSIONS,
+    getDraftKeyGeneration,
+    listFreshDrafts,
+    readDraft,
+    type StoredDraft,
+} from '@/app/lib/formDrafts';
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActivityDraftData } from '@/app/components/activity/activities/ActivityDialog';
@@ -77,8 +84,8 @@ function isTaskDraftData(value: unknown): value is TaskDraftData {
 }
 
 type ResumeDraft =
-    | { kind: 'activity'; stored: StoredDraft<ActivityDraftData> }
-    | { kind: 'task'; stored: StoredDraft<TaskDraftData> };
+    | { kind: 'activity'; keyGeneration: number; stored: StoredDraft<ActivityDraftData> }
+    | { kind: 'task'; keyGeneration: number; stored: StoredDraft<TaskDraftData> };
 
 function readCurrentActivityDraft(
     stored: StoredDraft<ActivityDraftData>,
@@ -151,91 +158,138 @@ export default function DraftResumeBridge() {
                     clearDraft(stored.key);
                     continue;
                 }
-                drafts.push({ kind: 'activity', stored: { ...stored, data: stored.data } });
+                drafts.push({
+                    kind: 'activity',
+                    keyGeneration: getDraftKeyGeneration(stored.key),
+                    stored: { ...stored, data: stored.data },
+                });
             } else if (stored.formType === 'task') {
-                if (!isTaskDraftData(stored.data) || !stored.data.description.trim()) {
+                if (stored.scope !== 'global' || !isTaskDraftData(stored.data) || !stored.data.description.trim()) {
                     clearDraft(stored.key);
                     continue;
                 }
-                drafts.push({ kind: 'task', stored: { ...stored, data: stored.data } });
+                drafts.push({
+                    kind: 'task',
+                    keyGeneration: getDraftKeyGeneration(stored.key),
+                    stored: { ...stored, data: stored.data },
+                });
             }
         }
         if (drafts.length === 0) return;
         let active = true;
+
+        function refreshActivityToast(stored: StoredDraft<ActivityDraftData>) {
+            const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+            if (current && !sameActivityDraft(current, stored)) {
+                showActivityToast(current, getDraftKeyGeneration(stored.key));
+                return;
+            }
+            toast.dismiss(stored.key);
+        }
+
+        function showActivityToast(stored: StoredDraft<ActivityDraftData>, keyGeneration: number) {
+            const label = stored.data.subject.trim() || stored.data.notes.trim();
+            toastInfo(t('activityMessageNamed', { label: shorten(label) }), {
+                id: stored.key,
+                duration: Infinity,
+                action: {
+                    label: t('resumeActivity'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshActivityToast(stored);
+                            return;
+                        }
+                        const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+                        if (!current) {
+                            toast.dismiss(stored.key);
+                            return;
+                        }
+                        const currentData = current.data;
+                        openOverlay({
+                            kind: 'create-activity',
+                            defaults: {
+                                personId: currentData.personId ?? undefined,
+                                dealId: currentData.dealId ?? undefined,
+                            },
+                            draft: {
+                                type: currentData.type,
+                                subject: currentData.subject,
+                                notes: currentData.notes,
+                            },
+                        });
+                        toast.dismiss(stored.key);
+                    },
+                },
+                cancel: {
+                    label: t('discardActivity'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshActivityToast(stored);
+                            return;
+                        }
+                        const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
+                        if (current && sameActivityDraft(current, stored)) clearDraft(stored.key);
+                        toast.dismiss(stored.key);
+                    },
+                },
+            });
+        }
+
+        function refreshTaskToast(stored: StoredDraft<TaskDraftData>) {
+            const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+            if (current && !sameTaskDraft(current, stored)) {
+                showTaskToast(current, getDraftKeyGeneration(stored.key));
+                return;
+            }
+            toast.dismiss(stored.key);
+        }
+
+        function showTaskToast(stored: StoredDraft<TaskDraftData>, keyGeneration: number) {
+            const label = shorten(noteContentToPlainText(stored.data.description));
+            toastInfo(t('taskMessageNamed', { label }), {
+                id: stored.key,
+                duration: Infinity,
+                action: {
+                    label: t('resumeTask'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshTaskToast(stored);
+                            return;
+                        }
+                        const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+                        if (!current) {
+                            toast.dismiss(stored.key);
+                            return;
+                        }
+                        openOverlay({ kind: 'create-task', draft: current.data, restoredDraft: true });
+                        toast.dismiss(stored.key);
+                    },
+                },
+                cancel: {
+                    label: t('discardTask'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshTaskToast(stored);
+                            return;
+                        }
+                        const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
+                        if (current && sameTaskDraft(current, stored)) clearDraft(stored.key);
+                        toast.dismiss(stored.key);
+                    },
+                },
+            });
+        }
+
         const timer = window.setTimeout(() => {
             for (const draft of drafts) {
                 if (draft.kind === 'activity') {
-                    const stored = draft.stored;
-                    const data = stored.data;
-                    const label = data.subject.trim() || data.notes.trim();
-                    toastInfo(t('activityMessageNamed', { label: shorten(label) }), {
-                        id: stored.key,
-                        duration: Infinity,
-                        action: {
-                            label: t('resumeActivity'),
-                            onClick: () => {
-                                if (!active) return;
-                                const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
-                                if (!current) {
-                                    toast.dismiss(stored.key);
-                                    return;
-                                }
-                                const currentData = current.data;
-                                openOverlay({
-                                    kind: 'create-activity',
-                                    defaults: {
-                                        personId: currentData.personId ?? undefined,
-                                        dealId: currentData.dealId ?? undefined,
-                                    },
-                                    draft: {
-                                        type: currentData.type,
-                                        subject: currentData.subject,
-                                        notes: currentData.notes,
-                                    },
-                                });
-                                toast.dismiss(stored.key);
-                            },
-                        },
-                        cancel: {
-                            label: t('discardActivity'),
-                            onClick: () => {
-                                if (!active) return;
-                                const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
-                                if (current && sameActivityDraft(current, stored)) clearDraft(stored.key);
-                                toast.dismiss(stored.key);
-                            },
-                        },
-                    });
+                    showActivityToast(draft.stored, draft.keyGeneration);
                 } else {
-                    const stored = draft.stored;
-                    const data = stored.data;
-                    const label = shorten(noteContentToPlainText(data.description));
-                    toastInfo(t('taskMessageNamed', { label }), {
-                        id: stored.key,
-                        duration: Infinity,
-                        action: {
-                            label: t('resumeTask'),
-                            onClick: () => {
-                                if (!active) return;
-                                const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
-                                if (!current) {
-                                    toast.dismiss(stored.key);
-                                    return;
-                                }
-                                openOverlay({ kind: 'create-task', draft: current.data, restoredDraft: true });
-                                toast.dismiss(stored.key);
-                            },
-                        },
-                        cancel: {
-                            label: t('discardTask'),
-                            onClick: () => {
-                                if (!active) return;
-                                const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
-                                if (current && sameTaskDraft(current, stored)) clearDraft(stored.key);
-                                toast.dismiss(stored.key);
-                            },
-                        },
-                    });
+                    showTaskToast(draft.stored, draft.keyGeneration);
                 }
             }
         }, DRAFT_TOAST_DELAY_MS);
