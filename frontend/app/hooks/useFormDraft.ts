@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
     clearDraft,
@@ -43,10 +43,12 @@ export type FormDraftControls<T> = {
  */
 export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): FormDraftControls<T> {
     const { userId, workspaceId, formType, scope } = keyParts;
-    const key = useMemo(
-        () => draftKey({ userId, workspaceId, formType, scope }),
-        [userId, workspaceId, formType, scope],
-    );
+    const [origin] = useState(() => ({
+        key: draftKey({ userId, workspaceId, formType, scope }),
+        version,
+        scope,
+        formType,
+    }));
 
     const timerRef = useRef<number | null>(null);
     const pendingRef = useRef<PendingDraft<T> | null>(null);
@@ -75,10 +77,10 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
         (snapshot: T) => {
             pendingRef.current = {
                 generation: getDraftStoreGeneration(),
-                key,
-                version,
-                scope,
-                formType,
+                key: origin.key,
+                version: origin.version,
+                scope: origin.scope,
+                formType: origin.formType,
                 data: snapshot,
             };
             if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -90,13 +92,13 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
                 if (pending.generation === getDraftStoreGeneration()) writeDraft(pending.key, pending);
             }, DRAFT_DEBOUNCE_MS);
         },
-        [key, version, scope, formType],
+        [origin],
     );
 
     const clear = useCallback(() => {
         cancel();
-        clearDraft(key);
-    }, [cancel, key]);
+        clearDraft(origin.key);
+    }, [cancel, origin]);
 
     useEffect(() => {
         const onPageHide = () => flush();
