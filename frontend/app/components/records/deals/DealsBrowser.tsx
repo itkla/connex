@@ -426,9 +426,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
     const deferredQuery = useDeferredValue(query.trim());
     const exportDeals = useCallback(
-        (signal: AbortSignal) => exportDealsCsv(
+        (signal: AbortSignal, workspaceId: number) => exportDealsCsv(
             { ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined },
-            { signal },
+            { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
         ),
         [activeCurrency, deferredQuery, serverFilters],
     );

@@ -174,8 +174,11 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     }, [clearSelection, reload, loadFacets]);
 
     const exportContacts = useCallback(
-        (signal: AbortSignal) =>
-            exportContactsCsv({ ...filterParams, q: query.trim() || undefined }, { signal }),
+        (signal: AbortSignal, workspaceId: number) =>
+            exportContactsCsv(
+                { ...filterParams, q: query.trim() || undefined },
+                { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
+            ),
         [filterParams, query],
     );
 

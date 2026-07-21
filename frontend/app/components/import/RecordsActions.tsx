@@ -71,7 +71,7 @@ export type RecordsActionsProps = {
     newLabel: string;
     newAriaLabel: string;
     onImported: () => void;
-    onExport: (signal: AbortSignal) => Promise<void>;
+    onExport: (signal: AbortSignal, workspaceId: number) => Promise<void>;
 };
 
 export default function RecordsActions({
@@ -103,6 +103,7 @@ export default function RecordsActions({
         if (
             !liveScope.active
             || liveScope.switching
+            || originWorkspaceId === null
             || liveScope.activeWorkspaceId !== originWorkspaceId
             || liveScope.pathname !== originPathname
             || context.workspace?.id !== originWorkspaceId
@@ -112,7 +113,7 @@ export default function RecordsActions({
         activeControllerRef.current = controller;
         const toastId = toast.loading(t('exporting'));
         try {
-            await liveExportRef.current(controller.signal);
+            await liveExportRef.current(controller.signal, originWorkspaceId);
             if (!controller.signal.aborted) toastSuccess(t('exported'), { id: toastId });
         } catch (error) {
             if (controller.signal.aborted || isAbortError(error)) {

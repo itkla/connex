@@ -1499,15 +1499,16 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
 }
 
 /**
- * Streams a CSV from the backend with the active workspace + locale headers (a plain anchor would
- * not carry the workspace context) and triggers a browser download.
+ * Streams a CSV from the backend with locale and workspace headers (a plain anchor would not carry
+ * the workspace context) and triggers a browser download. Callers may pin a workspace header for an
+ * operation that must remain bound to its invocation scope.
  */
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
     const workspaceId = clientWorkspaceId();
     const headers = new Headers(init.headers);
     headers.set("Accept-Language", locale);
-    if (workspaceId) headers.set("X-Workspace-Id", workspaceId);
+    if (workspaceId && !headers.has("X-Workspace-Id")) headers.set("X-Workspace-Id", workspaceId);
     const res = await fetch(`${API_BASE}${path}`, {
         ...init,
         credentials: "include",
