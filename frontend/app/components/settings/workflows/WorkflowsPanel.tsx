@@ -198,8 +198,7 @@ export default function WorkflowsPanel() {
                                     )}
                                     {duplicatingRuleId === rule.id && (
                                         <Badge
-                                            role="status"
-                                            aria-label={tw("duplicatingRule", { name: rule.name })}
+                                            aria-hidden
                                             variant="outline"
                                             className="text-muted-foreground"
                                         >
@@ -214,6 +213,11 @@ export default function WorkflowsPanel() {
                                     </span>
                                 ) : null}
                             </button>
+                            {duplicatingRuleId === rule.id && (
+                                <span role="status" className="sr-only">
+                                    {tw("duplicatingRule", { name: rule.name })}
+                                </span>
+                            )}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <button
