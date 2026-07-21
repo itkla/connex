@@ -132,6 +132,81 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
     }
 
     @Test
+    void preV116RedactedOperationalIdentitiesAreBackfilledDisabled() throws Exception {
+        User creator = newUser();
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.won"));
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTitle("Notify owner");
+
+        Rule userRule = new Rule();
+        userRule.setWorkspaceId(workspace.getId());
+        userRule.setName("Redacted user rule " + unique());
+        userRule.setEnabled(true);
+        userRule.setRecordType("deal");
+        userRule.setTriggerType("entity_change");
+        userRule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        userRule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        userRule.setExecutionMode("user");
+        userRule.setRunAsUserId(null);
+        userRule.setCreatedById(creator.getId());
+        ruleMapper.insert(userRule);
+
+        Rule systemRule = new Rule();
+        systemRule.setWorkspaceId(workspace.getId());
+        systemRule.setName("Redacted system rule " + unique());
+        systemRule.setEnabled(true);
+        systemRule.setRecordType("deal");
+        systemRule.setTriggerType("entity_change");
+        systemRule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        systemRule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        systemRule.setExecutionMode("system");
+        systemRule.setRunAsUserId(null);
+        systemRule.setCreatedById(null);
+        ruleMapper.insert(systemRule);
+
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+
+        Rule repairedUserRule = ruleMapper.getById(workspace.getId(), userRule.getId());
+        Rule repairedSystemRule = ruleMapper.getById(workspace.getId(), systemRule.getId());
+        assertFalse(repairedUserRule.isEnabled());
+        assertFalse(repairedSystemRule.isEnabled());
+        Workflow userWorkflow = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), userRule.getId());
+        Workflow systemWorkflow = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), systemRule.getId());
+        assertFalse(userWorkflow.isEnabled());
+        assertFalse(systemWorkflow.isEnabled());
+        WorkflowVersion userVersion = workflowVersionMapper.getById(
+            workspace.getId(), userWorkflow.getId(), userWorkflow.getActiveVersionId());
+        WorkflowVersion systemVersion = workflowVersionMapper.getById(
+            workspace.getId(), systemWorkflow.getId(), systemWorkflow.getActiveVersionId());
+        assertNull(userVersion.getRunAsUserId());
+        assertNull(systemVersion.getCreatedById());
+        byte[] userHash = userVersion.getDefinitionHash().clone();
+        byte[] systemHash = systemVersion.getDefinitionHash().clone();
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "deal", 1, "deal.won");
+        assertTrue(ruleMapper.getExecutionsByRule(
+            workspace.getId(), userRule.getId(), 50).isEmpty());
+        assertTrue(ruleMapper.getExecutionsByRule(
+            workspace.getId(), systemRule.getId(), 50).isEmpty());
+
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), userWorkflow.getId()).size());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), systemWorkflow.getId()).size());
+        assertArrayEquals(userHash, workflowVersionMapper.getById(
+            workspace.getId(), userWorkflow.getId(), userVersion.getId()).getDefinitionHash());
+        assertArrayEquals(systemHash, workflowVersionMapper.getById(
+            workspace.getId(), systemWorkflow.getId(), systemVersion.getId()).getDefinitionHash());
+    }
+
+    @Test
     void creatorDeletionPreservesImmutableVersionAndAllowsBackfillReplay() throws Exception {
         User creator = newUser();
         User runAs = newUser();

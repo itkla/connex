@@ -7,9 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -27,12 +29,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
@@ -54,9 +58,11 @@ import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
 
     @Autowired private WorkflowService workflowService;
+    @Autowired private LegacyWorkflowBackfillTransaction backfillTransaction;
     @Autowired private WorkflowVersionMapper workflowVersionMapper;
-    @Autowired private RuleMapper ruleMapper;
     @Autowired private ObjectMapper objectMapper;
+    @MockitoBean private AuditService auditService;
+    @MockitoSpyBean private RuleMapper ruleMapper;
     @MockitoSpyBean private WorkflowMapper workflowMapperSpy;
     @MockitoSpyBean private WorkflowPrincipalLockService workflowPrincipalLockServiceSpy;
 
@@ -159,6 +165,37 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
         assertEquals(1, versions.size());
         assertEquals(1, versions.getFirst().getVersionNumber());
         assertEquals(persisted.getActiveVersionId().longValue(), versions.getFirst().getId());
+    }
+
+    @Test
+    void redactedIdentityRepairRollsBackWhenWorkflowInsertFails() throws Exception {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.won"));
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTitle("Notify owner");
+        Rule rule = new Rule();
+        rule.setWorkspaceId(workspace.getId());
+        rule.setName("Rollback redacted identity");
+        rule.setEnabled(true);
+        rule.setRecordType("deal");
+        rule.setTriggerType("entity_change");
+        rule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        rule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        rule.setExecutionMode("user");
+        rule.setRunAsUserId(null);
+        rule.setCreatedById(currentUser.getId());
+        ruleMapper.insert(rule);
+        doThrow(new IllegalStateException()).when(workflowMapperSpy).insert(argThat(
+            workflow -> Integer.valueOf(rule.getId()).equals(workflow.getLegacyRuleId())));
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfillTransaction.backfillWorkspace(null, workspace.getId()));
+
+        assertTrue(ruleMapper.getById(workspace.getId(), rule.getId()).isEnabled());
+        assertNull(workflowMapperSpy.getByLegacyRuleId(workspace.getId(), rule.getId()));
     }
 
     private boolean saveAfterRelease(

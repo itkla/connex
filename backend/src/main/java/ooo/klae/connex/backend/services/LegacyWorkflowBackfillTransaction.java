@@ -65,7 +65,9 @@ public class LegacyWorkflowBackfillTransaction {
         for (BackfillCandidate candidate : candidates) {
             Rule rule = lockedRules.get(candidate.rule().getId());
             try {
-                backfillRule(rule, candidate.lockedWorkflow(), candidate.lockedVersion());
+                Workflow workflow = candidate.lockedWorkflow();
+                disableIfOperationalIdentityWasRedacted(rule, workflow);
+                backfillRule(rule, workflow, candidate.lockedVersion());
             } catch (RuntimeException exception) {
                 throw failure(catalog, workspaceId, candidate.rule().getId());
             }
@@ -199,6 +201,27 @@ public class LegacyWorkflowBackfillTransaction {
             }
         }
         return locked;
+    }
+
+    private void disableIfOperationalIdentityWasRedacted(Rule rule, Workflow workflow) {
+        boolean missingUserPrincipal = "user".equals(rule.getExecutionMode())
+            && rule.getRunAsUserId() == null;
+        boolean missingSystemPrincipal = "system".equals(rule.getExecutionMode())
+            && rule.getCreatedById() == null;
+        if (!rule.isEnabled() || !missingUserPrincipal && !missingSystemPrincipal) {
+            return;
+        }
+        if (ruleMapper.updateEnabled(rule.getWorkspaceId(), rule.getId(), false) != 1) {
+            throw new IllegalStateException();
+        }
+        rule.setEnabled(false);
+        if (workflow != null && workflow.isEnabled()) {
+            if (workflowMapper.disableForOffboarding(
+                    workflow.getWorkspaceId(), workflow.getId()) != 1) {
+                throw new IllegalStateException();
+            }
+            workflow.setEnabled(false);
+        }
     }
 
     private void backfillRule(

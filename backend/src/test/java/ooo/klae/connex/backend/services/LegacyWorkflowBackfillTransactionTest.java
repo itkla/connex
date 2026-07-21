@@ -177,6 +177,126 @@ class LegacyWorkflowBackfillTransactionTest {
     }
 
     @Test
+    void freshBackfillDisablesEnabledUserRuleWithRedactedRunAsIdentity() {
+        Rule rule = rule("user", true);
+        rule.setRunAsUserId(null);
+        rules(7, rule);
+        allowFreshInsert();
+        when(ruleMapper.updateEnabled(7, 23, false)).thenReturn(1);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
+        verify(ruleMapper).updateEnabled(7, 23, false);
+        verify(workflowMapper).insert(workflow.capture());
+        verify(workflowVersionMapper).insert(version.capture());
+        assertFalse(rule.isEnabled());
+        assertFalse(workflow.getValue().isEnabled());
+        assertNull(workflow.getValue().getDraftRunAsUserId());
+        assertNull(version.getValue().getRunAsUserId());
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, null);
+        InOrder writes = inOrder(ruleMapper, workflowMapper, workflowVersionMapper);
+        writes.verify(ruleMapper).updateEnabled(7, 23, false);
+        writes.verify(workflowMapper).insert(workflow.getValue());
+        writes.verify(workflowVersionMapper).insert(version.getValue());
+    }
+
+    @Test
+    void freshBackfillDisablesEnabledSystemRuleWithRedactedCreatorIdentity() {
+        Rule rule = rule("system", true);
+        rule.setCreatedById(null);
+        rules(7, rule);
+        allowFreshInsert();
+        when(ruleMapper.updateEnabled(7, 23, false)).thenReturn(1);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
+        verify(ruleMapper).updateEnabled(7, 23, false);
+        verify(workflowMapper).insert(workflow.capture());
+        verify(workflowVersionMapper).insert(version.capture());
+        assertFalse(rule.isEnabled());
+        assertFalse(workflow.getValue().isEnabled());
+        assertNull(workflow.getValue().getCreatedById());
+        assertNull(version.getValue().getCreatedById());
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, null);
+        InOrder writes = inOrder(ruleMapper, workflowMapper, workflowVersionMapper);
+        writes.verify(ruleMapper).updateEnabled(7, 23, false);
+        writes.verify(workflowMapper).insert(workflow.getValue());
+        writes.verify(workflowVersionMapper).insert(version.getValue());
+    }
+
+    @Test
+    void freshEnabledUserWithRunAsAndRedactedCreatorRemainsEnabled() {
+        Rule rule = rule("user", true);
+        rule.setCreatedById(null);
+        rules(7, rule);
+        allowFreshInsert();
+        when(workflowMapper.updateLifecycle(7, 101, true, null)).thenReturn(1);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        verify(ruleMapper, never()).updateEnabled(7, 23, false);
+        verify(workflowMapper).updateLifecycle(7, 101, true, null);
+    }
+
+    @Test
+    void freshEnabledSystemWithCreatorAndNoRunAsRemainsEnabled() {
+        Rule rule = rule("system", true);
+        rules(7, rule);
+        allowFreshInsert();
+        when(workflowMapper.updateLifecycle(7, 101, true, null)).thenReturn(1);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        verify(ruleMapper, never()).updateEnabled(7, 23, false);
+        verify(workflowMapper).updateLifecycle(7, 101, true, null);
+    }
+
+    @Test
+    void redactedOperationalIdentityRepairFailsClosedWhenRuleDisableLosesRace() {
+        Rule rule = rule("user", true);
+        rule.setRunAsUserId(null);
+        rules(7, rule);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        verify(ruleMapper).updateEnabled(7, 23, false);
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
+    void existingEnabledPairWithRedactedOperationalIdentityIsDisabledWithoutNewVersion() {
+        Rule rule = rule("user", true);
+        rule.setRunAsUserId(null);
+        PersistedPair pair = pair(rule, 4);
+        rules(7, rule);
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
+        when(ruleMapper.updateEnabled(7, 23, false)).thenReturn(1);
+        when(workflowMapper.disableForOffboarding(7, 101)).thenReturn(1);
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        assertFalse(rule.isEnabled());
+        assertFalse(pair.workflow().isEnabled());
+        verify(ruleMapper).updateEnabled(7, 23, false);
+        verify(workflowMapper).disableForOffboarding(7, 101);
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
     void systemBackfillRejectsPersistedRunAsIdentity() {
         Rule rule = rule("system", false);
         rule.setRunAsUserId(999);
@@ -639,6 +759,18 @@ class LegacyWorkflowBackfillTransactionTest {
 
     private void rules(int workspaceId, Rule... rules) {
         workspaceRules.put(workspaceId, List.of(rules));
+    }
+
+    private void allowFreshInsert() {
+        doAnswer(invocation -> {
+            invocation.<Workflow>getArgument(0).setId(101);
+            return null;
+        }).when(workflowMapper).insert(any(Workflow.class));
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(202L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(workflowMapper.updateActiveVersion(7, 101, 202L, null)).thenReturn(1);
     }
 
     private static String expectedDefinition() {
