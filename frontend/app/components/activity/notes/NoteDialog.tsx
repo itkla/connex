@@ -8,6 +8,8 @@ import { Loader2Icon } from 'lucide-react';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
@@ -34,7 +36,16 @@ import { cn } from '@/lib/utils';
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
+import { noteContentToPlainText } from '@/app/lib/references';
 import type { Contact, Deal, Note } from '@/app/lib/types';
+
+/** The serializable note-composer fields persisted and restored as one workspace-scoped draft. */
+export type NoteDraftData = {
+    content: string;
+    personId: number | null;
+    dealId: number | null;
+};
 
 type Props = {
     open: boolean;
@@ -47,10 +58,22 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
     defaultContent?: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
 };
 
-export default function NoteDialog({
+export default function NoteDialog(props: Props) {
+    const { activeWorkspaceId } = useWorkspace();
+    return (
+        <ScopedNoteDialog
+            key={`${props.currentUserId}:${activeWorkspaceId ?? 'none'}`}
+            {...props}
+            activeWorkspaceId={activeWorkspaceId}
+        />
+    );
+}
+
+function ScopedNoteDialog({
     open,
     onOpenChange,
     note,
@@ -60,12 +83,24 @@ export default function NoteDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultContent = '',
+    ownsInitialDraft = false,
     requestInit,
-}: Props) {
+    activeWorkspaceId,
+}: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityNotesDialog');
     const submittingRef = useRef(false);
     const [isDirty, setIsDirty] = useState(false);
     const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
+    const draft = useFormDraft<NoteDraftData>({
+        keyParts: {
+            userId: currentUserId,
+            workspaceId: activeWorkspaceId,
+            formType: 'note',
+            scope: 'global',
+        },
+        version: DRAFT_VERSIONS.note,
+    });
+    const isCreate = note === null;
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
@@ -95,17 +130,27 @@ export default function NoteDialog({
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
                         defaultContent={defaultContent}
+                        ownsInitialDraft={ownsInitialDraft}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
                         onDirtyChange={setIsDirty}
+                        onPersistDraft={isCreate ? draft.persist : undefined}
+                        onClearDraft={isCreate ? draft.clear : undefined}
                         onCancel={guard.requestClose}
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
             </ResponsiveDialog>
-            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={() => {
+                    if (isCreate) draft.clear();
+                    guard.confirm.onDiscard();
+                }}
+            />
         </>
     );
 }
@@ -118,10 +163,15 @@ type FormProps = {
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultContent: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onSubmittingChange: (value: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
+    /** Persists the current note snapshot after this form owns a meaningful edit. */
+    onPersistDraft?: (data: NoteDraftData) => void;
+    /** Clears the note draft after confirmed creation, explicit discard, or deletion of owned content. */
+    onClearDraft?: () => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the save succeeds (after the success beat), to dismiss the surface. */
@@ -141,9 +191,12 @@ export function NoteDialogForm({
     defaultPerson,
     defaultDeal,
     defaultContent,
+    ownsInitialDraft = false,
     requestInit,
     onSubmittingChange,
     onDirtyChange,
+    onPersistDraft,
+    onClearDraft,
     onCancel,
     onClose,
 }: FormProps) {
@@ -160,6 +213,8 @@ export function NoteDialogForm({
     );
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const ownsDraftRef = useRef(ownsInitialDraft);
+    const hasChangedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [initial] = useState(() => ({
@@ -176,6 +231,27 @@ export function NoteDialogForm({
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
+
+    useEffect(() => {
+        if (isEdit) return;
+        const meaningful = noteContentToPlainText(content).trim().length > 0;
+        if (dirty) hasChangedRef.current = true;
+        if (!hasChangedRef.current || succeeded) return;
+        if (meaningful) {
+            ownsDraftRef.current = true;
+        } else if (!ownsDraftRef.current) {
+            return;
+        }
+        if (!meaningful) {
+            onClearDraft?.();
+            return;
+        }
+        onPersistDraft?.({
+            content,
+            personId: selectedPerson?.id ?? null,
+            dealId: selectedDeal?.id ?? null,
+        });
+    }, [content, dirty, isEdit, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, succeeded]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -215,6 +291,7 @@ export function NoteDialogForm({
                     requestInit,
                 );
                 if (requestInit?.signal?.aborted) return;
+                onClearDraft?.();
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
