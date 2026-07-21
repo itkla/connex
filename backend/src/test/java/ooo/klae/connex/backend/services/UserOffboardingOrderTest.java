@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
 
 @ExtendWith(MockitoExtension.class)
 class UserOffboardingOrderTest {
@@ -61,6 +62,7 @@ class UserOffboardingOrderTest {
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private NotificationStateVersionService stateVersionService;
+    @Mock private WorkflowOffboardingService workflowOffboardingService;
 
     @InjectMocks private UserOffboardingService service;
 
@@ -108,17 +110,23 @@ class UserOffboardingOrderTest {
         when(notificationMapper.findRecipientIdsByActor(9)).thenReturn(List.of(11, 3));
         when(notificationMapper.lockRecipientIdsByActor(9)).thenReturn(List.of(11, 5, 3));
         when(notificationMapper.clearActorAnywhere(9)).thenReturn(3);
+        OffboardingPlan plan = new OffboardingPlan(List.of(), List.of(), List.of());
+        when(workflowOffboardingService.discover(9)).thenReturn(plan);
 
         service.eraseOrgDataReferences(9);
 
         InOrder order = inOrder(
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
-            stateVersionService, companyMapper, personMapper, dealMapper);
+            stateVersionService, companyMapper, personMapper, dealMapper,
+            workflowOffboardingService);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
+        order.verify(workflowOffboardingService).discover(9);
+        order.verify(workflowOffboardingService).lockWorkspaceRoots(plan);
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
+        order.verify(workflowOffboardingService).offboard(9, plan);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
@@ -147,9 +155,10 @@ class UserOffboardingOrderTest {
         User user = new User();
         user.setId(9);
         user.setUsername("target");
-        when(workspaceService.lockOwnedWorkspaceRoots(9)).thenReturn(List.of(7));
+        when(workspaceService.discoverOwnedWorkspaceIds(9)).thenReturn(List.of(7));
         when(userMapper.lockById(9)).thenReturn(9);
         when(offboardingService.snapshotAccountNotificationRecipients(9)).thenReturn(locks);
+        when(offboardingService.workflowWorkspaceIds(locks)).thenReturn(List.of());
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.isMember(7, 9)).thenReturn(true);
         when(userMapper.getUserById(9)).thenReturn(user);
@@ -174,8 +183,10 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(workspaceService, offboardingService, orgMemberService, userMapper);
         order.verify(workspaceService).requireSelf(9);
         order.verify(userMapper).lockById(9);
-        order.verify(workspaceService).lockOwnedWorkspaceRoots(9);
         order.verify(offboardingService).snapshotAccountNotificationRecipients(9);
+        order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
+        order.verify(offboardingService).workflowWorkspaceIds(locks);
+        order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
         order.verify(offboardingService).lockAccountNotificationRecipientMemberships(9, locks);
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);

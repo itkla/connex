@@ -30,6 +30,21 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="lockRole" resultType="java.lang.Integer">
+    SELECT id FROM workspace_role
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="lockPermissions" resultType="string">
+    SELECT wrp.permission FROM workspace_role_permission wrp
+    JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
+    WHERE wrp.workspace_role_id = #{roleId}
+      AND wrp.permission NOT IN ('SSO_MANAGE', 'WORKSPACE_DELETE')
+    ORDER BY wrp.permission
+    FOR UPDATE
+  </select>
+
   <update id="updateRoleName">
     UPDATE workspace_role SET name = #{name}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -66,9 +81,4 @@
     WHERE wr.id = #{roleId} AND wr.workspace_id = #{workspaceId}
   </insert>
 
-  <select id="roleExists" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1 FROM workspace_role WHERE workspace_id = #{workspaceId} AND id = #{id}
-    )
-  </select>
 </mapper>

@@ -19,7 +19,6 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
-import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -29,6 +28,7 @@ import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
 
 /**
  * Service-layer replacement for the database-level fan-out that account
@@ -47,7 +47,14 @@ import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 @RequiredArgsConstructor
 public class UserOffboardingService {
 
-    record AccountNotificationLocks(List<Integer> actorRecipientIds) {
+    record AccountNotificationLocks(
+        List<Integer> actorRecipientIds,
+        OffboardingPlan workflowPlan) {
+
+        AccountNotificationLocks(List<Integer> actorRecipientIds) {
+            this(actorRecipientIds, new OffboardingPlan(List.of(), List.of(), List.of()));
+        }
+
         AccountNotificationLocks {
             actorRecipientIds = List.copyOf(new TreeSet<>(actorRecipientIds));
         }
@@ -65,7 +72,6 @@ public class UserOffboardingService {
     private final CampaignMapper campaignMapper;
     private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
-    private final RuleMapper ruleMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
     private final SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -74,6 +80,7 @@ public class UserOffboardingService {
     private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final NotificationStateVersionService notificationStateVersionService;
+    private final WorkflowOffboardingService workflowOffboardingService;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -178,12 +185,15 @@ public class UserOffboardingService {
     public void eraseOrgDataReferences(int userId) {
         userMapper.lockById(userId);
         AccountNotificationLocks locks = snapshotAccountNotificationRecipients(userId);
+        workflowOffboardingService.lockWorkspaceRoots(locks.workflowPlan());
         lockAccountNotificationRecipientMemberships(userId, locks);
         eraseOrgDataReferences(userId, locks);
     }
 
     AccountNotificationLocks snapshotAccountNotificationRecipients(int userId) {
-        return new AccountNotificationLocks(notificationMapper.findRecipientIdsByActor(userId));
+        return new AccountNotificationLocks(
+            notificationMapper.findRecipientIdsByActor(userId),
+            workflowOffboardingService.discover(userId));
     }
 
     void lockAccountNotificationRecipientMemberships(int userId, AccountNotificationLocks locks) {
@@ -192,7 +202,12 @@ public class UserOffboardingService {
         recipientIdsToLock.forEach(notificationMapper::lockRecipientMemberships);
     }
 
+    List<Integer> workflowWorkspaceIds(AccountNotificationLocks locks) {
+        return locks.workflowPlan().workspaceIds();
+    }
+
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
+        workflowOffboardingService.offboard(userId, locks.workflowPlan());
         Set<Integer> actorRecipientIds = new TreeSet<>(locks.actorRecipientIds());
         actorRecipientIds.addAll(notificationMapper.lockRecipientIdsByActor(userId));
         savedViewPreferenceMapper.deletePinsForUserAnywhere(userId);
@@ -217,8 +232,6 @@ public class UserOffboardingService {
         consentMapper.clearEventCreatorsAnywhere(userId);
         reportMapper.clearDefinitionCreatorsAnywhere(userId);
         reportMapper.clearSnapshotGeneratorsAnywhere(userId);
-        ruleMapper.clearRunAsAnywhere(userId);
-        ruleMapper.clearCreatedByAnywhere(userId);
         shareMapper.clearCompanyShareGrantedByAnywhere(userId);
         shareMapper.clearPersonShareGrantedByAnywhere(userId);
         shareMapper.clearPipelineShareGrantedByAnywhere(userId);

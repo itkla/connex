@@ -30,6 +30,8 @@ spring:
             resolve-lazily: true
     jackson:
         default-property-inclusion: non_null
+        read:
+            strict-duplicate-detection: true
 
 connex:
     audit:
@@ -133,6 +135,7 @@ connex:
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
         business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
+        workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
     object-storage:
         provider: ${CONNEX_OBJECT_STORAGE_PROVIDER:filesystem}

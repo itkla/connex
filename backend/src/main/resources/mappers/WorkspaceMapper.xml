@@ -57,6 +57,13 @@
     FOR UPDATE
   </select>
 
+  <select id="lockAuthorizationMembership" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR UPDATE
+  </select>
+
   <select id="isMemberIncludingPending" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -130,6 +137,10 @@
 
   <select id="lockWorkspace" resultType="java.lang.Integer">
     SELECT id FROM workspace WHERE id = #{workspaceId} FOR UPDATE
+  </select>
+
+  <select id="lockWorkspaceForShare" resultType="java.lang.Integer">
+    SELECT id FROM workspace WHERE id = #{workspaceId} FOR SHARE
   </select>
 
   <select id="lockOwnerIds" resultType="int">
