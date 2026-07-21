@@ -7,6 +7,7 @@ import {
     ArrowTopRightOnSquareIcon,
     BoltIcon,
     BuildingOffice2Icon,
+    ChatBubbleLeftRightIcon,
     CheckCircleIcon,
     ChevronDownIcon,
     ChevronUpIcon,
@@ -27,6 +28,7 @@ import { useActionRecord, useActions } from '@/app/hooks/useActions';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
 import { RECORD_PATHS } from '@/app/lib/actions/seedActions';
+import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealSummary, getTasksForDeal } from '@/app/lib/api';
 import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
@@ -61,7 +63,7 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
     const t = useTranslations('RecordPeek');
     const locale = useLocale();
     const router = useRouter();
-    const { run, getAction } = useActions();
+    const { run, isAvailableForRecord } = useActions();
     const { record: recordRecent } = useRecentRecords();
     const isMobile = useIsMobile();
 
@@ -88,6 +90,19 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
     useEffect(() => {
         if (actionRecord) recordRecent(actionRecord);
     }, [actionRecord, recordRecent]);
+
+    const runRecordAction = (id: ActionId) => {
+        if (!actionRecord) return;
+        void run(id, { source: 'programmatic', record: actionRecord });
+    };
+
+    const canAddNote = actionRecord !== null && isAvailableForRecord('create.note', actionRecord);
+    const canCreateTask = actionRecord !== null && isAvailableForRecord('create.task', actionRecord);
+    const canLogActivity =
+        actionRecord !== null &&
+        actionRecord.type !== 'company' &&
+        isAvailableForRecord('create.activity', actionRecord);
+    const canCopyLink = actionRecord !== null && isAvailableForRecord('record.copy-link', actionRecord);
 
     useEffect(() => {
         if (!target) return;
@@ -171,25 +186,36 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
                 </div>
 
                 {target && !error && (
-                    <div className="grid grid-cols-2 gap-2 border-t p-3 sm:grid-cols-4">
-                        <Button variant="outline" size="sm" onClick={openFull} className="justify-start">
+                    <div className="grid grid-cols-2 gap-2 border-t p-3">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={openFull}
+                            className={!actionRecord || canLogActivity ? 'col-span-2 justify-start' : 'justify-start'}
+                        >
                             <ArrowTopRightOnSquareIcon className="size-4" />
                             {t('openFull')}
                         </Button>
-                        {data && getAction('create.note') && (
-                            <Button variant="ghost" size="sm" onClick={() => void run('create.note', { source: 'programmatic' })} className="justify-start">
+                        {canLogActivity && (
+                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.activity')} className="justify-start">
+                                <ChatBubbleLeftRightIcon className="size-4" />
+                                {t('logActivity')}
+                            </Button>
+                        )}
+                        {canAddNote && (
+                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.note')} className="justify-start">
                                 <DocumentTextIcon className="size-4" />
                                 {t('addNote')}
                             </Button>
                         )}
-                        {data && getAction('create.task') && (
-                            <Button variant="ghost" size="sm" onClick={() => void run('create.task', { source: 'programmatic' })} className="justify-start">
+                        {canCreateTask && (
+                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.task')} className="justify-start">
                                 <CheckCircleIcon className="size-4" />
                                 {t('createTask')}
                             </Button>
                         )}
-                        {data && getAction('record.copy-link') && (
-                            <Button variant="ghost" size="sm" onClick={() => void run('record.copy-link', { source: 'programmatic' })} className="justify-start">
+                        {canCopyLink && (
+                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('record.copy-link')} className="justify-start">
                                 <LinkIcon className="size-4" />
                                 {t('copyLink')}
                             </Button>
