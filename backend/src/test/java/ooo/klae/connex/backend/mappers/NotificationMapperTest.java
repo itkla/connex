@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 class NotificationMapperTest extends AbstractMapperTest {
@@ -292,6 +293,69 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertTrue(workspaceIds.contains(workspace.getId()));
         assertTrue(workspaceIds.contains(second.getId()));
         assertTrue(page.stream().allMatch(n -> n.getWorkspaceName() != null));
+    }
+
+    @Test
+    void facetsSpanAccessibleStatesAndExcludeForeignOrPendingWorkspaceBuckets() {
+        User recipient = newUser();
+        User otherRecipient = newUser();
+        Workspace second = new Workspace();
+        second.setName("Second WS");
+        second.setSlug("facets-second-" + unique());
+        workspaceMapper.insert(second);
+        workspaceMapper.addMember(second.getId(), recipient.getId(), "member");
+        Workspace pending = new Workspace();
+        pending.setName("Pending WS");
+        pending.setSlug("facets-pending-" + unique());
+        workspaceMapper.insert(pending);
+        workspaceMapper.addPendingMember(pending.getId(), recipient.getId(), "member");
+
+        Notification dismissed = reminder(recipient, "warning", "2026-07-20 00:00:00", 301);
+        notificationMapper.upsert(dismissed);
+        notificationMapper.dismiss(recipient.getId(), dismissed.getId());
+
+        Notification snoozed = reminder(recipient, "critical", "2026-07-20 01:00:00", 302);
+        snoozed.setWorkspaceId(second.getId());
+        snoozed.setType("deal.close");
+        snoozed.setCategory("deal");
+        notificationMapper.upsert(snoozed);
+        notificationMapper.snooze(
+            recipient.getId(), snoozed.getId(), "2999-01-01 00:00:00", "UTC");
+
+        Notification invitation = reminder(recipient, "info", "2026-07-20 02:00:00", 303);
+        invitation.setWorkspaceId(pending.getId());
+        invitation.setType("workspace.join");
+        invitation.setCategory("workspace");
+        notificationMapper.upsert(invitation);
+
+        Notification foreign = reminder(otherRecipient, "critical", "2026-07-20 03:00:00", 304);
+        foreign.setCategory("foreign");
+        notificationMapper.upsert(foreign);
+
+        Notification inaccessible = reminder(recipient, "info", "2026-07-20 04:00:00", 305);
+        inaccessible.setCategory("hidden");
+        inaccessible.setSourceType("unknown");
+        inaccessible.setSourceId(999999);
+        notificationMapper.upsert(inaccessible);
+
+        List<FacetCount> categories = notificationMapper.countsByCategory(recipient.getId());
+        List<FacetCount> severities = notificationMapper.countsBySeverity(recipient.getId());
+        List<FacetCount> workspaces = notificationMapper.countsByWorkspace(recipient.getId());
+
+        assertEquals(1, facet(categories, "task").getCount());
+        assertEquals(1, facet(categories, "deal").getCount());
+        assertEquals(1, facet(categories, "workspace").getCount());
+        assertNull(findFacet(categories, "foreign"));
+        assertNull(findFacet(categories, "hidden"));
+        assertEquals(1, facet(severities, "warning").getCount());
+        assertEquals(1, facet(severities, "critical").getCount());
+        assertEquals(1, facet(severities, "info").getCount());
+        assertEquals(
+            workspace.getName(),
+            facet(workspaces, Integer.toString(workspace.getId())).getLabel()
+        );
+        assertEquals(second.getName(), facet(workspaces, Integer.toString(second.getId())).getLabel());
+        assertNull(findFacet(workspaces, Integer.toString(pending.getId())));
     }
 
     @Test
@@ -633,6 +697,20 @@ class NotificationMapperTest extends AbstractMapperTest {
         );
         assertEquals(1, notifications.size());
         return notifications.getFirst();
+    }
+
+    private static FacetCount facet(List<FacetCount> facets, String key) {
+        return facets.stream()
+            .filter(candidate -> key.equals(candidate.getKey()))
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private static FacetCount findFacet(List<FacetCount> facets, String key) {
+        return facets.stream()
+            .filter(candidate -> key.equals(candidate.getKey()))
+            .findFirst()
+            .orElse(null);
     }
 
     private Notification reminder(User recipient, String severity, String triggeredAt) {

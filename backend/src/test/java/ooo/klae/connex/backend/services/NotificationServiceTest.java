@@ -23,8 +23,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
+import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -86,6 +88,25 @@ class NotificationServiceTest {
             42, "unread", null, List.of("task"), null, null,
             "deal", 55, "2026-06-25 00:00:00");
         assertEquals(19L, page.stateVersion());
+    }
+
+    @Test
+    void facetsAreAssembledForTheAuthenticatedRecipient() {
+        List<FacetCount> categories = List.of(new FacetCount("task", 3, null));
+        List<FacetCount> severities = List.of(new FacetCount("warning", 2, null));
+        List<FacetCount> workspaces = List.of(new FacetCount("7", 4, "Sales"));
+        when(notificationMapper.countsByCategory(42)).thenReturn(categories);
+        when(notificationMapper.countsBySeverity(42)).thenReturn(severities);
+        when(notificationMapper.countsByWorkspace(42)).thenReturn(workspaces);
+
+        NotificationFacets result = service.getFacets();
+
+        assertSame(categories, result.categories());
+        assertSame(severities, result.severities());
+        assertSame(workspaces, result.workspaces());
+        verify(notificationMapper).countsByCategory(42);
+        verify(notificationMapper).countsBySeverity(42);
+        verify(notificationMapper).countsByWorkspace(42);
     }
 
     @Test

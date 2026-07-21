@@ -305,6 +305,41 @@
     <include refid="inboxFilters"/>
   </select>
 
+  <select id="countsByCategory" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT n.category AS `key`, COUNT(*) AS `count`, NULL AS label
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.category
+    ORDER BY n.category
+  </select>
+
+  <select id="countsBySeverity" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT n.severity AS `key`, COUNT(*) AS `count`, NULL AS label
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.severity
+    ORDER BY n.severity
+  </select>
+
+  <select id="countsByWorkspace" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT CAST(n.workspace_id AS CHAR) AS `key`, COUNT(*) AS `count`, w.name AS label
+    FROM notification n
+    JOIN workspace w ON w.id = n.workspace_id
+    JOIN workspace_member active_wm
+      ON active_wm.workspace_id = n.workspace_id
+     AND active_wm.user_id = #{recipientId}
+     AND active_wm.status = 'active'
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.workspace_id, w.name
+    ORDER BY n.workspace_id
+  </select>
+
   <select id="getUnreadCounts"
           resultType="ooo.klae.connex.backend.dto.NotificationCountsDto">
     SELECT COALESCE(SUM(

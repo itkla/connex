@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 /**
@@ -139,6 +140,12 @@ public interface NotificationMapper {
     default NotificationCountsDto getUnreadCounts(int recipientId) {
         return getUnreadCounts(recipientId, getDatabaseUtcTimestamp());
     }
+
+    List<FacetCount> countsByCategory(@Param("recipientId") int recipientId);
+
+    List<FacetCount> countsBySeverity(@Param("recipientId") int recipientId);
+
+    List<FacetCount> countsByWorkspace(@Param("recipientId") int recipientId);
 
     String getNextSnoozeExpiry(
         @Param("recipientId") int recipientId,
