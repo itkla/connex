@@ -11,8 +11,9 @@ import { Loader2Icon } from 'lucide-react';
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
+import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
-import { formatShortcut, resolveShortcutPlatform, type ShortcutPlatform } from '@/app/lib/actions/shortcut';
+import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
@@ -34,19 +35,6 @@ const PILL_INPUT =
 
 type Mode = 'inline' | 'palette';
 type ScopedResults = { query: string; data: SearchResults };
-type ShortcutPlatformSnapshot = ShortcutPlatform | null;
-
-function subscribeToShortcutPlatform(): () => void {
-    return () => {};
-}
-
-function shortcutPlatformSnapshot(): ShortcutPlatformSnapshot {
-    return resolveShortcutPlatform(navigator.platform);
-}
-
-function shortcutPlatformServerSnapshot(): ShortcutPlatformSnapshot {
-    return null;
-}
 
 function actionLabel(action: AppAction, t: (key: string) => string): string {
     return action.label ?? t(action.labelKey);
@@ -106,11 +94,7 @@ export default function GlobalSearch() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
-    const shortcutPlatform = useSyncExternalStore(
-        subscribeToShortcutPlatform,
-        shortcutPlatformSnapshot,
-        shortcutPlatformServerSnapshot,
-    );
+    const shortcutPlatform = useShortcutPlatform();
     const currentViewport = useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => '0:0:0:0');
     const [viewportOffsetLeft, viewportOffsetTop, currentViewportWidth, currentViewportHeight] = currentViewport.split(':').map(Number);
     const reduceMotion = useReducedMotion() ?? false;
@@ -371,7 +355,7 @@ export default function GlobalSearch() {
                             autoComplete="off"
                         />
                         <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                            ⌘K
+                            {shortcutPlatform ? formatShortcut('mod+k', shortcutPlatform) : null}
                         </kbd>
                     </motion.form>
 
@@ -530,7 +514,9 @@ export default function GlobalSearch() {
                                                                 ) : null}
                                                             </span>
                                                             {action.shortcut && shortcutPlatform ? (
-                                                                <CommandShortcut>{formatShortcut(action.shortcut, shortcutPlatform)}</CommandShortcut>
+                                                                <CommandShortcut className="shrink-0 whitespace-nowrap">
+                                                                    {formatShortcut(action.shortcut, shortcutPlatform)}
+                                                                </CommandShortcut>
                                                             ) : null}
                                                         </CommandItem>
                                                     );
