@@ -12,8 +12,11 @@ export default function NotificationsLoading() {
                     <Skeleton className="h-9 w-36 rounded-md" />
                 </div>
 
-                <div className="px-4 sm:px-6">
+                <div className="flex flex-wrap gap-2 px-4 sm:px-6">
                     <Skeleton className="h-9 w-72 rounded-full" />
+                    <Skeleton className="h-9 w-24 rounded-full" />
+                    <Skeleton className="h-9 w-24 rounded-full" />
+                    <Skeleton className="h-9 w-32 rounded-full" />
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-border bg-card">

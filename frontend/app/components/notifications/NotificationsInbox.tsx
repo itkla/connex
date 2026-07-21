@@ -1,13 +1,15 @@
 "use client";
 
-import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import {
     ApiError,
     dismissNotification,
+    getNotificationFacets,
     getNotifications,
     markAllNotificationsRead,
     markNotificationRead,
@@ -16,7 +18,7 @@ import {
     snoozeNotification,
     unsnoozeNotification,
 } from "@/app/lib/api";
-import { type Notification, type NotificationState, type SnoozeRequest } from "@/app/lib/types";
+import { type Notification, type NotificationFacets, type NotificationState, type SnoozeRequest } from "@/app/lib/types";
 import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
@@ -29,7 +31,7 @@ import {
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
-import { SegmentedToggle } from "@/app/components/filters";
+import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/app/components/filters";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { Button } from "@/components/ui/button";
@@ -59,7 +61,9 @@ function matchesState(n: Notification, state: NotificationState): boolean {
  */
 export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
+    const tf = useTranslations("Filters");
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, snoozed, refreshUnread } = useNotifications();
     const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
@@ -67,6 +71,10 @@ export default function NotificationsInbox() {
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [categories, setCategories] = useState<Set<string>>(new Set());
+    const [severities, setSeverities] = useState<Set<string>>(new Set());
+    const [workspaceFilter, setWorkspaceFilter] = useState("all");
+    const [facets, setFacets] = useState<NotificationFacets | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
     const loadGenerationRef = useRef(0);
     const requestRef = useRef<AbortController | null>(null);
@@ -77,7 +85,14 @@ export default function NotificationsInbox() {
         const controller = new AbortController();
         const generation = ++loadGenerationRef.current;
         requestRef.current = controller;
-        getNotifications({ status: state, page, size: PAGE_SIZE }, { signal: controller.signal })
+        getNotifications({
+            status: state,
+            category: categories.size > 0 ? Array.from(categories) : undefined,
+            severity: severities.size > 0 ? Array.from(severities) : undefined,
+            workspaceId: workspaceFilter === "all" ? undefined : Number(workspaceFilter),
+            page,
+            size: PAGE_SIZE,
+        }, { signal: controller.signal })
             .then((result) => {
                 if (loadGenerationRef.current !== generation) return;
                 if (result.stateVersion < requiredStateVersionRef.current) return;
@@ -99,7 +114,28 @@ export default function NotificationsInbox() {
         return () => {
             controller.abort();
         };
-    }, [page, state, t, refreshKey]);
+    }, [categories, page, refreshKey, severities, state, t, workspaceFilter]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        getNotificationFacets({ signal: controller.signal })
+            .then((result) => {
+                setFacets(result);
+                setWorkspaceFilter((current) => (
+                    current === "all" || result.workspaces.some((facet) => facet.key === current)
+                        ? current
+                        : "all"
+                ));
+            })
+            .catch((error) => {
+                if (!(error instanceof DOMException && error.name === "AbortError")) {
+                    toastError(t("facetLoadError"));
+                }
+            });
+        return () => {
+            controller.abort();
+        };
+    }, [refreshKey, t]);
 
     useEffect(
         () => onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
@@ -260,7 +296,78 @@ export default function NotificationsInbox() {
         }
     }
 
+    function toggleCategory(value: string) {
+        setLoading(true);
+        setPage(1);
+        setCategories((current) => {
+            const next = new Set(current);
+            if (next.has(value)) next.delete(value);
+            else next.add(value);
+            return next;
+        });
+    }
+
+    function toggleSeverity(value: string) {
+        setLoading(true);
+        setPage(1);
+        setSeverities((current) => {
+            const next = new Set(current);
+            if (next.has(value)) next.delete(value);
+            else next.add(value);
+            return next;
+        });
+    }
+
+    function changeWorkspace(value: string) {
+        setLoading(true);
+        setPage(1);
+        setWorkspaceFilter(value);
+    }
+
+    function clearFacetFilters() {
+        setLoading(true);
+        setPage(1);
+        setCategories(new Set());
+        setSeverities(new Set());
+        setWorkspaceFilter("all");
+    }
+
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const hasFacetFilters = categories.size > 0 || severities.size > 0 || workspaceFilter !== "all";
+    const categoryLabels = new Map<string, string>([
+        ["activity", t("categoryActivity")],
+        ["company", t("categoryCompany")],
+        ["deal", t("categoryDeal")],
+        ["introduction", t("categoryIntroduction")],
+        ["note", t("categoryNote")],
+        ["person", t("categoryPerson")],
+        ["relationship", t("categoryRelationship")],
+        ["task", t("categoryTask")],
+        ["workspace", t("categoryWorkspace")],
+    ]);
+    const severityLabels = new Map<string, string>([
+        ["critical", t("severityCritical")],
+        ["warning", t("severityWarning")],
+        ["info", t("severityInfo")],
+    ]);
+    const categoryOptions = facets?.categories.map((facet) => ({
+        value: facet.key,
+        label: categoryLabels.get(facet.key) ?? facet.label ?? facet.key,
+        total: facet.count,
+    })) ?? [];
+    const severityOptions = facets?.severities.map((facet) => ({
+        value: facet.key,
+        label: severityLabels.get(facet.key) ?? facet.label ?? facet.key,
+        total: facet.count,
+    })) ?? [];
+    const workspaceOptions = [
+        { value: "all", label: t("filterAllWorkspaces") },
+        ...(facets?.workspaces.map((facet) => ({
+            value: facet.key,
+            label: facet.label ?? facet.key,
+            count: facet.count,
+        })) ?? []),
+    ];
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -279,39 +386,89 @@ export default function NotificationsInbox() {
                 </Rise>
 
                 <Rise delay={0.06} className="px-4 sm:px-6">
-                    <SegmentedToggle<NotificationState>
-                        ariaLabel={t("filterAria")}
-                        value={state}
-                        onChange={(value) => {
-                            setLoading(true);
-                            setState(value);
-                            setPage(1);
-                        }}
-                        options={[
-                            { value: "active", label: t("filter_active") },
-                            { value: "unread", label: t("filter_unread") },
-                            {
-                                value: "snoozed",
-                                label: (
-                                    <span className="inline-flex items-center gap-1.5">
-                                        {t("filter_snoozed")}
-                                        {snoozed > 0 ? (
-                                            <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-foreground/10 px-1 text-[10px] font-semibold leading-4 text-foreground">
-                                                {snoozed > 99 ? "99+" : snoozed}
-                                            </span>
-                                        ) : null}
-                                    </span>
-                                ),
-                            },
-                            { value: "history", label: t("filter_history") },
-                            { value: "all", label: t("filter_all") },
-                        ]}
-                    />
+                    <FilterBar
+                        chips={[]}
+                        hasActiveFilters={hasFacetFilters}
+                        onClearAll={clearFacetFilters}
+                        clearAllLabel={tf("clearAll")}
+                        reduce={reduce}
+                    >
+                        <SegmentedToggle<NotificationState>
+                            ariaLabel={t("filterAria")}
+                            value={state}
+                            onChange={(value) => {
+                                setLoading(true);
+                                setState(value);
+                                setPage(1);
+                            }}
+                            options={[
+                                { value: "active", label: t("filter_active") },
+                                { value: "unread", label: t("filter_unread") },
+                                {
+                                    value: "snoozed",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            {t("filter_snoozed")}
+                                            {snoozed > 0 ? (
+                                                <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-foreground/10 px-1 text-[10px] font-semibold leading-4 text-foreground">
+                                                    {snoozed > 99 ? "99+" : snoozed}
+                                                </span>
+                                            ) : null}
+                                        </span>
+                                    ),
+                                },
+                                { value: "history", label: t("filter_history") },
+                                { value: "all", label: t("filter_all") },
+                            ]}
+                        />
+                        {categoryOptions.length > 1 || categories.size > 0 ? (
+                            <MultiSelectFilter
+                                label={t("filterCategory")}
+                                ariaLabel={t("filterCategory")}
+                                options={categoryOptions}
+                                selected={categories}
+                                onToggle={toggleCategory}
+                                onClear={() => {
+                                    setLoading(true);
+                                    setPage(1);
+                                    setCategories(new Set());
+                                }}
+                                clearLabel={tf("clear")}
+                            />
+                        ) : null}
+                        {severityOptions.length > 1 || severities.size > 0 ? (
+                            <MultiSelectFilter
+                                label={t("filterSeverity")}
+                                ariaLabel={t("filterSeverity")}
+                                options={severityOptions}
+                                selected={severities}
+                                onToggle={toggleSeverity}
+                                onClear={() => {
+                                    setLoading(true);
+                                    setPage(1);
+                                    setSeverities(new Set());
+                                }}
+                                clearLabel={tf("clear")}
+                            />
+                        ) : null}
+                        {workspaceOptions.length > 2 || workspaceFilter !== "all" ? (
+                            <RadioFilter
+                                label={t("filterWorkspace")}
+                                ariaLabel={t("filterWorkspace")}
+                                value={workspaceFilter}
+                                onValueChange={changeWorkspace}
+                                options={workspaceOptions}
+                            />
+                        ) : null}
+                    </FilterBar>
                 </Rise>
 
                 <Rise delay={0.12}>
-                    <section>
+                    <section aria-busy={loading}>
                         <SectionHeader title={t("inbox")} />
+                        <p className="sr-only" aria-live="polite" aria-atomic="true">
+                            {loading ? "" : t("resultCount", { count: total })}
+                        </p>
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 {loading ? (
                     <div className="divide-y divide-border">
@@ -328,12 +485,19 @@ export default function NotificationsInbox() {
                 ) : items.length === 0 ? (
                     <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
                         <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                            <CheckCircleIcon className="size-6" />
+                            {hasFacetFilters ? <FunnelIcon className="size-6" /> : <CheckCircleIcon className="size-6" />}
                         </span>
                         <div>
-                            <p className="font-medium">{t("empty")}</p>
-                            <p className="mt-1 text-sm text-muted-foreground">{t("emptyHint")}</p>
+                            <p className="font-medium">{hasFacetFilters ? tf("noMatchesTitle") : t("empty")}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                {hasFacetFilters ? tf("noMatchesBody") : t("emptyHint")}
+                            </p>
                         </div>
+                        {hasFacetFilters ? (
+                            <Button variant="outline" size="sm" onClick={clearFacetFilters}>
+                                {tf("clearAll")}
+                            </Button>
+                        ) : null}
                     </div>
                 ) : (
                     <div className="divide-y divide-border">
