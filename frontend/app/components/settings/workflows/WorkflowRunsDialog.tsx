@@ -21,9 +21,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 const STATUS_CLASS: Record<RuleExecutionStatus, string> = {
-    running: "border-brand/30 bg-brand-light text-brand-dark",
+    running: "border-brand/30 bg-brand-light text-foreground",
     matched: "border-border bg-secondary text-secondary-foreground",
-    partial: "border-risk-medium/30 bg-risk-medium/15 text-risk-medium",
+    partial: "border-risk-medium/30 bg-risk-medium/15 text-foreground",
     skipped: "border-border bg-muted text-muted-foreground",
     failed: "border-destructive/30 bg-destructive/10 text-destructive",
 };
@@ -52,8 +52,6 @@ export default function WorkflowRunsDialog({
     useEffect(() => {
         if (!open) return;
         const controller = new AbortController();
-        setLoadState("loading");
-        setExecutions([]);
         void getRuleExecutions(rule.id, { signal: controller.signal })
             .then((loaded) => {
                 if (controller.signal.aborted) return;
@@ -86,7 +84,14 @@ export default function WorkflowRunsDialog({
                     <DialogDescription>{t("runs.description", { name: rule.name })}</DialogDescription>
                 </DialogHeader>
 
-                <div className="min-h-0 overflow-y-auto" aria-busy={loadState === "loading"} aria-live="polite">
+                <div className="min-h-0 overflow-y-auto" aria-busy={loadState === "loading"}>
+                    {loadState === "loading" ? (
+                        <p className="sr-only" role="status">{t("runs.loading")}</p>
+                    ) : loadState === "success" ? (
+                        <p className="sr-only" role="status">{t("runs.loaded", { count: executions.length })}</p>
+                    ) : (
+                        <p className="sr-only" role="alert">{t("runs.errorTitle")}</p>
+                    )}
                     {loadState === "loading" ? (
                         <RunsSkeleton />
                     ) : loadState === "error" ? (
@@ -98,7 +103,15 @@ export default function WorkflowRunsDialog({
                                 <p className="text-sm font-medium text-foreground">{t("runs.errorTitle")}</p>
                                 <p className="text-sm text-muted-foreground">{t("runs.errorBody")}</p>
                             </div>
-                            <Button variant="outline" size="sm" onClick={() => setAttempt((current) => current + 1)}>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setExecutions([]);
+                                    setLoadState("loading");
+                                    setAttempt((current) => current + 1);
+                                }}
+                            >
                                 {t("runs.retry")}
                             </Button>
                         </div>
@@ -130,8 +143,8 @@ export default function WorkflowRunsDialog({
                                             <dd className="font-medium text-foreground">{targetLabel(execution)}</dd>
                                         </div>
                                         <div className="min-w-0 space-y-1">
-                                            <dt className="text-muted-foreground">{t("runs.dedupeLabel")}</dt>
-                                            <dd className="break-all font-mono text-foreground">{execution.dedupeKey}</dd>
+                                            <dt className="text-muted-foreground">{t("runs.idLabel")}</dt>
+                                            <dd className="font-mono text-foreground">#{execution.id}</dd>
                                         </div>
                                     </dl>
                                 </li>

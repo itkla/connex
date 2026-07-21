@@ -2596,7 +2596,6 @@ export type RuleExecution = {
     triggerEntityType: string | null;
     triggerEntityId: number | null;
     status: RuleExecutionStatus;
-    dedupeKey: string;
     executedAt: string;
 };
 
