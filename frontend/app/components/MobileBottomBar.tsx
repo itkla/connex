@@ -15,7 +15,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/app/lib/motion';
-import { getTaskSummary } from '@/app/lib/api';
+import { ApiError, getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
@@ -181,6 +181,13 @@ function TaskBarLink({
     formatBadgeLabel: (count: number) => string;
 }) {
     const [attention, setAttention] = useState<{ workspaceId: number; count: number } | null>(null);
+    const requestScope = enabled ? workspaceId : null;
+    const [attentionScope, setAttentionScope] = useState(requestScope);
+
+    if (attentionScope !== requestScope) {
+        setAttentionScope(requestScope);
+        setAttention(null);
+    }
 
     useEffect(() => {
         if (!enabled || workspaceId === null) return;
@@ -202,15 +209,20 @@ function TaskBarLink({
                     });
                 }
             })
-            .catch(() => {
-                if (!controller.signal.aborted) {
+            .catch((error: unknown) => {
+                if (
+                    !controller.signal.aborted &&
+                    error instanceof ApiError &&
+                    (error.status === 401 || error.status === 403)
+                ) {
                     setAttention({ workspaceId: requestedWorkspaceId, count: 0 });
                 }
             });
         return () => controller.abort();
     }, [enabled, pathname, workspaceId]);
 
-    const badge = enabled && attention?.workspaceId === workspaceId ? attention.count : 0;
+    const badge =
+        attentionScope === requestScope && enabled && attention?.workspaceId === workspaceId ? attention.count : 0;
 
     return (
         <BarLink
