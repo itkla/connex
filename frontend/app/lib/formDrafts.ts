@@ -135,6 +135,13 @@ export function clearDraft(key: string): void {
     }
 }
 
+/** Removes a draft only while `expectedGeneration` still owns the key. */
+export function clearDraftIfGeneration(key: string, expectedGeneration: number): boolean {
+    if (getDraftKeyGeneration(key) !== expectedGeneration) return false;
+    clearDraft(key);
+    return true;
+}
+
 function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshnessMs: number): boolean {
     const age = Date.now() - env.savedAt;
     return (

@@ -37,7 +37,7 @@ import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
-import { noteContentToPlainText } from '@/app/lib/references';
+import { noteContentToVisibleText } from '@/app/lib/references';
 import type { Contact, Deal, Note } from '@/app/lib/types';
 
 /** The serializable note-composer fields persisted and restored as one workspace-scoped draft. */
@@ -58,7 +58,7 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
     defaultContent?: string;
-    ownsInitialDraft?: boolean;
+    initialDraftGeneration?: number;
     requestInit?: RequestInit;
 };
 
@@ -83,7 +83,7 @@ function ScopedNoteDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultContent = '',
-    ownsInitialDraft = false,
+    initialDraftGeneration,
     requestInit,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
@@ -99,6 +99,7 @@ function ScopedNoteDialog({
             scope: 'global',
         },
         version: DRAFT_VERSIONS.note,
+        initialKeyGeneration: initialDraftGeneration,
     });
     const isCreate = note === null;
 
@@ -130,7 +131,7 @@ function ScopedNoteDialog({
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
                         defaultContent={defaultContent}
-                        ownsInitialDraft={ownsInitialDraft}
+                        ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
@@ -234,7 +235,7 @@ export function NoteDialogForm({
 
     useEffect(() => {
         if (isEdit) return;
-        const meaningful = noteContentToPlainText(content).trim().length > 0;
+        const meaningful = noteContentToVisibleText(content).length > 0;
         if (dirty) hasChangedRef.current = true;
         if (!hasChangedRef.current || succeeded) return;
         if (meaningful) {

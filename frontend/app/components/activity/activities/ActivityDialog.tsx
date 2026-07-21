@@ -77,6 +77,7 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    initialDraftGeneration?: number;
     requestInit?: RequestInit;
 };
 
@@ -112,6 +113,7 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    initialDraftGeneration,
     requestInit,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
@@ -127,6 +129,7 @@ export default function ActivityDialog({
             scope: 'global',
         },
         version: DRAFT_VERSIONS.activity,
+        initialKeyGeneration: initialDraftGeneration,
     });
 
     const handleOpenChange = (next: boolean) => {

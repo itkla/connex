@@ -20,7 +20,7 @@ import type { ActivityDraftData } from '@/app/components/activity/activities/Act
 import type { NoteDraftData } from '@/app/components/activity/notes/NoteDialog';
 import type { TaskDraftData } from '@/app/components/activity/tasks/TaskDialog';
 import { ACTIVITY_TYPES } from '@/app/components/activity/activities/activityTypeMeta';
-import { noteContentToPlainText } from '@/app/lib/references';
+import { noteContentToPlainText, noteContentToVisibleText } from '@/app/lib/references';
 
 const MAX_LABEL = 48;
 /** Defer the toast past the mount/hydration tick so the sonner Toaster has subscribed before it fires. */
@@ -140,7 +140,7 @@ function readCurrentNoteDraft(
         { userId, workspaceId, formType: 'note', scope: stored.scope },
         { version: DRAFT_VERSIONS.note },
     );
-    if (!current || !isNoteDraftData(current.data) || !noteContentToPlainText(current.data.content).trim()) return null;
+    if (!current || !isNoteDraftData(current.data) || !noteContentToVisibleText(current.data.content)) return null;
     return { ...current, data: current.data };
 }
 
@@ -205,7 +205,7 @@ export default function DraftResumeBridge() {
                 if (
                     stored.scope !== 'global' ||
                     !isNoteDraftData(stored.data) ||
-                    !noteContentToPlainText(stored.data.content).trim()
+                    !noteContentToVisibleText(stored.data.content)
                 ) {
                     clearDraft(stored.key);
                     continue;
@@ -287,6 +287,7 @@ export default function DraftResumeBridge() {
                                 subject: currentData.subject,
                                 notes: currentData.notes,
                             },
+                            restoredDraftGeneration: keyGeneration,
                         });
                         toast.dismiss(stored.key);
                     },
@@ -325,7 +326,7 @@ export default function DraftResumeBridge() {
         }
 
         function showNoteToast(stored: StoredDraft<NoteDraftData>, keyGeneration: number) {
-            const label = shorten(noteContentToPlainText(stored.data.content));
+            const label = shorten(noteContentToVisibleText(stored.data.content));
             toastInfo(t('noteMessageNamed', { label }), {
                 id: stored.key,
                 duration: Infinity,
@@ -342,7 +343,11 @@ export default function DraftResumeBridge() {
                             toast.dismiss(stored.key);
                             return;
                         }
-                        openOverlay({ kind: 'create-note', draft: current.data, restoredDraft: true });
+                        openOverlay({
+                            kind: 'create-note',
+                            draft: current.data,
+                            restoredDraftGeneration: keyGeneration,
+                        });
                         toast.dismiss(stored.key);
                     },
                 },
@@ -397,7 +402,11 @@ export default function DraftResumeBridge() {
                             toast.dismiss(stored.key);
                             return;
                         }
-                        openOverlay({ kind: 'create-task', draft: current.data, restoredDraft: true });
+                        openOverlay({
+                            kind: 'create-task',
+                            draft: current.data,
+                            restoredDraftGeneration: keyGeneration,
+                        });
                         toast.dismiss(stored.key);
                     },
                 },
