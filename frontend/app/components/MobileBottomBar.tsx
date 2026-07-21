@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/app/lib/motion';
 import { getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 const GLASS_FILTER_ID = 'connex-liquid-glass';
 
@@ -163,6 +164,50 @@ function BarLink({
     );
 }
 
+function TaskBarLink({
+    workspaceId,
+    pathname,
+    label,
+    active,
+    reduce,
+    formatBadgeLabel,
+}: {
+    workspaceId: number;
+    pathname: string;
+    label: string;
+    active: boolean;
+    reduce: boolean;
+    formatBadgeLabel: (count: number) => string;
+}) {
+    const [attention, setAttention] = useState(0);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        getTaskSummary({}, {
+            signal: controller.signal,
+            headers: { 'X-Workspace-Id': String(workspaceId) },
+        })
+            .then((summary) => {
+                if (!controller.signal.aborted) setAttention(summary.overdue + summary.dueSoon);
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [pathname, workspaceId]);
+
+    return (
+        <BarLink
+            href="/activity/tasks"
+            label={label}
+            caption={label}
+            Icon={CheckCircleIcon}
+            active={active}
+            reduce={reduce}
+            badge={attention}
+            badgeLabel={formatBadgeLabel(attention)}
+        />
+    );
+}
+
 function BarButton({
     label,
     caption,
@@ -208,6 +253,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const pathname = usePathname();
     const reduce = useReducedMotion() ?? false;
     const isMobile = useIsMobile();
+    const { activeWorkspaceId, switching } = useWorkspace();
     const tNav = useTranslations('CommonSidebar');
     const tActions = useTranslations('Actions');
     const t = useTranslations('MobileNav');
@@ -229,20 +275,6 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
-
-    const [attention, setAttention] = useState(0);
-    useEffect(() => {
-        if (!isMobile) return;
-        let active = true;
-        getTaskSummary()
-            .then((summary) => {
-                if (active) setAttention(summary.overdue + summary.dueSoon);
-            })
-            .catch(() => {});
-        return () => {
-            active = false;
-        };
-    }, [pathname, isMobile]);
 
     const onDashboard = pathname === '/dashboard';
     const onTasks = pathname === '/activity/tasks' || pathname.startsWith('/activity/tasks/');
@@ -366,16 +398,26 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     </span>
                 </motion.button>
 
-                <BarLink
-                    href="/activity/tasks"
-                    label={tNav('navTasks')}
-                    caption={tNav('navTasks')}
-                    Icon={CheckCircleIcon}
-                    active={onTasks}
-                    reduce={reduce}
-                    badge={attention}
-                    badgeLabel={t('tasksBadge', { count: attention })}
-                />
+                {isMobile && !switching && activeWorkspaceId !== null ? (
+                    <TaskBarLink
+                        key={activeWorkspaceId}
+                        workspaceId={activeWorkspaceId}
+                        pathname={pathname}
+                        label={tNav('navTasks')}
+                        active={onTasks}
+                        reduce={reduce}
+                        formatBadgeLabel={(count) => t('tasksBadge', { count })}
+                    />
+                ) : (
+                    <BarLink
+                        href="/activity/tasks"
+                        label={tNav('navTasks')}
+                        caption={tNav('navTasks')}
+                        Icon={CheckCircleIcon}
+                        active={onTasks}
+                        reduce={reduce}
+                    />
+                )}
                 <BarButton
                     label={t('more')}
                     caption={t('more')}
