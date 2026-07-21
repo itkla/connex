@@ -49,6 +49,7 @@ function actionLabel(action: AppAction, t: (key: string) => string): string {
 
 function actionSearchText(action: AppAction, t: (key: string) => string): string {
     const parts = [actionLabel(action, t)];
+    if (action.descriptionKey) parts.push(t(action.descriptionKey));
     if (action.keywords) parts.push(...action.keywords);
     if (action.keywordsKey) parts.push(t(action.keywordsKey));
     return parts.join(' ').toLowerCase();
@@ -510,7 +511,14 @@ export default function GlobalSearch() {
                                                             ) : Icon ? (
                                                                 <Icon className="size-4 text-muted-foreground" />
                                                             ) : null}
-                                                            <span className="flex-1 truncate">{action.label ?? tActions(action.labelKey)}</span>
+                                                            <span className="min-w-0 flex-1">
+                                                                <span className="block truncate">{action.label ?? tActions(action.labelKey)}</span>
+                                                                {action.descriptionKey ? (
+                                                                    <span className="block truncate text-xs text-muted-foreground">
+                                                                        {tActions(action.descriptionKey)}
+                                                                    </span>
+                                                                ) : null}
+                                                            </span>
                                                             {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
                                                         </CommandItem>
                                                     );
