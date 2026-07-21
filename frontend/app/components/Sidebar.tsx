@@ -77,6 +77,7 @@ type NavSection = {
     id: SidebarSectionId;
     label: string;
     items: NavItem[];
+    activePaths?: readonly string[];
 };
 
 function useSections(): NavSection[] {
@@ -96,6 +97,7 @@ function useSections(): NavSection[] {
         {
             id: "overview",
             label: t("sectionOverview"),
+            activePaths: ["/dashboard", "/overview"],
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
                 { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: false },
@@ -109,6 +111,7 @@ function useSections(): NavSection[] {
         {
             id: "records",
             label: t("sectionRecords"),
+            activePaths: ["/records"],
             items: [
                 { label: t("navCompanies"), href: "/records/companies", icon: BuildingOffice2Icon },
                 { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
@@ -120,6 +123,7 @@ function useSections(): NavSection[] {
         {
             id: "marketing",
             label: t("sectionMarketing"),
+            activePaths: ["/marketing"],
             items: [
                 { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
             ],
@@ -127,6 +131,7 @@ function useSections(): NavSection[] {
         {
             id: "activity",
             label: t("sectionActivity"),
+            activePaths: ["/activity"],
             items: [
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
@@ -136,6 +141,7 @@ function useSections(): NavSection[] {
         {
             id: "library",
             label: t("sectionLibrary"),
+            activePaths: ["/library"],
             items: [
                 { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
@@ -145,11 +151,13 @@ function useSections(): NavSection[] {
         {
             id: "workspace",
             label: t("sectionWorkspace"),
+            activePaths: ["/users", "/workflows", "/settings", "/organization", "/admin"],
             items: workspaceItems,
         },
         {
             id: "help",
             label: t("sectionHelp"),
+            activePaths: ["/docs"],
             items: [{ label: t("navDocs"), href: "/docs", icon: BookOpenIcon }],
         },
     ];
@@ -184,7 +192,8 @@ function NavGroup({
     navigationKey: string;
     onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
-    const groupActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
+    const itemActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
+    const groupActive = itemActive || section.activePaths?.some((href) => isActive(pathname, href)) === true;
     const [manualState, setManualState] = useState<{ navigationKey: string; collapsed: boolean } | null>(null);
     const manualStateCurrent = manualState?.navigationKey === navigationKey && manualState.collapsed === collapsed;
     const open = manualStateCurrent ? !manualState.collapsed : groupActive || !collapsed;
