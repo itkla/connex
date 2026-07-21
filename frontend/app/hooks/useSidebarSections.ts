@@ -10,12 +10,15 @@ import {
 } from '@/app/lib/sidebarSections';
 
 const SECTION_CHANGE_EVENT_PREFIX = 'connex:sidebar-sections-change:';
+const volatileStates = new Map<string, string>();
 
 function serverSnapshot(): null {
     return null;
 }
 
 function readStoredState(key: string): string | null {
+    const volatileState = volatileStates.get(key);
+    if (volatileState !== undefined) return volatileState;
     try {
         return window.localStorage.getItem(key);
     } catch {
@@ -37,7 +40,10 @@ export function useSidebarSections(
     const subscribe = useCallback(
         (onStoreChange: () => void) => {
             const onStorage = (event: StorageEvent) => {
-                if (event.key === null || event.key === key) onStoreChange();
+                if (event.key === null || event.key === key) {
+                    volatileStates.delete(key);
+                    onStoreChange();
+                }
             };
             window.addEventListener('storage', onStorage);
             window.addEventListener(eventName, onStoreChange);
@@ -61,10 +67,12 @@ export function useSidebarSections(
             const next = new Set(parseCollapsedSidebarSections(readStoredState(key)));
             if (collapsed) next.add(sectionId);
             else next.delete(sectionId);
+            const serialized = serializeCollapsedSidebarSections(next);
             try {
-                window.localStorage.setItem(key, serializeCollapsedSidebarSections(next));
+                window.localStorage.setItem(key, serialized);
+                volatileStates.delete(key);
             } catch {
-                return;
+                volatileStates.set(key, serialized);
             }
             window.dispatchEvent(new Event(eventName));
         },
