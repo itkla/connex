@@ -98,15 +98,18 @@ class NotificationServiceTest {
         when(notificationMapper.countsByCategory(42)).thenReturn(categories);
         when(notificationMapper.countsBySeverity(42)).thenReturn(severities);
         when(notificationMapper.countsByWorkspace(42)).thenReturn(workspaces);
+        when(notificationMapper.getStateVersion(42)).thenReturn(12L);
 
         NotificationFacets result = service.getFacets();
 
         assertSame(categories, result.categories());
         assertSame(severities, result.severities());
         assertSame(workspaces, result.workspaces());
+        assertEquals(12L, result.stateVersion());
         verify(notificationMapper).countsByCategory(42);
         verify(notificationMapper).countsBySeverity(42);
         verify(notificationMapper).countsByWorkspace(42);
+        verify(notificationMapper).getStateVersion(42);
     }
 
     @Test

@@ -2247,13 +2247,14 @@ export type CreateAttachmentPayload = {
 export type FacetCount = {
     key: string;
     count: number;
-    label?: string;
+    label?: string | null;
 };
 
 export type NotificationFacets = {
     categories: FacetCount[];
     severities: FacetCount[];
     workspaces: FacetCount[];
+    stateVersion: number;
 };
 
 export type AttachmentsPageParams = PageParams & {

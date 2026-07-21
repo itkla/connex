@@ -5,8 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * A single filter facet bucket: a key (entity type, file kind, or tag id) and how
- * many attachments fall under it. Auto-mapped from {@code key} / {@code count} columns.
+ * A filter facet bucket with a stable key, result count, and optional display label.
  */
 @Data
 @NoArgsConstructor

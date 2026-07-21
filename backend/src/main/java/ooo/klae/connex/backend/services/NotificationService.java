@@ -141,7 +141,8 @@ public class NotificationService {
         return new NotificationFacets(
             notificationMapper.countsByCategory(recipientId),
             notificationMapper.countsBySeverity(recipientId),
-            notificationMapper.countsByWorkspace(recipientId)
+            notificationMapper.countsByWorkspace(recipientId),
+            notificationMapper.getStateVersion(recipientId)
         );
     }
 

@@ -8,5 +8,6 @@ import java.util.List;
 public record NotificationFacets(
     List<FacetCount> categories,
     List<FacetCount> severities,
-    List<FacetCount> workspaces
+    List<FacetCount> workspaces,
+    long stateVersion
 ) {}

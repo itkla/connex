@@ -88,7 +88,8 @@ class NotificationControllerTest {
         when(notificationService.getFacets()).thenReturn(new NotificationFacets(
             List.of(new FacetCount("task", 3, null)),
             List.of(new FacetCount("warning", 2, null)),
-            List.of(new FacetCount("7", 4, "Sales"))
+            List.of(new FacetCount("7", 4, "Sales")),
+            12
         ));
 
         mockMvc.perform(get("/api/notifications/facets"))
@@ -97,7 +98,8 @@ class NotificationControllerTest {
             .andExpect(jsonPath("$.categories[0].count").value(3))
             .andExpect(jsonPath("$.severities[0].key").value("warning"))
             .andExpect(jsonPath("$.workspaces[0].key").value("7"))
-            .andExpect(jsonPath("$.workspaces[0].label").value("Sales"));
+            .andExpect(jsonPath("$.workspaces[0].label").value("Sales"))
+            .andExpect(jsonPath("$.stateVersion").value(12));
 
         verify(notificationService).getFacets();
     }

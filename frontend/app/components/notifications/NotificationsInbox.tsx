@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, ExclamationTriangleIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
@@ -76,10 +76,31 @@ export default function NotificationsInbox() {
     const [workspaceFilter, setWorkspaceFilter] = useState("all");
     const [facets, setFacets] = useState<NotificationFacets | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [facetRefreshKey, setFacetRefreshKey] = useState(0);
+    const [listRetrying, setListRetrying] = useState(false);
+    const [facetRetrying, setFacetRetrying] = useState(false);
+    const [loadFailure, setLoadFailure] = useState<{ recipientId: number | null; generation: number } | null>(null);
+    const [facetFailure, setFacetFailure] = useState<{ recipientId: number | null; generation: number } | null>(null);
     const loadGenerationRef = useRef(0);
     const requestRef = useRef<AbortController | null>(null);
+    const facetGenerationRef = useRef(0);
+    const facetRequestRef = useRef<AbortController | null>(null);
     const serverStateVersionRef = useRef(0);
+    const facetStateVersionRef = useRef(0);
     const requiredStateVersionRef = useRef(0);
+    const workspaceFilterRef = useRef("all");
+    const filterRegionRef = useRef<HTMLDivElement | null>(null);
+    const workspaceFilterControlRef = useRef<HTMLSpanElement | null>(null);
+    const workspaceMenuOpenRef = useRef(false);
+    const inboxSectionRef = useRef<HTMLElement | null>(null);
+    const retryingLoadRef = useRef(false);
+    const retryingFacetsRef = useRef(false);
+
+    useEffect(() => {
+        serverStateVersionRef.current = 0;
+        facetStateVersionRef.current = 0;
+        requiredStateVersionRef.current = 0;
+    }, [recipientId]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -95,15 +116,28 @@ export default function NotificationsInbox() {
         }, { signal: controller.signal })
             .then((result) => {
                 if (loadGenerationRef.current !== generation) return;
-                if (result.stateVersion < requiredStateVersionRef.current) return;
+                if (result.stateVersion < requiredStateVersionRef.current) {
+                    loadGenerationRef.current += 1;
+                    setRefreshKey((current) => current + 1);
+                    return;
+                }
+                const restoreFocus = retryingLoadRef.current;
+                retryingLoadRef.current = false;
                 serverStateVersionRef.current = result.stateVersion;
+                setLoadFailure(null);
+                setListRetrying(false);
                 setItems(result.items);
                 setTotal(result.total);
+                if (restoreFocus) {
+                    requestAnimationFrame(() => inboxSectionRef.current?.focus());
+                }
             })
             .catch((error) => {
-                if (!(error instanceof DOMException && error.name === "AbortError")) {
-                    toastError(t("loadError"));
-                }
+                if (error instanceof DOMException && error.name === "AbortError") return;
+                if (loadGenerationRef.current !== generation) return;
+                retryingLoadRef.current = false;
+                setListRetrying(false);
+                setLoadFailure({ recipientId, generation });
             })
             .finally(() => {
                 if (loadGenerationRef.current === generation) {
@@ -114,38 +148,87 @@ export default function NotificationsInbox() {
         return () => {
             controller.abort();
         };
-    }, [categories, page, refreshKey, severities, state, t, workspaceFilter]);
+    }, [categories, page, recipientId, refreshKey, severities, state, t, workspaceFilter]);
 
     useEffect(() => {
         const controller = new AbortController();
+        const generation = ++facetGenerationRef.current;
+        facetRequestRef.current = controller;
         getNotificationFacets({ signal: controller.signal })
             .then((result) => {
+                if (facetGenerationRef.current !== generation) return;
+                if (result.stateVersion < requiredStateVersionRef.current) {
+                    facetGenerationRef.current += 1;
+                    setFacetRefreshKey((current) => current + 1);
+                    return;
+                }
+                const restoreFocus = retryingFacetsRef.current;
+                retryingFacetsRef.current = false;
+                facetStateVersionRef.current = result.stateVersion;
+                setFacetFailure(null);
+                setFacetRetrying(false);
                 setFacets(result);
-                setWorkspaceFilter((current) => (
-                    current === "all" || result.workspaces.some((facet) => facet.key === current)
-                        ? current
-                        : "all"
-                ));
+                const currentWorkspace = workspaceFilterRef.current;
+                if (currentWorkspace !== "all"
+                        && !result.workspaces.some((facet) => facet.key === currentWorkspace)) {
+                    const workspaceHadFocus = (workspaceFilterControlRef.current?.contains(document.activeElement) ?? false)
+                        || workspaceMenuOpenRef.current;
+                    loadGenerationRef.current += 1;
+                    requestRef.current?.abort();
+                    requestRef.current = null;
+                    setLoadFailure(null);
+                    setLoading(true);
+                    setPage(1);
+                    workspaceFilterRef.current = "all";
+                    workspaceMenuOpenRef.current = false;
+                    setWorkspaceFilter("all");
+                    if (workspaceHadFocus) focusPrimaryFilter();
+                }
+                if (restoreFocus) focusPrimaryFilter();
             })
             .catch((error) => {
-                if (!(error instanceof DOMException && error.name === "AbortError")) {
-                    toastError(t("facetLoadError"));
+                if (error instanceof DOMException && error.name === "AbortError") return;
+                if (facetGenerationRef.current !== generation) return;
+                retryingFacetsRef.current = false;
+                setFacetRetrying(false);
+                setFacetFailure({ recipientId, generation });
+            })
+            .finally(() => {
+                if (facetGenerationRef.current === generation) {
+                    facetRequestRef.current = null;
                 }
             });
         return () => {
             controller.abort();
         };
-    }, [refreshKey, t]);
+    }, [facetRefreshKey, recipientId, refreshKey, t]);
 
     useEffect(
         () => onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
-            if (!forceRefresh && stateVersion <= serverStateVersionRef.current) return;
+            if (!forceRefresh
+                    && stateVersion <= serverStateVersionRef.current
+                    && stateVersion <= facetStateVersionRef.current) return;
+            const restoreLoadFocus = retryingLoadRef.current;
+            const restoreFacetFocus = retryingFacetsRef.current;
             requiredStateVersionRef.current = Math.max(requiredStateVersionRef.current, stateVersion);
             loadGenerationRef.current += 1;
             requestRef.current?.abort();
             requestRef.current = null;
+            facetGenerationRef.current += 1;
+            facetRequestRef.current?.abort();
+            facetRequestRef.current = null;
+            retryingLoadRef.current = false;
+            retryingFacetsRef.current = false;
+            setLoadFailure(null);
+            setFacetFailure(null);
+            setListRetrying(false);
+            setFacetRetrying(false);
             setLoading(true);
             setRefreshKey((current) => current + 1);
+            if (restoreLoadFocus) {
+                requestAnimationFrame(() => inboxSectionRef.current?.focus());
+            }
+            if (restoreFacetFocus) focusPrimaryFilter();
         }),
         [recipientId],
     );
@@ -185,11 +268,32 @@ export default function NotificationsInbox() {
     }
 
     function refetch() {
+        const restoreFacetFocus = retryingFacetsRef.current;
+        retryingLoadRef.current = loadFailed;
+        retryingFacetsRef.current = false;
         loadGenerationRef.current += 1;
         requestRef.current?.abort();
         requestRef.current = null;
+        facetGenerationRef.current += 1;
+        facetRequestRef.current?.abort();
+        facetRequestRef.current = null;
+        setLoadFailure(null);
+        setFacetFailure(null);
+        setListRetrying(loadFailed);
+        setFacetRetrying(false);
         setLoading(true);
         setRefreshKey((current) => current + 1);
+        if (restoreFacetFocus) focusPrimaryFilter();
+    }
+
+    function retryFacets() {
+        retryingFacetsRef.current = true;
+        facetGenerationRef.current += 1;
+        facetRequestRef.current?.abort();
+        facetRequestRef.current = null;
+        setFacetFailure(null);
+        setFacetRetrying(true);
+        setFacetRefreshKey((current) => current + 1);
     }
 
     async function snooze(item: Notification, body: SnoozeRequest) {
@@ -297,7 +401,7 @@ export default function NotificationsInbox() {
     }
 
     function toggleCategory(value: string) {
-        setLoading(true);
+        beginQueryChange();
         setPage(1);
         setCategories((current) => {
             const next = new Set(current);
@@ -308,7 +412,7 @@ export default function NotificationsInbox() {
     }
 
     function toggleSeverity(value: string) {
-        setLoading(true);
+        beginQueryChange();
         setPage(1);
         setSeverities((current) => {
             const next = new Set(current);
@@ -319,20 +423,61 @@ export default function NotificationsInbox() {
     }
 
     function changeWorkspace(value: string) {
-        setLoading(true);
+        if (value === workspaceFilter) return;
+        beginQueryChange();
         setPage(1);
+        workspaceFilterRef.current = value;
         setWorkspaceFilter(value);
+        if (value === "all" && (facets?.workspaces.length ?? 0) <= 1) {
+            focusPrimaryFilter();
+        }
     }
 
     function clearFacetFilters() {
-        setLoading(true);
+        beginQueryChange();
         setPage(1);
         setCategories(new Set());
         setSeverities(new Set());
+        workspaceFilterRef.current = "all";
         setWorkspaceFilter("all");
+        focusPrimaryFilter();
+    }
+
+    function clearCategories() {
+        beginQueryChange();
+        setPage(1);
+        setCategories(new Set());
+        focusPrimaryFilter();
+    }
+
+    function clearSeverities() {
+        beginQueryChange();
+        setPage(1);
+        setSeverities(new Set());
+        focusPrimaryFilter();
+    }
+
+    function focusPrimaryFilter() {
+        requestAnimationFrame(() => {
+            filterRegionRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        });
+    }
+
+    function beginQueryChange() {
+        loadGenerationRef.current += 1;
+        requestRef.current?.abort();
+        requestRef.current = null;
+        retryingLoadRef.current = false;
+        setLoadFailure(null);
+        setListRetrying(false);
+        setLoading(true);
     }
 
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const loadFailed = loadFailure?.recipientId === recipientId
+        && loadFailure.generation === loadGenerationRef.current;
+    const facetFailed = facetFailure?.recipientId === recipientId
+        && facetFailure.generation === facetGenerationRef.current;
     const hasFacetFilters = categories.size > 0 || severities.size > 0 || workspaceFilter !== "all";
     const categoryLabels = new Map<string, string>([
         ["activity", t("categoryActivity")],
@@ -368,6 +513,8 @@ export default function NotificationsInbox() {
             count: facet.count,
         })) ?? []),
     ];
+    const selectedWorkspaceLabel = workspaceOptions.find((option) => option.value === workspaceFilter)?.label
+        ?? t("filterWorkspace");
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -386,18 +533,20 @@ export default function NotificationsInbox() {
                 </Rise>
 
                 <Rise delay={0.06} className="px-4 sm:px-6">
-                    <FilterBar
-                        chips={[]}
-                        hasActiveFilters={hasFacetFilters}
-                        onClearAll={clearFacetFilters}
-                        clearAllLabel={tf("clearAll")}
-                        reduce={reduce}
-                    >
+                    <div ref={filterRegionRef}>
+                        <FilterBar
+                            chips={[]}
+                            hasActiveFilters={hasFacetFilters}
+                            onClearAll={clearFacetFilters}
+                            clearAllLabel={tf("clearAll")}
+                            reduce={reduce}
+                        >
                         <SegmentedToggle<NotificationState>
                             ariaLabel={t("filterAria")}
                             value={state}
                             onChange={(value) => {
-                                setLoading(true);
+                                if (value === state) return;
+                                beginQueryChange();
                                 setState(value);
                                 setPage(1);
                             }}
@@ -424,53 +573,90 @@ export default function NotificationsInbox() {
                         {categoryOptions.length > 1 || categories.size > 0 ? (
                             <MultiSelectFilter
                                 label={t("filterCategory")}
-                                ariaLabel={t("filterCategory")}
+                                ariaLabel={categories.size > 0
+                                    ? t("filterCategorySelected", { count: categories.size })
+                                    : t("filterCategory")}
                                 options={categoryOptions}
                                 selected={categories}
                                 onToggle={toggleCategory}
-                                onClear={() => {
-                                    setLoading(true);
-                                    setPage(1);
-                                    setCategories(new Set());
-                                }}
+                                onClear={clearCategories}
                                 clearLabel={tf("clear")}
                             />
                         ) : null}
                         {severityOptions.length > 1 || severities.size > 0 ? (
                             <MultiSelectFilter
                                 label={t("filterSeverity")}
-                                ariaLabel={t("filterSeverity")}
+                                ariaLabel={severities.size > 0
+                                    ? t("filterSeveritySelected", { count: severities.size })
+                                    : t("filterSeverity")}
                                 options={severityOptions}
                                 selected={severities}
                                 onToggle={toggleSeverity}
-                                onClear={() => {
-                                    setLoading(true);
-                                    setPage(1);
-                                    setSeverities(new Set());
-                                }}
+                                onClear={clearSeverities}
                                 clearLabel={tf("clear")}
                             />
                         ) : null}
                         {workspaceOptions.length > 2 || workspaceFilter !== "all" ? (
-                            <RadioFilter
-                                label={t("filterWorkspace")}
-                                ariaLabel={t("filterWorkspace")}
-                                value={workspaceFilter}
-                                onValueChange={changeWorkspace}
-                                options={workspaceOptions}
-                            />
+                            <span ref={workspaceFilterControlRef} className="contents">
+                                <RadioFilter
+                                    label={t("filterWorkspace")}
+                                    ariaLabel={workspaceFilter === "all"
+                                        ? t("filterWorkspace")
+                                        : t("filterWorkspaceSelected", { workspace: selectedWorkspaceLabel })}
+                                    value={workspaceFilter}
+                                    onValueChange={changeWorkspace}
+                                    onOpenChange={(open) => {
+                                        workspaceMenuOpenRef.current = open;
+                                    }}
+                                    options={workspaceOptions}
+                                />
+                            </span>
                         ) : null}
-                    </FilterBar>
+                            {facetFailed || facetRetrying ? (
+                                <div role="alert" aria-busy={facetRetrying} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-destructive/30 bg-destructive/5 px-3 text-xs text-destructive">
+                                    <ExclamationTriangleIcon className="size-4 shrink-0" />
+                                    <span>{t("facetLoadError")}</span>
+                                    <Button
+                                        variant="outline"
+                                        size="xs"
+                                        className="transition-none active:not-aria-[haspopup]:translate-y-0 motion-reduce:transform-none aria-disabled:pointer-events-none aria-disabled:opacity-50"
+                                        aria-disabled={facetRetrying}
+                                        onClick={() => {
+                                            if (!facetRetrying) retryFacets();
+                                        }}
+                                    >
+                                        {facetRetrying ? t("loadingFilters") : t("retryFilters")}
+                                    </Button>
+                                </div>
+                            ) : null}
+                        </FilterBar>
+                    </div>
                 </Rise>
 
                 <Rise delay={0.12}>
-                    <section aria-busy={loading}>
+                    <section ref={inboxSectionRef} tabIndex={-1} aria-label={t("inbox")} aria-busy={loading} className="outline-none">
                         <SectionHeader title={t("inbox")} />
                         <p className="sr-only" aria-live="polite" aria-atomic="true">
-                            {loading ? "" : t("resultCount", { count: total })}
+                            {loading || loadFailed || listRetrying ? "" : t("resultCount", { count: total })}
                         </p>
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                {loading ? (
+                {loadFailed || listRetrying ? (
+                    <div role="alert" className="flex flex-col items-center px-6 py-16 text-center">
+                        <ExclamationTriangleIcon className="size-7 text-destructive" />
+                        <h2 className="mt-4 text-base font-semibold text-foreground">{t("loadError")}</h2>
+                        <p className="mt-1 max-w-md text-sm text-muted-foreground">{t("loadErrorHint")}</p>
+                        <Button
+                            variant="outline"
+                            className="mt-5 transition-none active:not-aria-[haspopup]:translate-y-0 motion-reduce:transform-none aria-disabled:pointer-events-none aria-disabled:opacity-50"
+                            aria-disabled={listRetrying}
+                            onClick={() => {
+                                if (!listRetrying) refetch();
+                            }}
+                        >
+                            {listRetrying ? t("loading") : t("retry")}
+                        </Button>
+                    </div>
+                ) : loading ? (
                     <div className="divide-y divide-border">
                         {Array.from({ length: 6 }).map((_, i) => (
                             <div key={i} className="flex gap-4 px-5 py-4">
@@ -614,7 +800,7 @@ export default function NotificationsInbox() {
                     </section>
                 </Rise>
 
-                {pageCount > 1 ? (
+                {!loading && !loadFailed && !listRetrying && pageCount > 1 ? (
                     <Rise delay={0.18}>
                         <Pagination>
                             <PaginationContent>
@@ -622,7 +808,7 @@ export default function NotificationsInbox() {
                                     <PaginationPrevious
                                         disabled={page <= 1}
                                         onClick={() => {
-                                            setLoading(true);
+                                            beginQueryChange();
                                             setPage((value) => Math.max(1, value - 1));
                                         }}
                                     />
@@ -634,7 +820,7 @@ export default function NotificationsInbox() {
                                     <PaginationNext
                                         disabled={page >= pageCount}
                                         onClick={() => {
-                                            setLoading(true);
+                                            beginQueryChange();
                                             setPage((value) => Math.min(pageCount, value + 1));
                                         }}
                                     />
