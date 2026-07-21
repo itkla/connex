@@ -34,6 +34,7 @@ class WorkflowMapperXmlTest {
         assertScoped(configuration, WorkflowMapper.class, "getById", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByLegacyRuleId", legacy);
+        assertScoped(configuration, WorkflowMapper.class, "getByLegacyRuleIdForUpdate", legacy);
         assertScoped(configuration, WorkflowMapper.class, "listUnpairedLegacyRules", workspace);
         assertScoped(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
         assertScoped(configuration, WorkflowMapper.class, "countUnpairedLegacyRules", workspace);
@@ -68,6 +69,30 @@ class WorkflowMapperXmlTest {
         lifecycle.put("updatedById", 17);
         assertScoped(configuration, WorkflowMapper.class, "updateLifecycle", lifecycle);
 
+        Map<String, Object> legacyReplacement = new HashMap<>();
+        legacyReplacement.put("workflow", workflow);
+        legacyReplacement.put("activeVersionId", 23L);
+        legacyReplacement.put("expectedLegacyRuleId", 13);
+        legacyReplacement.put("expectedActiveVersionId", 19L);
+        legacyReplacement.put("expectedRevision", 1);
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "replaceLegacyPublication",
+            legacyReplacement);
+
+        Map<String, Object> legacyDeletion = new HashMap<>(identity);
+        legacyDeletion.put("updatedById", 17);
+        legacyDeletion.put("expectedLegacyRuleId", 13);
+        legacyDeletion.put("expectedActiveVersionId", 19L);
+        legacyDeletion.put("expectedRevision", 1);
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "unlinkLegacyRuleForDeletion",
+            legacyDeletion);
+        assertScoped(configuration, WorkflowMapper.class, "delete", identity);
+
         Map<String, Object> active = new HashMap<>(identity);
         active.put("activeVersionId", 19L);
         active.put("updatedById", 17);
@@ -75,6 +100,9 @@ class WorkflowMapperXmlTest {
 
         String lockSql = sql(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertTrue(lockSql.endsWith("FOR UPDATE"));
+        String legacyLockSql = sql(
+            configuration, WorkflowMapper.class, "getByLegacyRuleIdForUpdate", legacy);
+        assertTrue(legacyLockSql.endsWith("FOR UPDATE"));
         String draftSql = sql(configuration, WorkflowMapper.class, "updateDraft", draft);
         assertTrue(draftSql.contains("draft_revision = draft_revision + 1"));
         assertTrue(draftSql.contains("draft_revision = ?"));
@@ -98,6 +126,26 @@ class WorkflowMapperXmlTest {
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
         assertTrue(legacySql.endsWith("ORDER BY r.id"));
+
+        String replacementSql = sql(
+            configuration,
+            WorkflowMapper.class,
+            "replaceLegacyPublication",
+            legacyReplacement);
+        assertTrue(replacementSql.contains("draft_revision = draft_revision + 1"));
+        assertTrue(replacementSql.contains("legacy_rule_id = ?"));
+        assertTrue(replacementSql.contains("active_version_id = ?"));
+        assertTrue(replacementSql.contains("draft_revision = ?"));
+        String deletionSql = sql(
+            configuration,
+            WorkflowMapper.class,
+            "unlinkLegacyRuleForDeletion",
+            legacyDeletion);
+        assertTrue(deletionSql.contains("legacy_rule_id = NULL"));
+        assertTrue(deletionSql.contains("active_version_id = NULL"));
+        assertTrue(deletionSql.contains("enabled = FALSE"));
+        assertTrue(deletionSql.contains("legacy_rule_id = ?"));
+        assertTrue(deletionSql.contains("active_version_id = ?"));
     }
 
     @Test

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -36,8 +37,9 @@ public class WorkflowPrincipalLockService {
             Collection<Integer> requiredActivePrincipalIds) {
         LockedAuthorization authorization = lockSharedRoots(
             workspaceId, actorId, discoveredPrincipalIds, requiredActivePrincipalIds);
-        requireRuleManage(workspaceId, authorization.actorMembership());
-        return authorization.principals();
+        Set<Permission> actorPermissions = lockCurrentPermissions(
+            workspaceId, authorization.actorMembership());
+        return authorization.principals().withActorPermissions(actorPermissions);
     }
 
     /** Locks principals and requires a current built-in administrator for a system-mode mutation. */
@@ -52,7 +54,7 @@ public class WorkflowPrincipalLockService {
                 || !("admin".equals(actor.getRole()) || "owner".equals(actor.getRole()))) {
             throw new ForbiddenException("Requires a built-in admin role in this workspace");
         }
-        return authorization.principals();
+        return authorization.principals().withActorPermissions(Permission.grantableSet());
     }
 
     private LockedAuthorization lockSharedRoots(
@@ -99,19 +101,38 @@ public class WorkflowPrincipalLockService {
         return new LockedAuthorization(principals, actorMembership);
     }
 
-    private void requireRuleManage(int workspaceId, WorkspaceMember actor) {
+    private Set<Permission> lockCurrentPermissions(int workspaceId, WorkspaceMember actor) {
         Integer roleId = actor.getRoleId();
         if (roleId == null) {
             if ("admin".equals(actor.getRole()) || "owner".equals(actor.getRole())) {
-                return;
+                return Permission.grantableSet();
             }
             throw new ForbiddenException("Requires the RULE_MANAGE permission in this workspace");
         }
-        if (roleMapper.lockRole(workspaceId, roleId) == null
-                || roleMapper.lockPermission(
-                    workspaceId, roleId, Permission.RULE_MANAGE.name()) == null) {
+        if (roleMapper.lockRole(workspaceId, roleId) == null) {
             throw new ForbiddenException("Requires the RULE_MANAGE permission in this workspace");
         }
+        EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
+        Collection<String> lockedPermissions = roleMapper.lockPermissions(workspaceId, roleId);
+        if (lockedPermissions == null) {
+            throw new ForbiddenException("Requires the RULE_MANAGE permission in this workspace");
+        }
+        for (String value : lockedPermissions) {
+            if (value == null) {
+                throw new ForbiddenException(
+                    "Requires the RULE_MANAGE permission in this workspace");
+            }
+            try {
+                permissions.add(Permission.valueOf(value));
+            } catch (IllegalArgumentException exception) {
+                throw new ForbiddenException(
+                    "Requires the RULE_MANAGE permission in this workspace");
+            }
+        }
+        if (!permissions.contains(Permission.RULE_MANAGE)) {
+            throw new ForbiddenException("Requires the RULE_MANAGE permission in this workspace");
+        }
+        return Set.copyOf(permissions);
     }
 
     private static TreeSet<Integer> sortedIds(Collection<Integer> ids) {
@@ -130,10 +151,24 @@ public class WorkflowPrincipalLockService {
     }
 
     /** The exact user roots requested and the subset that still existed when locked. */
-    public record LockedPrincipals(Set<Integer> requestedIds, Set<Integer> existingIds) {
+    public record LockedPrincipals(
+            Set<Integer> requestedIds,
+            Set<Integer> existingIds,
+            Set<Permission> actorPermissions) {
+        LockedPrincipals(Set<Integer> requestedIds, Set<Integer> existingIds) {
+            this(requestedIds, existingIds, Permission.grantableSet());
+        }
+
         public LockedPrincipals {
             requestedIds = Collections.unmodifiableSet(new LinkedHashSet<>(requestedIds));
             existingIds = Collections.unmodifiableSet(new LinkedHashSet<>(existingIds));
+            actorPermissions = actorPermissions.isEmpty()
+                ? Set.of()
+                : Collections.unmodifiableSet(EnumSet.copyOf(actorPermissions));
+        }
+
+        private LockedPrincipals withActorPermissions(Set<Permission> permissions) {
+            return new LockedPrincipals(requestedIds, existingIds, permissions);
         }
 
         /** Fails when a current persisted reference was not discovered and locked as an existing root. */
@@ -158,6 +193,20 @@ public class WorkflowPrincipalLockService {
         public void requireExisting(Integer userId, String message) {
             if (userId == null || !existingIds.contains(userId)) {
                 throw new ConflictException(message);
+            }
+        }
+
+        /** Fails against the current permission rows locked with the actor's role. */
+        public void requirePermissions(Collection<Permission> requiredPermissions) {
+            Collection<Permission> required = Objects.requireNonNull(requiredPermissions);
+            EnumSet<Permission> sorted = required.isEmpty()
+                ? EnumSet.noneOf(Permission.class)
+                : EnumSet.copyOf(required);
+            for (Permission permission : sorted) {
+                if (!actorPermissions.contains(permission)) {
+                    throw new ForbiddenException(
+                        "Requires the " + permission + " permission in this workspace");
+                }
             }
         }
     }

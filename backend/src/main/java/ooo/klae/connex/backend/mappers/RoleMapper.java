@@ -17,10 +17,6 @@ public interface RoleMapper {
     List<WorkspaceRole> findRolesByWorkspace(int workspaceId);
     WorkspaceRole findRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    String lockPermission(
-        @Param("workspaceId") int workspaceId,
-        @Param("roleId") int roleId,
-        @Param("permission") String permission);
     List<String> lockPermissions(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);

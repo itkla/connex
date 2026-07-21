@@ -42,8 +42,8 @@ class WorkflowPrincipalLockServiceTest {
         when(workspaceMapper.lockAuthorizationMembership(5, 7))
             .thenReturn(membership(5, 7, "member", 11, "active"));
         when(roleMapper.lockRole(5, 11)).thenReturn(11);
-        when(roleMapper.lockPermission(5, 11, Permission.RULE_MANAGE.name()))
-            .thenReturn(Permission.RULE_MANAGE.name());
+        when(roleMapper.lockPermissions(5, 11))
+            .thenReturn(List.of(Permission.RULE_MANAGE.name(), Permission.TASK_CREATE.name()));
 
         service.lockUserMutation(5, 7, List.of(9, 3), Set.of(3));
 
@@ -55,7 +55,7 @@ class WorkflowPrincipalLockServiceTest {
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 3);
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 7);
         order.verify(roleMapper).lockRole(5, 11);
-        order.verify(roleMapper).lockPermission(5, 11, Permission.RULE_MANAGE.name());
+        order.verify(roleMapper).lockPermissions(5, 11);
     }
 
     @Test
@@ -94,14 +94,32 @@ class WorkflowPrincipalLockServiceTest {
         when(workspaceMapper.lockAuthorizationMembership(5, 7))
             .thenReturn(membership(5, 7, "member", 11, "active"));
         when(roleMapper.lockRole(5, 11)).thenReturn(11);
-        when(roleMapper.lockPermission(5, 11, Permission.RULE_MANAGE.name())).thenReturn(null);
+        when(roleMapper.lockPermissions(5, 11)).thenReturn(List.of(Permission.TASK_CREATE.name()));
 
         assertThrows(
             ForbiddenException.class,
             () -> service.lockUserMutation(5, 7, Set.of(7), Set.of()));
 
         verify(roleMapper).lockRole(5, 11);
-        verify(roleMapper).lockPermission(5, 11, Permission.RULE_MANAGE.name());
+        verify(roleMapper).lockPermissions(5, 11);
+    }
+
+    @Test
+    void lockedPermissionsRejectAnActionGrantRevokedBeforeAuthorization() {
+        WorkflowPrincipalLockService service = service();
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.lockAuthorizationMembership(5, 7))
+            .thenReturn(membership(5, 7, "member", 11, "active"));
+        when(roleMapper.lockRole(5, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(5, 11)).thenReturn(List.of(Permission.RULE_MANAGE.name()));
+
+        WorkflowPrincipalLockService.LockedPrincipals principals =
+            service.lockUserMutation(5, 7, Set.of(7), Set.of());
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> principals.requirePermissions(Set.of(Permission.TASK_CREATE)));
     }
 
     @Test

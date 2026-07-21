@@ -246,7 +246,7 @@ public class WorkflowService {
             throw new ConflictException("Workflow execution mode changed during authorization");
         }
         Rule projection = project(workflow, draft);
-        validateProjection(projection);
+        principals.requirePermissions(validateProjectionForMutation(projection));
         LockedVersionState lockedVersions = lockDiscoveredVersions(
             workflow, discovery, principals, false);
         Rule linkedRule = lockDiscoveredRule(workflow, discovery, principals, false);
@@ -539,6 +539,20 @@ public class WorkflowService {
             projection.getExecutionMode());
     }
 
+    private Set<Permission> validateProjectionForMutation(Rule projection) {
+        RuleTrigger trigger = definitionCodec.parse(projection.getTriggerConfig(), RuleTrigger.class);
+        SegmentDefinition condition = projection.getConditionJson() == null
+            ? null
+            : definitionCodec.parse(projection.getConditionJson(), SegmentDefinition.class);
+        RuleAction[] actions = definitionCodec.parse(projection.getActionsJson(), RuleAction[].class);
+        return definitionValidator.validateDefinitionForMutation(
+            projection.getRecordType(),
+            trigger,
+            condition,
+            Arrays.asList(actions),
+            projection.getExecutionMode());
+    }
+
     private Integer resolveDraftRunAs(Workflow existing, String executionMode) {
         if ("system".equals(executionMode)) {
             return null;
@@ -725,6 +739,7 @@ public class WorkflowService {
                     discovered.getDraftExecutionMode(), current.getDraftExecutionMode())
                 || !Objects.equals(
                     discovered.getDraftRunAsUserId(), current.getDraftRunAsUserId())
+                || discovered.getDraftRevision() != current.getDraftRevision()
                 || !Objects.equals(
                     discovered.getActiveVersionId(), current.getActiveVersionId())
                 || !Objects.equals(

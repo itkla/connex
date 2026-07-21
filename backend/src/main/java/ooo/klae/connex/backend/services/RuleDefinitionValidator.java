@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -67,10 +68,16 @@ public class RuleDefinitionValidator {
     }
 
     void validate(RuleRequest request) {
+        Set<Permission> required = validateForMutation(request);
+        requireCurrentSystemRole(request.getExecutionMode());
+        requireCurrentPermissions(required);
+    }
+
+    Set<Permission> validateForMutation(RuleRequest request) {
         if (request == null) {
             throw new BadRequestException("Rule definition is required");
         }
-        validateDefinition(
+        return validateDefinitionForMutation(
             request.getRecordType(),
             request.getTrigger(),
             request.getCondition(),
@@ -79,6 +86,18 @@ public class RuleDefinitionValidator {
     }
 
     void validateDefinition(
+            String recordTypeValue,
+            RuleTrigger trigger,
+            SegmentDefinition condition,
+            List<RuleAction> actions,
+            String executionMode) {
+        Set<Permission> required = validateDefinitionForMutation(
+            recordTypeValue, trigger, condition, actions, executionMode);
+        requireCurrentSystemRole(executionMode);
+        requireCurrentPermissions(required);
+    }
+
+    Set<Permission> validateDefinitionForMutation(
             String recordTypeValue,
             RuleTrigger trigger,
             SegmentDefinition condition,
@@ -107,9 +126,6 @@ public class RuleDefinitionValidator {
         if (!EXECUTION_MODES.contains(mode)) {
             throw new BadRequestException("Invalid execution mode: " + executionMode);
         }
-        if ("system".equals(mode)) {
-            workspaceService.requireRole(Role.ADMIN);
-        }
         if (condition != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
             throw new BadRequestException("WHEN conditions are not supported for record type: " + recordTypeValue);
         }
@@ -121,7 +137,7 @@ public class RuleDefinitionValidator {
         }
         validateTrigger(trigger, recordType, condition);
         validateActions(actions, recordType);
-        requireActionPermissions(actions, recordType);
+        return actionPermissions(actions, recordType);
     }
 
     private <T> void requireStructurallyValid(T value) {
@@ -143,12 +159,24 @@ public class RuleDefinitionValidator {
         return hasConditions || hasGroups;
     }
 
-    private void requireActionPermissions(List<RuleAction> actions, String recordType) {
+    private Set<Permission> actionPermissions(List<RuleAction> actions, String recordType) {
+        EnumSet<Permission> required = EnumSet.noneOf(Permission.class);
         for (RuleAction action : actions) {
-            Permission required = actionPermission(normalize(action.getType()), recordType);
-            if (required != null) {
-                workspaceService.requirePermission(required);
+            Permission permission = actionPermission(normalize(action.getType()), recordType);
+            if (permission != null) {
+                required.add(permission);
             }
+        }
+        return Set.copyOf(required);
+    }
+
+    private void requireCurrentPermissions(Set<Permission> required) {
+        required.forEach(workspaceService::requirePermission);
+    }
+
+    private void requireCurrentSystemRole(String executionMode) {
+        if ("system".equals(normalize(executionMode))) {
+            workspaceService.requireRole(Role.ADMIN);
         }
     }
 

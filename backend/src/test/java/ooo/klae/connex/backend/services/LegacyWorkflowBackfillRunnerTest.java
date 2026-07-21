@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -10,8 +11,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +22,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -51,7 +56,7 @@ class LegacyWorkflowBackfillRunnerTest {
     }
 
     @Test
-    void resolvesCatalogsUnroutedAndStartsWorkspaceTransactionsOnlyInsideEachPin() {
+    void enumeratesEachCatalogThenRevalidatesWorkspacePlacementBeforeBackfill() {
         AtomicBoolean unrouted = new AtomicBoolean();
         AtomicReference<String> pinnedCatalog = new AtomicReference<>();
         AtomicBoolean defaultPinned = new AtomicBoolean();
@@ -92,8 +97,12 @@ class LegacyWorkflowBackfillRunnerTest {
                 assertEquals("cnx_a", pinnedCatalog.get());
                 return List.of(3, 7);
             });
+        when(tenantWorkScope.withWorkspacePlacement(eq(3), any())).thenAnswer(invocation ->
+            invocation.<BiFunction<Integer, String, ?>>getArgument(1).apply(30, "cnx_a"));
+        when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation ->
+            invocation.<BiFunction<Integer, String, ?>>getArgument(1).apply(70, "cnx_a"));
         doAnswer(invocation -> {
-            assertEquals("cnx_a", pinnedCatalog.get());
+            assertNull(pinnedCatalog.get());
             return null;
         }).when(backfillTransaction).backfillWorkspace(any(), anyInt());
 
@@ -106,8 +115,52 @@ class LegacyWorkflowBackfillRunnerTest {
         order.verify(ruleMapper).workspaceIdsWithRules();
         order.verify(tenantWorkScope).withCatalog(eq("cnx_a"), any());
         order.verify(ruleMapper).workspaceIdsWithRules();
+        order.verify(tenantWorkScope).withWorkspacePlacement(eq(3), any());
         order.verify(backfillTransaction).backfillWorkspace("cnx_a", 3);
+        order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
         order.verify(backfillTransaction).backfillWorkspace("cnx_a", 7);
+    }
+
+    @Test
+    void staleCatalogRowsFailBeforeAnyMutation() {
+        when(tenantWorkScope.unrouted(any())).thenReturn(List.of("cnx_a"));
+        when(tenantWorkScope.withCatalog(eq("cnx_a"), any())).thenReturn(List.of(3));
+        when(tenantWorkScope.withWorkspacePlacement(eq(3), any())).thenAnswer(invocation ->
+            invocation.<BiFunction<Integer, String, ?>>getArgument(1).apply(30, "cnx_b"));
+
+        assertThrows(IllegalStateException.class, () -> runner.run(arguments));
+
+        verify(backfillTransaction, never()).backfillWorkspace(any(), anyInt());
+    }
+
+    @Test
+    void unservableWorkspaceIsSkippedWithoutStarvingTheRemainingCatalogSweep() {
+        when(tenantWorkScope.unrouted(any())).thenReturn(Arrays.asList((String) null));
+        when(tenantWorkScope.withCatalog(isNull(), any())).thenReturn(List.of(3, 7));
+        when(tenantWorkScope.withWorkspacePlacement(eq(3), any()))
+            .thenThrow(new ServiceUnavailableException("Placement is not servable"));
+        when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation ->
+            invocation.<BiFunction<Integer, String, ?>>getArgument(1).apply(70, null));
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, never()).backfillWorkspace(nullable(String.class), eq(3));
+        verify(backfillTransaction).backfillWorkspace(null, 7);
+    }
+
+    @Test
+    void oneStaleTransactionalSnapshotIsRetriedOnce() {
+        when(tenantWorkScope.unrouted(any())).thenReturn(Arrays.asList((String) null));
+        when(tenantWorkScope.withCatalog(isNull(), any())).thenReturn(List.of(7));
+        when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation ->
+            invocation.<BiFunction<Integer, String, ?>>getArgument(1).apply(70, null));
+        doThrow(new IllegalStateException("stale"))
+            .doNothing()
+            .when(backfillTransaction).backfillWorkspace(null, 7);
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, times(2)).backfillWorkspace(null, 7);
     }
 
     @Test

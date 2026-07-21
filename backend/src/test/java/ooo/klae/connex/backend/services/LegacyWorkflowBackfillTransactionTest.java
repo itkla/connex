@@ -8,9 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,6 +20,8 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +47,10 @@ import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 @ExtendWith(MockitoExtension.class)
 class LegacyWorkflowBackfillTransactionTest {
@@ -52,26 +58,53 @@ class LegacyWorkflowBackfillTransactionTest {
     @Mock private RuleMapper ruleMapper;
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
+    @Mock private UserMapper userMapper;
+    @Mock private WorkspaceMapper workspaceMapper;
 
     private RuleDefinitionCodec definitionCodec;
     private LegacyWorkflowBackfillTransaction backfill;
+    private Map<Integer, List<Rule>> workspaceRules;
 
     @BeforeEach
     void setUp() {
         definitionCodec = new RuleDefinitionCodec(new ObjectMapper());
+        workspaceRules = new HashMap<>();
         backfill = new LegacyWorkflowBackfillTransaction(
             ruleMapper,
             workflowMapper,
             workflowVersionMapper,
+            userMapper,
+            workspaceMapper,
             new LegacyWorkflowGraphConverter(definitionCodec),
             new WorkflowDraftCanonicalizer(),
             definitionCodec);
+        lenient().when(ruleMapper.getByWorkspace(anyInt())).thenAnswer(invocation ->
+            workspaceRules.getOrDefault(invocation.getArgument(0), List.of()));
+        lenient().when(ruleMapper.getByWorkspaceForUpdate(anyInt())).thenAnswer(invocation ->
+            workspaceRules.getOrDefault(invocation.getArgument(0), List.of()));
+        lenient().when(ruleMapper.getByIdForUpdate(anyInt(), anyInt())).thenAnswer(invocation ->
+            workspaceRules.getOrDefault(
+                    invocation.<Integer>getArgument(0), List.of()).stream()
+                .filter(rule -> rule.getId() == invocation.<Integer>getArgument(1))
+                .findFirst()
+                .orElse(null));
+        lenient().when(workflowMapper.getByLegacyRuleIdForUpdate(anyInt(), anyInt()))
+            .thenAnswer(invocation -> workflowMapper.getByLegacyRuleId(
+                invocation.getArgument(0), invocation.getArgument(1)));
+        lenient().when(workflowVersionMapper.getByIdForUpdate(anyInt(), anyInt(), anyLong()))
+            .thenAnswer(invocation -> workflowVersionMapper.getById(
+                invocation.getArgument(0),
+                invocation.getArgument(1),
+                invocation.getArgument(2)));
+        lenient().when(userMapper.lockById(anyInt())).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(workspaceMapper.lockWorkspace(anyInt()))
+            .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
     void freshBackfillPersistsExactProjectionCanonicalHashAndSafeActivationOrder() throws Exception {
         Rule rule = rule("user", true);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         doAnswer(invocation -> {
             invocation.<Workflow>getArgument(0).setId(101);
             return null;
@@ -147,7 +180,7 @@ class LegacyWorkflowBackfillTransactionTest {
     void systemBackfillRejectsPersistedRunAsIdentity() {
         Rule rule = rule("system", false);
         rule.setRunAsUserId(999);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
 
         IllegalStateException exception = assertThrows(
             IllegalStateException.class,
@@ -168,7 +201,7 @@ class LegacyWorkflowBackfillTransactionTest {
             "{ \"events\" : [ \"deal.won\" ], \"type\" : \"entity_change\" }");
         formatted.setActionsJson(
             "[ { \"title\" : \"Notify owner\", \"type\" : \"notify\" } ]");
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(formatted));
+        rules(7, formatted);
         doAnswer(invocation -> {
             invocation.<Workflow>getArgument(0).setId(101);
             return null;
@@ -195,20 +228,19 @@ class LegacyWorkflowBackfillTransactionTest {
 
         Rule changedName = rule("user", false);
         changedName.setName(" Legacy rule ");
-        when(ruleMapper.getByWorkspaceForUpdate(8)).thenReturn(List.of(changedName));
         changedName.setWorkspaceId(8);
+        rules(8, changedName);
 
         assertThrows(
             IllegalStateException.class,
             () -> backfill.backfillWorkspace(null, 8));
-        verify(workflowMapper, never()).getByLegacyRuleId(8, 23);
     }
 
     @Test
     void rerunVerifiesEquivalentActiveVersionWithoutWrites() {
         Rule rule = rule("user", true);
         PersistedPair pair = pair(rule, 4);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
         completeCounts(1, 1, 0);
@@ -220,6 +252,67 @@ class LegacyWorkflowBackfillTransactionTest {
         verify(workflowMapper, never()).updateActiveVersion(
             eq(7), eq(101), eq(204L), any());
         verify(workflowMapper, never()).updateLifecycle(eq(7), eq(101), eq(true), any());
+    }
+
+    @Test
+    void locksSortedPrincipalsWorkspaceWorkflowVersionAndRuleBeforeVerification() {
+        Rule rule = rule("user", true);
+        PersistedPair pair = pair(rule, 4);
+        pair.version().setPublishedById(88);
+        rules(7, rule);
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        InOrder order = inOrder(
+            userMapper, workspaceMapper, workflowMapper, workflowVersionMapper, ruleMapper);
+        order.verify(userMapper).lockById(41);
+        order.verify(userMapper).lockById(88);
+        order.verify(userMapper).lockById(999);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workflowMapper).getByLegacyRuleIdForUpdate(7, 23);
+        order.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 204L);
+        order.verify(ruleMapper).getByIdForUpdate(7, 23);
+        order.verify(ruleMapper).getByWorkspaceForUpdate(7);
+    }
+
+    @Test
+    void concurrentCompletedPairIsRefreshedAndVerifiedInsteadOfInsertedAgain() {
+        Rule rule = rule("user", true);
+        PersistedPair pair = pair(rule, 1);
+        rules(7, rule);
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(null);
+        when(workflowMapper.getByLegacyRuleIdForUpdate(7, 23))
+            .thenReturn(pair.workflow());
+        when(workflowVersionMapper.getByIdForUpdate(7, 101, 201L))
+            .thenReturn(pair.version());
+        completeCounts(1, 1, 0);
+
+        backfill.backfillWorkspace("cnx_a", 7);
+
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(workflowMapper, never()).updateActiveVersion(
+            eq(7), eq(101), anyLong(), any());
+    }
+
+    @Test
+    void rerunRejectsCreatorDriftThatLegacyMutationsWouldReject() {
+        Rule rule = rule("user", true);
+        PersistedPair pair = pair(rule, 1);
+        pair.workflow().setCreatedById(88);
+        rules(7, rule);
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(7, 101, 201L)).thenReturn(pair.version());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
     }
 
     @Test
@@ -261,7 +354,7 @@ class LegacyWorkflowBackfillTransactionTest {
         pair.version().setDefinitionJson(canonical.definitionJson());
         pair.version().setCanvasJson(canonical.canvasJson());
         pair.version().setDefinitionHash(canonical.definitionHash());
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 204L)).thenReturn(pair.version());
         completeCounts(1, 1, 0);
@@ -290,7 +383,7 @@ class LegacyWorkflowBackfillTransactionTest {
         pair.version().setActionsJson(
             "[{\"title\":\"Notify owner\",\"type\":\"notify\"}]");
         pair.version().setPublishedById(88);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 207L)).thenReturn(pair.version());
         completeCounts(1, 1, 0);
@@ -308,7 +401,7 @@ class LegacyWorkflowBackfillTransactionTest {
         PersistedPair definitionChanged = pair(rule, 4);
         definitionChanged.version().setDefinitionJson(
             " " + definitionChanged.version().getDefinitionJson());
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23))
             .thenReturn(definitionChanged.workflow());
         when(workflowVersionMapper.getById(7, 101, 204L))
@@ -339,7 +432,7 @@ class LegacyWorkflowBackfillTransactionTest {
         PersistedPair pair = pair(rule, 3);
         pair.version().setExecutionMode("system");
         pair.version().setRunAsUserId(null);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 203L)).thenReturn(pair.version());
 
@@ -362,7 +455,7 @@ class LegacyWorkflowBackfillTransactionTest {
 
     @Test
     void emptyWorkspaceIsANoOpAndStillProvesCompleteness() {
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of());
+        rules(7);
         completeCounts(0, 0, 0);
 
         backfill.backfillWorkspace(null, 7);
@@ -373,10 +466,23 @@ class LegacyWorkflowBackfillTransactionTest {
     }
 
     @Test
+    void nullRuleCandidateFailsWithTheBoundedBackfillError() {
+        workspaceRules.put(7, Arrays.asList((Rule) null));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        assertEquals(
+            "Legacy workflow backfill failed for catalog=cnx_a workspace=7 rule=0",
+            exception.getMessage());
+    }
+
+    @Test
     void incompleteWorkspaceFailsClosedWithTheFirstUnpairedRuleId() {
         Rule rule = rule("user", true);
         PersistedPair pair = pair(rule, 1);
-        when(ruleMapper.getByWorkspaceForUpdate(7)).thenReturn(List.of(rule));
+        rules(7, rule);
         when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 201L)).thenReturn(pair.version());
         completeCounts(2, 1, 1);
@@ -491,6 +597,10 @@ class LegacyWorkflowBackfillTransactionTest {
         when(ruleMapper.countByWorkspace(7)).thenReturn(rules);
         when(workflowMapper.countLegacyRuleLinks(7)).thenReturn(linked);
         when(workflowMapper.countUnpairedLegacyRules(7)).thenReturn(unpaired);
+    }
+
+    private void rules(int workspaceId, Rule... rules) {
+        workspaceRules.put(workspaceId, List.of(rules));
     }
 
     private static String expectedDefinition() {

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -142,6 +143,18 @@ class RuleDefinitionValidatorTest {
 
         assertEquals("Missing permission", exception.getMessage());
         verify(workspaceService).requirePermission(Permission.TASK_CREATE);
+    }
+
+    @Test
+    void mutationValidationReturnsPermissionsWithoutReadingCurrentAuthorization() {
+        RuleRequest request = request(
+            "deal", entityChange("deal.won"), "system", action("create_task"));
+
+        Set<Permission> required = validator.validateForMutation(request);
+
+        assertEquals(Set.of(Permission.TASK_CREATE), required);
+        verify(workspaceService, never()).requireRole(any());
+        verify(workspaceService, never()).requirePermission(any());
     }
 
     @Test

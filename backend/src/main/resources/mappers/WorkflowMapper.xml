@@ -38,6 +38,12 @@
     WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
   </select>
 
+  <select id="getByLegacyRuleIdForUpdate" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
+    FOR UPDATE
+  </select>
+
   <select id="findAffectedByUserAnywhere" resultType="Workflow">
     SELECT <include refid="workflowColumns"/> FROM workflow w
     WHERE w.created_by_id = #{userId}
@@ -157,6 +163,43 @@
     SET enabled = #{enabled}, updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
   </update>
+
+  <update id="replaceLegacyPublication">
+    UPDATE workflow
+    SET name = #{workflow.name},
+        description = #{workflow.description},
+        enabled = #{workflow.enabled},
+        draft_revision = draft_revision + 1,
+        draft_record_type = #{workflow.draftRecordType},
+        draft_execution_mode = #{workflow.draftExecutionMode},
+        draft_run_as_user_id = #{workflow.draftRunAsUserId},
+        draft_definition_json = #{workflow.draftDefinitionJson},
+        draft_canvas_json = #{workflow.draftCanvasJson},
+        active_version_id = #{activeVersionId},
+        updated_by_id = #{workflow.updatedById}
+    WHERE workspace_id = #{workflow.workspaceId}
+      AND id = #{workflow.id}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <update id="unlinkLegacyRuleForDeletion">
+    UPDATE workflow
+    SET legacy_rule_id = NULL,
+        active_version_id = NULL,
+        enabled = FALSE,
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM workflow WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
 
   <update id="disableForOffboarding">
     UPDATE workflow SET enabled = FALSE

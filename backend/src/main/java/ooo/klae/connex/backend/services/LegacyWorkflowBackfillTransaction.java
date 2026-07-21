@@ -2,8 +2,12 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,8 +21,10 @@ import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 
@@ -30,6 +36,8 @@ public class LegacyWorkflowBackfillTransaction {
     private final RuleMapper ruleMapper;
     private final WorkflowMapper workflowMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final LegacyWorkflowGraphConverter graphConverter;
     private final WorkflowDraftCanonicalizer canonicalizer;
     private final RuleDefinitionCodec definitionCodec;
@@ -37,29 +45,169 @@ public class LegacyWorkflowBackfillTransaction {
     /** Backfills one workspace inside the catalog scope installed by the startup runner. */
     @Transactional
     public void backfillWorkspace(String catalog, int workspaceId) {
-        List<Rule> rules = ruleMapper.getByWorkspaceForUpdate(workspaceId);
+        List<BackfillCandidate> candidates = discover(catalog, workspaceId);
+        int firstRuleId = candidates.isEmpty() ? 0 : candidates.getFirst().rule().getId();
+        TreeSet<Integer> lockedPrincipalIds = principalIds(candidates);
+        for (int userId : lockedPrincipalIds) {
+            if (userMapper.lockById(userId) == null) {
+                throw failure(catalog, workspaceId, firstRuleId);
+            }
+        }
+        if (workspaceMapper.lockWorkspace(workspaceId) == null) {
+            throw failure(catalog, workspaceId, firstRuleId);
+        }
+        refreshAndLockWorkflows(catalog, workspaceId, candidates);
+        lockVersions(catalog, workspaceId, candidates);
+        Map<Integer, Rule> lockedRules = lockRules(catalog, workspaceId, candidates);
+        requireLockedPrincipals(
+            catalog, workspaceId, candidates, lockedRules, lockedPrincipalIds);
+        for (BackfillCandidate candidate : candidates) {
+            Rule rule = lockedRules.get(candidate.rule().getId());
+            try {
+                backfillRule(rule, candidate.lockedWorkflow(), candidate.lockedVersion());
+            } catch (RuntimeException exception) {
+                throw failure(catalog, workspaceId, candidate.rule().getId());
+            }
+        }
+        requireComplete(catalog, workspaceId, List.copyOf(lockedRules.values()));
+    }
+
+    private List<BackfillCandidate> discover(String catalog, int workspaceId) {
+        List<Rule> rules = ruleMapper.getByWorkspace(workspaceId).stream()
+            .sorted(Comparator.nullsFirst(Comparator.comparingInt(Rule::getId)))
+            .toList();
+        Map<Integer, BackfillCandidate> candidates = new LinkedHashMap<>();
         for (Rule rule : rules) {
             int ruleId = rule == null ? 0 : rule.getId();
-            try {
-                backfillRule(workspaceId, rule);
-            } catch (RuntimeException exception) {
+            if (rule == null || ruleId <= 0 || rule.getWorkspaceId() != workspaceId) {
+                throw failure(catalog, workspaceId, ruleId);
+            }
+            Workflow workflow = workflowMapper.getByLegacyRuleId(workspaceId, ruleId);
+            WorkflowVersion active = null;
+            if (workflow != null) {
+                Long activeVersionId = workflow.getActiveVersionId();
+                if (workflow.getId() <= 0
+                        || workflow.getWorkspaceId() != workspaceId
+                        || !Objects.equals(workflow.getLegacyRuleId(), ruleId)
+                        || activeVersionId == null) {
+                    throw failure(catalog, workspaceId, ruleId);
+                }
+                active = workflowVersionMapper.getById(
+                    workspaceId, workflow.getId(), activeVersionId);
+                if (active == null
+                        || active.getId() != activeVersionId
+                        || active.getWorkspaceId() != workspaceId
+                        || active.getWorkflowId() != workflow.getId()
+                        || active.getVersionNumber() <= 0) {
+                    throw failure(catalog, workspaceId, ruleId);
+                }
+            }
+            if (candidates.put(
+                    ruleId, new BackfillCandidate(rule, workflow, active)) != null) {
                 throw failure(catalog, workspaceId, ruleId);
             }
         }
-        requireComplete(catalog, workspaceId, rules);
+        return List.copyOf(candidates.values());
     }
 
-    private void backfillRule(int workspaceId, Rule rule) {
-        if (rule == null || rule.getId() <= 0 || rule.getWorkspaceId() != workspaceId) {
-            throw new IllegalStateException();
+    private void refreshAndLockWorkflows(
+            String catalog, int workspaceId, List<BackfillCandidate> candidates) {
+        for (BackfillCandidate candidate : candidates) {
+            Workflow current = workflowMapper.getByLegacyRuleIdForUpdate(
+                workspaceId, candidate.rule().getId());
+            if (current == null) {
+                if (candidate.workflow() != null) {
+                    throw failure(catalog, workspaceId, candidate.rule().getId());
+                }
+                continue;
+            }
+            if (current.getId() <= 0
+                    || current.getWorkspaceId() != workspaceId
+                    || !Objects.equals(current.getLegacyRuleId(), candidate.rule().getId())
+                    || current.getActiveVersionId() == null) {
+                throw failure(catalog, workspaceId, candidate.rule().getId());
+            }
+            candidate.lockedWorkflow(current);
         }
+    }
+
+    private void lockVersions(
+            String catalog, int workspaceId, List<BackfillCandidate> candidates) {
+        candidates.stream()
+            .filter(candidate -> candidate.lockedWorkflow() != null)
+            .sorted(Comparator.comparingLong(
+                candidate -> candidate.lockedWorkflow().getActiveVersionId()))
+            .forEach(candidate -> {
+                Workflow workflow = candidate.lockedWorkflow();
+                long activeVersionId = workflow.getActiveVersionId();
+                WorkflowVersion current = workflowVersionMapper.getByIdForUpdate(
+                    workspaceId,
+                    workflow.getId(),
+                    activeVersionId);
+                if (current == null
+                        || current.getId() != activeVersionId
+                        || current.getWorkspaceId() != workspaceId
+                        || current.getWorkflowId() != workflow.getId()
+                        || current.getVersionNumber() <= 0) {
+                    throw failure(catalog, workspaceId, candidate.rule().getId());
+                }
+                candidate.lockedVersion(current);
+            });
+    }
+
+    private void requireLockedPrincipals(
+            String catalog,
+            int workspaceId,
+            List<BackfillCandidate> candidates,
+            Map<Integer, Rule> lockedRules,
+            TreeSet<Integer> lockedPrincipalIds) {
+        TreeSet<Integer> currentPrincipalIds = new TreeSet<>();
+        for (BackfillCandidate candidate : candidates) {
+            addWorkflowPrincipals(currentPrincipalIds, candidate.lockedWorkflow());
+            addVersionPrincipals(currentPrincipalIds, candidate.lockedVersion());
+        }
+        for (Rule rule : lockedRules.values()) {
+            addPrincipal(currentPrincipalIds, rule.getCreatedById());
+            addPrincipal(currentPrincipalIds, rule.getRunAsUserId());
+        }
+        if (!lockedPrincipalIds.containsAll(currentPrincipalIds)) {
+            throw failure(catalog, workspaceId, candidates.getFirst().rule().getId());
+        }
+    }
+
+    private Map<Integer, Rule> lockRules(
+            String catalog, int workspaceId, List<BackfillCandidate> candidates) {
+        Map<Integer, Rule> locked = new LinkedHashMap<>();
+        for (BackfillCandidate candidate : candidates) {
+            Rule current = ruleMapper.getByIdForUpdate(workspaceId, candidate.rule().getId());
+            if (current == null
+                    || current.getId() != candidate.rule().getId()
+                    || current.getWorkspaceId() != workspaceId) {
+                throw failure(catalog, workspaceId, candidate.rule().getId());
+            }
+            locked.put(current.getId(), current);
+        }
+        List<Rule> completeLock = ruleMapper.getByWorkspaceForUpdate(workspaceId);
+        if (completeLock.size() != locked.size()) {
+            int ruleId = completeLock.isEmpty() ? 0 : completeLock.getFirst().getId();
+            throw failure(catalog, workspaceId, ruleId);
+        }
+        for (Rule rule : completeLock) {
+            if (!sameRule(locked.get(rule.getId()), rule)) {
+                throw failure(catalog, workspaceId, rule.getId());
+            }
+        }
+        return locked;
+    }
+
+    private void backfillRule(
+            Rule rule, Workflow existing, WorkflowVersion active) {
         Snapshot expected = snapshot(rule);
-        Workflow existing = workflowMapper.getByLegacyRuleId(workspaceId, rule.getId());
         if (existing == null) {
             insert(expected);
             return;
         }
-        requireEquivalent(existing, rule);
+        requireEquivalent(existing, active, rule);
     }
 
     private Snapshot snapshot(Rule rule) {
@@ -149,7 +297,8 @@ public class LegacyWorkflowBackfillTransaction {
         }
     }
 
-    private void requireEquivalent(Workflow workflow, Rule source) {
+    private void requireEquivalent(
+            Workflow workflow, WorkflowVersion active, Rule source) {
         Long activeVersionId = workflow.getActiveVersionId();
         if (workflow.getId() <= 0
                 || workflow.getWorkspaceId() != source.getWorkspaceId()
@@ -158,14 +307,13 @@ public class LegacyWorkflowBackfillTransaction {
                 || activeVersionId == null) {
             throw new IllegalStateException();
         }
-        WorkflowVersion active = workflowVersionMapper.getById(
-            source.getWorkspaceId(), workflow.getId(), activeVersionId);
         if (active == null
                 || active.getId() <= 0
                 || active.getId() != activeVersionId
                 || active.getWorkspaceId() != source.getWorkspaceId()
                 || active.getWorkflowId() != workflow.getId()
-                || active.getVersionNumber() <= 0) {
+                || active.getVersionNumber() <= 0
+                || !Objects.equals(workflow.getCreatedById(), active.getCreatedById())) {
             throw new IllegalStateException();
         }
         CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
@@ -298,5 +446,100 @@ public class LegacyWorkflowBackfillTransaction {
                 + " workspace=" + workspaceId + " rule=" + ruleId);
     }
 
+    private static TreeSet<Integer> principalIds(List<BackfillCandidate> candidates) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        for (BackfillCandidate candidate : candidates) {
+            addPrincipal(ids, candidate.rule().getCreatedById());
+            addPrincipal(ids, candidate.rule().getRunAsUserId());
+            addWorkflowPrincipals(ids, candidate.workflow());
+            addVersionPrincipals(ids, candidate.version());
+        }
+        return ids;
+    }
+
+    private static void addWorkflowPrincipals(TreeSet<Integer> ids, Workflow workflow) {
+        if (workflow != null) {
+            addPrincipal(ids, workflow.getCreatedById());
+            addPrincipal(ids, workflow.getUpdatedById());
+            addPrincipal(ids, workflow.getDraftRunAsUserId());
+        }
+    }
+
+    private static void addVersionPrincipals(
+            TreeSet<Integer> ids, WorkflowVersion version) {
+        if (version != null) {
+            addPrincipal(ids, version.getCreatedById());
+            addPrincipal(ids, version.getPublishedById());
+            addPrincipal(ids, version.getRunAsUserId());
+        }
+    }
+
+    private static void addPrincipal(TreeSet<Integer> ids, Integer userId) {
+        if (userId != null) {
+            ids.add(userId);
+        }
+    }
+
+    private static boolean sameRule(Rule expected, Rule current) {
+        return expected != null
+            && current != null
+            && expected.getId() == current.getId()
+            && expected.getWorkspaceId() == current.getWorkspaceId()
+            && expected.isEnabled() == current.isEnabled()
+            && Objects.equals(expected.getName(), current.getName())
+            && Objects.equals(expected.getDescription(), current.getDescription())
+            && Objects.equals(expected.getRecordType(), current.getRecordType())
+            && Objects.equals(expected.getTriggerType(), current.getTriggerType())
+            && Objects.equals(expected.getTriggerConfig(), current.getTriggerConfig())
+            && Objects.equals(expected.getConditionJson(), current.getConditionJson())
+            && Objects.equals(expected.getActionsJson(), current.getActionsJson())
+            && Objects.equals(expected.getExecutionMode(), current.getExecutionMode())
+            && Objects.equals(expected.getRunAsUserId(), current.getRunAsUserId())
+            && Objects.equals(expected.getCreatedById(), current.getCreatedById());
+    }
+
     private record Snapshot(Rule projection, CanonicalDraft draft) { }
+
+    private static final class BackfillCandidate {
+        private final Rule rule;
+        private final Workflow workflow;
+        private final WorkflowVersion version;
+        private Workflow lockedWorkflow;
+        private WorkflowVersion lockedVersion;
+
+        private BackfillCandidate(
+                Rule rule, Workflow workflow, WorkflowVersion version) {
+            this.rule = rule;
+            this.workflow = workflow;
+            this.version = version;
+        }
+
+        private Rule rule() {
+            return rule;
+        }
+
+        private Workflow workflow() {
+            return workflow;
+        }
+
+        private WorkflowVersion version() {
+            return version;
+        }
+
+        private Workflow lockedWorkflow() {
+            return lockedWorkflow;
+        }
+
+        private void lockedWorkflow(Workflow value) {
+            lockedWorkflow = value;
+        }
+
+        private WorkflowVersion lockedVersion() {
+            return lockedVersion;
+        }
+
+        private void lockedVersion(WorkflowVersion value) {
+            lockedVersion = value;
+        }
+    }
 }

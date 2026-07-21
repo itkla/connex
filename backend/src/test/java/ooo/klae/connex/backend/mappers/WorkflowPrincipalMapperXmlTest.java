@@ -49,16 +49,6 @@ class WorkflowPrincipalMapperXmlTest {
         assertTrue(role.contains("id = ?"));
         assertTrue(role.endsWith("FOR UPDATE"));
 
-        String permission = sql(
-            configuration,
-            RoleMapper.class,
-            "lockPermission",
-            Map.of("workspaceId", 5, "roleId", 11, "permission", "RULE_MANAGE"));
-        assertTrue(permission.contains("wr.workspace_id = ?"));
-        assertTrue(permission.contains("wrp.workspace_role_id = ?"));
-        assertTrue(permission.contains("wrp.permission = ?"));
-        assertTrue(permission.endsWith("FOR UPDATE"));
-
         String permissions = sql(
             configuration,
             RoleMapper.class,

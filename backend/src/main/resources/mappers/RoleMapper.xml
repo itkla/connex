@@ -36,13 +36,6 @@
     FOR UPDATE
   </select>
 
-  <select id="lockPermission" resultType="string">
-    SELECT wrp.permission FROM workspace_role_permission wrp
-    JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
-    WHERE wrp.workspace_role_id = #{roleId} AND wrp.permission = #{permission}
-    FOR UPDATE
-  </select>
-
   <select id="lockPermissions" resultType="string">
     SELECT wrp.permission FROM workspace_role_permission wrp
     JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}

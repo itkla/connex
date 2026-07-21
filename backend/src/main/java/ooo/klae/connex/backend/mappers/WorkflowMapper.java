@@ -20,6 +20,10 @@ public interface WorkflowMapper {
         @Param("workspaceId") int workspaceId,
         @Param("legacyRuleId") int legacyRuleId);
 
+    Workflow getByLegacyRuleIdForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("legacyRuleId") int legacyRuleId);
+
     List<Workflow> findAffectedByUserAnywhere(@Param("userId") int userId);
 
     List<Rule> listUnpairedLegacyRules(@Param("workspaceId") int workspaceId);
@@ -58,6 +62,23 @@ public interface WorkflowMapper {
         @Param("id") int id,
         @Param("enabled") boolean enabled,
         @Param("updatedById") Integer updatedById);
+
+    int replaceLegacyPublication(
+        @Param("workflow") Workflow workflow,
+        @Param("activeVersionId") long activeVersionId,
+        @Param("expectedLegacyRuleId") int expectedLegacyRuleId,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("expectedRevision") int expectedRevision);
+
+    int unlinkLegacyRuleForDeletion(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("updatedById") int updatedById,
+        @Param("expectedLegacyRuleId") int expectedLegacyRuleId,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("expectedRevision") int expectedRevision);
+
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int disableForOffboarding(
         @Param("workspaceId") int workspaceId,

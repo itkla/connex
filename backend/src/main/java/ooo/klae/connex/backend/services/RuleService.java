@@ -37,6 +37,7 @@ public class RuleService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final LegacyRuleWorkflowService legacyRuleWorkflowService;
     private final RuleDefinitionValidator definitionValidator;
     private final RuleDefinitionCodec definitionCodec;
 
@@ -76,13 +77,7 @@ public class RuleService {
     public RuleDto create(RuleRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = authService.getCurrentUser().getId();
-        definitionValidator.validate(request);
-
-        Rule rule = new Rule();
-        rule.setWorkspaceId(workspaceId);
-        rule.setCreatedById(userId);
-        applyRequest(rule, request);
-        ruleMapper.insert(rule);
+        Rule rule = legacyRuleWorkflowService.create(workspaceId, userId, request);
         auditService.record("rule.create", "rule", rule.getId(), rule.getName(),
             "Created rule " + rule.getName(), auditService.singleChange("enabled", null, rule.isEnabled()));
         return toDto(rule);
@@ -91,10 +86,9 @@ public class RuleService {
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public RuleDto update(int id, RuleRequest request) {
-        Rule rule = requireRule(id);
-        definitionValidator.validate(request);
-        applyRequest(rule, request);
-        ruleMapper.update(rule);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
+        Rule rule = legacyRuleWorkflowService.update(workspaceId, actorId, id, request);
         auditService.record("rule.update", "rule", id, rule.getName(),
             "Updated rule " + rule.getName(), null);
         return toDto(rule);
@@ -103,8 +97,9 @@ public class RuleService {
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public void delete(int id) {
-        Rule rule = requireRule(id);
-        ruleMapper.delete(workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
+        Rule rule = legacyRuleWorkflowService.delete(workspaceId, actorId, id);
         auditService.record("rule.delete", "rule", id, rule.getName(),
             "Deleted rule " + rule.getName(), null);
     }
@@ -115,20 +110,6 @@ public class RuleService {
             throw new ResourceNotFoundException("Rule not found with id: " + id);
         }
         return rule;
-    }
-
-    private void applyRequest(Rule rule, RuleRequest request) {
-        String mode = definitionValidator.normalize(request.getExecutionMode());
-        rule.setName(request.getName().trim());
-        rule.setDescription(request.getDescription());
-        rule.setEnabled(request.getEnabled() == null || request.getEnabled());
-        rule.setRecordType(definitionValidator.normalize(request.getRecordType()));
-        rule.setTriggerType(definitionValidator.normalize(request.getTrigger().getType()));
-        rule.setTriggerConfig(definitionCodec.serialize(request.getTrigger()));
-        rule.setConditionJson(request.getCondition() == null ? null : definitionCodec.serialize(request.getCondition()));
-        rule.setActionsJson(definitionCodec.serialize(request.getActions()));
-        rule.setExecutionMode(mode);
-        rule.setRunAsUserId("system".equals(mode) ? null : rule.getCreatedById());
     }
 
     private RuleDto toDto(Rule rule) {

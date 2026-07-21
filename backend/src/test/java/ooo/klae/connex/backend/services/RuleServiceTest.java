@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +17,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
@@ -27,12 +30,18 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 
 class RuleServiceTest extends AbstractServiceTest {
 
     @Autowired RuleService ruleService;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired RuleMapper ruleMapper;
+    @Autowired WorkflowMapper workflowMapper;
+    @Autowired WorkflowVersionMapper workflowVersionMapper;
 
     private static RuleTrigger schedule(String cadence) {
         RuleTrigger trigger = new RuleTrigger();
@@ -199,6 +208,46 @@ class RuleServiceTest extends AbstractServiceTest {
         assertEquals("entity_change", updated.getTrigger().getType());
         assertEquals("add_tag", updated.getActions().get(0).getType());
         assertEquals(false, updated.isEnabled());
+    }
+
+    @Test
+    void legacyMutationsMaintainOneCanonicalWorkflowAggregate() {
+        RuleRequest initial = req(
+            "deal", entityChange("deal.won"), "user", action("notify"));
+        RuleDto created = ruleService.create(initial);
+        Workflow first = workflowMapper.getByLegacyRuleId(workspace.getId(), created.getId());
+        assertNotNull(first);
+        assertNotNull(first.getActiveVersionId());
+        assertTrue(first.isEnabled());
+        assertEquals(1, first.getDraftRevision());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), first.getId()).size());
+
+        initial.setEnabled(false);
+        ruleService.update(created.getId(), initial);
+        Workflow disabled = workflowMapper.getByLegacyRuleId(workspace.getId(), created.getId());
+        assertEquals(first.getActiveVersionId(), disabled.getActiveVersionId());
+        assertEquals(first.getDraftRevision(), disabled.getDraftRevision());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), first.getId()).size());
+
+        RuleRequest changed = req(
+            "deal", entityChange("deal.lost"), "user", action("notify"));
+        changed.setDescription("   ");
+        changed.setEnabled(false);
+        ruleService.update(created.getId(), changed);
+        Workflow replaced = workflowMapper.getByLegacyRuleId(workspace.getId(), created.getId());
+        assertNotEquals(disabled.getActiveVersionId(), replaced.getActiveVersionId());
+        assertEquals(disabled.getDraftRevision() + 1, replaced.getDraftRevision());
+        assertEquals("   ", replaced.getDescription());
+        assertEquals(2, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), first.getId()).size());
+
+        ruleService.delete(created.getId());
+        assertNull(ruleMapper.getById(workspace.getId(), created.getId()));
+        assertNull(workflowMapper.getByLegacyRuleId(workspace.getId(), created.getId()));
+        assertTrue(workflowVersionMapper.listByWorkflow(
+            workspace.getId(), first.getId()).isEmpty());
     }
 
     @Test

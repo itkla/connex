@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowServiceTest {
@@ -91,6 +92,8 @@ class WorkflowServiceTest {
             definitionCodec);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
+        lenient().when(definitionValidator.validateDefinitionForMutation(
+            any(), any(), any(), any(), any())).thenReturn(Set.of());
     }
 
     @Test
@@ -364,7 +367,7 @@ class WorkflowServiceTest {
         assertEquals(1, version.getValue().getVersionNumber());
         assertEquals(41, version.getValue().getCreatedById());
         assertEquals(41, version.getValue().getPublishedById());
-        verify(definitionValidator).validateDefinition(
+        verify(definitionValidator).validateDefinitionForMutation(
             eq("deal"), any(RuleTrigger.class), eq(null), any(), eq("user"));
         InOrder writes = inOrder(ruleMapper, workflowVersionMapper, workflowMapper);
         writes.verify(ruleMapper).insert(any(Rule.class));
@@ -374,6 +377,27 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.publish"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
+    }
+
+    @Test
+    void publishChecksActionRequirementsAgainstTheLockedPermissionSet() {
+        Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+            .thenReturn(new LockedPrincipals(
+                Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
+        when(definitionValidator.validateDefinitionForMutation(
+            any(), any(), any(), any(), any())).thenReturn(Set.of(Permission.TASK_CREATE));
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> service.publish(101, publishRequest(0)));
+
+        verify(ruleMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
