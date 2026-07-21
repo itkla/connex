@@ -42,6 +42,8 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
@@ -257,6 +259,30 @@ class WorkflowServiceTest {
         verify(workflowDefinitionValidator).validate(
             eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verify(workflowMapper, never()).updateDraft(any(), any(Integer.class));
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
+    void validateKeepsBranchingClosedUntilTheCanonicalRuntimeCutover() {
+        Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
+        CanonicalDraft branching = canonicalizer.canonicalizeDraftJson(
+            "Workflow",
+            null,
+            "deal",
+            "user",
+            branchingDefinitionJson(),
+            branchingCanvasJson());
+        workflow.setDraftDefinitionJson(branching.definitionJson());
+        workflow.setDraftCanvasJson(branching.canvasJson());
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+
+        BadRequestException exception = assertThrows(
+            BadRequestException.class,
+            () -> service.validate(101));
+
+        assertEquals("Legacy workflow condition no branch must end", exception.getMessage());
+        verify(workflowDefinitionValidator).validate(
+            eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
     }
 
@@ -1062,6 +1088,74 @@ class WorkflowServiceTest {
             Map.of(
                 "eventSource", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
                 "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
+            new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
+        try {
+            return JsonMapper.builder().build().writeValueAsString(canvas);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static String branchingDefinitionJson() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.won"));
+        SegmentCondition field = new SegmentCondition();
+        field.setType("field");
+        field.setField("name");
+        field.setOp("contains");
+        field.setValue("Acme");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of(field));
+        RuleAction yesAction = new RuleAction();
+        yesAction.setType("notify");
+        yesAction.setTitle("Yes branch");
+        RuleAction noAction = new RuleAction();
+        noAction.setType("notify");
+        noAction.setTitle("No branch");
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1,
+            "trigger",
+            List.of(
+                new ooo.klae.connex.backend.dto.WorkflowNode.Trigger("trigger", trigger),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Condition("condition", condition),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Action("yesAction", yesAction),
+                new ooo.klae.connex.backend.dto.WorkflowNode.Action("noAction", noAction),
+                new ooo.klae.connex.backend.dto.WorkflowNode.End("end")),
+            List.of(
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "trigger-condition", "trigger", "condition",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "condition-yes", "condition", "yesAction",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.YES),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "condition-no", "condition", "noAction",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NO),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "yes-end", "yesAction", "end",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT),
+                new ooo.klae.connex.backend.dto.WorkflowEdge(
+                    "no-end", "noAction", "end",
+                    ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT)));
+        try {
+            return JsonMapper.builder().build().writeValueAsString(definition);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static String branchingCanvasJson() {
+        WorkflowCanvas canvas = new WorkflowCanvas(
+            Map.of(
+                "trigger", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
+                "condition", new WorkflowCanvas.Position(BigDecimal.valueOf(240), BigDecimal.ZERO),
+                "yesAction", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(480), BigDecimal.valueOf(-120)),
+                "noAction", new WorkflowCanvas.Position(
+                    BigDecimal.valueOf(480), BigDecimal.valueOf(120)),
+                "end", new WorkflowCanvas.Position(BigDecimal.valueOf(720), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {
             return JsonMapper.builder().build().writeValueAsString(canvas);

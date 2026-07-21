@@ -1,11 +1,12 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -32,6 +33,7 @@ import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
+import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
@@ -78,11 +80,19 @@ class WorkflowDefinitionValidatorTest {
 
         assertEquals(List.of("trigger", "condition", "action", "end"),
             compiled.topologicalOrder());
-        assertSame(action, ((WorkflowNode.Action) compiled.node("action")).config());
+        assertEquals(NodeType.ACTION, compiled.nodeType("action"));
         assertEquals("action",
             compiled.transition("condition", WorkflowEdge.Outcome.YES).targetNodeId());
         assertEquals("action",
             compiled.transition("condition", WorkflowEdge.Outcome.NO).targetNodeId());
+        assertThrows(
+            UnsupportedOperationException.class,
+            () -> compiled.nodeTypes().put("other", NodeType.END));
+        assertFalse(Arrays.stream(CompiledWorkflow.class.getRecordComponents())
+            .anyMatch(component -> component.getType() == WorkflowNode.class
+                || component.getType() == RuleAction.class
+                || component.getType() == RuleTrigger.class
+                || component.getType() == SegmentDefinition.class));
         verify(segmentService).validate("deal", condition);
         verifyNoInteractions(workspaceService);
     }

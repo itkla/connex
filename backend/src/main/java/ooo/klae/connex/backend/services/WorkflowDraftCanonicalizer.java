@@ -133,6 +133,13 @@ public class WorkflowDraftCanonicalizer {
         return parse(definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
     }
 
+    static WorkflowDefinition snapshotDefinition(WorkflowDefinition definition) {
+        validateDefinitionStructure(definition);
+        String definitionJson = canonicalDefinition(definition);
+        requireInputSize(definitionJson, MAX_DEFINITION_BYTES, "Workflow definition is too large");
+        return parse(definitionJson, WorkflowDefinition.class, "Invalid workflow definition");
+    }
+
     WorkflowCanvas parseCanvas(String canvasJson) {
         requireInputSize(canvasJson, MAX_CANVAS_BYTES, "Workflow canvas is too large");
         return parse(canvasJson, WorkflowCanvas.class, "Invalid workflow canvas");

@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RuleAction;
+import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
@@ -37,41 +38,41 @@ public class WorkflowDefinitionValidator {
             String recordType,
             String executionMode,
             WorkflowDefinition definition) {
-        CompiledWorkflow compiled = compile(definition);
+        Compilation compilation = compile(definition);
         ruleDefinitionValidator.validateWorkflowDefinition(
             recordType,
-            compiled.trigger().config(),
-            conditions(compiled),
-            actions(compiled),
+            compilation.trigger(),
+            compilation.conditions(),
+            compilation.actions(),
             executionMode);
-        return compiled;
+        return compilation.compiled();
     }
 
     Set<Permission> validateForMutation(
             String recordType,
             String executionMode,
             WorkflowDefinition definition) {
-        CompiledWorkflow compiled = compile(definition);
+        Compilation compilation = compile(definition);
         return ruleDefinitionValidator.validateWorkflowDefinitionForMutation(
             recordType,
-            compiled.trigger().config(),
-            conditions(compiled),
-            actions(compiled),
+            compilation.trigger(),
+            compilation.conditions(),
+            compilation.actions(),
             executionMode);
     }
 
-    private static CompiledWorkflow compile(WorkflowDefinition definition) {
-        WorkflowDraftCanonicalizer.validateDefinitionStructure(definition);
+    private static Compilation compile(WorkflowDefinition definition) {
+        WorkflowDefinition snapshot = WorkflowDraftCanonicalizer.snapshotDefinition(definition);
 
         Map<String, WorkflowNode> nodes = new TreeMap<>();
-        for (WorkflowNode node : definition.nodes()) {
+        for (WorkflowNode node : snapshot.nodes()) {
             nodes.put(node.id(), node);
         }
-        WorkflowNode.Trigger trigger = requireEntryTrigger(definition, nodes);
+        WorkflowNode.Trigger trigger = requireEntryTrigger(snapshot, nodes);
 
         Map<String, List<WorkflowEdge>> incoming = edgeLists(nodes.keySet());
         Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> outgoing = outcomeMaps(nodes.keySet());
-        List<WorkflowEdge> orderedEdges = definition.edges().stream()
+        List<WorkflowEdge> orderedEdges = snapshot.edges().stream()
             .sorted(Comparator.comparing(WorkflowEdge::id))
             .toList();
         for (WorkflowEdge edge : orderedEdges) {
@@ -86,7 +87,32 @@ public class WorkflowDefinitionValidator {
         validateNodeConnections(nodes, incoming, outgoing);
         requireReachable(trigger.id(), nodes, outgoing);
         List<String> topologicalOrder = topologicalOrder(nodes, incoming, outgoing);
-        return new CompiledWorkflow(trigger, nodes, outgoing, topologicalOrder);
+        Map<String, NodeType> nodeTypes = new LinkedHashMap<>();
+        List<SegmentDefinition> conditions = new ArrayList<>();
+        List<RuleAction> actions = new ArrayList<>();
+        for (String nodeId : topologicalOrder) {
+            WorkflowNode node = nodes.get(nodeId);
+            if (node instanceof WorkflowNode.Trigger) {
+                nodeTypes.put(nodeId, NodeType.TRIGGER);
+            } else if (node instanceof WorkflowNode.Condition condition) {
+                nodeTypes.put(nodeId, NodeType.CONDITION);
+                conditions.add(condition.config());
+            } else if (node instanceof WorkflowNode.Action action) {
+                nodeTypes.put(nodeId, NodeType.ACTION);
+                actions.add(action.config());
+            } else if (node instanceof WorkflowNode.End) {
+                nodeTypes.put(nodeId, NodeType.END);
+            } else {
+                throw new BadRequestException("Workflow contains an unsupported node type");
+            }
+        }
+        CompiledWorkflow compiled = new CompiledWorkflow(
+            trigger.id(), nodeTypes, outgoing, topologicalOrder);
+        return new Compilation(
+            compiled,
+            trigger.config(),
+            Collections.unmodifiableList(new ArrayList<>(conditions)),
+            Collections.unmodifiableList(new ArrayList<>(actions)));
     }
 
     private static WorkflowNode.Trigger requireEntryTrigger(
@@ -247,35 +273,15 @@ public class WorkflowDefinitionValidator {
         return List.copyOf(ordered);
     }
 
-    private static List<SegmentDefinition> conditions(CompiledWorkflow compiled) {
-        List<SegmentDefinition> conditions = new ArrayList<>();
-        for (String nodeId : compiled.topologicalOrder()) {
-            if (compiled.nodes().get(nodeId) instanceof WorkflowNode.Condition condition) {
-                conditions.add(condition.config());
-            }
-        }
-        return conditions;
-    }
-
-    private static List<RuleAction> actions(CompiledWorkflow compiled) {
-        List<RuleAction> actions = new ArrayList<>();
-        for (String nodeId : compiled.topologicalOrder()) {
-            if (compiled.nodes().get(nodeId) instanceof WorkflowNode.Action action) {
-                actions.add(action.config());
-            }
-        }
-        return actions;
-    }
-
     record CompiledWorkflow(
-        WorkflowNode.Trigger trigger,
-        Map<String, WorkflowNode> nodes,
+        String entryNodeId,
+        Map<String, NodeType> nodeTypes,
         Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> outgoing,
         List<String> topologicalOrder
     ) {
 
         CompiledWorkflow {
-            nodes = Collections.unmodifiableMap(new LinkedHashMap<>(nodes));
+            nodeTypes = Collections.unmodifiableMap(new LinkedHashMap<>(nodeTypes));
             Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> transitions = new LinkedHashMap<>();
             outgoing.forEach((nodeId, edges) -> transitions.put(
                 nodeId,
@@ -284,8 +290,8 @@ public class WorkflowDefinitionValidator {
             topologicalOrder = List.copyOf(topologicalOrder);
         }
 
-        WorkflowNode node(String nodeId) {
-            return nodes.get(nodeId);
+        NodeType nodeType(String nodeId) {
+            return nodeTypes.get(nodeId);
         }
 
         WorkflowEdge transition(String nodeId, WorkflowEdge.Outcome outcome) {
@@ -293,4 +299,18 @@ public class WorkflowDefinitionValidator {
             return transitions == null ? null : transitions.get(outcome);
         }
     }
+
+    enum NodeType {
+        TRIGGER,
+        CONDITION,
+        ACTION,
+        END
+    }
+
+    private record Compilation(
+        CompiledWorkflow compiled,
+        RuleTrigger trigger,
+        List<SegmentDefinition> conditions,
+        List<RuleAction> actions
+    ) { }
 }
