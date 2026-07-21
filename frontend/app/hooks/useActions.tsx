@@ -123,10 +123,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const pathname = usePathname() ?? "";
     const locale = useLocale();
     const t = useTranslations("Actions");
-    const { activeWorkspace } = useWorkspace();
+    const { activeWorkspace, switching } = useWorkspace();
     const activeUserId = user?.id ?? null;
     const activeWorkspaceId = activeWorkspace?.id ?? null;
-    const activeIdentity = `${activeUserId ?? "anon"}:${activeWorkspaceId ?? "none"}`;
+    const activeIdentity = `${activeUserId ?? "anon"}:${switching ? "switching" : (activeWorkspaceId ?? "none")}`;
 
     const registrationsRef = useRef<Map<RegistrationToken, readonly AppAction[]>>(new Map());
     const registryMapRef = useRef<Map<ActionId, AppAction>>(new Map());
@@ -292,7 +292,9 @@ export function ActionProvider({ user, children }: { user: User | null; children
         [register, unregister, setRecord, clearRecord, setSelection, clearSelection],
     );
     const visibleOverlay =
-        overlay?.userId === activeUserId && overlay.workspaceId === activeWorkspaceId ? overlay.request : null;
+        !switching && overlay?.userId === activeUserId && overlay.workspaceId === activeWorkspaceId
+            ? overlay.request
+            : null;
 
     return (
         <ActionsContext.Provider value={value}>
