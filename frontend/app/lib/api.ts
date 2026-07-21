@@ -1502,15 +1502,16 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
  * Streams a CSV from the backend with the active workspace + locale headers (a plain anchor would
  * not carry the workspace context) and triggers a browser download.
  */
-export async function downloadCsv(path: string, filename: string): Promise<void> {
+export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
     const workspaceId = clientWorkspaceId();
+    const headers = new Headers(init.headers);
+    headers.set("Accept-Language", locale);
+    if (workspaceId) headers.set("X-Workspace-Id", workspaceId);
     const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
         credentials: "include",
-        headers: {
-            "Accept-Language": locale,
-            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-        },
+        headers,
     });
     if (!res.ok) {
         throw await getApiError(res);
@@ -1526,29 +1527,29 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
     URL.revokeObjectURL(url);
 }
 
-export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
+export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
     });
-    return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
+    return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
 
-export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}) {
+export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
         scope: params.scope, memberIds: params.memberIds,
     });
-    return downloadCsv(`/api/exports/companies${query}`, "companies.csv");
+    return downloadCsv(`/api/exports/companies${query}`, "companies.csv", init);
 }
 
-export function exportDealsCsv(params: Types.DealFilterParams = {}) {
+export function exportDealsCsv(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
         companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
         scope: params.scope, memberIds: params.memberIds,
     });
-    return downloadCsv(`/api/exports/deals${query}`, "deals.csv");
+    return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
 }
 
 export function getPersonFacets(init: RequestInit = {}) {
