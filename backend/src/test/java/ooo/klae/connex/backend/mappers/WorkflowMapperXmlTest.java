@@ -213,17 +213,7 @@ class WorkflowMapperXmlTest {
         assertFalse(xml.contains("<delete"));
         assertEquals(1, occurrences(xml, "<insert"));
         assertEquals(5, occurrences(xml, "<select"));
-        assertEquals(1, occurrences(xml, "<update"));
-        String redaction = sql(
-            configuration,
-            WorkflowVersionMapper.class,
-            "redactUserReferences",
-            Map.of("workspaceId", 7, "workflowId", 11, "id", 19L, "userId", 23));
-        assertTrue(redaction.contains("WHERE workspace_id = ?"));
-        assertTrue(redaction.contains("workflow_id = ?"));
-        assertTrue(redaction.contains("id = ?"));
-        assertFalse(redaction.contains("definition_json ="));
-        assertFalse(redaction.contains("canvas_json ="));
+        assertFalse(xml.contains("<update"));
     }
 
     @Test
@@ -252,14 +242,19 @@ class WorkflowMapperXmlTest {
             assertTrue(discovery.contains("run_as_user_id = ?"));
             assertFalse(discovery.contains("${"));
         }
+        String workflowDiscovery = sql(
+            configuration, WorkflowMapper.class, "findAffectedByUserAnywhere", user);
+        String versionDiscovery = sql(
+            configuration, WorkflowVersionMapper.class, "findLockCandidatesByUserAnywhere", user);
+        String ruleDiscovery = sql(
+            configuration, RuleMapper.class, "findLockCandidatesByUserAnywhere", user);
+        assertTrue(workflowDiscovery.contains("v.id = w.active_version_id"));
+        assertTrue(versionDiscovery.contains("w.active_version_id = v.id"));
+        assertTrue(ruleDiscovery.contains("v.id = w.active_version_id"));
 
         Map<String, Object> workflow = Map.of("workspaceId", 7, "id", 11, "userId", 23);
         assertScoped(configuration, WorkflowMapper.class, "redactUserReferences", workflow);
         assertScoped(configuration, WorkflowMapper.class, "disableForOffboarding", workflow);
-        Map<String, Object> version = Map.of(
-            "workspaceId", 7, "workflowId", 11, "id", 19L, "userId", 23);
-        assertScoped(
-            configuration, WorkflowVersionMapper.class, "redactUserReferences", version);
         Map<String, Object> rule = Map.of("workspaceId", 7, "id", 13, "userId", 23);
         assertScoped(configuration, RuleMapper.class, "redactUserReferences", rule);
     }

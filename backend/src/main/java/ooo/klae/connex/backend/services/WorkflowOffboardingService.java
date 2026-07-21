@@ -19,7 +19,7 @@ import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
-/** Locks, disables, and redacts workflow identities during permanent account deletion. */
+/** Locks and disables workflow aggregates while preserving immutable published versions. */
 @Service
 @RequiredArgsConstructor
 public class WorkflowOffboardingService {
@@ -95,8 +95,6 @@ public class WorkflowOffboardingService {
 
         workflows.values().forEach(workflow -> workflowMapper.redactUserReferences(
             workflow.getWorkspaceId(), workflow.getId(), userId));
-        versions.values().forEach(version -> workflowVersionMapper.redactUserReferences(
-            version.getWorkspaceId(), version.getWorkflowId(), version.getId(), userId));
         rules.values().forEach(rule -> ruleMapper.redactUserReferences(
             rule.getWorkspaceId(), rule.getId(), userId));
     }

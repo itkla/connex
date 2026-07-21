@@ -53,6 +53,7 @@
          SELECT 1 FROM workflow_version v
          WHERE v.workspace_id = w.workspace_id
            AND v.workflow_id = w.id
+           AND v.id = w.active_version_id
            AND (v.created_by_id = #{userId}
              OR v.published_by_id = #{userId}
              OR v.run_as_user_id = #{userId})

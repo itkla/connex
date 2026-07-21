@@ -78,7 +78,6 @@ class WorkflowOffboardingServiceTest {
         disables.verify(ruleMapper).updateEnabled(5, 100, false);
         disables.verify(ruleMapper).updateEnabled(7, 200, false);
         verify(workflowMapper).redactUserReferences(7, 20, 9);
-        verify(workflowVersionMapper).redactUserReferences(7, 20, 300L, 9);
         verify(ruleMapper).redactUserReferences(5, 100, 9);
         verify(ruleMapper).redactUserReferences(7, 200, 9);
     }
