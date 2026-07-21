@@ -125,7 +125,7 @@ public class NotificationService {
             asOf
         );
         long stateVersion = notificationMapper.getStateVersion(recipientId);
-        return new NotificationPageDto(items, total, stateVersion);
+        return new NotificationPageDto(items, total, stateVersion, databaseTimestamp(asOf).toString());
     }
 
     @Transactional(readOnly = true)
