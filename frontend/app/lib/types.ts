@@ -2203,7 +2203,8 @@ export type NotificationParams = {
     status?: NotificationState;
     type?: string | string[];
     workspaceId?: number;
-    category?: string;
+    category?: string | string[];
+    severity?: string | string[];
     contextType?: string;
     contextId?: number;
     page?: number;
@@ -2246,7 +2247,14 @@ export type CreateAttachmentPayload = {
 export type FacetCount = {
     key: string;
     count: number;
-    label?: string;
+    label?: string | null;
+};
+
+export type NotificationFacets = {
+    categories: FacetCount[];
+    severities: FacetCount[];
+    workspaces: FacetCount[];
+    stateVersion: number;
 };
 
 export type AttachmentsPageParams = PageParams & {

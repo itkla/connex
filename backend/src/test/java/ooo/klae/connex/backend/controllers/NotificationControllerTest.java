@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -22,7 +23,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationDto;
+import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
@@ -78,6 +81,27 @@ class NotificationControllerTest {
         verify(notificationService).getPage(
             "snoozed", null, List.of("task.due", "deal.close"), List.of("task", "deal"),
             List.of("critical"), 7, "deal", 9, 2, 50);
+    }
+
+    @Test
+    void facetsExposeTheStableRecipientFilterContract() throws Exception {
+        when(notificationService.getFacets()).thenReturn(new NotificationFacets(
+            List.of(new FacetCount("task", 3, null)),
+            List.of(new FacetCount("warning", 2, null)),
+            List.of(new FacetCount("7", 4, "Sales")),
+            12
+        ));
+
+        mockMvc.perform(get("/api/notifications/facets"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.categories[0].key").value("task"))
+            .andExpect(jsonPath("$.categories[0].count").value(3))
+            .andExpect(jsonPath("$.severities[0].key").value("warning"))
+            .andExpect(jsonPath("$.workspaces[0].key").value("7"))
+            .andExpect(jsonPath("$.workspaces[0].label").value("Sales"))
+            .andExpect(jsonPath("$.stateVersion").value(12));
+
+        verify(notificationService).getFacets();
     }
 
     @Test

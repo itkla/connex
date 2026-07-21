@@ -2421,6 +2421,13 @@ export function getNotificationCounts(init: RequestInit = {}) {
     });
 }
 
+export function getNotificationFacets(init: RequestInit = {}) {
+    return getJson<Types.NotificationFacets>("/api/notifications/facets", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
 export function getNotificationPreferences(init: RequestInit = {}) {
     return getJson<Types.NotificationPreference[]>("/api/notification-preferences", {
         cache: "no-store",

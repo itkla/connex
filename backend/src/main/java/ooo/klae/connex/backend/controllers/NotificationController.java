@@ -14,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
+import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPreferenceDto;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.dto.NotificationQuietHoursDto;
@@ -63,6 +64,11 @@ public class NotificationController {
     @GetMapping("/api/notifications/counts")
     public NotificationCountsDto getCounts() {
         return notificationService.getUnreadCounts();
+    }
+
+    @GetMapping("/api/notifications/facets")
+    public NotificationFacets getFacets() {
+        return notificationService.getFacets();
     }
 
     @PostMapping("/api/notifications/{id}/read")

@@ -72,6 +72,9 @@ class TenantScopeArchTest {
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsByCategory",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsBySeverity",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsByWorkspace",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getUnreadCounts",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getNextSnoozeExpiry",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",

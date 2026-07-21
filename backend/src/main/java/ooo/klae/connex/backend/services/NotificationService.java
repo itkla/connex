@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
+import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -132,6 +133,17 @@ public class NotificationService {
         int recipientId = currentRecipientId();
         String asOf = notificationMapper.getDatabaseUtcTimestamp();
         return countsAt(recipientId, asOf);
+    }
+
+    @Transactional(readOnly = true)
+    public NotificationFacets getFacets() {
+        int recipientId = currentRecipientId();
+        return new NotificationFacets(
+            notificationMapper.countsByCategory(recipientId),
+            notificationMapper.countsBySeverity(recipientId),
+            notificationMapper.countsByWorkspace(recipientId),
+            notificationMapper.getStateVersion(recipientId)
+        );
     }
 
     @Transactional
