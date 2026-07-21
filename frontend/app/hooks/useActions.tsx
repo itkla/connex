@@ -300,7 +300,12 @@ export function ActionProvider({ user, children }: { user: User | null; children
         <ActionsContext.Provider value={value}>
             <ActionContributorContext.Provider value={contributorValue}>
                 {children}
-                <ActionOverlayHost overlay={visibleOverlay} user={user} onClose={closeOverlay} />
+                <ActionOverlayHost
+                    key={activeIdentity}
+                    overlay={visibleOverlay}
+                    user={user}
+                    onClose={closeOverlay}
+                />
             </ActionContributorContext.Provider>
         </ActionsContext.Provider>
     );
