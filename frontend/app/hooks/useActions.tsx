@@ -41,6 +41,7 @@ import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
 type RegistrationToken = symbol;
 
 type ScopedOverlay = {
+    identity: string;
     request: OverlayRequest;
     userId: number | null;
     workspaceId: number | null;
@@ -139,12 +140,19 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const [overlay, setOverlay] = useState<ScopedOverlay | null>(null);
     const [overlayIdentity, setOverlayIdentity] = useState(activeIdentity);
+    const liveOverlayIdentityRef = useRef<string | null>(null);
     const lastInvokerRef = useRef<HTMLElement | null>(null);
 
     if (overlayIdentity !== activeIdentity) {
         setOverlayIdentity(activeIdentity);
         setOverlay(null);
     }
+
+    useLayoutEffect(() => {
+        if (liveOverlayIdentityRef.current === activeIdentity) return;
+        liveOverlayIdentityRef.current = null;
+        lastInvokerRef.current = null;
+    }, [activeIdentity]);
 
     const pendingRef = useRef<Set<ActionId>>(new Set());
     const [pendingIds, setPendingIds] = useState<ReadonlySet<ActionId>>(EMPTY_PENDING);
@@ -194,16 +202,23 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const openOverlay = useCallback((request: OverlayRequest) => {
         const active = document.activeElement;
         lastInvokerRef.current = active instanceof HTMLElement ? active : null;
-        setOverlay({ request, userId: activeUserId, workspaceId: activeWorkspaceId });
-    }, [activeUserId, activeWorkspaceId]);
-    const closeOverlay = useCallback(() => {
-        setOverlay(null);
+        liveOverlayIdentityRef.current = activeIdentity;
+        setOverlay({ identity: activeIdentity, request, userId: activeUserId, workspaceId: activeWorkspaceId });
+    }, [activeIdentity, activeUserId, activeWorkspaceId]);
+    const closeOverlayForIdentity = useCallback((identity: string) => {
+        if (liveOverlayIdentityRef.current !== identity) return;
+        liveOverlayIdentityRef.current = null;
+        setOverlay((current) => (current?.identity === identity ? null : current));
         const invoker = lastInvokerRef.current;
         lastInvokerRef.current = null;
         if (invoker && invoker.isConnected) {
             requestAnimationFrame(() => invoker.focus());
         }
     }, []);
+    const closeOverlay = useCallback(
+        () => closeOverlayForIdentity(activeIdentity),
+        [activeIdentity, closeOverlayForIdentity],
+    );
 
     const context = useMemo<ActionContext>(
         () => ({
@@ -292,7 +307,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
         [register, unregister, setRecord, clearRecord, setSelection, clearSelection],
     );
     const visibleOverlay =
-        !switching && overlay?.userId === activeUserId && overlay.workspaceId === activeWorkspaceId
+        !switching &&
+        overlay?.identity === activeIdentity &&
+        overlay.userId === activeUserId &&
+        overlay.workspaceId === activeWorkspaceId
             ? overlay.request
             : null;
 
