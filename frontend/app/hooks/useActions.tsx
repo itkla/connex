@@ -41,6 +41,7 @@ import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
 type RegistrationToken = symbol;
 
 type ScopedOverlay = {
+    generation: number;
     identity: string;
     request: OverlayRequest;
     userId: number | null;
@@ -140,7 +141,8 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const [overlay, setOverlay] = useState<ScopedOverlay | null>(null);
     const [overlayIdentity, setOverlayIdentity] = useState(activeIdentity);
-    const liveOverlayIdentityRef = useRef<string | null>(null);
+    const nextOverlayGenerationRef = useRef(0);
+    const liveOverlayRef = useRef<{ generation: number; identity: string } | null>(null);
     const lastInvokerRef = useRef<HTMLElement | null>(null);
 
     if (overlayIdentity !== activeIdentity) {
@@ -149,8 +151,8 @@ export function ActionProvider({ user, children }: { user: User | null; children
     }
 
     useLayoutEffect(() => {
-        if (liveOverlayIdentityRef.current === activeIdentity) return;
-        liveOverlayIdentityRef.current = null;
+        if (liveOverlayRef.current?.identity === activeIdentity) return;
+        liveOverlayRef.current = null;
         lastInvokerRef.current = null;
     }, [activeIdentity]);
 
@@ -201,24 +203,32 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const openOverlay = useCallback((request: OverlayRequest) => {
         const active = document.activeElement;
+        const generation = nextOverlayGenerationRef.current + 1;
+        nextOverlayGenerationRef.current = generation;
         lastInvokerRef.current = active instanceof HTMLElement ? active : null;
-        liveOverlayIdentityRef.current = activeIdentity;
-        setOverlay({ identity: activeIdentity, request, userId: activeUserId, workspaceId: activeWorkspaceId });
+        liveOverlayRef.current = { generation, identity: activeIdentity };
+        setOverlay({
+            generation,
+            identity: activeIdentity,
+            request,
+            userId: activeUserId,
+            workspaceId: activeWorkspaceId,
+        });
     }, [activeIdentity, activeUserId, activeWorkspaceId]);
-    const closeOverlayForIdentity = useCallback((identity: string) => {
-        if (liveOverlayIdentityRef.current !== identity) return;
-        liveOverlayIdentityRef.current = null;
-        setOverlay((current) => (current?.identity === identity ? null : current));
+    const closeOverlayGeneration = useCallback((generation: number) => {
+        if (liveOverlayRef.current?.generation !== generation) return;
+        liveOverlayRef.current = null;
+        setOverlay((current) => (current?.generation === generation ? null : current));
         const invoker = lastInvokerRef.current;
         lastInvokerRef.current = null;
         if (invoker && invoker.isConnected) {
             requestAnimationFrame(() => invoker.focus());
         }
     }, []);
-    const closeOverlay = useCallback(
-        () => closeOverlayForIdentity(activeIdentity),
-        [activeIdentity, closeOverlayForIdentity],
-    );
+    const closeOverlay = useCallback(() => {
+        const generation = liveOverlayRef.current?.generation;
+        if (generation !== undefined) closeOverlayGeneration(generation);
+    }, [closeOverlayGeneration]);
 
     const context = useMemo<ActionContext>(
         () => ({
@@ -313,6 +323,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
         overlay.workspaceId === activeWorkspaceId
             ? overlay.request
             : null;
+    const visibleOverlayGeneration = visibleOverlay === null ? null : overlay?.generation ?? null;
+    const closeVisibleOverlay = useCallback(() => {
+        if (visibleOverlayGeneration !== null) closeOverlayGeneration(visibleOverlayGeneration);
+    }, [closeOverlayGeneration, visibleOverlayGeneration]);
 
     return (
         <ActionsContext.Provider value={value}>
@@ -322,7 +336,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
                     key={activeIdentity}
                     overlay={visibleOverlay}
                     user={user}
-                    onClose={closeOverlay}
+                    onClose={closeVisibleOverlay}
                 />
             </ActionContributorContext.Provider>
         </ActionsContext.Provider>
