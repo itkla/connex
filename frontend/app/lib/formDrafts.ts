@@ -1,5 +1,6 @@
 const DRAFT_PREFIX = 'connex:draft:';
 let draftStoreGeneration = 0;
+const draftKeyGenerations = new Map<string, number>();
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -40,6 +41,18 @@ export type StoredDraft<T> = {
 /** Returns the current in-memory draft-store generation used to invalidate pending writes after logout. */
 export function getDraftStoreGeneration(): number {
     return draftStoreGeneration;
+}
+
+/** Returns the current write generation for one draft key. */
+export function getDraftKeyGeneration(key: string): number {
+    return draftKeyGenerations.get(key) ?? 0;
+}
+
+/** Advances one draft key so pending writes captured by another composer become stale. */
+export function advanceDraftKeyGeneration(key: string): number {
+    const next = getDraftKeyGeneration(key) + 1;
+    draftKeyGenerations.set(key, next);
+    return next;
 }
 
 /** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
@@ -112,6 +125,7 @@ export function writeDraft<T>(key: string, params: { version: number; scope: str
 
 /** Removes a single draft. */
 export function clearDraft(key: string): void {
+    advanceDraftKeyGeneration(key);
     const store = safeSession();
     if (!store) return;
     try {
@@ -215,6 +229,7 @@ export function listFreshDrafts(opts: {
 /** Removes every composer draft in the store so none survive a logout and re-login. */
 export function clearAllDrafts(): void {
     draftStoreGeneration += 1;
+    draftKeyGenerations.clear();
     const store = safeSession();
     if (!store) return;
     let keys: string[] = [];
