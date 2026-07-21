@@ -154,6 +154,9 @@ export default function ActionOverlayHost({
             ? rendered.request.draft?.dealId
             : defaultDealId
         : undefined;
+    const restoredAssigneeId = rosterOnly && rendered.request.kind === "create-task"
+        ? rendered.request.draft?.assigneeId
+        : undefined;
     const referenceKey = needsReference
         ? [rendered?.generation, kind, defaultPersonId, defaultDealId, rosterOnly].join(":")
         : null;
@@ -204,12 +207,17 @@ export default function ActionOverlayHost({
             })
             .catch(() => {
                 if (cancelled || requestInit.signal?.aborted) return;
+                if (restoredAssigneeId != null) {
+                    toastError(t("feedback.linkedRecordLoadFailed"));
+                    onClose();
+                    return;
+                }
                 setLoadedUsers({ key: usersKey, users: [] });
             });
         return () => {
             cancelled = true;
         };
-    }, [requestInit, usersKey]);
+    }, [onClose, requestInit, restoredAssigneeId, t, usersKey]);
 
     if (!user) return null;
 

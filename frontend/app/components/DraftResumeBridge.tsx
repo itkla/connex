@@ -192,7 +192,11 @@ export default function DraftResumeBridge() {
         const drafts: ResumeDraft[] = [];
         for (const stored of listFreshDrafts({ userId, workspaceId: activeWorkspaceId })) {
             if (stored.formType === 'activity') {
-                if (!isActivityDraftData(stored.data) || (!stored.data.subject.trim() && !stored.data.notes.trim())) {
+                if (
+                    stored.scope !== 'global' ||
+                    !isActivityDraftData(stored.data) ||
+                    (!stored.data.subject.trim() && !stored.data.notes.trim())
+                ) {
                     clearDraft(stored.key);
                     continue;
                 }

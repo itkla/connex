@@ -77,6 +77,7 @@ export function noteContentToVisibleText(content: string): string {
         .map((line) => {
             if (/^\s*(?:`{3,}|~{3,})/.test(line)) return "";
             if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) return "";
+            if (/^\s*>\s*\[!(?:info|success|warn|danger|toggle)\]\s*$/.test(line)) return "";
             return line
                 .replace(/^\s{0,3}(?:#{1,6}(?:\s+|$)|>\s*)/, "")
                 .replace(/^\s*(?:[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)/, "")
