@@ -41,6 +41,7 @@ import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
 type RegistrationToken = symbol;
 
 type ScopedOverlay = {
+    controller: AbortController;
     generation: number;
     identity: string;
     request: OverlayRequest;
@@ -142,7 +143,11 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const [overlay, setOverlay] = useState<ScopedOverlay | null>(null);
     const [overlayIdentity, setOverlayIdentity] = useState(activeIdentity);
     const nextOverlayGenerationRef = useRef(0);
-    const liveOverlayRef = useRef<{ generation: number; identity: string } | null>(null);
+    const liveOverlayRef = useRef<{
+        controller: AbortController;
+        generation: number;
+        identity: string;
+    } | null>(null);
     const lastInvokerRef = useRef<HTMLElement | null>(null);
 
     if (overlayIdentity !== activeIdentity) {
@@ -152,6 +157,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     useLayoutEffect(() => {
         if (liveOverlayRef.current?.identity === activeIdentity) return;
+        liveOverlayRef.current?.controller.abort();
         liveOverlayRef.current = null;
         lastInvokerRef.current = null;
     }, [activeIdentity]);
@@ -203,11 +209,14 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const openOverlay = useCallback((request: OverlayRequest) => {
         const active = document.activeElement;
+        const controller = new AbortController();
         const generation = nextOverlayGenerationRef.current + 1;
         nextOverlayGenerationRef.current = generation;
+        liveOverlayRef.current?.controller.abort();
         lastInvokerRef.current = active instanceof HTMLElement ? active : null;
-        liveOverlayRef.current = { generation, identity: activeIdentity };
+        liveOverlayRef.current = { controller, generation, identity: activeIdentity };
         setOverlay({
+            controller,
             generation,
             identity: activeIdentity,
             request,
@@ -217,6 +226,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
     }, [activeIdentity, activeUserId, activeWorkspaceId]);
     const closeOverlayGeneration = useCallback((generation: number) => {
         if (liveOverlayRef.current?.generation !== generation) return;
+        liveOverlayRef.current.controller.abort();
         liveOverlayRef.current = null;
         setOverlay((current) => (current?.generation === generation ? null : current));
         const invoker = lastInvokerRef.current;
@@ -321,9 +331,9 @@ export function ActionProvider({ user, children }: { user: User | null; children
         overlay?.identity === activeIdentity &&
         overlay.userId === activeUserId &&
         overlay.workspaceId === activeWorkspaceId
-            ? overlay.request
+            ? overlay
             : null;
-    const visibleOverlayGeneration = visibleOverlay === null ? null : overlay?.generation ?? null;
+    const visibleOverlayGeneration = visibleOverlay?.generation ?? null;
     const closeVisibleOverlay = useCallback(() => {
         if (visibleOverlayGeneration !== null) closeOverlayGeneration(visibleOverlayGeneration);
     }, [closeOverlayGeneration, visibleOverlayGeneration]);
@@ -334,7 +344,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
                 {children}
                 <ActionOverlayHost
                     key={activeIdentity}
-                    overlay={visibleOverlay}
+                    overlay={visibleOverlay?.request ?? null}
+                    overlayGeneration={visibleOverlayGeneration}
+                    originWorkspaceId={visibleOverlay?.workspaceId ?? null}
+                    requestSignal={visibleOverlay?.controller.signal ?? null}
                     user={user}
                     onClose={closeVisibleOverlay}
                 />
