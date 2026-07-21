@@ -72,6 +72,10 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "CampaignMapper.clearCampaignUserReferencesAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "CampaignMapper.clearSnapshotCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ConsentMapper.clearEventCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "WorkflowMapper.findAffectedByUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "WorkflowVersionMapper.findLockCandidatesByUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "RuleMapper.findLockCandidatesByUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SuppressionMapper.clearCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewMapper.deleteForFreshMembership"));
         assertFalse(interceptor.requiresResolvedContext(

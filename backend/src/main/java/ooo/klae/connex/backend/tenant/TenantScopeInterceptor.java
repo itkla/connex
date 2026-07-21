@@ -174,7 +174,10 @@ public class TenantScopeInterceptor implements Interceptor {
      * anchor {@code workspace_id} and the user id in SQL. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
-     * offboarding flows. The AI-output-cache purge (issue #221 cease-of-use) is
+     * offboarding flows. Workflow discovery is likewise bound to the departing
+     * user across workflow, immutable-version, and linked-rule creator/run-as
+     * columns; subsequent locks and writes use exact workspace-scoped keys. The
+     * AI-output-cache purge (issue #221 cease-of-use) is
      * org-scoped: restricting a contact removes its cached AI outputs across every
      * workspace in the contact's organization (including same-org grantee
      * workspaces it was shared into), org-anchored via a {@code workspace} join
@@ -206,8 +209,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "CampaignDeliveryMapper.getByToken",
         MAPPERS + "DeliveryProviderConfigMapper.findByWebhookTokenHash",
         MAPPERS + "ConsentMapper.clearEventCreatorsAnywhere",
-        MAPPERS + "RuleMapper.clearRunAsAnywhere",
-        MAPPERS + "RuleMapper.clearCreatedByAnywhere",
+        MAPPERS + "WorkflowMapper.findAffectedByUserAnywhere",
+        MAPPERS + "WorkflowVersionMapper.findLockCandidatesByUserAnywhere",
+        MAPPERS + "RuleMapper.findLockCandidatesByUserAnywhere",
         MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",

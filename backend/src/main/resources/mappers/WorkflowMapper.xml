@@ -38,6 +38,28 @@
     WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
   </select>
 
+  <select id="findAffectedByUserAnywhere" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow w
+    WHERE w.created_by_id = #{userId}
+       OR w.updated_by_id = #{userId}
+       OR w.draft_run_as_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1 FROM workflow_version v
+         WHERE v.workspace_id = w.workspace_id
+           AND v.workflow_id = w.id
+           AND (v.created_by_id = #{userId}
+             OR v.published_by_id = #{userId}
+             OR v.run_as_user_id = #{userId})
+       )
+       OR EXISTS (
+         SELECT 1 FROM rule r
+         WHERE r.workspace_id = w.workspace_id
+           AND r.id = w.legacy_rule_id
+           AND (r.created_by_id = #{userId} OR r.run_as_user_id = #{userId})
+       )
+    ORDER BY w.workspace_id, w.id
+  </select>
+
   <select id="listUnpairedLegacyRules" resultType="Rule">
     SELECT <include refid="legacyRuleColumns"/>
     FROM rule r
@@ -134,6 +156,23 @@
     UPDATE workflow
     SET enabled = #{enabled}, updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
+  </update>
+
+  <update id="disableForOffboarding">
+    UPDATE workflow SET enabled = FALSE
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled = TRUE
+  </update>
+
+  <update id="redactUserReferences">
+    UPDATE workflow
+    SET draft_run_as_user_id = IF(draft_run_as_user_id = #{userId}, NULL, draft_run_as_user_id),
+        created_by_id = IF(created_by_id = #{userId}, NULL, created_by_id),
+        updated_by_id = IF(updated_by_id = #{userId}, NULL, updated_by_id)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND (draft_run_as_user_id = #{userId}
+        OR created_by_id = #{userId}
+        OR updated_by_id = #{userId})
   </update>
 
   <update id="updateActiveVersion">

@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 
-/** Workspace-scoped append-only persistence for immutable workflow versions. */
+/** Workspace-scoped immutable workflow versions with a permanent-erasure identity redaction seam. */
 public interface WorkflowVersionMapper {
 
     WorkflowVersion getById(
@@ -27,9 +27,13 @@ public interface WorkflowVersionMapper {
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId);
 
-    WorkflowVersion getLatestForUpdate(
-        @Param("workspaceId") int workspaceId,
-        @Param("workflowId") int workflowId);
+    List<WorkflowVersion> findLockCandidatesByUserAnywhere(@Param("userId") int userId);
 
     void insert(WorkflowVersion version);
+
+    int redactUserReferences(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId,
+        @Param("id") long id,
+        @Param("userId") int userId);
 }

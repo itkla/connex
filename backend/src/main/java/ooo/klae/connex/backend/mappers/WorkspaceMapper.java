@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
@@ -25,6 +26,9 @@ public interface WorkspaceMapper {
      * be assigned as an owner concurrently with their removal.
      */
     Integer lockActiveMembership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    WorkspaceMember lockAuthorizationMembership(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int countActiveMembers(
         @Param("workspaceId") int workspaceId,
@@ -39,6 +43,7 @@ public interface WorkspaceMapper {
     int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
     Integer lockWorkspace(@Param("workspaceId") int workspaceId);
+    Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
     java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);

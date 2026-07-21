@@ -38,12 +38,35 @@
     LIMIT 1
   </select>
 
-  <select id="getLatestForUpdate" resultType="WorkflowVersion">
-    SELECT <include refid="columns"/> FROM workflow_version
-    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
-    ORDER BY version_number DESC, id DESC
-    LIMIT 1
-    FOR UPDATE
+  <select id="findLockCandidatesByUserAnywhere" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version v
+    WHERE v.created_by_id = #{userId}
+       OR v.published_by_id = #{userId}
+       OR v.run_as_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1 FROM workflow w
+         WHERE w.workspace_id = v.workspace_id
+           AND w.id = v.workflow_id
+           AND w.active_version_id = v.id
+           AND (w.created_by_id = #{userId}
+             OR w.updated_by_id = #{userId}
+             OR w.draft_run_as_user_id = #{userId}
+             OR EXISTS (
+               SELECT 1 FROM workflow_version affected
+               WHERE affected.workspace_id = w.workspace_id
+                 AND affected.workflow_id = w.id
+                 AND (affected.created_by_id = #{userId}
+                   OR affected.published_by_id = #{userId}
+                   OR affected.run_as_user_id = #{userId})
+             )
+             OR EXISTS (
+               SELECT 1 FROM rule r
+               WHERE r.workspace_id = w.workspace_id
+                 AND r.id = w.legacy_rule_id
+                 AND (r.created_by_id = #{userId} OR r.run_as_user_id = #{userId})
+             ))
+       )
+    ORDER BY v.workspace_id, v.workflow_id, v.id
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
@@ -58,5 +81,18 @@
        #{runAsUserId}, #{createdById}, #{publishedById}, #{definitionJson}, #{canvasJson},
        #{definitionHash})
   </insert>
+
+  <update id="redactUserReferences">
+    UPDATE workflow_version
+    SET run_as_user_id = IF(run_as_user_id = #{userId}, NULL, run_as_user_id),
+        created_by_id = IF(created_by_id = #{userId}, NULL, created_by_id),
+        published_by_id = IF(published_by_id = #{userId}, NULL, published_by_id)
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+      AND (run_as_user_id = #{userId}
+        OR created_by_id = #{userId}
+        OR published_by_id = #{userId})
+  </update>
 
 </mapper>

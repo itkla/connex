@@ -153,7 +153,6 @@ class WorkflowMapperXmlTest {
         assertScoped(configuration, WorkflowVersionMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowVersionMapper.class, "listByWorkflow", workflow);
         assertScoped(configuration, WorkflowVersionMapper.class, "getLatest", workflow);
-        assertScoped(configuration, WorkflowVersionMapper.class, "getLatestForUpdate", workflow);
         assertScoped(configuration, WorkflowVersionMapper.class, "insert", version());
 
         String latestSql = sql(configuration, WorkflowVersionMapper.class, "getLatest", workflow);
@@ -162,15 +161,21 @@ class WorkflowMapperXmlTest {
         String lockedVersionSql = sql(
             configuration, WorkflowVersionMapper.class, "getByIdForUpdate", identity);
         assertTrue(lockedVersionSql.endsWith("FOR UPDATE"));
-        String lockedLatestSql = sql(
-            configuration, WorkflowVersionMapper.class, "getLatestForUpdate", workflow);
-        assertTrue(lockedLatestSql.endsWith("LIMIT 1 FOR UPDATE"));
-
         String xml = resource("mappers/WorkflowVersionMapper.xml");
-        assertFalse(xml.contains("<update"));
         assertFalse(xml.contains("<delete"));
         assertEquals(1, occurrences(xml, "<insert"));
         assertEquals(5, occurrences(xml, "<select"));
+        assertEquals(1, occurrences(xml, "<update"));
+        String redaction = sql(
+            configuration,
+            WorkflowVersionMapper.class,
+            "redactUserReferences",
+            Map.of("workspaceId", 7, "workflowId", 11, "id", 19L, "userId", 23));
+        assertTrue(redaction.contains("WHERE workspace_id = ?"));
+        assertTrue(redaction.contains("workflow_id = ?"));
+        assertTrue(redaction.contains("id = ?"));
+        assertFalse(redaction.contains("definition_json ="));
+        assertFalse(redaction.contains("canvas_json ="));
     }
 
     @Test
@@ -183,6 +188,32 @@ class WorkflowMapperXmlTest {
             assertFalse(xml.contains("workspace_member"));
             assertFalse(xml.contains("JOIN workspace"));
         }
+    }
+
+    @Test
+    void offboardingDiscoveryIsStrictlyUserBoundAndExactWritesStayWorkspaceScoped() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> user = Map.of("userId", 23);
+        for (Map.Entry<Class<?>, String> statement : Map.<Class<?>, String>of(
+                WorkflowMapper.class, "findAffectedByUserAnywhere",
+                WorkflowVersionMapper.class, "findLockCandidatesByUserAnywhere",
+                RuleMapper.class, "findLockCandidatesByUserAnywhere").entrySet()) {
+            String discovery = sql(
+                configuration, statement.getKey(), statement.getValue(), user);
+            assertTrue(discovery.contains("created_by_id = ?"));
+            assertTrue(discovery.contains("run_as_user_id = ?"));
+            assertFalse(discovery.contains("${"));
+        }
+
+        Map<String, Object> workflow = Map.of("workspaceId", 7, "id", 11, "userId", 23);
+        assertScoped(configuration, WorkflowMapper.class, "redactUserReferences", workflow);
+        assertScoped(configuration, WorkflowMapper.class, "disableForOffboarding", workflow);
+        Map<String, Object> version = Map.of(
+            "workspaceId", 7, "workflowId", 11, "id", 19L, "userId", 23);
+        assertScoped(
+            configuration, WorkflowVersionMapper.class, "redactUserReferences", version);
+        Map<String, Object> rule = Map.of("workspaceId", 7, "id", 13, "userId", 23);
+        assertScoped(configuration, RuleMapper.class, "redactUserReferences", rule);
     }
 
     private static Configuration configuration() throws Exception {

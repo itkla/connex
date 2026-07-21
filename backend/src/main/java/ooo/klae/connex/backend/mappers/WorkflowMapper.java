@@ -20,6 +20,8 @@ public interface WorkflowMapper {
         @Param("workspaceId") int workspaceId,
         @Param("legacyRuleId") int legacyRuleId);
 
+    List<Workflow> findAffectedByUserAnywhere(@Param("userId") int userId);
+
     List<Rule> listUnpairedLegacyRules(@Param("workspaceId") int workspaceId);
 
     int countLegacyRuleLinks(@Param("workspaceId") int workspaceId);
@@ -56,6 +58,15 @@ public interface WorkflowMapper {
         @Param("id") int id,
         @Param("enabled") boolean enabled,
         @Param("updatedById") Integer updatedById);
+
+    int disableForOffboarding(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
+    int redactUserReferences(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("userId") int userId);
 
     int updateActiveVersion(
         @Param("workspaceId") int workspaceId,

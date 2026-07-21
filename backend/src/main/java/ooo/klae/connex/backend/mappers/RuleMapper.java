@@ -29,6 +29,9 @@ public interface RuleMapper {
     /** A single workspace-scoped rule locked for lifecycle synchronization, or {@code null}. */
     Rule getByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Exact rule roots affected by permanent account offboarding. */
+    List<Rule> findLockCandidatesByUserAnywhere(@Param("userId") int userId);
+
     /** Inserts a rule, populating its generated id. */
     void insert(Rule rule);
 
@@ -40,6 +43,12 @@ public interface RuleMapper {
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("enabled") boolean enabled);
+
+    /** Redacts exact locked rule principal references during permanent account offboarding. */
+    int redactUserReferences(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("userId") int userId);
 
     /** Deletes a rule scoped to the workspace; returns rows affected. */
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -62,17 +71,4 @@ public interface RuleMapper {
     /** Recent executions for a rule scoped to the workspace, newest first. */
     List<RuleExecution> getExecutionsByRule(@Param("workspaceId") int workspaceId, @Param("ruleId") int ruleId, @Param("limit") int limit);
 
-    /**
-     * Nulls the run-as principal on every rule referencing a user. Offboarding
-     * replacement for the {@code rule.run_as_user_id} ON DELETE SET NULL (#440
-     * increment 3); the rule engine already treats a null run-as as disabled.
-     */
-    void clearRunAsAnywhere(@Param("userId") int userId);
-
-    /**
-     * Nulls the creator reference on every rule created by a user. Offboarding
-     * replacement for the {@code rule.created_by_id} ON DELETE SET NULL (#440
-     * increment 3).
-     */
-    void clearCreatedByAnywhere(@Param("userId") int userId);
 }

@@ -2,9 +2,14 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,10 +34,9 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
-import ooo.klae.connex.backend.services.WorkspaceService.Role;
+import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -46,7 +50,7 @@ public class WorkflowService {
     private final WorkflowMapper workflowMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final RuleMapper ruleMapper;
-    private final WorkspaceMapper workspaceMapper;
+    private final WorkflowPrincipalLockService principalLockService;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final WorkflowDraftCanonicalizer canonicalizer;
@@ -85,10 +89,12 @@ public class WorkflowService {
             request.getExecutionMode(),
             request.getDefinition(),
             request.getCanvas());
-        requireSystemAuthor(draft.executionMode());
-        if ("user".equals(draft.executionMode())) {
-            workspaceService.lockAndRequireMember(workspaceId, actorId);
-        }
+        lockAuthoringPrincipals(
+            workspaceId,
+            actorId,
+            draft.executionMode(),
+            Set.of(actorId),
+            "user".equals(draft.executionMode()) ? Set.of(actorId) : Set.of());
 
         Workflow workflow = new Workflow();
         workflow.setWorkspaceId(workspaceId);
@@ -129,7 +135,7 @@ public class WorkflowService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         int expectedRevision = request.getExpectedRevision();
-        Workflow existing = requireWorkflow(workspaceId, id);
+        Workflow discovered = requireWorkflow(workspaceId, id);
         if (expectedRevision == Integer.MAX_VALUE) {
             throw new ConflictException("Workflow draft revision cannot be advanced");
         }
@@ -140,9 +146,27 @@ public class WorkflowService {
             request.getExecutionMode(),
             request.getDefinition(),
             request.getCanvas());
-        requireSystemAuthor(draft.executionMode());
-
+        Integer discoveredRunAsUserId = resolveDraftRunAs(discovered, draft.executionMode());
+        TreeSet<Integer> principalIds = workflowPrincipalIds(discovered);
+        addPrincipal(principalIds, discoveredRunAsUserId);
+        LockedPrincipals principals = lockAuthoringPrincipals(
+            workspaceId,
+            actorId,
+            draft.executionMode(),
+            principalIds,
+            "user".equals(draft.executionMode())
+                ? Set.of(discoveredRunAsUserId)
+                : Set.of());
+        Workflow existing = requireWorkflowForUpdate(workspaceId, id);
+        requireStableAuthorizationDiscovery(discovered, existing);
+        principals.requireCurrentReferences(workflowPrincipalIds(existing));
+        if (existing.getDraftRevision() != expectedRevision) {
+            throw new ConflictException("Workflow draft revision does not match");
+        }
         Integer runAsUserId = resolveDraftRunAs(existing, draft.executionMode());
+        if (!Objects.equals(discoveredRunAsUserId, runAsUserId)) {
+            throw new ConflictException("Workflow principal state changed during authorization");
+        }
         Workflow replacement = new Workflow();
         replacement.setId(id);
         replacement.setWorkspaceId(workspaceId);
@@ -157,9 +181,6 @@ public class WorkflowService {
 
         int updated = workflowMapper.updateDraft(replacement, expectedRevision);
         if (updated != 1) {
-            if (workflowMapper.getById(workspaceId, id) == null) {
-                throw workflowNotFound();
-            }
             throw new ConflictException("Workflow draft revision does not match");
         }
         auditService.record(
@@ -194,25 +215,49 @@ public class WorkflowService {
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        MutationDiscovery discovery = discoverMutation(workspaceId, id, true);
+        Workflow discovered = discovery.workflow();
+        String discoveredExecutionMode = discovered.getDraftExecutionMode();
+        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
+        if ("user".equals(discoveredExecutionMode)) {
+            addRequiredPrincipal(requiredActiveIds, discovered.getDraftRunAsUserId());
+        }
+        LockedPrincipals principals = lockAuthoringPrincipals(
+            workspaceId,
+            actorId,
+            discoveredExecutionMode,
+            discovery.principalIds(),
+            requiredActiveIds);
+        if ("system".equals(discoveredExecutionMode)) {
+            principals.requireExisting(
+                discovered.getCreatedById(),
+                "System workflow creator account no longer exists");
+        }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
+        requireStableAuthorizationDiscovery(discovered, workflow);
+        principals.requireCurrentReferences(workflowPrincipalIds(workflow));
         if (workflow.getDraftRevision() != request.getExpectedRevision()) {
             throw new ConflictException("Workflow draft revision does not match");
         }
 
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
         canonicalizer.requirePublishableCanvas(draft);
-        requireActiveExecutionIdentity(
-            workspaceId, draft.executionMode(), workflow.getDraftRunAsUserId());
+        if (!Objects.equals(discoveredExecutionMode, draft.executionMode())) {
+            throw new ConflictException("Workflow execution mode changed during authorization");
+        }
         Rule projection = project(workflow, draft);
         validateProjection(projection);
+        LockedVersionState lockedVersions = lockDiscoveredVersions(
+            workflow, discovery, principals, false);
+        Rule linkedRule = lockDiscoveredRule(workflow, discovery, principals, false);
         PublishedState current = workflow.getActiveVersionId() == null
-            ? requireUnpublishedState(workflow)
-            : requirePublishedState(workflow, false);
+            ? requireUnpublishedState(workflow, lockedVersions.latest())
+            : requirePublishedState(workflow, lockedVersions.active(), linkedRule, false);
         if (current != null && materiallyEquivalent(current.version(), projection, draft)) {
             return toDto(workflow, draft);
         }
 
-        int versionNumber = nextVersionNumber(workspaceId, workflow.getId(), current);
+        int versionNumber = nextVersionNumber(current, lockedVersions.latest());
         if (current == null) {
             ruleMapper.insert(projection);
             if (projection.getId() <= 0) {
@@ -295,14 +340,46 @@ public class WorkflowService {
     private WorkflowDto setEnabled(int id, boolean enabled) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        MutationDiscovery discovery = discoverMutation(workspaceId, id, false);
+        WorkflowVersion discoveredActive = discovery.activeVersion();
+        String executionMode = discoveredActive == null
+            ? discovery.workflow().getDraftExecutionMode()
+            : discoveredActive.getExecutionMode();
+        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
+        if (enabled && discoveredActive != null && "user".equals(executionMode)) {
+            addRequiredPrincipal(requiredActiveIds, discoveredActive.getRunAsUserId());
+        }
+        LockedPrincipals principals = enabled && "system".equals(executionMode)
+            ? principalLockService.lockSystemMutation(
+                workspaceId, actorId, discovery.principalIds())
+            : principalLockService.lockUserMutation(
+                workspaceId, actorId, discovery.principalIds(), requiredActiveIds);
+        if (enabled && "system".equals(executionMode)) {
+            principals.requireExisting(
+                discovery.workflow().getCreatedById(),
+                "System workflow creator account no longer exists");
+            principals.requireExisting(
+                discoveredActive == null ? null : discoveredActive.getCreatedById(),
+                "System workflow creator account no longer exists");
+        }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
+        requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
+        if (enabled) {
+            principals.requireCurrentReferences(workflowPrincipalIds(workflow));
+        } else {
+            principals.requireDiscoveredReferences(workflowPrincipalIds(workflow));
+        }
         if (!enabled
                 && !workflow.isEnabled()
                 && workflow.getActiveVersionId() == null
                 && workflow.getLegacyRuleId() == null) {
             return toDto(workflow);
         }
-        PublishedState state = requirePublishedState(workflow, enabled);
+        LockedVersionState versions = lockDiscoveredVersions(
+            workflow, discovery, principals, !enabled);
+        Rule linkedRule = lockDiscoveredRule(workflow, discovery, principals, !enabled);
+        PublishedState state = requirePublishedState(
+            workflow, versions.active(), linkedRule, !enabled);
         if (workflow.isEnabled() == enabled) {
             return toDto(workflow);
         }
@@ -324,12 +401,11 @@ public class WorkflowService {
         return toDto(workflow);
     }
 
-    private PublishedState requireUnpublishedState(Workflow workflow) {
+    private PublishedState requireUnpublishedState(
+            Workflow workflow, WorkflowVersion latest) {
         if (workflow.getLegacyRuleId() != null || workflow.isEnabled()) {
             throw inconsistentWorkflow();
         }
-        WorkflowVersion latest = workflowVersionMapper.getLatestForUpdate(
-            workflow.getWorkspaceId(), workflow.getId());
         if (latest != null) {
             throw inconsistentWorkflow();
         }
@@ -337,14 +413,15 @@ public class WorkflowService {
     }
 
     private PublishedState requirePublishedState(
-            Workflow workflow, boolean requireExecutionIdentity) {
+            Workflow workflow,
+            WorkflowVersion active,
+            Rule linked,
+            boolean allowBrokenPrincipals) {
         Long activeVersionId = workflow.getActiveVersionId();
         Integer legacyRuleId = workflow.getLegacyRuleId();
         if (activeVersionId == null || legacyRuleId == null) {
             throw inconsistentWorkflow();
         }
-        WorkflowVersion active = workflowVersionMapper.getByIdForUpdate(
-            workflow.getWorkspaceId(), workflow.getId(), activeVersionId);
         if (active == null
                 || active.getId() != activeVersionId
                 || active.getWorkspaceId() != workflow.getWorkspaceId()
@@ -374,12 +451,10 @@ public class WorkflowService {
         if (!versionMatchesProjection(active, projection)) {
             throw inconsistentWorkflow();
         }
-        if (requireExecutionIdentity) {
-            requireActiveExecutionIdentity(
-                workflow.getWorkspaceId(), active.getExecutionMode(), active.getRunAsUserId());
-        }
-        Rule linked = ruleMapper.getByIdForUpdate(workflow.getWorkspaceId(), legacyRuleId);
-        if (linked == null || !ruleMatchesProjection(linked, projection)) {
+        if (linked == null
+                || !(allowBrokenPrincipals
+                    ? ruleMatchesProjectionIgnoringPrincipals(linked, projection)
+                    : ruleMatchesProjection(linked, projection))) {
             throw inconsistentWorkflow();
         }
         return new PublishedState(active, linked);
@@ -469,47 +544,193 @@ public class WorkflowService {
             return null;
         }
         if ("user".equals(existing.getDraftExecutionMode())) {
-            return existing.getDraftRunAsUserId();
+            Integer runAsUserId = existing.getDraftRunAsUserId();
+            if (runAsUserId == null) {
+                throw new ConflictException("Workflow run-as user is not an active workspace member");
+            }
+            return runAsUserId;
         }
         Integer creatorId = existing.getCreatedById();
-        if (creatorId == null
-                || workspaceMapper.lockActiveMembership(existing.getWorkspaceId(), creatorId) == null) {
+        if (creatorId == null) {
             throw new ConflictException("Workflow creator is not an active workspace member");
         }
         return creatorId;
     }
 
-    private void requireSystemAuthor(String executionMode) {
+    private LockedPrincipals lockAuthoringPrincipals(
+            int workspaceId,
+            int actorId,
+            String executionMode,
+            Collection<Integer> principalIds,
+            Collection<Integer> requiredActiveIds) {
         if ("system".equals(executionMode)) {
-            workspaceService.requireRole(Role.ADMIN);
+            return principalLockService.lockSystemMutation(workspaceId, actorId, principalIds);
         }
+        if (!"user".equals(executionMode)) {
+            throw inconsistentWorkflow();
+        }
+        return principalLockService.lockUserMutation(
+            workspaceId, actorId, principalIds, requiredActiveIds);
     }
 
-    private void requireActiveExecutionIdentity(
-            int workspaceId, String executionMode, Integer runAsUserId) {
-        if ("system".equals(executionMode)) {
-            workspaceService.requireRole(Role.ADMIN);
-            return;
-        }
-        if (!"user".equals(executionMode)
-                || runAsUserId == null
-                || workspaceMapper.lockActiveMembership(workspaceId, runAsUserId) == null) {
-            throw new ConflictException("Workflow run-as user is not an active workspace member");
-        }
-    }
-
-    private int nextVersionNumber(
-            int workspaceId, int workflowId, PublishedState current) {
+    private int nextVersionNumber(PublishedState current, WorkflowVersion latest) {
         if (current == null) {
             return 1;
         }
-        WorkflowVersion latest = workflowVersionMapper.getLatestForUpdate(workspaceId, workflowId);
         if (latest == null
                 || latest.getVersionNumber() < current.version().getVersionNumber()
                 || latest.getVersionNumber() == Integer.MAX_VALUE) {
             throw inconsistentWorkflow();
         }
         return latest.getVersionNumber() + 1;
+    }
+
+    private MutationDiscovery discoverMutation(
+            int workspaceId, int workflowId, boolean includeLatestVersion) {
+        Workflow workflow = requireWorkflow(workspaceId, workflowId);
+        TreeMap<Long, WorkflowVersion> versions = new TreeMap<>();
+        if (workflow.getActiveVersionId() != null) {
+            WorkflowVersion active = workflowVersionMapper.getById(
+                workspaceId, workflowId, workflow.getActiveVersionId());
+            if (active != null) {
+                versions.put(active.getId(), active);
+            }
+        }
+        WorkflowVersion latest = null;
+        if (includeLatestVersion) {
+            latest = workflowVersionMapper.getLatest(workspaceId, workflowId);
+            if (latest != null) {
+                versions.put(latest.getId(), latest);
+            }
+        }
+        Rule linkedRule = workflow.getLegacyRuleId() == null
+            ? null
+            : ruleMapper.getById(workspaceId, workflow.getLegacyRuleId());
+        TreeSet<Integer> principalIds = workflowPrincipalIds(workflow);
+        versions.values().forEach(version -> principalIds.addAll(versionPrincipalIds(version)));
+        if (linkedRule != null) {
+            principalIds.addAll(rulePrincipalIds(linkedRule));
+        }
+        return new MutationDiscovery(
+            workflow,
+            new LinkedHashMap<>(versions),
+            latest == null ? null : latest.getId(),
+            linkedRule,
+            principalIds);
+    }
+
+    private LockedVersionState lockDiscoveredVersions(
+            Workflow workflow,
+            MutationDiscovery discovery,
+            LockedPrincipals principals,
+            boolean allowMissingPrincipals) {
+        if (workflow.getActiveVersionId() != null
+                && !discovery.versions().containsKey(workflow.getActiveVersionId())) {
+            throw new ConflictException("Workflow version state changed during authorization");
+        }
+        Map<Long, WorkflowVersion> locked = new LinkedHashMap<>();
+        for (long versionId : discovery.versions().keySet()) {
+            WorkflowVersion current = workflowVersionMapper.getByIdForUpdate(
+                workflow.getWorkspaceId(), workflow.getId(), versionId);
+            if (current == null
+                    || current.getWorkspaceId() != workflow.getWorkspaceId()
+                    || current.getWorkflowId() != workflow.getId()
+                    || current.getId() != versionId) {
+                throw inconsistentWorkflow();
+            }
+            if (allowMissingPrincipals) {
+                principals.requireDiscoveredReferences(versionPrincipalIds(current));
+            } else {
+                principals.requireCurrentReferences(versionPrincipalIds(current));
+            }
+            locked.put(versionId, current);
+        }
+        WorkflowVersion active = workflow.getActiveVersionId() == null
+            ? null
+            : locked.get(workflow.getActiveVersionId());
+        WorkflowVersion latest = discovery.latestVersionId() == null
+            ? null
+            : locked.get(discovery.latestVersionId());
+        return new LockedVersionState(active, latest);
+    }
+
+    private Rule lockDiscoveredRule(
+            Workflow workflow,
+            MutationDiscovery discovery,
+            LockedPrincipals principals,
+            boolean allowMissingPrincipals) {
+        Integer ruleId = workflow.getLegacyRuleId();
+        if (ruleId == null) {
+            if (discovery.linkedRule() != null) {
+                throw new ConflictException("Workflow rule state changed during authorization");
+            }
+            return null;
+        }
+        if (discovery.linkedRule() == null || discovery.linkedRule().getId() != ruleId) {
+            throw new ConflictException("Workflow rule state changed during authorization");
+        }
+        Rule current = ruleMapper.getByIdForUpdate(workflow.getWorkspaceId(), ruleId);
+        if (current == null || current.getWorkspaceId() != workflow.getWorkspaceId()) {
+            throw inconsistentWorkflow();
+        }
+        if (allowMissingPrincipals) {
+            principals.requireDiscoveredReferences(rulePrincipalIds(current));
+        } else {
+            principals.requireCurrentReferences(rulePrincipalIds(current));
+        }
+        return current;
+    }
+
+    private static TreeSet<Integer> workflowPrincipalIds(Workflow workflow) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        addPrincipal(ids, workflow.getCreatedById());
+        addPrincipal(ids, workflow.getUpdatedById());
+        addPrincipal(ids, workflow.getDraftRunAsUserId());
+        return ids;
+    }
+
+    private static TreeSet<Integer> versionPrincipalIds(WorkflowVersion version) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        addPrincipal(ids, version.getCreatedById());
+        addPrincipal(ids, version.getPublishedById());
+        addPrincipal(ids, version.getRunAsUserId());
+        return ids;
+    }
+
+    private static TreeSet<Integer> rulePrincipalIds(Rule rule) {
+        TreeSet<Integer> ids = new TreeSet<>();
+        addPrincipal(ids, rule.getCreatedById());
+        addPrincipal(ids, rule.getRunAsUserId());
+        return ids;
+    }
+
+    private static void addPrincipal(Set<Integer> ids, Integer userId) {
+        if (userId != null) {
+            ids.add(userId);
+        }
+    }
+
+    private static void addRequiredPrincipal(Set<Integer> ids, Integer userId) {
+        if (userId == null || userId <= 0) {
+            throw new ConflictException("Workflow run-as user is not an active workspace member");
+        }
+        ids.add(userId);
+    }
+
+    private static void requireStableAuthorizationDiscovery(
+            Workflow discovered, Workflow current) {
+        if (discovered.getId() != current.getId()
+                || discovered.getWorkspaceId() != current.getWorkspaceId()
+                || !Objects.equals(
+                    discovered.getDraftExecutionMode(), current.getDraftExecutionMode())
+                || !Objects.equals(
+                    discovered.getDraftRunAsUserId(), current.getDraftRunAsUserId())
+                || !Objects.equals(
+                    discovered.getActiveVersionId(), current.getActiveVersionId())
+                || !Objects.equals(
+                    discovered.getLegacyRuleId(), current.getLegacyRuleId())) {
+            throw new ConflictException("Workflow state changed during authorization");
+        }
     }
 
     private WorkflowVersion version(
@@ -561,6 +782,12 @@ public class WorkflowService {
     }
 
     private boolean ruleMatchesProjection(Rule rule, Rule projection) {
+        return ruleMatchesProjectionIgnoringPrincipals(rule, projection)
+            && Objects.equals(rule.getRunAsUserId(), projection.getRunAsUserId())
+            && Objects.equals(rule.getCreatedById(), projection.getCreatedById());
+    }
+
+    private boolean ruleMatchesProjectionIgnoringPrincipals(Rule rule, Rule projection) {
         return rule.getId() == projection.getId()
             && rule.getWorkspaceId() == projection.getWorkspaceId()
             && Objects.equals(rule.getName(), projection.getName())
@@ -569,8 +796,6 @@ public class WorkflowService {
             && Objects.equals(rule.getRecordType(), projection.getRecordType())
             && Objects.equals(rule.getTriggerType(), projection.getTriggerType())
             && Objects.equals(rule.getExecutionMode(), projection.getExecutionMode())
-            && Objects.equals(rule.getRunAsUserId(), projection.getRunAsUserId())
-            && Objects.equals(rule.getCreatedById(), projection.getCreatedById())
             && definitionsEquivalent(rule, projection);
     }
 
@@ -698,6 +923,23 @@ public class WorkflowService {
     private static ConflictException inconsistentWorkflow() {
         return new ConflictException("Workflow state is inconsistent");
     }
+
+    private record MutationDiscovery(
+        Workflow workflow,
+        Map<Long, WorkflowVersion> versions,
+        Long latestVersionId,
+        Rule linkedRule,
+        Set<Integer> principalIds) {
+
+        private WorkflowVersion activeVersion() {
+            Long activeVersionId = workflow.getActiveVersionId();
+            return activeVersionId == null ? null : versions.get(activeVersionId);
+        }
+    }
+
+    private record LockedVersionState(
+        WorkflowVersion active,
+        WorkflowVersion latest) { }
 
     private record PublishedState(WorkflowVersion version, Rule rule) { }
 }
