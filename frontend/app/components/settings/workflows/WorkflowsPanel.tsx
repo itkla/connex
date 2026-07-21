@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BoltIcon, ClockIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import {
+    BoltIcon,
+    ClockIcon,
+    DocumentDuplicateIcon,
+    EllipsisHorizontalIcon,
+    PencilSquareIcon,
+    PlusIcon,
+    TrashIcon,
+} from "@heroicons/react/24/outline";
 
 import type { Rule } from "@/app/lib/types";
-import { deleteRule, getRules, updateRule } from "@/app/lib/api";
+import { createRule, deleteRule, getRuleById, getRules, updateRule } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +35,25 @@ import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRuns
 
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
+const MAX_RULE_NAME_LENGTH = 128;
+
+type DuplicateOperation = {
+    controller: AbortController;
+    pathname: string;
+    ruleId: number;
+    systemMode: boolean;
+    workspaceId: number;
+};
+
+function fitDuplicatedRuleName(name: string, format: (value: string) => string): string {
+    let baseName = name.trim();
+    let copyName = format(baseName);
+    if (copyName.length <= MAX_RULE_NAME_LENGTH) return copyName;
+
+    baseName = baseName.slice(0, Math.max(0, baseName.length - (copyName.length - MAX_RULE_NAME_LENGTH))).trimEnd();
+    copyName = format(baseName);
+    return copyName.slice(0, MAX_RULE_NAME_LENGTH);
+}
 
 /**
  * Workflows list at /workflows: the same automations the legacy rules panel managed,
@@ -37,7 +64,8 @@ export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceRules");
     const tw = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
-    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const pathname = usePathname();
+    const { activeWorkspaceId, activeWorkspace, switching } = useWorkspace();
     const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
 
     const [rules, setRules] = useState<Rule[]>([]);
@@ -46,8 +74,51 @@ export default function WorkflowsPanel() {
     const [removeTarget, setRemoveTarget] = useState<Rule | null>(null);
     const [runsTarget, setRunsTarget] = useState<{ workspaceId: number; rule: Rule } | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [duplicatingRuleId, setDuplicatingRuleId] = useState<number | null>(null);
+    const duplicateOperationRef = useRef<DuplicateOperation | null>(null);
+    const duplicateScopeRef = useRef({
+        active: true,
+        activeWorkspaceId,
+        canRunAsSystem,
+        pathname,
+        switching,
+    });
 
     const runsRule = runsTarget?.workspaceId === activeWorkspaceId ? runsTarget.rule : null;
+
+    useLayoutEffect(() => {
+        duplicateScopeRef.current = {
+            active: true,
+            activeWorkspaceId,
+            canRunAsSystem,
+            pathname,
+            switching,
+        };
+        const operation = duplicateOperationRef.current;
+        if (
+            operation !== null
+            && (
+                switching
+                || activeWorkspaceId !== operation.workspaceId
+                || pathname !== operation.pathname
+                || (operation.systemMode && !canRunAsSystem)
+            )
+        ) {
+            duplicateOperationRef.current = null;
+            operation.controller.abort();
+            setDuplicatingRuleId(null);
+        }
+    }, [activeWorkspaceId, canRunAsSystem, pathname, switching]);
+
+    useLayoutEffect(() => () => {
+        duplicateScopeRef.current = {
+            ...duplicateScopeRef.current,
+            active: false,
+        };
+        const operation = duplicateOperationRef.current;
+        duplicateOperationRef.current = null;
+        operation?.controller.abort();
+    }, []);
 
     useEffect(() => {
         if (!activeWorkspaceId) return;
@@ -83,6 +154,71 @@ export default function WorkflowsPanel() {
         } catch (err) {
             setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: rule.enabled } : r)));
             toastError(err instanceof Error ? err.message : t("saveFailed"));
+        }
+    };
+
+    const duplicateRule = async (rule: Rule) => {
+        const scope = duplicateScopeRef.current;
+        if (
+            duplicateOperationRef.current !== null
+            || !scope.active
+            || scope.switching
+            || scope.activeWorkspaceId === null
+            || (rule.executionMode === "system" && !scope.canRunAsSystem)
+        ) return;
+
+        const controller = new AbortController();
+        const operation: DuplicateOperation = {
+            controller,
+            pathname: scope.pathname,
+            ruleId: rule.id,
+            systemMode: rule.executionMode === "system",
+            workspaceId: scope.activeWorkspaceId,
+        };
+        const isCurrent = () => {
+            const currentScope = duplicateScopeRef.current;
+            return duplicateOperationRef.current === operation
+                && currentScope.active
+                && !currentScope.switching
+                && currentScope.activeWorkspaceId === operation.workspaceId
+                && currentScope.pathname === operation.pathname
+                && !controller.signal.aborted;
+        };
+        const requestInit: RequestInit = {
+            cache: "no-store",
+            signal: controller.signal,
+            headers: { "X-Workspace-Id": String(operation.workspaceId) },
+        };
+
+        duplicateOperationRef.current = operation;
+        setDuplicatingRuleId(rule.id);
+        try {
+            const source = await getRuleById(rule.id, requestInit);
+            if (!isCurrent()) return;
+            if (source.executionMode === "system" && !duplicateScopeRef.current.canRunAsSystem) {
+                toastError(tw("duplicateSystemRestricted"));
+                return;
+            }
+            operation.systemMode = source.executionMode === "system";
+            const created = await createRule(
+                {
+                    ...ruleToRequest(source),
+                    name: fitDuplicatedRuleName(source.name, (name) => tw("copyName", { name })),
+                    enabled: false,
+                },
+                requestInit,
+            );
+            if (!isCurrent()) return;
+            toastSuccess(tw("duplicated", { name: created.name }));
+            router.push(`/workflows/${created.id}`);
+        } catch (error) {
+            if (!isCurrent()) return;
+            toastError(error instanceof Error ? error.message : tw("duplicateFailed"));
+        } finally {
+            if (duplicateOperationRef.current === operation) {
+                duplicateOperationRef.current = null;
+                setDuplicatingRuleId(null);
+            }
         }
     };
 
@@ -185,7 +321,7 @@ export default function WorkflowsPanel() {
                             </button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <button type="button" aria-label={t("ruleActions")} className={rowActionTrigger}>
+                                    <button type="button" aria-label={tw("rowActions", { name: rule.name })} className={rowActionTrigger}>
                                         <EllipsisHorizontalIcon className="size-5" />
                                     </button>
                                 </DropdownMenuTrigger>
@@ -194,6 +330,15 @@ export default function WorkflowsPanel() {
                                         <PencilSquareIcon className="size-4" />
                                         {t("edit")}
                                     </DropdownMenuItem>
+                                    {(rule.executionMode !== "system" || canRunAsSystem) && (
+                                        <DropdownMenuItem
+                                            disabled={duplicatingRuleId !== null}
+                                            onSelect={() => void duplicateRule(rule)}
+                                        >
+                                            <DocumentDuplicateIcon className="size-4" />
+                                            {duplicatingRuleId === rule.id ? tw("duplicating") : tw("duplicate")}
+                                        </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem
                                         onSelect={() => {
                                             if (activeWorkspaceId == null) return;

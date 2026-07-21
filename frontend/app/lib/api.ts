@@ -3021,8 +3021,8 @@ export function getRules(init: RequestInit = {}) {
     return getJson<Types.Rule[]>(`/api/rules`, { cache: "no-store", ...init });
 }
 
-export function createRule(payload: Types.RuleRequest) {
-    return postJson<Types.Rule>(`/api/rules`, payload);
+export function createRule(payload: Types.RuleRequest, init: RequestInit = {}) {
+    return postJson<Types.Rule>(`/api/rules`, payload, init);
 }
 
 export function updateRule(id: number, payload: Types.RuleRequest) {
