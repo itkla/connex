@@ -7,7 +7,6 @@ import {
     ArrowTopRightOnSquareIcon,
     BoltIcon,
     BuildingOffice2Icon,
-    ChatBubbleLeftRightIcon,
     CheckCircleIcon,
     ChevronDownIcon,
     ChevronUpIcon,
@@ -61,9 +60,10 @@ type PeekData =
  */
 function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPrev, hasNext, position }: Props) {
     const t = useTranslations('RecordPeek');
+    const actionsT = useTranslations('Actions');
     const locale = useLocale();
     const router = useRouter();
-    const { run, isAvailableForRecord } = useActions();
+    const { run, getAction, isAvailableForRecord } = useActions();
     const { record: recordRecent } = useRecentRecords();
     const isMobile = useIsMobile();
 
@@ -98,7 +98,10 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
 
     const canAddNote = actionRecord !== null && isAvailableForRecord('create.note', actionRecord);
     const canCreateTask = actionRecord !== null && isAvailableForRecord('create.task', actionRecord);
+    const logActivityAction = getAction('create.activity');
+    const LogActivityIcon = logActivityAction?.icon;
     const canLogActivity =
+        logActivityAction !== undefined &&
         actionRecord !== null &&
         actionRecord.type !== 'company' &&
         isAvailableForRecord('create.activity', actionRecord);
@@ -196,10 +199,10 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
                             <ArrowTopRightOnSquareIcon className="size-4" />
                             {t('openFull')}
                         </Button>
-                        {canLogActivity && (
+                        {canLogActivity && logActivityAction && (
                             <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.activity')} className="justify-start">
-                                <ChatBubbleLeftRightIcon className="size-4" />
-                                {t('logActivity')}
+                                {LogActivityIcon && <LogActivityIcon className="size-4" />}
+                                {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
                             </Button>
                         )}
                         {canAddNote && (

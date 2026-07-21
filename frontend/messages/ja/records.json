@@ -392,7 +392,6 @@
     "error_forbidden": "このレコードへのアクセス権がありません。",
     "error_failed": "このレコードを読み込めませんでした。",
     "openFull": "レコードを開く",
-    "logActivity": "活動を記録",
     "addNote": "ノートを追加",
     "createTask": "タスクを作成",
     "copyLink": "リンクをコピー",

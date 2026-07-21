@@ -392,7 +392,6 @@
     "error_forbidden": "You don't have access to this record.",
     "error_failed": "Couldn't load this record.",
     "openFull": "Open record",
-    "logActivity": "Log activity",
     "addNote": "Add note",
     "createTask": "Create task",
     "copyLink": "Copy link",
