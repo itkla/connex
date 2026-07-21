@@ -29,10 +29,10 @@ export type FormDraftControls<T> = {
 
 /**
  * Draft-persistence controls for a create composer. Writes are debounced and flushed on `pagehide` so the
- * last keystrokes before an accidental reload survive; a pending write is cancelled on unmount so a discarded
- * draft is never resurrected by a late timer. The hook itself never decides *when* to persist or clear — the
- * composer persists while dirty and clears on success, and its wrapper clears on an explicit discard — so a
- * pristine open/close leaves any existing draft untouched for the resume banner to surface.
+ * last keystrokes before an accidental reload survive. Pending work also flushes on unmount so route and
+ * workspace transitions preserve the origin-scoped snapshot; explicit clear cancels it before a successful
+ * submit or confirmed discard can unmount the wrapper. The hook itself never decides *when* to persist or
+ * clear, so a pristine open/close leaves any existing draft untouched for the resume banner to surface.
  */
 export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): FormDraftControls<T> {
     const { userId, workspaceId, formType, scope } = keyParts;
@@ -90,7 +90,7 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
         return () => window.removeEventListener('pagehide', onPageHide);
     }, [flush]);
 
-    useEffect(() => () => cancel(), [cancel]);
+    useEffect(() => () => flush(), [flush]);
 
     return { persist, clear };
 }

@@ -116,21 +116,27 @@ export function clearDraft(key: string): void {
 }
 
 function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshnessMs: number): boolean {
+    const age = Date.now() - env.savedAt;
     return (
         typeof env === 'object' &&
         env !== null &&
         env.v === expectedVersion &&
         env.data !== null &&
         env.data !== undefined &&
-        typeof env.savedAt === 'number' &&
-        Date.now() - env.savedAt <= freshnessMs
+        Number.isSafeInteger(env.savedAt) &&
+        age >= 0 &&
+        age <= freshnessMs
     );
 }
 
-/** Reads a draft by key, validating version + freshness; drops and returns null if invalid or expired. */
-export function readDraft(key: string, opts: { version: number; freshnessMs?: number }): StoredDraft<unknown> | null {
+/** Reads a draft by canonical key parts, validating metadata, version, and freshness. */
+export function readDraft(
+    keyParts: DraftKeyParts,
+    opts: { version: number; freshnessMs?: number },
+): StoredDraft<unknown> | null {
     const store = safeSession();
     if (!store) return null;
+    const key = draftKey(keyParts);
     const freshnessMs = opts.freshnessMs ?? DEFAULT_DRAFT_FRESHNESS_MS;
     let raw: string | null = null;
     try {
@@ -140,7 +146,12 @@ export function readDraft(key: string, opts: { version: number; freshnessMs?: nu
     }
     if (raw === null) return null;
     const env = parseDraftEnvelope(raw);
-    if (!env || !key.endsWith(`:${env.formType}:${env.scope}`) || !isFresh(env, opts.version, freshnessMs)) {
+    if (
+        !env ||
+        env.formType !== keyParts.formType ||
+        env.scope !== keyParts.scope ||
+        !isFresh(env, opts.version, freshnessMs)
+    ) {
         clearDraft(key);
         return null;
     }
