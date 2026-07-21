@@ -173,6 +173,12 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         loadFacets();
     }, [clearSelection, reload, loadFacets]);
 
+    const exportContacts = useCallback(
+        (signal: AbortSignal) =>
+            exportContactsCsv({ ...filterParams, q: query.trim() || undefined }, { signal }),
+        [filterParams, query],
+    );
+
     useEffect(() => subscribeToRecordMutations((entity) => {
         if (entity === 'contact') refresh();
     }), [refresh]);
@@ -651,7 +657,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 newLabel={t('new')}
                                 newAriaLabel={t('newAria')}
                                 onImported={refresh}
-                                onExport={() => exportContactsCsv({ ...filterParams, q: query.trim() || undefined })}
+                                onExport={exportContacts}
                             />
                         </div>
                     </div>

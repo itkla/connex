@@ -58,7 +58,17 @@
       "markAllNotificationsRead": "すべての通知を既読にする",
       "importCompanies": "会社をインポート",
       "importContacts": "連絡先をインポート",
-      "importDeals": "取引をインポート"
+      "importDeals": "取引をインポート",
+      "exportCurrentCompanies": "現在の会社ビューをエクスポート",
+      "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
+      "exportCurrentDeals": "現在の取引ビューをエクスポート"
+    },
+    "description": {
+      "utility": {
+        "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
+        "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
+        "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する取引をすべてダウンロードします。"
+      }
     },
     "feedback": {
       "linkCopied": "リンクをクリップボードにコピーしました",
@@ -96,7 +106,10 @@
       "utility": {
         "importCompanies": "会社をインポート, csv, アップロード, 一括",
         "importContacts": "連絡先をインポート, 人, 担当者, csv, アップロード, 一括",
-        "importDeals": "取引をインポート, 商談, 案件, csv, アップロード, 一括"
+        "importDeals": "取引をインポート, 商談, 案件, csv, アップロード, 一括",
+        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, csv, 現在のビュー, 絞り込み, セグメント",
+        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, 人, 担当者, csv, 現在のビュー, 絞り込み",
+        "exportCurrentDeals": "取引をエクスポート, 商談をダウンロード, 案件, csv, 現在のビュー, 絞り込み"
       }
     }
   }

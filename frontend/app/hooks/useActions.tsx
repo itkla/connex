@@ -5,6 +5,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -202,7 +203,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
         [activeWorkspace, user, pathname, locale, record, selection],
     );
     const contextRef = useRef(context);
-    useEffect(() => {
+    useLayoutEffect(() => {
         contextRef.current = context;
     }, [context]);
 

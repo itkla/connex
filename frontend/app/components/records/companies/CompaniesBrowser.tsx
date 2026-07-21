@@ -296,14 +296,17 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         }
     }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
 
-    const exportCompanies = useCallback(async () => {
+    const exportCompanies = useCallback(async (signal: AbortSignal) => {
         const params = { ...filterParams, q: query.trim() || undefined };
         if (!hasSegments) {
-            await exportCompaniesCsv(params);
+            await exportCompaniesCsv(params, { signal });
             return;
         }
-        const matched = await getCompanySegmentIds({ ...params, definition: evaluable });
-        await exportCompaniesCsv({ ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] });
+        const matched = await getCompanySegmentIds({ ...params, definition: evaluable }, { signal });
+        await exportCompaniesCsv(
+            { ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] },
+            { signal },
+        );
     }, [filterParams, query, hasSegments, evaluable]);
 
     const [isDeleting, setIsDeleting] = useState(false);

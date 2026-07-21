@@ -425,6 +425,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
     const deferredQuery = useDeferredValue(query.trim());
+    const exportDeals = useCallback(
+        (signal: AbortSignal) => exportDealsCsv(
+            { ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined },
+            { signal },
+        ),
+        [activeCurrency, deferredQuery, serverFilters],
+    );
 
     useEffect(() => {
         let active = true;
@@ -1045,7 +1052,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 newLabel={t('newButton')}
                                 newAriaLabel={t('addDeal')}
                                 onImported={refreshRecords}
-                                onExport={() => exportDealsCsv({ ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined })}
+                                onExport={exportDeals}
                             />
                         </div>
                     </div>

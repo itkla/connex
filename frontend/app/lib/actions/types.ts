@@ -120,6 +120,8 @@ export type AppAction = {
     group: ActionGroup;
     /** Key within the `Actions` next-intl namespace that resolves the display label. */
     labelKey: string;
+    /** Key within the `Actions` namespace resolving supporting text shown on richer action surfaces. */
+    descriptionKey?: string;
     /**
      * A resolved display label used verbatim when present, taking precedence over {@link labelKey}.
      * For dynamic actions whose label is data (e.g. a pinned saved view's name) and so cannot be a
