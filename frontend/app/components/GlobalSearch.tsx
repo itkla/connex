@@ -356,7 +356,7 @@ export default function GlobalSearch() {
                         />
                         <kbd
                             className={cn(
-                                'pointer-events-none absolute right-3 top-1/2 w-14 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] font-medium text-muted-foreground',
+                                'pointer-events-none absolute right-2 top-1/2 w-14 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] font-medium text-muted-foreground',
                                 !shortcutPlatform && 'invisible',
                             )}
                         >
