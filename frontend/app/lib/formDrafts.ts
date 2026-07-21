@@ -9,7 +9,7 @@ export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
  * version no longer matches its form type is dropped on read (the version lives in the envelope, not the
  * key, so a newer reader still sees and sweeps older drafts).
  */
-export const DRAFT_VERSIONS: Record<string, number> = { activity: 1 };
+export const DRAFT_VERSIONS: Record<string, number> = { activity: 1, task: 1 };
 
 /** The parts that uniquely scope a draft to a user, workspace, form type, and entity context. */
 export type DraftKeyParts = {
@@ -212,7 +212,7 @@ export function listFreshDrafts(opts: {
     return out;
 }
 
-/** Removes every draft in the store. Call on logout so note/activity drafts never survive a re-login. */
+/** Removes every composer draft in the store so none survive a logout and re-login. */
 export function clearAllDrafts(): void {
     draftStoreGeneration += 1;
     const store = safeSession();

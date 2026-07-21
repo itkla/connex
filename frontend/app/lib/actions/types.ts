@@ -77,7 +77,13 @@ export type CreateDefaults = {
 };
 
 /** Values typed into a quick-create form, carried into the full dialog when the user asks for more detail. */
-export type TaskDraft = { description?: string; dueDate?: string };
+export type TaskDraft = {
+    description?: string;
+    dueDate?: string;
+    assigneeId?: number | null;
+    personId?: number | null;
+    dealId?: number | null;
+};
 export type NoteDraft = { content?: string };
 export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 
