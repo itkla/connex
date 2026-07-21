@@ -162,6 +162,12 @@ export function ActionProvider({ user, children }: { user: User | null; children
         lastInvokerRef.current = null;
     }, [activeIdentity]);
 
+    useLayoutEffect(() => () => {
+        liveOverlayRef.current?.controller.abort();
+        liveOverlayRef.current = null;
+        lastInvokerRef.current = null;
+    }, []);
+
     const pendingRef = useRef<Set<ActionId>>(new Set());
     const [pendingIds, setPendingIds] = useState<ReadonlySet<ActionId>>(EMPTY_PENDING);
 

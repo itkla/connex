@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
@@ -192,86 +192,88 @@ export default function ActionOverlayHost({
 
     return (
         <>
-            {rendered?.request.kind === "create-task" && users && references ? (
-                <TaskDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    persons={persons}
-                    deals={deals}
-                    users={users}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultDueDate={rendered.request.draft?.dueDate ?? ""}
-                    defaultDescription={rendered.request.draft?.description ?? ""}
-                    requestInit={requestInit}
-                />
-            ) : null}
-            {rendered?.request.kind === "create-note" && references ? (
-                <NoteDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    note={null}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultContent={rendered.request.draft?.content ?? ""}
-                    requestInit={requestInit}
-                />
-            ) : null}
-            {rendered?.request.kind === "create-activity" && references ? (
-                <ActivityDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultType={defaultActivityType}
-                    defaultSubject={activityDraft?.subject ?? ""}
-                    defaultNotes={activityDraft?.notes ?? ""}
-                    requestInit={requestInit}
-                />
-            ) : null}
-            {rendered?.request.kind === "create-company" ? (
-                <CompanyCreateContainer open={visible} onOpenChange={handleOpenChange} requestInit={requestInit} />
-            ) : null}
-            {rendered?.request.kind === "create-person" ? (
-                <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
-            ) : null}
-            {rendered?.request.kind === "create-deal" ? (
-                <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
-            ) : null}
-            {rendered?.request.kind === "import-companies" ? (
-                <ImportDialog
-                    entity="companies"
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    onImported={handleCompaniesImported}
-                    requestInit={requestInit}
-                />
-            ) : null}
-            {rendered?.request.kind === "import-contacts" ? (
-                <ImportDialog
-                    entity="persons"
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    onImported={handleContactsImported}
-                    requestInit={requestInit}
-                />
-            ) : null}
-            {rendered?.request.kind === "import-deals" ? (
-                <ImportDialog
-                    entity="deals"
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    onImported={() => {}}
-                    requestInit={requestInit}
-                />
-            ) : null}
+            <Fragment key={rendered?.generation}>
+                {rendered?.request.kind === "create-task" && users && references ? (
+                    <TaskDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        persons={persons}
+                        deals={deals}
+                        users={users}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultDueDate={rendered.request.draft?.dueDate ?? ""}
+                        defaultDescription={rendered.request.draft?.description ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-note" && references ? (
+                    <NoteDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        note={null}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultContent={rendered.request.draft?.content ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-activity" && references ? (
+                    <ActivityDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultType={defaultActivityType}
+                        defaultSubject={activityDraft?.subject ?? ""}
+                        defaultNotes={activityDraft?.notes ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-company" ? (
+                    <CompanyCreateContainer open={visible} onOpenChange={handleOpenChange} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "create-person" ? (
+                    <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "create-deal" ? (
+                    <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "import-companies" ? (
+                    <ImportDialog
+                        entity="companies"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={handleCompaniesImported}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "import-contacts" ? (
+                    <ImportDialog
+                        entity="persons"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={handleContactsImported}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "import-deals" ? (
+                    <ImportDialog
+                        entity="deals"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={() => {}}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+            </Fragment>
         </>
     );
 }
