@@ -176,7 +176,7 @@ export default function RecordsActions({
                             <ChevronDownIcon className="size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none" />
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuContent align="end" className="w-60">
                         <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setImportOpen(true); }}>
                             <ArrowUpTrayIcon className="size-4" />
                             {t('openImport')}
