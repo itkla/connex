@@ -576,8 +576,11 @@ export default function DesignSystemPage() {
 
                 <Button variant="outline" onClick={() => setPaletteOpen(true)}>
                   Command palette
-                  <Badge variant="ghost" className="font-mono">
-                    {shortcutPlatform ? formatShortcut("mod+k", shortcutPlatform) : null}
+                  <Badge
+                    variant="ghost"
+                    className={cn("min-w-14 justify-center font-mono", !shortcutPlatform && "invisible")}
+                  >
+                    {formatShortcut("mod+k", shortcutPlatform ?? "other")}
                   </Badge>
                 </Button>
               </div>

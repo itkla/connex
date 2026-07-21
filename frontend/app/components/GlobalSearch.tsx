@@ -354,8 +354,13 @@ export default function GlobalSearch() {
                             aria-autocomplete="list"
                             autoComplete="off"
                         />
-                        <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                            {shortcutPlatform ? formatShortcut('mod+k', shortcutPlatform) : null}
+                        <kbd
+                            className={cn(
+                                'pointer-events-none absolute right-3 top-1/2 min-w-12 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] font-medium text-muted-foreground',
+                                !shortcutPlatform && 'invisible',
+                            )}
+                        >
+                            {formatShortcut('mod+k', shortcutPlatform ?? 'other')}
                         </kbd>
                     </motion.form>
 
@@ -514,7 +519,12 @@ export default function GlobalSearch() {
                                                                 ) : null}
                                                             </span>
                                                             {action.shortcut && shortcutPlatform ? (
-                                                                <CommandShortcut className="shrink-0 whitespace-nowrap">
+                                                                <CommandShortcut
+                                                                    className={cn(
+                                                                        'shrink-0 whitespace-nowrap',
+                                                                        shortcutPlatform === 'other' && 'tracking-normal',
+                                                                    )}
+                                                                >
                                                                     {formatShortcut(action.shortcut, shortcutPlatform)}
                                                                 </CommandShortcut>
                                                             ) : null}
