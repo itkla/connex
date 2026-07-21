@@ -2,9 +2,11 @@ package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -21,7 +23,9 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.services.RuleEngineService;
 import ooo.klae.connex.backend.services.LegacyWorkflowBackfillTransaction;
+import ooo.klae.connex.backend.services.WorkflowOffboardingService;
 
 /** Verifies legacy workflow backfill persistence and replay against real MySQL. */
 class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
@@ -29,7 +33,10 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
     @Autowired private RuleMapper ruleMapper;
     @Autowired private WorkflowMapper workflowMapper;
     @Autowired private WorkflowVersionMapper workflowVersionMapper;
+    @Autowired private TaskMapper taskMapper;
     @Autowired private LegacyWorkflowBackfillTransaction backfillTransaction;
+    @Autowired private WorkflowOffboardingService workflowOffboardingService;
+    @Autowired private RuleEngineService ruleEngineService;
     @Autowired private ObjectMapper objectMapper;
 
     @Test
@@ -122,5 +129,131 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(workflow.getActiveVersionId(), replayed.getActiveVersionId());
         assertEquals(1, workflowVersionMapper.listByWorkflow(
             workspace.getId(), workflow.getId()).size());
+    }
+
+    @Test
+    void creatorDeletionPreservesImmutableVersionAndAllowsBackfillReplay() throws Exception {
+        User creator = newUser();
+        User runAs = newUser();
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.won"));
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTitle("Notify owner");
+
+        Rule rule = new Rule();
+        rule.setWorkspaceId(workspace.getId());
+        rule.setName("Offboarded backfill " + unique());
+        rule.setEnabled(true);
+        rule.setRecordType("deal");
+        rule.setTriggerType("entity_change");
+        rule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        rule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        rule.setExecutionMode("user");
+        rule.setRunAsUserId(runAs.getId());
+        rule.setCreatedById(creator.getId());
+        ruleMapper.insert(rule);
+
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+
+        Workflow before = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        assertNotNull(before);
+        assertNotNull(before.getActiveVersionId());
+        long versionId = before.getActiveVersionId();
+        WorkflowVersion immutableVersion = workflowVersionMapper.getById(
+            workspace.getId(), before.getId(), versionId);
+        assertEquals(creator.getId(), immutableVersion.getCreatedById());
+
+        var plan = workflowOffboardingService.discover(creator.getId());
+        workflowOffboardingService.lockWorkspaceRoots(plan);
+        workflowOffboardingService.offboard(creator.getId(), plan);
+        userMapper.delete(creator.getId());
+
+        Rule redactedRule = ruleMapper.getById(workspace.getId(), rule.getId());
+        Workflow redactedWorkflow = workflowMapper.getById(workspace.getId(), before.getId());
+        assertFalse(redactedRule.isEnabled());
+        assertNull(redactedRule.getCreatedById());
+        assertEquals(runAs.getId(), redactedRule.getRunAsUserId());
+        assertFalse(redactedWorkflow.isEnabled());
+        assertNull(redactedWorkflow.getCreatedById());
+        assertEquals(runAs.getId(), redactedWorkflow.getDraftRunAsUserId());
+        assertEquals(creator.getId(), workflowVersionMapper.getById(
+            workspace.getId(), before.getId(), versionId).getCreatedById());
+
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+
+        Workflow replayed = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        assertEquals(before.getId(), replayed.getId());
+        assertEquals(versionId, replayed.getActiveVersionId());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), before.getId()).size());
+    }
+
+    @Test
+    void backfillAndReplayPreserveOneExecutionPerEvent() throws Exception {
+        User principal = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), principal.getId(), "admin");
+        var person = newPerson(newCompany());
+        String taskTitle = "Backfill task " + unique();
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("person.updated"));
+        RuleAction action = new RuleAction();
+        action.setType("create_task");
+        action.setTitle(taskTitle);
+
+        Rule rule = new Rule();
+        rule.setWorkspaceId(workspace.getId());
+        rule.setName("Backfill execution " + unique());
+        rule.setEnabled(true);
+        rule.setRecordType("person");
+        rule.setTriggerType("entity_change");
+        rule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        rule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        rule.setExecutionMode("user");
+        rule.setRunAsUserId(principal.getId());
+        rule.setCreatedById(principal.getId());
+        ruleMapper.insert(rule);
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.updated");
+
+        assertExecutions(rule.getId(), 1);
+        assertEquals(1, matchingTasks(person.getId(), taskTitle));
+
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+        backfillTransaction.backfillWorkspace(null, workspace.getId());
+
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        assertNotNull(workflow);
+        assertEquals(rule.getId(), workflow.getLegacyRuleId());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), workflow.getId()).size());
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.updated");
+
+        assertExecutions(rule.getId(), 2);
+        assertEquals(2, matchingTasks(person.getId(), taskTitle));
+        assertEquals(1, workflowMapper.listByWorkspace(workspace.getId()).stream()
+            .filter(candidate -> candidate.getLegacyRuleId() != null)
+            .filter(candidate -> candidate.getLegacyRuleId() == rule.getId())
+            .count());
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), workflow.getId()).size());
+    }
+
+    private void assertExecutions(int ruleId, int expected) {
+        var executions = ruleMapper.getExecutionsByRule(workspace.getId(), ruleId, 50);
+        assertEquals(expected, executions.size());
+        assertTrue(executions.stream().allMatch(
+            execution -> "matched".equals(execution.getStatus())));
+    }
+
+    private long matchingTasks(int personId, String title) {
+        return taskMapper.getTasksByPersonId(workspace.getId(), personId).stream()
+            .filter(task -> title.equals(task.getDescription()))
+            .count();
     }
 }
