@@ -105,7 +105,7 @@ public class WorkflowDraftCanonicalizer {
             String executionMode,
             WorkflowDefinition definition,
             WorkflowCanvas canvas) {
-        validateDefinition(definition);
+        validateDefinitionStructure(definition);
         validateCanvas(canvas, definition.nodes());
 
         String normalizedName = normalizeName(name);
@@ -153,7 +153,7 @@ public class WorkflowDraftCanonicalizer {
         }
     }
 
-    private static void validateDefinition(WorkflowDefinition definition) {
+    static void validateDefinitionStructure(WorkflowDefinition definition) {
         if (definition == null || definition.schemaVersion() != 1) {
             throw new BadRequestException("Workflow definition must use schemaVersion 1");
         }
