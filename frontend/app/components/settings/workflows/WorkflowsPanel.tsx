@@ -3,7 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BoltIcon, ClockIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import {
+    BoltIcon,
+    ClockIcon,
+    DocumentDuplicateIcon,
+    EllipsisHorizontalIcon,
+    PencilSquareIcon,
+    PlusIcon,
+    TrashIcon,
+} from "@heroicons/react/24/outline";
 
 import type { Rule } from "@/app/lib/types";
 import { deleteRule, getRules, updateRule } from "@/app/lib/api";
@@ -24,6 +32,7 @@ import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { ruleSummary, ruleToRequest } from "@/app/components/settings/RulesPanel";
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
+import { useWorkflowDuplication } from "@/app/components/settings/workflows/useWorkflowDuplication";
 
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
@@ -37,8 +46,13 @@ export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceRules");
     const tw = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
-    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace, switching } = useWorkspace();
     const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
+    const { duplicateRule, duplicatingRuleId } = useWorkflowDuplication({
+        activeWorkspaceId,
+        canRunAsSystem,
+        switching,
+    });
 
     const [rules, setRules] = useState<Rule[]>([]);
     const [loading, setLoading] = useState(true);
@@ -143,11 +157,17 @@ export default function WorkflowsPanel() {
             ) : (
                 <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                     {rules.map((rule) => (
-                        <li key={rule.id} className="group flex items-center gap-3 px-4 py-3.5">
+                        <li
+                            key={rule.id}
+                            className="group flex items-center gap-3 px-4 py-3.5"
+                        >
                             <Switch
                                 checked={rule.enabled}
                                 onCheckedChange={() => toggleEnabled(rule)}
-                                disabled={rule.executionMode === "system" && !canRunAsSystem}
+                                disabled={
+                                    duplicatingRuleId === rule.id
+                                    || (rule.executionMode === "system" && !canRunAsSystem)
+                                }
                                 aria-label={t("toggleEnabled", { name: rule.name })}
                                 aria-describedby={
                                     rule.executionMode === "system" && !canRunAsSystem
@@ -158,7 +178,8 @@ export default function WorkflowsPanel() {
                             <button
                                 type="button"
                                 onClick={() => router.push(`/workflows/${rule.id}`)}
-                                className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none"
+                                disabled={duplicatingRuleId === rule.id}
+                                className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"
                             >
                                 <span className="flex items-center gap-2">
                                     <span className="truncate text-sm font-medium text-foreground group-hover:underline">
@@ -175,6 +196,15 @@ export default function WorkflowsPanel() {
                                             {t("disabledBadge")}
                                         </Badge>
                                     )}
+                                    {duplicatingRuleId === rule.id && (
+                                        <Badge
+                                            aria-hidden
+                                            variant="outline"
+                                            className="text-muted-foreground"
+                                        >
+                                            {tw("duplicating")}
+                                        </Badge>
+                                    )}
                                 </span>
                                 <span className="block truncate text-xs text-muted-foreground">{ruleSummary(rule, t)}</span>
                                 {rule.executionMode === "system" && !canRunAsSystem ? (
@@ -183,18 +213,45 @@ export default function WorkflowsPanel() {
                                     </span>
                                 ) : null}
                             </button>
+                            {duplicatingRuleId === rule.id && (
+                                <span role="status" className="sr-only">
+                                    {tw("duplicatingRule", { name: rule.name })}
+                                </span>
+                            )}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <button type="button" aria-label={t("ruleActions")} className={rowActionTrigger}>
+                                    <button
+                                        type="button"
+                                        aria-busy={duplicatingRuleId === rule.id}
+                                        aria-label={
+                                            duplicatingRuleId === rule.id
+                                                ? tw("duplicatingRule", { name: rule.name })
+                                                : tw("rowActions", { name: rule.name })
+                                        }
+                                        className={rowActionTrigger}
+                                    >
                                         <EllipsisHorizontalIcon className="size-5" />
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-40">
-                                    <DropdownMenuItem onSelect={() => router.push(`/workflows/${rule.id}`)}>
+                                    <DropdownMenuItem
+                                        disabled={duplicatingRuleId === rule.id}
+                                        onSelect={() => router.push(`/workflows/${rule.id}`)}
+                                    >
                                         <PencilSquareIcon className="size-4" />
                                         {t("edit")}
                                     </DropdownMenuItem>
+                                    {(rule.executionMode !== "system" || canRunAsSystem) && (
+                                        <DropdownMenuItem
+                                            disabled={duplicatingRuleId !== null}
+                                            onSelect={() => void duplicateRule(rule)}
+                                        >
+                                            <DocumentDuplicateIcon className="size-4" />
+                                            {duplicatingRuleId === rule.id ? tw("duplicating") : tw("duplicate")}
+                                        </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem
+                                        disabled={duplicatingRuleId === rule.id}
                                         onSelect={() => {
                                             if (activeWorkspaceId == null) return;
                                             requestAnimationFrame(() => setRunsTarget({ workspaceId: activeWorkspaceId, rule }));
@@ -203,7 +260,11 @@ export default function WorkflowsPanel() {
                                         <ClockIcon className="size-4" />
                                         {tw("runs.view")}
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(rule)}>
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        disabled={duplicatingRuleId === rule.id}
+                                        onSelect={() => setRemoveTarget(rule)}
+                                    >
                                         <TrashIcon className="size-4" />
                                         {t("delete")}
                                     </DropdownMenuItem>
