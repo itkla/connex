@@ -185,8 +185,9 @@ function NavGroup({
     onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
     const groupActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
-    const [manualState, setManualState] = useState<{ navigationKey: string; open: boolean } | null>(null);
-    const open = manualState?.navigationKey === navigationKey ? manualState.open : groupActive || !collapsed;
+    const [manualState, setManualState] = useState<{ navigationKey: string; collapsed: boolean } | null>(null);
+    const manualStateCurrent = manualState?.navigationKey === navigationKey && manualState.collapsed === collapsed;
+    const open = manualStateCurrent ? !manualState.collapsed : groupActive || !collapsed;
     const sectionId = `nav-group-${section.id}`;
     if (rail) {
         return (
@@ -203,7 +204,7 @@ function NavGroup({
                 type="button"
                 onClick={() => {
                     const nextOpen = !open;
-                    setManualState({ navigationKey, open: nextOpen });
+                    setManualState({ navigationKey, collapsed: !nextOpen });
                     onCollapsedChange(section.id, !nextOpen);
                 }}
                 aria-expanded={open}
