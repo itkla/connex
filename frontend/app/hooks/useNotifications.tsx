@@ -85,7 +85,9 @@ export function NotificationProvider({
                 const generation = mutationGenerationRef.current;
                 requestRef.current = controller;
                 try {
+                    const requestStartedAt = performance.now();
                     const counts = await getNotificationCounts({ signal: controller.signal });
+                    const roundTripMs = performance.now() - requestStartedAt;
                     if (generation === mutationGenerationRef.current) {
                         if (counts.stateVersion < observedStateVersionRef.current && staleRetryAvailable) {
                             staleRetryAvailable = false;
@@ -105,7 +107,11 @@ export function NotificationProvider({
                                 snoozeExpiryTimerRef.current = null;
                             }
                             if (counts.nextSnoozeExpiry) {
-                                const delay = notificationSnoozeDelayMs(counts.nextSnoozeExpiry, counts.asOf);
+                                const delay = notificationSnoozeDelayMs(
+                                    counts.nextSnoozeExpiry,
+                                    counts.asOf,
+                                    roundTripMs,
+                                );
                                 if (delay != null) {
                                     snoozeExpiryTimerRef.current = window.setTimeout(
                                         () => {
