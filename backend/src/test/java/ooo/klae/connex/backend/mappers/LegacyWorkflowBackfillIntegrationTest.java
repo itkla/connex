@@ -80,8 +80,12 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
             workspace.getId(), workflow.getId(), workflow.getActiveVersionId());
         assertNotNull(active);
         assertEquals(1, active.getVersionNumber());
-        assertEquals(rule.getTriggerConfig(), active.getTriggerConfig());
-        assertEquals(rule.getActionsJson(), active.getActionsJson());
+        assertEquals(
+            objectMapper.readTree(rule.getTriggerConfig()),
+            objectMapper.readTree(active.getTriggerConfig()));
+        assertEquals(
+            objectMapper.readTree(rule.getActionsJson()),
+            objectMapper.readTree(active.getActionsJson()));
         assertEquals(runAs.getId(), active.getRunAsUserId());
         assertEquals(creator.getId(), active.getCreatedById());
         assertNull(active.getPublishedById());

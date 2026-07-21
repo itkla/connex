@@ -250,6 +250,7 @@ class WorkflowMapperXmlTest {
             configuration, RuleMapper.class, "findLockCandidatesByUserAnywhere", user);
         assertTrue(workflowDiscovery.contains("v.id = w.active_version_id"));
         assertTrue(versionDiscovery.contains("w.active_version_id = v.id"));
+        assertTrue(versionDiscovery.startsWith("SELECT v.id, v.workspace_id, v.workflow_id"));
         assertTrue(ruleDiscovery.contains("v.id = w.active_version_id"));
 
         Map<String, Object> workflow = Map.of("workspaceId", 7, "id", 11, "userId", 23);
