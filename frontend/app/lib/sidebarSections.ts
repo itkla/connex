@@ -17,11 +17,6 @@ export type SidebarSectionId = (typeof SIDEBAR_SECTION_IDS)[number];
 const SIDEBAR_SECTION_ID_SET: ReadonlySet<string> = new Set(SIDEBAR_SECTION_IDS);
 const SIDEBAR_SECTION_STATE_VERSION = 1;
 
-type StoredSidebarSectionState = {
-    v: number;
-    collapsed: unknown[];
-};
-
 function isSidebarSectionId(value: unknown): value is SidebarSectionId {
     return typeof value === "string" && SIDEBAR_SECTION_ID_SET.has(value);
 }
@@ -45,12 +40,11 @@ export function parseCollapsedSidebarSections(raw: string | null): SidebarSectio
         return [];
     }
     if (typeof parsed !== "object" || parsed === null) return [];
-
-    const candidate = parsed as Partial<StoredSidebarSectionState>;
-    if (candidate.v !== SIDEBAR_SECTION_STATE_VERSION || !Array.isArray(candidate.collapsed)) return [];
+    if (!("v" in parsed) || !("collapsed" in parsed)) return [];
+    if (parsed.v !== SIDEBAR_SECTION_STATE_VERSION || !Array.isArray(parsed.collapsed)) return [];
 
     const collapsed = new Set<SidebarSectionId>();
-    for (const value of candidate.collapsed) {
+    for (const value of parsed.collapsed) {
         if (isSidebarSectionId(value)) collapsed.add(value);
     }
     return SIDEBAR_SECTION_IDS.filter((id) => collapsed.has(id));
