@@ -381,20 +381,26 @@ async function requestMultipart<T>(
     path: string,
     method: "POST" | "PUT",
     body: FormData,
+    init: RequestInit = {},
 ): Promise<T> {
-    const locale = requestLocale({});
+    const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const stepUpGeneration = passkeyStepUpGeneration;
-    const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
-        method,
-        body,
-        credentials: "include",
-        headers: {
+    const send = (csrf: Record<string, string>) => {
+        const headers = new Headers({
             "Accept-Language": locale,
             ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
             ...csrf,
-        },
-    });
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
+            ...init,
+            method,
+            body,
+            credentials: "include",
+            headers,
+        });
+    };
     const sendWithCsrfRetry = async () => {
         let response = await send(await csrfHeader());
         if (await shouldRetryWithFreshCsrf(path, response, true)) {
@@ -1421,18 +1427,18 @@ export function getCompanyById(id: number, init: RequestInit = {}) {
     return getJson<Types.Company>(`/api/companies/${id}`, init);
 }
 
-export function createCompany(payload: Types.CreateCompanyPayload) {
-    return postJson<Types.Company>(`/api/companies`, payload);
+export function createCompany(payload: Types.CreateCompanyPayload, init: RequestInit = {}) {
+    return postJson<Types.Company>(`/api/companies`, payload, init);
 }
 
 export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
     return putJson<Types.Company>(`/api/companies/${id}`, payload);
 }
 
-export async function uploadCompanyLogo(companyId: number, file: File) {
+export async function uploadCompanyLogo(companyId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData);
+    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData, init);
     return company.logoUrl;
 }
 
@@ -1836,8 +1842,8 @@ export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestIni
     return postJson<void>(`/api/introductions/paths/dismiss`, payload, init);
 }
 
-export function createContact(payload: Types.CreateContactPayload) {
-    return postJson<Types.Contact>(`/api/persons`, payload);
+export function createContact(payload: Types.CreateContactPayload, init: RequestInit = {}) {
+    return postJson<Types.Contact>(`/api/persons`, payload, init);
 }
 
 /** Reads business-card readiness for the authorized active workspace. */
@@ -1941,10 +1947,10 @@ export function updateContact(id: number, payload: Types.UpdateContactPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}`, payload);
 }
 
-export async function uploadContactPicture(contactId: number, file: File) {
+export async function uploadContactPicture(contactId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData);
+    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
     return contact.imageUrl;
 }
 
@@ -2288,8 +2294,8 @@ export function revokeAiProviderConfig(workspaceId: number) {
     return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
 }
 
-export function createDeal(payload: Types.CreateDealPayload) {
-    return postJson<Types.Deal>(`/api/deals`, payload);
+export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals`, payload, init);
 }
 
 export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
