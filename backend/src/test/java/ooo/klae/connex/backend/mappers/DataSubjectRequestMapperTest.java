@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ActivityDto;
 
 class DataSubjectRequestMapperTest extends AbstractMapperTest {
     @Autowired private DataSubjectRequestMapper dataSubjectRequestMapper;
+    @Autowired private DataSubjectDisclosureMapper dataSubjectDisclosureMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private ActivityMapper activityMapper;
     @Autowired private AttachmentMapper attachmentMapper;
@@ -87,6 +88,10 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         Workspace ownerWorkspace = newWorkspace(org.getId());
         Workspace overlayWorkspace = newWorkspace(org.getId());
         Workspace foreignWorkspace = newWorkspace(foreignOrg.getId());
+        List<Integer> orgWorkspaceIds = List.of(ownerWorkspace.getId(), overlayWorkspace.getId());
+        assertEquals(orgWorkspaceIds, workspaceMapper.findByOrgId(org.getId()).stream()
+            .map(Workspace::getId)
+            .toList());
         User actor = newUser();
         Company subjectCompany = newCompany(ownerWorkspace.getId(), "Subject Company");
         Person subject = newPerson(ownerWorkspace.getId(), subjectCompany, "Subject Person");
@@ -94,10 +99,10 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         Person other = newPerson(ownerWorkspace.getId(), subjectCompany, "Other Person");
         Person third = newPerson(ownerWorkspace.getId(), subjectCompany, "Third Person");
 
-        assertTrue(dataSubjectRequestMapper.subjectPersonInOrg(
-            org.getId(), ownerWorkspace.getId(), subject.getId()));
-        assertFalse(dataSubjectRequestMapper.subjectPersonInOrg(
-            foreignOrg.getId(), ownerWorkspace.getId(), subject.getId()));
+        assertTrue(dataSubjectDisclosureMapper.subjectPersonExists(
+            ownerWorkspace.getId(), subject.getId()));
+        assertFalse(dataSubjectDisclosureMapper.subjectPersonExists(
+            foreignWorkspace.getId(), subject.getId()));
 
         Tag subjectTag = newTag(ownerWorkspace.getId(), "Subject Tag");
         Tag otherTag = newTag(ownerWorkspace.getId(), "Other Tag");
@@ -141,47 +146,50 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         insertAudit(org.getId(), overlayWorkspace.getId(), subject.getId(), "person.subject");
         insertAudit(org.getId(), overlayWorkspace.getId(), other.getId(), "person.other");
         insertAudit(foreignOrg.getId(), foreignWorkspace.getId(), subject.getId(), "person.foreign");
+        insertAudit(org.getId(), null, subject.getId(), "person.organization");
+        insertAudit(null, null, subject.getId(), "person.legacy-unscoped");
 
         personMapper.updateProcessingRestrictions(ownerWorkspace.getId(), subject.getId(), true, true);
-        var disclosedPerson = dataSubjectRequestMapper.findDisclosurePerson(
-            org.getId(), ownerWorkspace.getId(), subject.getId());
+        var disclosedPerson = dataSubjectDisclosureMapper.findPerson(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds);
         assertEquals(subject.getId(), disclosedPerson.getId());
         assertEquals("Subject Company", disclosedPerson.getCompanyName());
         assertNotNull(disclosedPerson.getSuspendedAt());
         assertNotNull(disclosedPerson.getProvisionCeasedAt());
-        assertEquals(List.of(subjectTag.getId()), dataSubjectRequestMapper.findDisclosureTags(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
-        assertEquals("special_care", dataSubjectRequestMapper.findDisclosureCustomFields(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).getFirst().getDataClassification());
-        assertEquals(List.of(subjectActivity.getId()), dataSubjectRequestMapper.findDisclosureActivities(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(ActivityDto::getId).toList());
-        assertEquals(List.of(subjectNote.getId()), dataSubjectRequestMapper.findDisclosureNotes(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
-        assertEquals(List.of(subjectTask.getId()), dataSubjectRequestMapper.findDisclosureTasks(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
-        assertEquals(List.of(subjectEmployment.getId()), dataSubjectRequestMapper.findDisclosureEmployment(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
-        assertEquals(List.of(subjectAttachment.getId()), dataSubjectRequestMapper.findDisclosureAttachments(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
-        assertEquals("subject.pdf", dataSubjectRequestMapper.findDisclosureAttachments(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).getFirst().getFileName());
-        assertEquals(List.of("subject edge"), dataSubjectRequestMapper.findDisclosureEdges(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getNote()).toList());
-        assertEquals(counterpart.getName(), dataSubjectRequestMapper.findDisclosureEdges(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).getFirst().getCounterpartPersonName());
-        assertEquals(List.of(subjectDeal.getId()), dataSubjectRequestMapper.findDisclosureDeals(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getDealId()).toList());
-        assertEquals(List.of("subject introduction"), dataSubjectRequestMapper.findDisclosureIntroductions(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getNote()).toList());
+        assertEquals(List.of(subjectTag.getId()), dataSubjectDisclosureMapper.findTags(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals("special_care", dataSubjectDisclosureMapper.findCustomFields(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).getFirst().getDataClassification());
+        assertEquals(List.of(subjectActivity.getId()), dataSubjectDisclosureMapper.findActivities(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(ActivityDto::getId).toList());
+        assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNotes(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(subjectTask.getId()), dataSubjectDisclosureMapper.findTasks(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(subjectEmployment.getId()), dataSubjectDisclosureMapper.findEmployment(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(subjectAttachment.getId()), dataSubjectDisclosureMapper.findAttachments(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals("subject.pdf", dataSubjectDisclosureMapper.findAttachments(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).getFirst().getFileName());
+        assertEquals(List.of("subject edge"), dataSubjectDisclosureMapper.findEdges(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getNote()).toList());
+        assertEquals(counterpart.getName(), dataSubjectDisclosureMapper.findEdges(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).getFirst().getCounterpartPersonName());
+        assertEquals(List.of(subjectDeal.getId()), dataSubjectDisclosureMapper.findDeals(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getDealId()).toList());
+        assertEquals(List.of("subject introduction"), dataSubjectDisclosureMapper.findIntroductions(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getNote()).toList());
         assertEquals(List.of(overlayWorkspace.getId()),
-            dataSubjectRequestMapper.findDisclosureProvisions(
-                org.getId(), ownerWorkspace.getId(), subject.getId()).stream()
+            dataSubjectDisclosureMapper.findProvisions(
+                ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream()
                 .map(row -> row.getTargetWorkspaceId()).sorted().toList());
-        assertEquals(List.of("person.subject"), dataSubjectRequestMapper.findDisclosureAudit(
-            org.getId(), ownerWorkspace.getId(), subject.getId(), 1_000).stream()
+        assertEquals(List.of("person.legacy-unscoped", "person.organization", "person.subject"),
+            dataSubjectRequestMapper.findDisclosureAudit(
+            org.getId(), subject.getId(), orgWorkspaceIds, 1_000).stream()
             .map(row -> row.getAction()).toList());
-        assertEquals(1, dataSubjectRequestMapper.countDisclosureAudit(
-            org.getId(), ownerWorkspace.getId(), subject.getId()));
+        assertEquals(3, dataSubjectRequestMapper.countDisclosureAudit(
+            org.getId(), subject.getId(), orgWorkspaceIds));
     }
 
     private Organization newOrg() {
@@ -374,7 +382,7 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         return request;
     }
 
-    private void insertAudit(int orgId, int workspaceId, int personId, String action) {
+    private void insertAudit(Integer orgId, Integer workspaceId, int personId, String action) {
         AuditLog entry = new AuditLog();
         entry.setOrgId(orgId);
         entry.setWorkspaceId(workspaceId);
@@ -384,11 +392,12 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         entry.setActorLabel("Actor");
         entry.setOutcome("success");
         entry.setSummary("summary");
-        entry.setChainScopeType("workspace");
-        entry.setChainScopeId(workspaceId);
-        entry.setChainIndex(nextChainIndex);
-        entry.setPrevHash(hash(nextChainIndex - 1));
-        entry.setRowHash(hash(nextChainIndex));
+        entry.setChainScopeType(workspaceId == null ? orgId == null ? "system" : "organization" : "workspace");
+        entry.setChainScopeId(workspaceId == null ? orgId == null ? 0 : orgId : workspaceId);
+        long chainIndex = 9_000_000 + nextChainIndex;
+        entry.setChainIndex(chainIndex);
+        entry.setPrevHash(hash(chainIndex - 1));
+        entry.setRowHash(hash(chainIndex));
         nextChainIndex++;
         auditLogMapper.insert(entry);
     }

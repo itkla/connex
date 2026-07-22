@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper">
+
+  <select id="subjectPersonExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM person
+      WHERE workspace_id = #{workspaceId} AND id = #{personId}
+    )
+  </select>
+
+  <select id="findPerson"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$PersonDto">
+    SELECT p.id, p.workspace_id, p.name, p.email, p.phone, p.title,
+           c.id AS company_id, c.name AS company_name,
+           p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
+           p.provision_ceased_at, p.created_at, p.updated_at
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id AND c.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+  </select>
+
+  <select id="findTags"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TagDto">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM person p
+    JOIN person_tag pt ON pt.person_id = p.id
+    JOIN tag t ON t.id = pt.tag_id AND t.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY t.name, t.id
+  </select>
+
+  <select id="findCustomFields"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$CustomFieldValueDto">
+    SELECT v.id, v.workspace_id, v.definition_id, d.field_key, d.label, d.field_type,
+           d.data_classification, d.options_json, d.required, d.position, d.archived,
+           v.value_text, v.value_number, v.value_date, v.value_bool, v.created_at, v.updated_at
+    FROM person p
+    JOIN custom_field_value v ON v.entity_type = 'person' AND v.entity_id = p.id
+      AND v.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN custom_field_definition d
+      ON d.workspace_id = v.workspace_id AND d.id = v.definition_id AND d.entity_type = 'person'
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY v.workspace_id, d.position, d.id
+  </select>
+
+  <select id="findActivities"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ActivityDto">
+    SELECT a.id, a.workspace_id, a.type, a.subject, a.notes, a.person_id, a.deal_id,
+           a.created_by_id, a.timestamp
+    FROM person p
+    JOIN activity a ON a.person_id = p.id AND a.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY a.timestamp DESC, a.id DESC
+  </select>
+
+  <select id="findNotes"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$NoteDto">
+    SELECT n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id,
+           n.visibility, n.created_at, n.updated_at
+    FROM person p
+    JOIN note n ON n.person_id = p.id AND n.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY n.created_at DESC, n.id DESC
+  </select>
+
+  <select id="findTasks"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TaskDto">
+    SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
+           t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+    FROM person p
+    JOIN task t ON t.person_id = p.id AND t.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY t.created_at DESC, t.id DESC
+  </select>
+
+  <select id="findAttachments"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$AttachmentDto">
+    SELECT a.id, a.workspace_id, a.file_name, a.content_type, a.size, a.uploaded_by_id, a.created_at
+    FROM person p
+    JOIN attachment a ON a.entity_type = 'person' AND a.entity_id = p.id AND a.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY a.created_at DESC, a.id DESC
+  </select>
+
+  <select id="findEmployment"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$EmploymentDto">
+    SELECT e.id, e.workspace_id, e.person_id, e.company_id, e.company_name, e.title,
+           e.started_at, e.ended_at, e.created_at
+    FROM person p
+    JOIN person_employment e ON e.person_id = p.id AND e.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY e.started_at DESC, e.created_at DESC, e.id DESC
+  </select>
+
+  <select id="findEdges"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$RelationshipEdgeDto">
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           CASE WHEN e.source_person_id = p.id THEN e.target_person_id ELSE e.source_person_id END
+             AS counterpart_person_id,
+           counterpart.name AS counterpart_person_name,
+           e.type, e.strength, e.note, e.created_at
+    FROM person p
+    JOIN person_edge e ON (e.source_person_id = p.id OR e.target_person_id = p.id)
+      AND e.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN person counterpart
+      ON counterpart.id = CASE WHEN e.source_person_id = p.id THEN e.target_person_id ELSE e.source_person_id END
+      AND counterpart.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY e.created_at DESC, e.id DESC
+  </select>
+
+  <select id="findDeals"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$DealAssociationDto">
+    SELECT d.workspace_id, d.id AS deal_id, d.name AS deal_name,
+           s.id AS stage_id, s.name AS stage_name, dp.role
+    FROM person p
+    JOIN deal_person dp ON dp.person_id = p.id
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN stage s ON s.id = d.stage_id AND s.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY d.updated_at DESC, d.id DESC
+  </select>
+
+  <select id="findIntroductions"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$IntroductionDto">
+    SELECT i.id, i.workspace_id, i.introducer_user_id,
+           i.person_a_id, person_a.name AS person_a_name,
+           i.person_b_id, person_b.name AS person_b_name,
+           i.status, i.note, i.introduced_at, i.created_at, i.updated_at
+    FROM person p
+    JOIN introduction i ON (i.person_a_id = p.id OR i.person_b_id = p.id)
+      AND i.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN person person_a ON person_a.id = i.person_a_id AND person_a.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN person person_b ON person_b.id = i.person_b_id AND person_b.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY i.introduced_at DESC, i.id DESC
+  </select>
+
+  <select id="findProvisions"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ThirdPartyProvisionDto">
+    SELECT ps.workspace_id AS target_workspace_id,
+           ps.granted_by, ps.can_edit, ps.created_at
+    FROM person p
+    JOIN person_share ps ON ps.person_id = p.id AND ps.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY ps.created_at DESC, ps.workspace_id
+  </select>
+
+</mapper>

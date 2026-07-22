@@ -80,6 +80,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "DeliveryProviderConfigMapper",
         MAPPERS + "ConnectorConfigMapper",
         MAPPERS + "CampaignAudienceExportMapper",
+        MAPPERS + "DataSubjectDisclosureMapper",
         MAPPERS + "ActivityMapper",
         MAPPERS + "NoteMapper",
         MAPPERS + "ObjectDeletionQueueMapper",

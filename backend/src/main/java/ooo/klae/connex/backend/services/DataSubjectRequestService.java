@@ -2,71 +2,60 @@ package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ThirdPartyProvisionDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
-import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
+import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.DisclosureControlData;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @Service
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @RequiredArgsConstructor
 public class DataSubjectRequestService {
-    private static final int MAX_LIMIT = 200;
-    private static final int MAX_OFFSET = 100_000;
-    private static final int DISCLOSURE_AUDIT_LIMIT = 1_000;
+    static final int DISCLOSURE_AUDIT_LIMIT = 1_000;
     private static final Set<String> REQUEST_TYPES = Set.of(
         "disclosure", "correction", "cease_use", "cease_provision");
     private static final Set<String> STATUSES = Set.of(
         "received", "verifying", "in_progress", "responded", "refused", "closed");
-    private static final Set<String> AUDIT_DIFF_FIELDS = Set.of(
-        "requestType", "status", "subjectWorkspaceId", "subjectPersonId", "receivedAt",
-        "identityVerifiedAt", "dueAt", "respondedAt", "closedAt");
 
-    private final DataSubjectRequestMapper dataSubjectRequestMapper;
-    private final OrgMemberService orgMemberService;
-    private final AuditService auditService;
-    private final SessionSecurityService sessionSecurityService;
+    private final DataSubjectRequestControlOperations controlOperations;
+    private final DataSubjectDisclosureAccess disclosureAccess;
+    private final TenantWorkScope tenantWorkScope;
 
     public List<DataSubjectRequestDto> list(int orgId, int actorId, String status, int limit, int offset) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
-        String normalizedStatus = status == null || status.isBlank()
-            ? null
-            : normalize(status, null, STATUSES, "status");
-        return dataSubjectRequestMapper.findByOrg(orgId, normalizedStatus, cap(limit), offset(offset)).stream()
-            .map(DataSubjectRequestDto::from)
-            .toList();
+        return tenantWorkScope.unrouted(
+            () -> controlOperations.list(orgId, actorId, status, limit, offset));
     }
 
     public DataSubjectRequestDto get(int orgId, long requestId, int actorId) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
-        return DataSubjectRequestDto.from(findRequest(orgId, requestId));
+        return tenantWorkScope.unrouted(() -> controlOperations.get(orgId, requestId, actorId));
     }
 
-    @Transactional
     public DataSubjectRequestDto create(int orgId, int actorId, DataSubjectRequestUpsertRequest request) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
-        sessionSecurityService.requireRecentAuthentication(actorId);
+        tenantWorkScope.unrouted(() -> {
+            controlOperations.requireMutationAccess(orgId, actorId);
+            return null;
+        });
         DataSubjectRequest subjectRequest = new DataSubjectRequest();
         apply(subjectRequest, orgId, actorId, request, true);
-        dataSubjectRequestMapper.insert(subjectRequest);
-        auditService.record("appi.subject_request.create", "organization", orgId,
-            requestLabel(subjectRequest.getId()), "APPI data-subject request created",
-            auditChanges(subjectRequest));
-        return DataSubjectRequestDto.from(findRequest(orgId, subjectRequest.getId()));
+        validateSubjectLink(orgId, actorId,
+            subjectRequest.getSubjectWorkspaceId(), subjectRequest.getSubjectPersonId());
+        return tenantWorkScope.unrouted(
+            () -> controlOperations.create(orgId, actorId, subjectRequest));
     }
 
     /**
@@ -76,23 +65,16 @@ public class DataSubjectRequestService {
      * are cleared by sending a blank string. Field-level changes to the workflow timestamps and
      * the subject link are recorded in the audit log.
      */
-    @Transactional
     public DataSubjectRequestDto update(int orgId, long requestId, int actorId,
             DataSubjectRequestUpsertRequest request) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
-        sessionSecurityService.requireRecentAuthentication(actorId);
-        DataSubjectRequest subjectRequest = findRequest(orgId, requestId);
+        DataSubjectRequest subjectRequest = tenantWorkScope.unrouted(
+            () -> controlOperations.loadForMutation(orgId, requestId, actorId));
         DataSubjectRequest before = auditSnapshot(subjectRequest);
         apply(subjectRequest, orgId, actorId, request, false);
-        dataSubjectRequestMapper.update(subjectRequest);
-        Map<String, Object> changes = new LinkedHashMap<>(auditChanges(subjectRequest));
-        Map<String, Object> diff = auditService.diff(before, subjectRequest, AUDIT_DIFF_FIELDS);
-        if (diff != null && !diff.isEmpty()) {
-            changes.put("fields", diff);
-        }
-        auditService.record("appi.subject_request.update", "organization", orgId,
-            requestLabel(subjectRequest.getId()), "APPI data-subject request updated", changes);
-        return DataSubjectRequestDto.from(findRequest(orgId, requestId));
+        validateSubjectLink(orgId, actorId,
+            subjectRequest.getSubjectWorkspaceId(), subjectRequest.getSubjectPersonId());
+        return tenantWorkScope.unrouted(
+            () -> controlOperations.update(orgId, requestId, actorId, before, subjectRequest));
     }
 
     /**
@@ -104,71 +86,38 @@ public class DataSubjectRequestService {
      * section is capped at {@link #DISCLOSURE_AUDIT_LIMIT} entries with the uncapped total exposed
      * for truncation detection.
      */
-    @Transactional
     public DataSubjectDisclosureDto disclosure(int orgId, long requestId, int actorId) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
-        sessionSecurityService.requireRecentAuthentication(actorId);
-        DataSubjectRequest subjectRequest = findRequest(orgId, requestId);
-        if (!"disclosure".equals(subjectRequest.getRequestType())) {
-            throw new BadRequestException("Disclosure can only be assembled for a disclosure-type request");
+        DisclosureControlData control = tenantWorkScope.unrouted(
+            () -> controlOperations.prepareDisclosure(orgId, requestId, actorId));
+        int workspaceId = control.request().getSubjectWorkspaceId();
+        int personId = control.request().getSubjectPersonId();
+        DataSubjectDisclosureDto disclosure = disclosureAccess.assemble(
+            orgId, actorId, workspaceId, personId, control.workspaces().ids());
+        for (ThirdPartyProvisionDto provision : disclosure.getThirdPartyProvisions()) {
+            String workspaceName = control.workspaces().names().get(provision.getTargetWorkspaceId());
+            if (workspaceName == null) {
+                throw new ResourceNotFoundException(
+                    "Third-party provision workspace not found: " + provision.getTargetWorkspaceId());
+            }
+            provision.setTargetWorkspaceName(workspaceName);
         }
-        if (subjectRequest.getIdentityVerifiedAt() == null) {
-            throw new BadRequestException(
-                "Identity verification must be recorded before disclosure can be assembled");
-        }
-        Integer workspaceId = subjectRequest.getSubjectWorkspaceId();
-        Integer personId = subjectRequest.getSubjectPersonId();
-        if (workspaceId == null || personId == null) {
-            throw new BadRequestException("A linked subject person is required before disclosure can be assembled");
-        }
-        PersonDto person = dataSubjectRequestMapper.findDisclosurePerson(orgId, workspaceId, personId);
-        if (person == null) {
-            throw new ResourceNotFoundException("Linked subject person not found: " + personId);
-        }
-
-        DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
         disclosure.setRequestId(requestId);
         disclosure.setSubjectWorkspaceId(workspaceId);
         disclosure.setSubjectPersonId(personId);
-        disclosure.setPerson(person);
-        disclosure.setTags(dataSubjectRequestMapper.findDisclosureTags(orgId, workspaceId, personId));
-        disclosure.setCustomFieldValues(
-            dataSubjectRequestMapper.findDisclosureCustomFields(orgId, workspaceId, personId));
-        disclosure.setActivities(dataSubjectRequestMapper.findDisclosureActivities(orgId, workspaceId, personId));
-        disclosure.setNotes(dataSubjectRequestMapper.findDisclosureNotes(orgId, workspaceId, personId));
-        disclosure.setTasks(dataSubjectRequestMapper.findDisclosureTasks(orgId, workspaceId, personId));
-        disclosure.setAttachments(dataSubjectRequestMapper.findDisclosureAttachments(orgId, workspaceId, personId));
-        disclosure.setEmploymentHistory(
-            dataSubjectRequestMapper.findDisclosureEmployment(orgId, workspaceId, personId));
-        disclosure.setRelationshipEdges(dataSubjectRequestMapper.findDisclosureEdges(orgId, workspaceId, personId));
-        disclosure.setDealAssociations(dataSubjectRequestMapper.findDisclosureDeals(orgId, workspaceId, personId));
-        disclosure.setIntroductions(
-            dataSubjectRequestMapper.findDisclosureIntroductions(orgId, workspaceId, personId));
-        disclosure.setThirdPartyProvisions(
-            dataSubjectRequestMapper.findDisclosureProvisions(orgId, workspaceId, personId));
-        disclosure.setAuditTrail(
-            dataSubjectRequestMapper.findDisclosureAudit(orgId, workspaceId, personId, DISCLOSURE_AUDIT_LIMIT));
-        disclosure.setAuditTrailTotal(dataSubjectRequestMapper.countDisclosureAudit(orgId, workspaceId, personId));
+        disclosure.setAuditTrail(control.auditTrail());
+        disclosure.setAuditTrailTotal(control.auditTrailTotal());
         disclosure.setGeneratedAt(LocalDateTime.now());
 
         try {
-            auditService.recordStrict("appi.subject_request.disclosure", "organization", orgId,
-                requestLabel(subjectRequest.getId()), "Subject-scoped disclosure export assembled",
-                Map.of("requestId", subjectRequest.getId(), "subjectPersonId", personId,
-                    "subjectWorkspaceId", workspaceId));
-        } catch (RuntimeException e) {
+            tenantWorkScope.unrouted(() -> {
+                controlOperations.recordDisclosureAudit(orgId, requestId, personId, workspaceId);
+                return null;
+            });
+        } catch (RuntimeException exception) {
             throw new ServiceUnavailableException(
-                "Disclosure requires a durable audit record and none could be written", e);
+                "Disclosure requires a durable audit record and none could be written", exception);
         }
         return disclosure;
-    }
-
-    private DataSubjectRequest findRequest(int orgId, long requestId) {
-        DataSubjectRequest request = dataSubjectRequestMapper.findById(orgId, requestId);
-        if (request == null) {
-            throw new ResourceNotFoundException("Data-subject request not found: " + requestId);
-        }
-        return request;
     }
 
     private void apply(DataSubjectRequest target, int orgId, int actorId,
@@ -185,7 +134,6 @@ public class DataSubjectRequestService {
         LocalDateTime respondedAt = mysqlPrecision(merge(create, request.getRespondedAt(), target.getRespondedAt()));
         LocalDateTime closedAt = mysqlPrecision(merge(create, request.getClosedAt(), target.getClosedAt()));
         validateChronology(receivedAt, identityVerifiedAt, respondedAt, closedAt);
-        validateSubjectLink(orgId, subjectWorkspaceId, subjectPersonId);
 
         target.setOrgId(orgId);
         target.setRequestType(normalize(request.getRequestType(), create ? null : target.getRequestType(),
@@ -235,12 +183,17 @@ public class DataSubjectRequestService {
         }
     }
 
-    private void validateSubjectLink(int orgId, Integer workspaceId, Integer personId) {
+    private void validateSubjectLink(int orgId, int actorId, Integer workspaceId, Integer personId) {
         if (workspaceId == null && personId == null) {
             return;
         }
-        if (workspaceId == null || personId == null
-                || !dataSubjectRequestMapper.subjectPersonInOrg(orgId, workspaceId, personId)) {
+        if (workspaceId == null || personId == null) {
+            throw new BadRequestException("Subject person must exist in a workspace belonging to the organization");
+        }
+        boolean workspaceBelongsToOrg = tenantWorkScope.unrouted(
+            () -> controlOperations.workspaceBelongsToOrg(orgId, workspaceId));
+        if (!workspaceBelongsToOrg
+                || !disclosureAccess.subjectPersonExists(orgId, actorId, workspaceId, personId)) {
             throw new BadRequestException("Subject person must exist in a workspace belonging to the organization");
         }
     }
@@ -285,18 +238,6 @@ public class DataSubjectRequestService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private static int cap(int limit) {
-        return Math.max(1, Math.min(limit, MAX_LIMIT));
-    }
-
-    private static int offset(int offset) {
-        return Math.min(Math.max(0, offset), MAX_OFFSET);
-    }
-
-    private static String requestLabel(long requestId) {
-        return "Subject request " + requestId;
-    }
-
     private static DataSubjectRequest auditSnapshot(DataSubjectRequest source) {
         DataSubjectRequest snapshot = new DataSubjectRequest();
         snapshot.setId(source.getId());
@@ -321,10 +262,5 @@ public class DataSubjectRequestService {
         snapshot.setCreatedAt(source.getCreatedAt());
         snapshot.setUpdatedAt(source.getUpdatedAt());
         return snapshot;
-    }
-
-    private static Map<String, Object> auditChanges(DataSubjectRequest request) {
-        return Map.of("requestId", request.getId(), "requestType", request.getRequestType(),
-            "status", request.getStatus());
     }
 }

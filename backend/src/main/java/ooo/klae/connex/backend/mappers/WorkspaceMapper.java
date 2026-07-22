@@ -54,6 +54,7 @@ public interface WorkspaceMapper {
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
     int insert(Workspace workspace);
     Integer getOrgId(int workspaceId);
+    List<Workspace> findByOrgId(@Param("orgId") int orgId);
     int countEnforcingSsoMemberships(int userId);
     int addMember(
         @Param("workspaceId") int workspaceId,

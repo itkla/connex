@@ -17,16 +17,13 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
-import ooo.klae.connex.backend.beans.DataSubjectRequest;
-
-/** Verifies control-plane data-subject request SQL stays bound and plane-pure. */
-class DataSubjectRequestMapperXmlTest {
+/** Verifies disclosure SQL stays parameter-bound and tenant-plane pure. */
+class DataSubjectDisclosureMapperXmlTest {
 
     @Test
-    void mapperXmlParsesAndUsesBoundParametersWithoutTenantTables() throws Exception {
+    void mapperXmlParsesAndPinsEverySectionToTheSubjectAndAllowlist() throws Exception {
         Configuration configuration = new Configuration();
-        configuration.getTypeAliasRegistry().registerAlias("DataSubjectRequest", DataSubjectRequest.class);
-        String resource = "mappers/DataSubjectRequestMapper.xml";
+        String resource = "mappers/DataSubjectDisclosureMapper.xml";
         String xml;
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
             assertNotNull(input);
@@ -38,34 +35,31 @@ class DataSubjectRequestMapperXmlTest {
         }
 
         Map<String, Object> parameters = new HashMap<>();
-        parameters.put("orgId", 3);
+        parameters.put("workspaceId", 4);
         parameters.put("personId", 5);
         parameters.put("workspaceIds", List.of(4, 6));
-        parameters.put("status", "received");
-        parameters.put("limit", 1_000);
-        parameters.put("offset", 0);
-        String auditSql = configuration.getMappedStatement(
-            DataSubjectRequestMapper.class.getName() + ".findDisclosureAudit")
-            .getBoundSql(parameters)
-            .getSql();
-        assertTrue(auditSql.contains("workspace_id IN"));
-        assertTrue(auditSql.contains("org_id = ?"));
-        assertTrue(auditSql.contains("entity_id = ?"));
-
         Set<String> expectedStatements = Set.of(
-            "insert", "update", "findById", "findByOrg", "findDisclosureAudit", "countDisclosureAudit");
-        String namespacePrefix = DataSubjectRequestMapper.class.getName() + ".";
+            "subjectPersonExists", "findPerson", "findTags", "findCustomFields", "findActivities",
+            "findNotes", "findTasks", "findAttachments", "findEmployment", "findEdges", "findDeals",
+            "findIntroductions", "findProvisions");
+        String namespacePrefix = DataSubjectDisclosureMapper.class.getName() + ".";
+        Set<String> found = new HashSet<>();
         for (MappedStatement statement : new HashSet<>(configuration.getMappedStatements())) {
             if (!statement.getId().startsWith(namespacePrefix) || statement.getId().contains("!")) {
                 continue;
             }
-            assertTrue(expectedStatements.contains(statement.getId().substring(namespacePrefix.length())));
+            String statementName = statement.getId().substring(namespacePrefix.length());
+            found.add(statementName);
+            String sql = statement.getBoundSql(parameters).getSql();
+            assertTrue(sql.contains("workspace_id = ?"), statementName);
+            assertTrue(sql.contains("id = ?"), statementName);
+            if (!"subjectPersonExists".equals(statementName)) {
+                assertTrue(sql.contains(" IN"), statementName);
+            }
         }
+        assertTrue(found.equals(expectedStatements), found.toString());
         assertFalse(xml.contains("${"));
-        for (String table : Set.of(
-                "activity", "attachment", "company", "custom_field_definition", "custom_field_value",
-                "deal", "deal_person", "introduction", "note", "person", "person_edge",
-                "person_employment", "person_share", "person_tag", "stage", "tag", "task")) {
+        for (String table : Set.of("workspace", "audit_log", "data_subject_request")) {
             assertFalse(xml.matches("(?s).*(?:FROM|JOIN|INTO|UPDATE)\\s+" + table + "\\b.*"), table);
         }
     }
