@@ -105,6 +105,8 @@ public class ReportService {
             "warm_intro_opportunity_value", "warm_intro_reachable_account_count");
     private static final Set<String> RELATIONSHIP_MEASURES = Set.of(
             "count", "company_count", "reverse_intro_weighted_opportunities");
+    private static final Set<String> EMPLOYMENT_MEASURES = Set.of(
+            "employment_departure_count", "employment_arrival_count");
     private static final Set<String> REVERSE_INTRO_MEASURES = Set.of(
             "reverse_intro_weighted_opportunities");
     private static final Set<String> COUNT_MEASURES = Set.of("count");
@@ -113,7 +115,8 @@ public class ReportService {
             "none", "date", "pipeline", "stage", "owner", "status", "company", "deal", "risk");
     private static final Set<String> ACTIVITY_GROUPS = Set.of("none", "date", "activity_type", "owner");
     private static final Set<String> TASK_GROUPS = Set.of("none", "date", "status", "owner");
-    private static final Set<String> PEOPLE_GROUPS = Set.of("none", "company");
+    private static final Set<String> PEOPLE_GROUPS = Set.of("none", "date", "company", "person");
+    private static final Set<String> EMPLOYMENT_GROUPS = Set.of("none", "date", "company", "person");
     private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry", "company", "connector");
     private static final Set<String> RELATIONSHIP_GROUPS = Set.of("none", "warmth_band", "trend", "pair");
     private static final Set<String> DEAL_STATUSES = Set.of("open", "won", "lost");
@@ -121,7 +124,7 @@ public class ReportService {
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
-            "forecasting", "quota-attainment", "activity-team", "network-warm-intros");
+            "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves");
 
     private final ReportMapper reportMapper;
     private final GoalMapper goalMapper;
@@ -162,7 +165,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the eight built-in report starting points. */
+    /** Returns the nine built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -232,6 +235,25 @@ public class ReportService {
                                         "reverse_intro_weighted_opportunities", "none", "kpi"),
                                 widget("reverse-intro-matches", "Top reverse-intro matches", "relationships",
                                         "reverse_intro_weighted_opportunities", "pair", "table"))),
+                template("employment-moves", "Employment Moves",
+                        "Contact departures and arrivals that signal relationship risk and new-account opportunities.",
+                        "monthly", List.of(
+                                widget("departure-total", "Employment departures", "people",
+                                        "employment_departure_count", "none", "kpi"),
+                                widget("arrival-total", "Employment arrivals", "people",
+                                        "employment_arrival_count", "none", "kpi"),
+                                widget("departure-trend", "Employment departures", "people",
+                                        "employment_departure_count", "date", "line-area"),
+                                widget("arrival-trend", "Employment arrivals", "people",
+                                        "employment_arrival_count", "date", "line-area"),
+                                widget("departure-companies", "Employment departures", "people",
+                                        "employment_departure_count", "company", "table"),
+                                widget("arrival-companies", "Employment arrivals", "people",
+                                        "employment_arrival_count", "company", "table"),
+                                widget("departure-contacts", "Employment departures", "people",
+                                        "employment_departure_count", "person", "table"),
+                                widget("arrival-contacts", "Employment arrivals", "people",
+                                        "employment_arrival_count", "person", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),
@@ -631,7 +653,9 @@ public class ReportService {
             case "deals" -> reportMapper.aggregateDeals(query);
             case "activities" -> reportMapper.aggregateActivities(query);
             case "tasks" -> reportMapper.aggregateTasks(query);
-            case "people" -> reportMapper.aggregatePeople(query);
+            case "people" -> EMPLOYMENT_MEASURES.contains(query.measure())
+                    ? reportMapper.aggregateEmployment(query)
+                    : reportMapper.aggregatePeople(query);
             case "companies" -> reportMapper.aggregateCompanies(query);
             default -> throw new BadRequestException("Unsupported report data source: " + dataSource);
         };
@@ -1082,6 +1106,7 @@ public class ReportService {
         Set<String> measures = new HashSet<>(DEAL_MEASURES);
         measures.addAll(COMPANY_MEASURES);
         measures.addAll(RELATIONSHIP_MEASURES);
+        measures.addAll(EMPLOYMENT_MEASURES);
         measures.addAll(COUNT_MEASURES);
         return Set.copyOf(measures);
     }
@@ -1107,6 +1132,7 @@ public class ReportService {
         }
         Set<String> measures = switch (source) {
             case "deals" -> DEAL_MEASURES;
+            case "people" -> supportedPeopleMeasures();
             case "companies" -> COMPANY_MEASURES;
             case "relationships" -> RELATIONSHIP_MEASURES;
             default -> COUNT_MEASURES;
@@ -1141,6 +1167,9 @@ public class ReportService {
                 || "reverse_intro_weighted_opportunities".equals(measure)
                         && !Set.of("none", "pair").contains(group)
                 || "pair".equals(group) && !REVERSE_INTRO_MEASURES.contains(measure)
+                || EMPLOYMENT_MEASURES.contains(measure) && !EMPLOYMENT_GROUPS.contains(group)
+                || "people".equals(source) && "count".equals(measure)
+                        && !Set.of("none", "company").contains(group)
                 || FORECAST_MEASURES.contains(measure)
                         && !Set.of("none", "date", "pipeline", "stage").contains(group)
                 || "attainment".equals(measure) && (
@@ -1148,6 +1177,12 @@ public class ReportService {
                         || !Set.of("bar", "kpi").contains(chart))) {
             throw new BadRequestException("Unsupported report measure or grouping");
         }
+    }
+
+    private static Set<String> supportedPeopleMeasures() {
+        Set<String> measures = new HashSet<>(COUNT_MEASURES);
+        measures.addAll(EMPLOYMENT_MEASURES);
+        return Set.copyOf(measures);
     }
 
     private static void validateFilters(ReportFilters filters) {

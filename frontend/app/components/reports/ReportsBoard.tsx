@@ -8,6 +8,7 @@ import {
     ArrowPathIcon,
     ArrowRightIcon,
     ArrowTrendingUpIcon,
+    BriefcaseIcon,
     ChartBarIcon,
     DocumentDuplicateIcon,
     EllipsisHorizontalIcon,
@@ -57,6 +58,7 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'relationship-coverage': HeartIcon,
     'relationship-health': ShieldExclamationIcon,
     'network-warm-intros': ShareIcon,
+    'employment-moves': BriefcaseIcon,
     'activity-team': UserGroupIcon,
 };
 

@@ -249,6 +249,101 @@ class ReportIntegrationTest {
           }
         }
         """;
+    private static final String EMPLOYMENT_REPORT_BODY = """
+        {
+          "name": "January Employment Moves",
+          "description": "Contact departures and arrivals",
+          "cadence": "custom",
+          "templateKey": "employment-moves",
+          "config": {
+            "widgets": [
+              {
+                "id": "departure-total",
+                "title": "Employment departures",
+                "dataSource": "people",
+                "measure": "employment_departure_count",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "arrival-total",
+                "title": "Employment arrivals",
+                "dataSource": "people",
+                "measure": "employment_arrival_count",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "departure-date",
+                "title": "Employment departures",
+                "dataSource": "people",
+                "measure": "employment_departure_count",
+                "groupBy": "date",
+                "chartType": "line-area"
+              },
+              {
+                "id": "arrival-date",
+                "title": "Employment arrivals",
+                "dataSource": "people",
+                "measure": "employment_arrival_count",
+                "groupBy": "date",
+                "chartType": "line-area"
+              },
+              {
+                "id": "departure-company",
+                "title": "Employment departures",
+                "dataSource": "people",
+                "measure": "employment_departure_count",
+                "groupBy": "company",
+                "chartType": "table"
+              },
+              {
+                "id": "arrival-company",
+                "title": "Employment arrivals",
+                "dataSource": "people",
+                "measure": "employment_arrival_count",
+                "groupBy": "company",
+                "chartType": "table"
+              },
+              {
+                "id": "departure-person",
+                "title": "Employment departures",
+                "dataSource": "people",
+                "measure": "employment_departure_count",
+                "groupBy": "person",
+                "chartType": "table"
+              },
+              {
+                "id": "arrival-person",
+                "title": "Employment arrivals",
+                "dataSource": "people",
+                "measure": "employment_arrival_count",
+                "groupBy": "person",
+                "chartType": "table"
+              }
+            ],
+            "filters": {
+              "pipelineIds": null,
+              "ownerIds": [%d],
+              "statuses": null,
+              "tagIds": [%d],
+              "warmthBands": null
+            },
+            "range": {"start": "2026-01-01", "end": "2026-01-31"},
+            "bucket": "day",
+            "layout": [
+              {"widgetId": "departure-total", "x": 0, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "arrival-total", "x": 6, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "departure-date", "x": 0, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "arrival-date", "x": 6, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "departure-company", "x": 0, "y": 8, "width": 6, "height": 4},
+              {"widgetId": "arrival-company", "x": 6, "y": 8, "width": 6, "height": 4},
+              {"widgetId": "departure-person", "x": 0, "y": 12, "width": 6, "height": 4},
+              {"widgetId": "arrival-person", "x": 6, "y": 12, "width": 6, "height": 4}
+            ]
+          }
+        }
+        """;
     private static final String FORECAST_BODY = """
         {
           "name": "Forward Forecast",
@@ -562,6 +657,237 @@ class ReportIntegrationTest {
                 "warm_intro_opportunity_value",
                 "warm_intro_reachable_account_count",
                 "reverse_intro_weighted_opportunities")));
+    }
+
+    @Test
+    void employmentMoveTemplateIsAvailableWithCanonicalMeasuresAndGroups() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        MvcResult result = mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.key == 'employment-moves')]").isNotEmpty())
+            .andReturn();
+
+        JsonNode template = findTemplate(
+                objectMapper.readTree(result.getResponse().getContentAsString()), "employment-moves");
+        assertNotNull(template);
+        assertEquals("monthly", template.get("cadence").asText());
+        Set<String> measures = new java.util.HashSet<>();
+        Set<String> groups = new java.util.HashSet<>();
+        for (JsonNode widget : template.get("config").get("widgets")) {
+            assertEquals("people", widget.get("dataSource").asText());
+            measures.add(widget.get("measure").asText());
+            groups.add(widget.get("groupBy").asText());
+        }
+        assertEquals(Set.of("employment_departure_count", "employment_arrival_count"), measures);
+        assertEquals(Set.of("none", "date", "company", "person"), groups);
+    }
+
+    @Test
+    void employmentMovesPreserveTransitionFiltersPeriodsSnapshotsAndTenantBoundaries() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspaceInOrg(organization.getId());
+        User member = newMember(workspace, "member");
+        User otherOwner = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int trackedTag = insertTag(workspace.getId(), "Tracked moves");
+        int formerAlpha = insertCompany(workspace.getId(), "Former Alpha");
+        int destinationBeta = insertCompany(workspace.getId(), "Destination Beta");
+        int destinationGamma = insertCompany(workspace.getId(), "Destination Gamma");
+        int firstEmployer = insertCompany(workspace.getId(), "First Employer");
+
+        int direct = insertPerson(workspace.getId(), destinationBeta, member.getId(), "Direct Move");
+        tagPerson(direct, trackedTag);
+        insertEmployment(workspace.getId(), direct, formerAlpha, "Former Alpha Snapshot",
+                "2025-11-01 00:00:00", "2026-01-10 09:00:00");
+        insertEmployment(workspace.getId(), direct, destinationBeta, "Destination Beta Snapshot",
+                "2026-01-10 09:00:00", null);
+
+        int unknownDestination = insertPerson(
+                workspace.getId(), formerAlpha, member.getId(), "Unknown Destination");
+        tagPerson(unknownDestination, trackedTag);
+        insertEmployment(workspace.getId(), unknownDestination, formerAlpha, "Former Alpha Snapshot",
+                "2025-11-02 00:00:00", "2026-01-12 09:00:00");
+
+        int gapped = insertPerson(workspace.getId(), destinationGamma, member.getId(), "Gapped Move");
+        tagPerson(gapped, trackedTag);
+        insertEmployment(workspace.getId(), gapped, formerAlpha, "Former Alpha Snapshot",
+                "2025-11-03 00:00:00", "2025-12-15 09:00:00");
+        insertEmployment(workspace.getId(), gapped, destinationGamma, "Destination Gamma Snapshot",
+                "2026-01-20 09:00:00", null);
+
+        int firstOnly = insertPerson(workspace.getId(), firstEmployer, member.getId(), "First Employer Only");
+        tagPerson(firstOnly, trackedTag);
+        insertEmployment(workspace.getId(), firstOnly, firstEmployer, "First Employer Snapshot",
+                "2026-01-15 09:00:00", null);
+
+        int priorMove = insertPerson(workspace.getId(), destinationBeta, member.getId(), "Prior Move");
+        tagPerson(priorMove, trackedTag);
+        insertEmployment(workspace.getId(), priorMove, formerAlpha, "Prior Former Snapshot",
+                "2025-10-01 00:00:00", "2025-12-10 09:00:00");
+        insertEmployment(workspace.getId(), priorMove, destinationBeta, "Prior Destination Snapshot",
+                "2025-12-10 09:00:00", null);
+
+        int wrongOwner = insertPerson(workspace.getId(), destinationBeta, otherOwner.getId(), "Wrong Owner");
+        tagPerson(wrongOwner, trackedTag);
+        insertDirectMove(workspace.getId(), wrongOwner, formerAlpha, destinationBeta, "2026-01-08 09:00:00");
+
+        int untagged = insertPerson(workspace.getId(), destinationBeta, member.getId(), "Untagged Move");
+        insertDirectMove(workspace.getId(), untagged, formerAlpha, destinationBeta, "2026-01-09 09:00:00");
+
+        int suspended = insertPerson(workspace.getId(), destinationBeta, member.getId(), "Suspended Move");
+        tagPerson(suspended, trackedTag);
+        insertDirectMove(workspace.getId(), suspended, formerAlpha, destinationBeta, "2026-01-11 09:00:00");
+        suspendPerson(suspended);
+
+        Workspace otherWorkspace = newWorkspaceInOrg(organization.getId());
+        int otherCompany = insertCompany(otherWorkspace.getId(), "Other Workspace Company");
+        int foreignPerson = insertPerson(
+                otherWorkspace.getId(), otherCompany, member.getId(), "Foreign Owned Person");
+        tagPerson(foreignPerson, trackedTag);
+        insertPersonShare(foreignPerson, workspace.getId(), member.getId());
+        insertDirectMove(
+                workspace.getId(), foreignPerson, formerAlpha, destinationBeta, "2026-01-13 09:00:00");
+        insertEmployment(otherWorkspace.getId(), direct, formerAlpha, "Foreign Employment Row",
+                "2025-11-01 00:00:00", "2026-01-14 09:00:00");
+
+        int reportId = createReport(
+                session, workspace, EMPLOYMENT_REPORT_BODY.formatted(member.getId(), trackedTag));
+        MvcResult generated = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andReturn();
+        JsonNode document = objectMapper.readTree(generated.getResponse().getContentAsString());
+
+        JsonNode departureTotal = findWidget(document.get("widgets"), "departure-total");
+        JsonNode arrivalTotal = findWidget(document.get("widgets"), "arrival-total");
+        assertNotNull(departureTotal);
+        assertNotNull(arrivalTotal);
+        assertDecimal("2", departureTotal.get("total").decimalValue());
+        assertDecimal("2", departureTotal.get("priorTotal").decimalValue());
+        assertDecimal("2", arrivalTotal.get("total").decimalValue());
+        assertDecimal("1", arrivalTotal.get("priorTotal").decimalValue());
+
+        assertEquals(
+                Map.of("2026-01-10", new BigDecimal("1"), "2026-01-12", new BigDecimal("1"),
+                        "2026-01-15", BigDecimal.ZERO),
+                pointValues(findWidget(document.get("widgets"), "departure-date")));
+        assertEquals(
+                Map.of("2026-01-10", new BigDecimal("1"), "2026-01-20", new BigDecimal("1")),
+                pointValues(findWidget(document.get("widgets"), "arrival-date")));
+        assertEquals(
+                Map.of("Former Alpha Snapshot", new BigDecimal("2")),
+                positivePointValuesByLabel(findWidget(document.get("widgets"), "departure-company")));
+        assertEquals(
+                Map.of(
+                        "Destination Beta Snapshot", new BigDecimal("1"),
+                        "Destination Gamma Snapshot", new BigDecimal("1")),
+                positivePointValuesByLabel(findWidget(document.get("widgets"), "arrival-company")));
+        assertEquals(
+                Map.of("Direct Move", new BigDecimal("1"), "Unknown Destination", new BigDecimal("1")),
+                positivePointValuesByLabel(findWidget(document.get("widgets"), "departure-person")));
+        assertEquals(
+                Map.of("Direct Move", new BigDecimal("1"), "Gapped Move", new BigDecimal("1")),
+                positivePointValuesByLabel(findWidget(document.get("widgets"), "arrival-person")));
+
+        MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.computedResult.widgets[0].total").value(2))
+            .andReturn();
+        int snapshotId = responseId(snapshotResult);
+
+        int later = insertPerson(workspace.getId(), destinationBeta, member.getId(), "Later Move");
+        tagPerson(later, trackedTag);
+        insertDirectMove(workspace.getId(), later, formerAlpha, destinationBeta, "2026-01-25 09:00:00");
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(3))
+            .andExpect(jsonPath("$.widgets[1].total").value(3));
+        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.computedResult.widgets[0].total").value(2));
+        MvcResult csvResult = mockMvc.perform(post("/api/reports/{id}/export.csv", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andReturn();
+        String csv = csvResult.getResponse().getContentAsString();
+        assertTrue(csv.contains(
+                "\"employment_departure_count · Total\",\"3\",\"2\",\"count\""));
+        assertTrue(csv.contains(
+                "\"employment_arrival_count · Total\",\"3\",\"1\",\"count\""));
+        assertTrue(csv.contains(
+                "\"employment_departure_count · Former Alpha Snapshot\",\"2\",\"1\",\"count\""));
+        assertTrue(csv.contains(
+                "\"employment_departure_count · Excluded Former Snapshot\",\"1\",\"0\",\"count\""));
+        assertTrue(csv.contains(
+                "\"employment_arrival_count · Direct Move\",\"1\",\"0\",\"count\""));
+    }
+
+    @Test
+    void employmentMoveDateBucketsUseUserTimezoneHalfOpenBounds() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        userMapper.updateTimezone(member.getId(), "America/New_York");
+        MockHttpSession session = login(member.getUsername());
+        int former = insertCompany(workspace.getId(), "Boundary Former");
+        int destination = insertCompany(workspace.getId(), "Boundary Destination");
+        List<String> boundaries = List.of(
+                "2026-03-08 04:59:59", "2026-03-08 05:00:00",
+                "2026-03-09 03:59:59", "2026-03-09 04:00:00");
+        for (int index = 0; index < boundaries.size(); index++) {
+            int departure = insertPerson(
+                    workspace.getId(), former, member.getId(), "Boundary Departure " + index);
+            insertEmployment(workspace.getId(), departure, former, "Boundary Former",
+                    "2026-01-01 00:00:00", boundaries.get(index));
+            int arrival = insertPerson(
+                    workspace.getId(), destination, member.getId(), "Boundary Arrival " + index);
+            insertEmployment(workspace.getId(), arrival, former, "Boundary Former",
+                    "2026-01-01 00:00:00", "2026-02-01 00:00:00");
+            insertEmployment(workspace.getId(), arrival, destination, "Boundary Destination",
+                    boundaries.get(index), null);
+        }
+
+        int reportId = createReport(session, workspace, employmentBoundaryReportBody());
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(2))
+            .andExpect(jsonPath("$.widgets[0].points.length()").value(1))
+            .andExpect(jsonPath("$.widgets[0].points[0].key").value("2026-03-08"))
+            .andExpect(jsonPath("$.widgets[1].total").value(2))
+            .andExpect(jsonPath("$.widgets[1].points.length()").value(1))
+            .andExpect(jsonPath("$.widgets[1].points[0].key").value("2026-03-08"));
     }
 
     @Test
@@ -1369,6 +1695,15 @@ class ReportIntegrationTest {
         return null;
     }
 
+    private static JsonNode findWidget(JsonNode widgets, String id) {
+        for (JsonNode widget : widgets) {
+            if (id.equals(widget.get("widgetId").asText())) {
+                return widget;
+            }
+        }
+        return null;
+    }
+
     private static Map<String, BigDecimal> pointValues(JsonNode widget) {
         Map<String, BigDecimal> values = new LinkedHashMap<>();
         for (JsonNode point : widget.get("points")) {
@@ -1383,6 +1718,61 @@ class ReportIntegrationTest {
             values.put(point.get("key").asText(), point.get("priorValue").decimalValue());
         }
         return values;
+    }
+
+    private static Map<String, BigDecimal> positivePointValuesByLabel(JsonNode widget) {
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        for (JsonNode point : widget.get("points")) {
+            BigDecimal value = point.get("value").decimalValue();
+            if (value.signum() > 0) {
+                values.put(point.get("label").asText(), value);
+            }
+        }
+        return values;
+    }
+
+    private static String employmentBoundaryReportBody() {
+        return """
+            {
+              "name": "Employment boundary report",
+              "description": "Timezone boundary verification",
+              "cadence": "custom",
+              "templateKey": "employment-moves",
+              "config": {
+                "widgets": [
+                  {
+                    "id": "departure-date",
+                    "title": "Employment departures",
+                    "dataSource": "people",
+                    "measure": "employment_departure_count",
+                    "groupBy": "date",
+                    "chartType": "line-area"
+                  },
+                  {
+                    "id": "arrival-date",
+                    "title": "Employment arrivals",
+                    "dataSource": "people",
+                    "measure": "employment_arrival_count",
+                    "groupBy": "date",
+                    "chartType": "line-area"
+                  }
+                ],
+                "filters": {
+                  "pipelineIds": null,
+                  "ownerIds": null,
+                  "statuses": null,
+                  "tagIds": null,
+                  "warmthBands": null
+                },
+                "range": {"start": "2026-03-08", "end": "2026-03-08"},
+                "bucket": "day",
+                "layout": [
+                  {"widgetId": "departure-date", "x": 0, "y": 0, "width": 6, "height": 4},
+                  {"widgetId": "arrival-date", "x": 6, "y": 0, "width": 6, "height": 4}
+                ]
+              }
+            }
+            """;
     }
 
     private static void assertDecimal(String expected, BigDecimal actual) {
@@ -1441,12 +1831,59 @@ class ReportIntegrationTest {
     }
 
     private int insertPerson(int workspaceId, int companyId, String name) {
+        return insertPerson(workspaceId, companyId, null, name);
+    }
+
+    private int insertPerson(int workspaceId, int companyId, Integer ownerId, String name) {
         jdbcTemplate.update(
-                "INSERT INTO person (workspace_id, company_id, name, created_at) VALUES (?, ?, ?, ?)",
-                workspaceId, companyId, name, "2026-01-01 00:00:00");
+                "INSERT INTO person (workspace_id, owner_id, company_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
+                workspaceId, ownerId, companyId, name, "2026-01-01 00:00:00");
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM person WHERE workspace_id = ? AND name = ?",
                 Integer.class, workspaceId, name);
+    }
+
+    private int insertTag(int workspaceId, String name) {
+        jdbcTemplate.update(
+                "INSERT INTO tag (workspace_id, name, color) VALUES (?, ?, ?)",
+                workspaceId, name, "#64748B");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM tag WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private void tagPerson(int personId, int tagId) {
+        jdbcTemplate.update(
+                "INSERT INTO person_tag (person_id, tag_id) VALUES (?, ?)",
+                personId, tagId);
+    }
+
+    private void suspendPerson(int personId) {
+        jdbcTemplate.update(
+                "UPDATE person SET suspended_at = ? WHERE id = ?",
+                "2026-01-01 00:00:00", personId);
+    }
+
+    private void insertEmployment(
+            int workspaceId,
+            int personId,
+            int companyId,
+            String companyName,
+            String startedAt,
+            String endedAt) {
+        jdbcTemplate.update(
+                "INSERT INTO person_employment "
+                        + "(workspace_id, person_id, company_id, company_name, started_at, ended_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, personId, companyId, companyName, startedAt, endedAt);
+    }
+
+    private void insertDirectMove(
+            int workspaceId, int personId, int formerCompanyId, int destinationCompanyId, String movedAt) {
+        insertEmployment(workspaceId, personId, formerCompanyId, "Excluded Former Snapshot",
+                "2025-11-01 00:00:00", movedAt);
+        insertEmployment(workspaceId, personId, destinationCompanyId, "Excluded Destination Snapshot",
+                movedAt, null);
     }
 
     private void insertPersonActivity(int workspaceId, int userId, int personId, String timestamp) {

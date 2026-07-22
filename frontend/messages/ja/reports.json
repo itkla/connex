@@ -82,6 +82,10 @@
         "name": "ネットワークとウォーム紹介",
         "description": "到達可能なパイプライン、未活用の紹介経路、コネクターのカバレッジ、リバース紹介の可能性。"
       },
+      "employment-moves": {
+        "name": "勤務先の変化",
+        "description": "連絡先の離職・入社を追跡し、関係性リスクと新規開拓の機会を可視化します。"
+      },
       "activity-team": {
         "name": "活動とチーム",
         "description": "チーム活動とタスク実行状況。"
@@ -235,6 +239,8 @@
       "warm_intro_opportunity_value": "ウォーム紹介の機会価値",
       "warm_intro_reachable_account_count": "ウォーム紹介で到達可能なアカウント",
       "reverse_intro_weighted_opportunities": "加重リバース紹介機会",
+      "employment_departure_count": "勤務先からの離職数",
+      "employment_arrival_count": "勤務先への入社数",
       "forecast_best": "最良ケース予測",
       "forecast_weighted": "見込み予測（加重）",
       "forecast_worst": "コミット予測",
@@ -255,7 +261,8 @@
       "warmth_band": "温度帯",
       "trend": "傾向",
       "connector": "コネクター",
-      "pair": "提案された組み合わせ"
+      "pair": "提案された組み合わせ",
+      "person": "連絡先"
     },
     "chart": {
       "bar": "棒グラフ",

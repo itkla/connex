@@ -1852,6 +1852,8 @@ export type ReportMeasure =
     | "warm_intro_opportunity_value"
     | "warm_intro_reachable_account_count"
     | "reverse_intro_weighted_opportunities"
+    | "employment_departure_count"
+    | "employment_arrival_count"
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"
@@ -1872,7 +1874,8 @@ export type ReportGroupBy =
     | "warmth_band"
     | "trend"
     | "connector"
-    | "pair";
+    | "pair"
+    | "person";
 
 export type ReportRange = {
     start: string;
