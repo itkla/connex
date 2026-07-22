@@ -744,8 +744,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: definition }),
-        [filterState, query, sortKey, sortDirection, definition],
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: evaluable }),
+        [filterState, query, sortKey, sortDirection, evaluable],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
