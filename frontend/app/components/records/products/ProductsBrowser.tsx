@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { PlusIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
+import { PencilIcon, TrashIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -15,36 +15,102 @@ import {
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
+import RecordsActions from '@/app/components/import/RecordsActions';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
-import { deleteProduct } from '@/app/lib/api';
+import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency } from '@/app/lib/utils';
 import type { Product } from '@/app/lib/types';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+
+type ProductSearchScope = {
+    query: string;
+    revision: number;
+    attempt: number;
+    workspaceId: number;
+};
+
+type ProductSearchResult = ProductSearchScope & (
+    | { status: 'success'; products: Product[] }
+    | { status: 'error' }
+);
 
 /** Workspace-scoped product/service catalog admin: searchable table with create/edit/delete. */
 export default function ProductsBrowser({ products: initial }: { products: Product[] }) {
     const t = useTranslations('ProductsBrowser');
     const tf = useTranslations('Filters');
     const locale = useLocale();
+    const { activeWorkspaceId, switching } = useWorkspace();
     const [products, setProducts] = useState(initial);
     const [query, setQuery] = useState('');
     const [dialog, setDialog] = useState<{ mode: 'create' | 'edit'; product?: Product } | null>(null);
     const [removeTarget, setRemoveTarget] = useState<Product | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [catalogRevision, setCatalogRevision] = useState(0);
+    const [searchAttempt, setSearchAttempt] = useState(0);
+    const [searchResult, setSearchResult] = useState<ProductSearchResult | null>(null);
+    const normalizedQuery = query.trim();
 
-    const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return products;
-        return products.filter((p) =>
-            [p.name, p.sku, p.description].some((v) => v?.toLowerCase().includes(q)));
-    }, [products, query]);
+    useEffect(() => {
+        if (!normalizedQuery || activeWorkspaceId === null || switching) return;
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => {
+            getProducts(
+                { q: normalizedQuery },
+                { signal: controller.signal, headers: { 'X-Workspace-Id': String(activeWorkspaceId) } },
+            )
+                .then((matches) => setSearchResult({
+                    query: normalizedQuery,
+                    revision: catalogRevision,
+                    attempt: searchAttempt,
+                    workspaceId: activeWorkspaceId,
+                    status: 'success',
+                    products: matches,
+                }))
+                .catch((error: unknown) => {
+                    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+                    setSearchResult({
+                        query: normalizedQuery,
+                        revision: catalogRevision,
+                        attempt: searchAttempt,
+                        workspaceId: activeWorkspaceId,
+                        status: 'error',
+                    });
+                });
+        }, 200);
+        return () => {
+            window.clearTimeout(timeout);
+            controller.abort();
+        };
+    }, [activeWorkspaceId, catalogRevision, normalizedQuery, searchAttempt, switching]);
+
+    const searchCurrent = !switching
+        && searchResult?.query === normalizedQuery
+        && searchResult.revision === catalogRevision
+        && searchResult.attempt === searchAttempt
+        && searchResult.workspaceId === activeWorkspaceId;
+    let filtered = products;
+    if (normalizedQuery) {
+        filtered = searchCurrent && searchResult.status === 'success' ? searchResult.products : [];
+    }
+    const searching = normalizedQuery.length > 0 && !searchCurrent;
+    const searchFailed = normalizedQuery.length > 0 && searchCurrent && searchResult.status === 'error';
 
     const upsert = (saved: Product) => {
         setProducts((prev) => prev.some((p) => p.id === saved.id)
             ? prev.map((p) => (p.id === saved.id ? saved : p))
             : [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)));
+        setCatalogRevision((revision) => revision + 1);
     };
+
+    const exportProducts = useCallback(
+        (signal: AbortSignal, workspaceId: number) => exportProductsCsv(
+            { q: query.trim() || undefined },
+            { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
+        ),
+        [query],
+    );
 
     const confirmRemove = async () => {
         if (!removeTarget) return;
@@ -52,6 +118,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
         try {
             await deleteProduct(removeTarget.id);
             setProducts((prev) => prev.filter((p) => p.id !== removeTarget.id));
+            setCatalogRevision((revision) => revision + 1);
             toastSuccess(t('deleted'));
             setRemoveTarget(null);
         } catch (err) {
@@ -67,10 +134,13 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <Button variant="brand" onClick={() => setDialog({ mode: 'create' })}>
-                            <PlusIcon className="size-4" />
-                            {t('newButton')}
-                        </Button>
+                        <RecordsActions
+                            entity="products"
+                            onNew={() => setDialog({ mode: 'create' })}
+                            newLabel={t('newButton')}
+                            newAriaLabel={t('newButton')}
+                            onExport={exportProducts}
+                        />
                     </div>
                 </Rise>
 
@@ -86,7 +156,18 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 </Rise>
 
                 <Rise delay={0.12}>
-                    {filtered.length === 0 ? (
+                    {searching ? (
+                        <div role="status" aria-live="polite" className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+                            {t('searching')}
+                        </div>
+                    ) : searchFailed ? (
+                        <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+                            <span>{t('searchFailed')}</span>
+                            <Button variant="outline" size="sm" onClick={() => setSearchAttempt((attempt) => attempt + 1)}>
+                                {t('retrySearch')}
+                            </Button>
+                        </div>
+                    ) : filtered.length === 0 ? (
                         <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
                             {query ? t('noMatches') : t('empty')}
                         </div>

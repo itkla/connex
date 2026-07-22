@@ -13,20 +13,22 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 
 /**
- * Builds RFC-4180 CSV exports for contacts, companies, and deals, scoped to the active workspace and
- * honoring the same filters as the list endpoints. Every cell is quoted when needed and neutralized
- * against CSV formula injection (a leading {@code = + - @}, tab, or CR is prefixed with an
- * apostrophe). Standard fields come first, then one column per non-archived custom-field definition,
- * then a {@code tags} column.
+ * Builds RFC-4180 CSV exports for contacts, companies, deals, and products, scoped to the active
+ * workspace and honoring the same filters as the list endpoints. Every cell is quoted when needed
+ * and neutralized against CSV formula injection (leading formula operators and control characters,
+ * including their full-width variants, are prefixed with an apostrophe). Record exports append
+ * non-archived custom fields and tags; product exports use the catalog's fixed schema.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,6 +38,7 @@ public class ExportService {
     private final DealService dealService;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
+    private final ProductMapper productMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
@@ -96,6 +99,33 @@ public class ExportService {
             appendCustom(row, defs, custom.get(c.getId()));
             row.add(joinTags(tags.get(c.getId())));
             writeRow(sb, row);
+        }
+        return sb.toString();
+    }
+
+    /** CSV of products matching the current catalog search (all products when unfiltered). */
+    public String exportProducts(String query) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Product> products = productMapper.getFiltered(workspaceId, query);
+
+        StringBuilder sb = new StringBuilder();
+        writeRow(sb, List.of(
+            "id", "sku", "name", "description", "active", "unit", "unitPrice", "currency",
+            "taxRate", "billingFrequency", "effectiveStart", "effectiveEnd"));
+        for (Product product : products) {
+            writeRow(sb, List.of(
+                Integer.toString(product.getId()),
+                value(product.getSku()),
+                value(product.getName()),
+                value(product.getDescription()),
+                Boolean.toString(product.isActive()),
+                value(product.getUnit()),
+                product.getUnitPrice() == null ? "" : product.getUnitPrice().toPlainString(),
+                value(product.getCurrency()),
+                product.getTaxRate() == null ? "" : product.getTaxRate().toPlainString(),
+                value(product.getBillingFrequency()),
+                product.getEffectiveStart() == null ? "" : product.getEffectiveStart().toString(),
+                product.getEffectiveEnd() == null ? "" : product.getEffectiveEnd().toString()));
         }
         return sb.toString();
     }
@@ -209,6 +239,10 @@ public class ExportService {
         return Double.toString(value);
     }
 
+    private static String value(String value) {
+        return value == null ? "" : value;
+    }
+
     private static void writeRow(StringBuilder sb, List<String> cells) {
         for (int i = 0; i < cells.size(); i++) {
             if (i > 0) sb.append(',');
@@ -221,7 +255,9 @@ public class ExportService {
         if (value == null || value.isEmpty()) return "";
         String s = value;
         char first = s.charAt(0);
-        if (first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r') {
+        if (first == '=' || first == '+' || first == '-' || first == '@'
+                || first == '\t' || first == '\r' || first == '\n'
+                || first == '＝' || first == '＋' || first == '－' || first == '＠') {
             s = "'" + s;
         }
         if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {

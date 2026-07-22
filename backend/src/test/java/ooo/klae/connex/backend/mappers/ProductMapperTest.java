@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.util.LikePattern;
 
 class ProductMapperTest extends AbstractMapperTest {
 
@@ -92,5 +94,49 @@ class ProductMapperTest extends AbstractMapperTest {
         int affected = productMapper.update(spoof);
         assertEquals(0, affected);
         assertEquals("Widget", productMapper.getById(workspace.getId(), p.getId()).getName());
+    }
+
+    @Test
+    void getFilteredMatchesTheCatalogSearchAndKeepsWorkspaceBoundary() {
+        Product byName = newProduct(workspace.getId(), "Alpha Needle");
+        Product bySku = newProduct(workspace.getId(), "Beta product");
+        bySku.setSku("NEEDLE-SKU");
+        productMapper.update(bySku);
+        Product byDescription = newProduct(workspace.getId(), "Gamma product");
+        byDescription.setDescription("Includes a needle in its description");
+        productMapper.update(byDescription);
+        Product inactive = newProduct(workspace.getId(), "Omega needle");
+        inactive.setActive(false);
+        productMapper.update(inactive);
+        Product unrelated = newProduct(workspace.getId(), "Unrelated product");
+
+        Workspace foreign = new Workspace();
+        foreign.setName("Foreign " + unique());
+        foreign.setSlug("foreign-" + unique());
+        workspaceMapper.insert(foreign);
+        newProduct(foreign.getId(), "Foreign Needle");
+
+        List<Product> products = productMapper.getFiltered(
+            workspace.getId(), LikePattern.containing("needle"));
+
+        assertEquals(
+            List.of(byName.getId(), bySku.getId(), byDescription.getId(), inactive.getId()),
+            products.stream().map(Product::getId).toList());
+        assertFalse(products.getLast().isActive());
+        assertEquals(
+            List.of(byName.getId(), bySku.getId(), byDescription.getId(), inactive.getId(), unrelated.getId()),
+            productMapper.getFiltered(workspace.getId(), null).stream().map(Product::getId).toList());
+    }
+
+    @Test
+    void getFilteredMatchesTheBrowserCaseAndAccentSemantics() {
+        Product accented = newProduct(workspace.getId(), "Café plan");
+
+        assertTrue(productMapper.getFiltered(
+            workspace.getId(), LikePattern.containing("cafe")).isEmpty());
+        assertEquals(
+            List.of(accented.getId()),
+            productMapper.getFiltered(
+                workspace.getId(), LikePattern.containing("CAFÉ")).stream().map(Product::getId).toList());
     }
 }

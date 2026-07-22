@@ -1577,6 +1577,10 @@ export function exportDealsCsv(params: Types.DealFilterParams = {}, init: Reques
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
 }
 
+export function exportProductsCsv(params: Types.ProductSearchParams = {}, init: RequestInit = {}) {
+    return downloadCsv(`/api/exports/products${buildQuery({ q: params.q })}`, "products.csv", init);
+}
+
 export function exportDealSegmentCsv(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
     return downloadCsv(`/api/exports/deals/segment`, "deals.csv", {
         ...init,
@@ -2626,12 +2630,12 @@ export function deleteTag(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/tags/${id}`, init);
 }
 
-export function getProducts(init: RequestInit = {}) {
-    return getJson<Types.Product[]>(`/api/products`, init);
+export function getProducts(params: Types.ProductSearchParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Product[]>(`/api/products${buildQuery({ q: params.q })}`, init);
 }
 
 export function getProductsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Product>((init) => getProducts(init), cookie);
+    return safeWithCookie<Types.Product>((init) => getProducts({}, init), cookie);
 }
 
 export function getProductById(id: number, init: RequestInit = {}) {

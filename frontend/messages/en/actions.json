@@ -61,13 +61,15 @@
       "importDeals": "Import deals",
       "exportCurrentCompanies": "Export current company view",
       "exportCurrentContacts": "Export current contact view",
-      "exportCurrentDeals": "Export current deal view"
+      "exportCurrentDeals": "Export current deal view",
+      "exportCurrentProducts": "Export current product view"
     },
     "description": {
       "utility": {
         "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
         "exportCurrentContacts": "Download all contacts matching this view's search and filters.",
-        "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency."
+        "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency.",
+        "exportCurrentProducts": "Download all products matching this view's search."
       }
     },
     "feedback": {
@@ -111,7 +113,8 @@
         "importDeals": "import deals, opportunities, csv, upload, bulk",
         "exportCurrentCompanies": "export companies, download companies, csv, current view, filtered companies, segment",
         "exportCurrentContacts": "export contacts, download contacts, people, persons, csv, current view, filtered contacts",
-        "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals"
+        "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals",
+        "exportCurrentProducts": "export products, download products, catalog, services, csv, current view, filtered products"
       }
     }
   }

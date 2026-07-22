@@ -24,13 +24,13 @@ import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 
 /**
- * REST controller for CSV export of contacts, companies, and deals. Each endpoint returns a UTF-8
- * CSV (BOM-prefixed for spreadsheet compatibility) of the workspace's records, honoring the same
- * search, facet, and member-scope filters as the matching list endpoint so the exported set tracks
- * the visible filtered+scoped list rather than just the loaded page. Contacts under an APPI
- * processing restriction ({@code suspended_at}) are the one deliberate exception: they remain
- * visible and manageable in the browser but are never exported, since export is a data provision.
- * Delegates to {@code ExportService}.
+ * REST controller for CSV export of contacts, companies, deals, and products. Each endpoint returns
+ * a UTF-8 CSV (BOM-prefixed for spreadsheet compatibility) of the workspace's records, honoring the
+ * same search and applicable scope filters as the matching list so the exported set tracks the full
+ * current view rather than just the loaded page. Contacts under an APPI processing restriction
+ * ({@code suspended_at}) are the one deliberate exception: they remain visible and manageable in
+ * the browser but are never exported, since export is a data provision. Delegates to
+ * {@code ExportService}.
  */
 @RestController
 @RequestMapping("/api/exports")
@@ -73,6 +73,13 @@ public class ExportController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("companies.csv", exportService.exportCompanies(query, industry, noIndustry, ids, memberScope));
+    }
+
+    /** Export products as CSV, honoring the product catalog's search. */
+    @GetMapping("/products")
+    public ResponseEntity<byte[]> exportProducts(@RequestParam(required = false) String q) {
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q.trim());
+        return csv("products.csv", exportService.exportProducts(query));
     }
 
     /**

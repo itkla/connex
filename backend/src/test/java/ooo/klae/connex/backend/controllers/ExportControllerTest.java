@@ -67,4 +67,26 @@ class ExportControllerTest {
             definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), true,
             List.of("won", "lost"), List.of("high", "none"), memberScope);
     }
+
+    @Test
+    void productExportNormalizesSearchAndReturnsBomPrefixedCsv() {
+        ExportController controller = new ExportController(
+            exportService, memberScopeResolver, workspaceService);
+        when(exportService.exportProducts("%100\\%\\_ready%"))
+            .thenReturn("id,name\r\n7,Product\r\n");
+
+        var response = controller.exportProducts("  100%_ready  ");
+
+        assertEquals("attachment; filename=\"products.csv\"",
+            response.getHeaders().getFirst("Content-Disposition"));
+        assertEquals("text/csv;charset=UTF-8", response.getHeaders().getFirst("Content-Type"));
+        byte[] csv = "id,name\r\n7,Product\r\n".getBytes(StandardCharsets.UTF_8);
+        byte[] expected = new byte[csv.length + 3];
+        expected[0] = (byte) 0xEF;
+        expected[1] = (byte) 0xBB;
+        expected[2] = (byte) 0xBF;
+        System.arraycopy(csv, 0, expected, 3, csv.length);
+        assertArrayEquals(expected, response.getBody());
+        verify(exportService).exportProducts("%100\\%\\_ready%");
+    }
 }

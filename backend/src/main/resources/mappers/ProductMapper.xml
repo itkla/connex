@@ -26,9 +26,16 @@
     tax_rate, billing_frequency, effective_start, effective_end, created_at, updated_at
   </sql>
 
-  <select id="getAll" resultMap="ProductResult">
+  <select id="getFiltered" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId}
+    <if test="query != null">
+      AND (
+        LOWER(name) COLLATE utf8mb4_bin LIKE LOWER(#{query}) COLLATE utf8mb4_bin
+        OR LOWER(sku) COLLATE utf8mb4_bin LIKE LOWER(#{query}) COLLATE utf8mb4_bin
+        OR LOWER(description) COLLATE utf8mb4_bin LIKE LOWER(#{query}) COLLATE utf8mb4_bin
+      )
+    </if>
     ORDER BY name, id
   </select>
 
