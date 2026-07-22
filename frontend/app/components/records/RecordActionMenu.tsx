@@ -109,7 +109,7 @@ function MenuBody({
     Separator: ComponentType;
 }) {
     return groups.map((group, index) => (
-        <Fragment key={`group-${index}`}>
+        <Fragment key={group.map((item) => item.key).join(':')}>
             {index > 0 && <Separator />}
             {group.map((item) => (
                 <Item key={item.key} variant={item.destructive ? 'destructive' : 'default'} onSelect={item.onSelect}>
