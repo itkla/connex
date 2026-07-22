@@ -35,6 +35,7 @@ import { ruleSummary, ruleToRequest } from "@/app/components/settings/RulesPanel
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
 import {
     formatWorkflowRunDateTime,
+    normalizeWorkflowRunDateTime,
     WORKFLOW_RUN_STATUS_CLASS,
 } from "@/app/components/settings/workflows/workflowRunStatus";
 import { useWorkflowDuplication } from "@/app/components/settings/workflows/useWorkflowDuplication";
@@ -223,7 +224,9 @@ export default function WorkflowsPanel() {
                                                 {tw(`runs.status.${rule.latestExecution.status}`)}
                                             </Badge>
                                             <time
-                                                dateTime={rule.latestExecution.executedAt}
+                                                dateTime={normalizeWorkflowRunDateTime(
+                                                    rule.latestExecution.executedAt,
+                                                )}
                                                 title={formatWorkflowRunDateTime(
                                                     rule.latestExecution.executedAt,
                                                     locale,

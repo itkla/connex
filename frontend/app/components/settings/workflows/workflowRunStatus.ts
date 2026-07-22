@@ -11,9 +11,11 @@ export const WORKFLOW_RUN_STATUS_CLASS: Record<RuleExecutionStatus, string> = {
 
 /** Formats a UTC MySQL execution timestamp as a localized absolute time. */
 export function formatWorkflowRunDateTime(value: string, locale: string): string {
+    return formatDateTime(normalizeWorkflowRunDateTime(value), locale);
+}
+
+/** Normalizes a UTC MySQL execution timestamp for machine-readable datetime attributes. */
+export function normalizeWorkflowRunDateTime(value: string): string {
     const timestamp = parseMysqlDateTime(value);
-    return formatDateTime(
-        Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString(),
-        locale,
-    );
+    return Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString();
 }

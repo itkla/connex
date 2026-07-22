@@ -20,6 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     formatWorkflowRunDateTime,
+    normalizeWorkflowRunDateTime,
     WORKFLOW_RUN_STATUS_CLASS,
 } from "@/app/components/settings/workflows/workflowRunStatus";
 
@@ -128,7 +129,10 @@ export default function WorkflowRunsDialog({
                                         <Badge variant="outline" className={WORKFLOW_RUN_STATUS_CLASS[execution.status]}>
                                             {t(`runs.status.${execution.status}`)}
                                         </Badge>
-                                        <time className="text-xs text-muted-foreground" dateTime={execution.executedAt}>
+                                        <time
+                                            className="text-xs text-muted-foreground"
+                                            dateTime={normalizeWorkflowRunDateTime(execution.executedAt)}
+                                        >
                                             {formatWorkflowRunDateTime(execution.executedAt, locale)}
                                         </time>
                                     </div>
