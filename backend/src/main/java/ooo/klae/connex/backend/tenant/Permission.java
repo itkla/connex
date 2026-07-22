@@ -39,6 +39,14 @@ public enum Permission {
     GOAL_MANAGE,
     PIPELINE_MANAGE,
     TAG_MANAGE,
+    PRODUCT_MANAGE,
+    DOCUMENT_MANAGE,
+    /**
+     * Permission to approve or reject generated deal documents that an approval
+     * policy has routed for review. Requesting approval only needs
+     * {@link #DEAL_UPDATE}; policy configuration stays {@link #DOCUMENT_MANAGE}.
+     */
+    DOCUMENT_APPROVE,
     CUSTOM_FIELD_MANAGE,
     SHARE_MANAGE,
     MEMBER_MANAGE,
@@ -46,6 +54,10 @@ public enum Permission {
     AUDIT_READ,
     WORKSPACE_SETTINGS,
     RULE_MANAGE,
+    CAMPAIGN_VIEW,
+    CAMPAIGN_MANAGE,
+    CAMPAIGN_SEND,
+    CONSENT_MANAGE,
     /**
      * Permission to invoke AI-powered features (e.g. account/meeting briefs).
      * Grantable; the instance flag and per-org BYOP provider config additionally

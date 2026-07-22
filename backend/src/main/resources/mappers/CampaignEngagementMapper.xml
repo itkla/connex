@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignEngagementMapper">
+
+  <select id="deliveryStatusCountsForSend"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT d.status AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery d
+    WHERE d.workspace_id = #{workspaceId} AND d.send_id = #{sendId}
+    GROUP BY d.status
+  </select>
+
+  <select id="deliveryStatusCountsForCampaign"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT d.status AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND s.campaign_id = #{campaignId}
+    GROUP BY d.status
+  </select>
+
+  <select id="skipReasonCountsForSend"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT d.skip_reason AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery d
+    WHERE d.workspace_id = #{workspaceId} AND d.send_id = #{sendId}
+      AND d.status = 'skipped' AND d.skip_reason IS NOT NULL
+    GROUP BY d.skip_reason
+  </select>
+
+  <select id="skipReasonCountsForCampaign"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT d.skip_reason AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND s.campaign_id = #{campaignId}
+      AND d.status = 'skipped' AND d.skip_reason IS NOT NULL
+    GROUP BY d.skip_reason
+  </select>
+
+  <select id="eventTypeCountsForSend"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT e.event_type AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery_event e
+    JOIN campaign_delivery d ON d.workspace_id = e.workspace_id AND d.id = e.delivery_id
+    WHERE e.workspace_id = #{workspaceId} AND d.send_id = #{sendId}
+    GROUP BY e.event_type
+  </select>
+
+  <select id="eventTypeCountsForCampaign"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT e.event_type AS key_value, COUNT(*) AS count_value
+    FROM campaign_delivery_event e
+    JOIN campaign_delivery d ON d.workspace_id = e.workspace_id AND d.id = e.delivery_id
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE e.workspace_id = #{workspaceId} AND s.campaign_id = #{campaignId}
+    GROUP BY e.event_type
+  </select>
+
+  <select id="channelSplit"
+          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
+    SELECT s.channel AS key_value, COUNT(d.id) AS count_value
+    FROM campaign_send s
+    LEFT JOIN campaign_delivery d ON d.workspace_id = s.workspace_id AND d.send_id = s.id
+    WHERE s.workspace_id = #{workspaceId} AND s.campaign_id = #{campaignId}
+    GROUP BY s.channel
+  </select>
+
+</mapper>

@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.controllers;
 
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -11,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
@@ -26,6 +29,18 @@ import ooo.klae.connex.backend.services.BusinessCardService;
 @RequiredArgsConstructor
 public class BusinessCardController {
     private final BusinessCardService businessCardService;
+
+    /**
+     * Returns active-workspace readiness without exposing provider configuration.
+     *
+     * @return non-cacheable scan and import readiness
+     */
+    @GetMapping("/availability")
+    public ResponseEntity<BusinessCardAvailabilityResponse> availability() {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(businessCardService.availability());
+    }
 
     /**
      * Scans one card image into an editable draft without database mutation.

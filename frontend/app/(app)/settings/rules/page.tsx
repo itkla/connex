@@ -1,6 +1,6 @@
-import RulesPanel from "@/app/components/settings/RulesPanel";
+import { redirect } from "next/navigation";
 
-/** Workspace settings sub-page for automation rules. */
+/** Rules moved to the workflows surface; keep old bookmarks working. */
 export default function RulesSettingsPage() {
-    return <RulesPanel />;
+    redirect("/workflows");
 }

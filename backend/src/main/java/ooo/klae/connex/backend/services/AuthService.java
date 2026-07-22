@@ -278,15 +278,25 @@ public class AuthService {
     }
 
     /**
-     * Retrieves the currently authenticated user based on the security context. Throws {@code ResourceNotFoundException} if no user is currently authenticated.
-     * @return
+     * Retrieves the authenticated session principal without refreshing it from persistence.
+     *
+     * @return the authenticated user principal
      */
-    public User getCurrentUser() {
+    public User getCurrentPrincipal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User principal)) {
             throw new ResourceNotFoundException("Not authenticated");
         }
+        return principal;
+    }
+
+    /**
+     * Retrieves the currently authenticated user based on the security context. Throws {@code ResourceNotFoundException} if no user is currently authenticated.
+     * @return
+     */
+    public User getCurrentUser() {
+        User principal = getCurrentPrincipal();
 
         // handles cases where the user updates their info but is not returned
         // reduntant if the user is not updated; just returns the same value

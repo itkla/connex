@@ -19,6 +19,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 /**
  * Migrates representative populated V73 data through the current Flyway lineage on real MySQL.
  */
@@ -74,14 +77,43 @@ class FlywayUpgradeIntegrationTest {
         seedV81Data();
         migrateTo("84");
         seedV84Reservation();
+        migrateTo("110");
+        seedV110SavedView();
+        migrateTo("115");
+        try (Connection connection = connection()) {
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+        }
+        migrateTo("116");
+        assertWorkflowSchemaAtV116();
 
         Flyway latest = flyway(null);
         latest.migrate();
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
-        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("89")) >= 0);
+        assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("116")) >= 0);
         try (Connection connection = connection()) {
+            JsonNode migratedConfig = JsonMapper.builder().build().readTree(
+                stringScalar(connection, "SELECT config_json FROM saved_view WHERE id = 9101"));
+            JsonNode expectedConfig = JsonMapper.builder().build().readTree("""
+                {
+                  "query":"legacy",
+                  "filters":{"owner":["me"]},
+                  "unknown":{"nested":[1,true]},
+                  "version":1
+                }
+                """);
+            assertEquals(expectedConfig, migratedConfig);
+            assertEquals("2025-06-15 12:34:56", stringScalar(connection, """
+                SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s')
+                FROM saved_view
+                WHERE id = 9101
+                """));
             assertEquals(6, scalar(connection, """
                 SELECT COUNT(*)
                 FROM (
@@ -165,6 +197,90 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
+    private static void assertWorkflowSchemaAtV116() throws SQLException {
+        try (Connection connection = connection()) {
+            assertEquals(2, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+            assertEquals(1, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'workflow_version'
+                  AND COLUMN_NAME = 'definition_hash'
+                  AND DATA_TYPE = 'binary'
+                  AND CHARACTER_MAXIMUM_LENGTH = 32
+                """));
+            assertEquals(4, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                  AND COLUMN_NAME IN (
+                      'draft_definition_json', 'draft_canvas_json',
+                      'definition_json', 'canvas_json')
+                  AND DATA_TYPE = 'mediumtext'
+                """));
+            assertEquals(3, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'workflow_version'
+                  AND COLUMN_NAME IN ('trigger_config', 'condition_json', 'actions_json')
+                  AND DATA_TYPE = 'json'
+                """));
+            assertEquals(3, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.REFERENTIAL_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                """));
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*)
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ('workflow', 'workflow_version')
+                  AND REFERENCED_TABLE_NAME IN ('workspace', 'app_user')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Invalid enabled workflow', 2, 'user',
+                    '{"schemaVersion":1}', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Invalid JSON workflow', FALSE, 'user',
+                    '{', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Coerced schema workflow', FALSE, 'user',
+                    '{"schemaVersion":"1"}', '{}')
+                """));
+            assertThrows(SQLException.class, () -> execute(connection, """
+                INSERT INTO workflow (
+                    workspace_id, name, enabled, draft_execution_mode,
+                    draft_definition_json, draft_canvas_json)
+                VALUES (
+                    9101, 'Oversized definition workflow', FALSE, 'user',
+                    CONCAT('{"schemaVersion":1,"padding":"', REPEAT('a', 65536), '"}'),
+                    '{}')
+                """));
+        }
+    }
+
     private static void seedV73Data() throws SQLException {
         try (Connection connection = connection()) {
             execute(connection, """
@@ -231,6 +347,20 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
+    private static void seedV110SavedView() throws SQLException {
+        try (Connection connection = connection()) {
+            execute(connection, """
+                INSERT INTO saved_view (
+                    id, workspace_id, user_id, record_type, name, config_json, position,
+                    created_at, updated_at)
+                VALUES (
+                    9101, 9101, 9101, 'company', 'Legacy saved view',
+                    '{"query":"legacy","filters":{"owner":["me"]},"unknown":{"nested":[1,true]}}',
+                    4, '2025-06-15 12:00:00', '2025-06-15 12:34:56')
+                """);
+        }
+    }
+
     private static Flyway migrateTo(String version) {
         Flyway flyway = flyway(version);
         flyway.migrate();
@@ -264,6 +394,14 @@ class FlywayUpgradeIntegrationTest {
                 ResultSet resultSet = statement.executeQuery(sql)) {
             resultSet.next();
             return resultSet.getLong(1);
+        }
+    }
+
+    private static String stringScalar(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(sql)) {
+            resultSet.next();
+            return resultSet.getString(1);
         }
     }
 

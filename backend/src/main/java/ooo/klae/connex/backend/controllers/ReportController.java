@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -85,8 +86,15 @@ public class ReportController {
     @RequirePermission(Permission.REPORT_READ)
     public ReportDocumentDto generate(
             @PathVariable int id,
+            @RequestParam(name = "narrative", defaultValue = "cached") String narrative,
             @Valid @RequestBody(required = false) ReportGenerateRequest request) {
-        return reportService.generate(id, request);
+        return reportService.generate(id, request, narrativeMode(narrative));
+    }
+
+    private static ReportService.NarrativeMode narrativeMode(String narrative) {
+        return "full".equalsIgnoreCase(narrative)
+                ? ReportService.NarrativeMode.FULL
+                : ReportService.NarrativeMode.CACHED;
     }
 
     @PostMapping("/{id}/snapshots")

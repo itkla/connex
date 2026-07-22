@@ -17,6 +17,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
@@ -27,17 +29,19 @@ class CapabilityRegistryTest {
 
     @Mock private SsoConnectionService ssoConnectionService;
     @Mock private SocialLoginClientRegistrations socialLoginClientRegistrations;
+    @Mock private ConnectedAccountProviders connectedAccountProviders;
     @Mock private MailProperties mailProperties;
     @Mock private BusinessCardService businessCardService;
     @Mock private DeploymentProperties deploymentProperties;
+    @Mock private DeliveryProperties deliveryProperties;
 
     private CapabilityRegistry capabilityRegistry;
 
     @BeforeEach
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
-                socialLoginClientRegistrations, mailProperties, businessCardService,
-                deploymentProperties, capability -> true);
+                socialLoginClientRegistrations, connectedAccountProviders, mailProperties, businessCardService,
+                deploymentProperties, capability -> true, deliveryProperties);
     }
 
     @Test
@@ -77,10 +81,12 @@ class CapabilityRegistryTest {
         CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
                 ssoConnectionService,
                 socialLoginClientRegistrations,
+                connectedAccountProviders,
                 mailProperties,
                 businessCardService,
                 deploymentProperties,
                 capability -> true,
+                deliveryProperties,
                 Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
         when(deploymentProperties.isConfigured()).thenReturn(true);
         when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
@@ -97,10 +103,12 @@ class CapabilityRegistryTest {
         CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
                 ssoConnectionService,
                 socialLoginClientRegistrations,
+                connectedAccountProviders,
                 managedMailProperties,
                 businessCardService,
                 new DeploymentProperties(),
-                capability -> capability != Capability.MANAGED_MAIL);
+                capability -> capability != Capability.MANAGED_MAIL,
+                new DeliveryProperties());
 
         assertFalse(restrictedRegistry.isAvailable(Capability.MANAGED_MAIL));
     }

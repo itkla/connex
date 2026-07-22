@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateDealRationale } from '@/app/lib/api';
+import { recoverAiResult } from '@/app/lib/aiRecovery';
 import type { DealRationale } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -51,7 +52,16 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                     setStoredState({ dealId, status: 'hidden' });
                 }
             } catch {
-                if (!cancelled) setStoredState({ dealId, status: 'error' });
+                if (cancelled) return;
+                const recovered = await recoverAiResult(
+                    () => generateDealRationale(dealId, false),
+                    (rationale) => rationale.available && Boolean(rationale.narrative || rationale.rationale),
+                    () => cancelled,
+                );
+                if (cancelled) return;
+                setStoredState(recovered
+                    ? { dealId, status: 'ready', rationale: recovered }
+                    : { dealId, status: 'error' });
             }
         })();
         return () => {

@@ -13,8 +13,6 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
-import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
@@ -100,10 +98,10 @@ public class IntroRationaleService {
             aiOutputCacheStore.save(workspaceId, cacheFeature, lo, hi,
                     contentHash, new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt);
             return IntroRationaleDto.of(lo, hi, rationale, generatedAt, parsed.demaskWarnings());
-        } catch (MaskingLeakException | AiProviderException exception) {
-            return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
+        } catch (RuntimeException exception) {
+            return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
         }
     }
 

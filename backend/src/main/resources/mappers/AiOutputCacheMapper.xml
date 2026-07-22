@@ -15,6 +15,21 @@
       AND subject_b_id = #{subjectBId}
   </select>
 
+  <delete id="deleteForPerson">
+    DELETE c FROM ai_output_cache c
+    JOIN workspace owner_workspace ON owner_workspace.id = #{workspaceId}
+    JOIN workspace cache_workspace
+      ON cache_workspace.id = c.workspace_id AND cache_workspace.org_id = owner_workspace.org_id
+    WHERE (
+      (c.feature LIKE 'intro.rationale:%'
+        AND (c.subject_a_id = #{personId} OR c.subject_b_id = #{personId}))
+      OR ((c.feature LIKE 'deal.brief:%' OR c.feature LIKE 'deal.risk_rationale:%')
+        AND c.subject_a_id IN (
+          SELECT dp.deal_id FROM deal_person dp WHERE dp.person_id = #{personId}
+        ))
+    )
+  </delete>
+
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_output_cache
       (workspace_id, feature, subject_a_id, subject_b_id, content_hash, payload, warnings, generated_at)

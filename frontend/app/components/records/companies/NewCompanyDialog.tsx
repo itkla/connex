@@ -11,6 +11,8 @@ import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
 import { isFieldError } from '@/app/lib/api';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
+import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
+import { useDuplicateNameCheck } from '@/app/hooks/useDuplicateNameCheck';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -28,6 +30,8 @@ import {
 import { ImagePlusIcon, Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError } from '@/app/lib/toast';
 
@@ -198,6 +202,8 @@ export default function NewCompanyDialog({
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
 
+    const nameMatches = useDuplicateNameCheck('company', payload.name);
+
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
     const status: 'idle' | 'loading' | 'success' | 'error' = isCreating
@@ -240,9 +246,29 @@ export default function NewCompanyDialog({
         setWebsiteFormatError(normalized && !isLikelyUrl(normalized) ? t('websiteInvalid') : null);
     };
 
+    const isDirty =
+        open &&
+        !isSuccess &&
+        (payload.name.trim() !== '' ||
+            (payload.website ?? '').trim() !== '' ||
+            (payload.industry ?? '').trim() !== '' ||
+            (payload.phone ?? '').trim() !== '' ||
+            (payload.address ?? '').trim() !== '' ||
+            pendingContacts.length > 0 ||
+            Boolean(logoPreview));
+    const guard = useUnsavedChangesGuard({
+        isDirty,
+        onClose: () => onOpenChange(false),
+        enabled: !isCreating && !isSuccess,
+    });
+
     const handleOpenChange = (next: boolean) => {
         if (!next && (isCreating || logoSelectionPending)) return;
-        onOpenChange(next);
+        if (next) {
+            onOpenChange(true);
+            return;
+        }
+        guard.onOpenChange(false);
     };
 
     const handleSubmit = async (e: FormEvent) => {
@@ -340,6 +366,7 @@ export default function NewCompanyDialog({
     }, [reduce, open]);
 
     return (
+        <>
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent scrollable={false} className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <motion.div
@@ -444,13 +471,14 @@ export default function NewCompanyDialog({
                                     className={cn(inputBase, 'pl-9 pr-3', fieldErrors.name && inputError)}
                                     placeholder={t('placeholderName')}
                                     aria-invalid={Boolean(fieldErrors.name)}
-                                    aria-describedby={fieldErrors.name ? 'company-name-error' : undefined}
+                                    aria-describedby={[fieldErrors.name && 'company-name-error', nameMatches.matches.length > 0 && 'company-name-duplicate'].filter(Boolean).join(' ') || undefined}
                                     autoComplete="organization"
                                     autoFocus
                                     required
                                 />
                             </div>
                             {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                            <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                         </div>
 
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -634,6 +662,8 @@ export default function NewCompanyDialog({
                 </p>
             </ResponsiveDialogContent>
         </ResponsiveDialog>
+        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -708,6 +738,8 @@ export function NewCompanyForm({
         const key = normalizeWebsiteForCompare(payload.website);
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
+
+    const nameMatches = useDuplicateNameCheck('company', payload.name);
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
@@ -845,6 +877,7 @@ export function NewCompanyForm({
                             />
                         </div>
                         {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                        <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>

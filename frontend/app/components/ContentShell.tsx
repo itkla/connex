@@ -6,6 +6,8 @@ import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
+import MobileBottomBar from "@/app/components/MobileBottomBar";
+import { useSidebarMode } from "@/app/hooks/useSidebarMode";
 import { useTranslations } from "next-intl";
 
 export default function ContentShell({
@@ -15,7 +17,7 @@ export default function ContentShell({
     sidebar: React.ReactNode;
     children: React.ReactNode;
 }) {
-    const [open, setOpen] = useState(true);
+    const { mode, toggle } = useSidebarMode();
     const [mobileOpen, setMobileOpen] = useState(false);
     const pathname = usePathname();
     const t = useTranslations("CommonContentShell");
@@ -74,9 +76,9 @@ export default function ContentShell({
 
             <div
                 id="app-sidebar"
-                className={`fixed inset-y-0 left-0 z-50 transition-[margin,translate] duration-300 ease-out motion-reduce:transition-none md:static md:z-auto md:translate-x-0 ${
+                className={`fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-out motion-reduce:transition-none md:static md:z-auto md:ml-0 md:translate-x-0 ${
                     mobileOpen ? "translate-x-0" : "-translate-x-full"
-                } ${open ? "md:ml-0" : "md:-ml-68"}`}
+                }`}
             >
                 {sidebar}
             </div>
@@ -100,12 +102,12 @@ export default function ContentShell({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            onClick={() => setOpen((o) => !o)}
-                            aria-label={open ? t("hideSidebar") : t("showSidebar")}
-                            aria-expanded={open}
+                            onClick={toggle}
+                            aria-label={mode === "expanded" ? t("collapseSidebar") : t("expandSidebar")}
+                            aria-expanded={mode === "expanded"}
                             className="shrink-0"
                         >
-                            {open ? (
+                            {mode === "expanded" ? (
                                 <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
                             ) : (
                                 <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
@@ -119,10 +121,12 @@ export default function ContentShell({
                     </div>
                 </div>
 
-                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
+                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6">
                     {children}
                 </main>
             </div>
+
+            {!mobileOpen && <MobileBottomBar onOpenMore={() => setMobileOpen(true)} />}
         </div>
     );
 }

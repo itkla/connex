@@ -35,17 +35,32 @@ class OffboardingIndexArchTest {
         new String[] {"notification", "actor_id"},
         new String[] {"deal_collaborator", "user_id"},
         new String[] {"deal", "owner_id"},
+        new String[] {"company", "owner_id"},
+        new String[] {"person", "owner_id"},
         new String[] {"task", "assigned_to_id"},
         new String[] {"attachment", "uploaded_by_id"},
         new String[] {"rule", "run_as_user_id"},
         new String[] {"rule", "created_by_id"},
         new String[] {"saved_view", "user_id"},
+        new String[] {"saved_view_pin", "user_id"},
+        new String[] {"saved_view_default", "user_id"},
         new String[] {"user_dashboard", "user_id"},
         new String[] {"report_definition", "created_by"},
         new String[] {"report_snapshot", "generated_by"},
+        new String[] {"campaign", "owner_user_id"},
+        new String[] {"campaign", "created_by_id"},
+        new String[] {"campaign_audience_snapshot", "created_by_id"},
+        new String[] {"contact_channel_consent_event", "created_by_id"},
+        new String[] {"suppression_entry", "created_by_id"},
         new String[] {"company_share", "granted_by"},
         new String[] {"person_share", "granted_by"},
-        new String[] {"pipeline_share", "granted_by"});
+        new String[] {"pipeline_share", "granted_by"},
+        new String[] {"workflow", "draft_run_as_user_id"},
+        new String[] {"workflow", "created_by_id"},
+        new String[] {"workflow", "updated_by_id"},
+        new String[] {"workflow_version", "run_as_user_id"},
+        new String[] {"workflow_version", "created_by_id"},
+        new String[] {"workflow_version", "published_by_id"});
 
     @Autowired private DataSource dataSource;
 

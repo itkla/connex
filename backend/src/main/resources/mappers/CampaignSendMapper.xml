@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignSendMapper">
+
+  <sql id="sendColumns">
+    id, workspace_id, campaign_id, snapshot_id, message_id, message_version, channel, purpose,
+    provider_id, status, scheduled_at, started_at, completed_at, total_recipients,
+    dispatched_count, skipped_count, failed_count, created_by_id, created_at, updated_at
+  </sql>
+
+  <select id="getSendsByCampaign" resultType="CampaignSend">
+    SELECT <include refid="sendColumns"/> FROM campaign_send
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+    ORDER BY id DESC
+  </select>
+
+  <select id="getSend" resultType="CampaignSend">
+    SELECT <include refid="sendColumns"/> FROM campaign_send
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getSendForUpdate" resultType="CampaignSend">
+    SELECT <include refid="sendColumns"/> FROM campaign_send
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertSend" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_send
+      (workspace_id, campaign_id, snapshot_id, message_id, message_version, channel, purpose,
+       provider_id, status, scheduled_at, total_recipients, created_by_id)
+    VALUES
+      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{messageId}, #{messageVersion}, #{channel},
+       #{purpose}, #{providerId}, #{status}, #{scheduledAt}, #{totalRecipients}, #{createdById})
+  </insert>
+
+  <update id="transitionStatus">
+    UPDATE campaign_send SET status = #{toStatus}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = #{fromStatus}
+  </update>
+
+  <update id="assignProvider">
+    UPDATE campaign_send SET provider_id = #{providerId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="markRunning">
+    UPDATE campaign_send
+    SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'queued'
+  </update>
+
+  <update id="markCompleted">
+    UPDATE campaign_send
+    SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'running'
+  </update>
+
+  <update id="refreshCounters">
+    UPDATE campaign_send s
+    SET s.dispatched_count = (
+          SELECT COUNT(*) FROM campaign_delivery d
+          WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id AND d.status = 'dispatched'),
+        s.skipped_count = (
+          SELECT COUNT(*) FROM campaign_delivery d
+          WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id AND d.status = 'skipped'),
+        s.failed_count = (
+          SELECT COUNT(*) FROM campaign_delivery d
+          WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id AND d.status = 'failed')
+    WHERE s.workspace_id = #{workspaceId} AND s.id = #{id}
+  </update>
+
+  <select id="queuedSendIds" resultType="int">
+    SELECT id FROM campaign_send
+    WHERE workspace_id = #{workspaceId} AND status IN ('queued', 'running')
+    ORDER BY id
+  </select>
+
+  <select id="workspaceIdsWithQueuedSends" resultType="int">
+    SELECT DISTINCT workspace_id FROM campaign_send WHERE status IN ('queued', 'running')
+  </select>
+
+</mapper>

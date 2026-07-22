@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class ConnectionService {
+    private static final int MAX_TOP_CONNECTIONS = 5;
+
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
     private final WorkspaceService workspaceService;
@@ -45,6 +47,16 @@ public class ConnectionService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
         return edgeMapper.getConnections(workspaceId, personId);
+    }
+
+    /** A contact's strongest processable direct connections, capped for bounded context assembly. */
+    public List<PersonConnectionDto> getTopConnections(int personId, int limit) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        if (limit <= 0) {
+            return List.of();
+        }
+        return edgeMapper.getTopConnections(workspaceId, personId, Math.min(limit, MAX_TOP_CONNECTIONS));
     }
 
     /** Connects two contacts (idempotent; re-adding edits the existing edge). */

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
@@ -81,6 +81,9 @@ export default function CalendarNewDealContainer({
         onOpenChange(next);
     };
 
+    const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined };
+    const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
+
     const createNewDeal = async () => {
         setSucceeded(false);
         setCreating(true);
@@ -118,6 +121,7 @@ export default function CalendarNewDealContainer({
             stagesByPipeline={stagesByPipeline}
             isCreating={creating}
             isSuccess={succeeded}
+            isDirty={isDirty}
             createNewDeal={createNewDeal}
         />
     );

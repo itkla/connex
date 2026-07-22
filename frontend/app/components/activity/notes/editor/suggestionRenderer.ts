@@ -59,6 +59,7 @@ export function createSuggestionRenderer<Item>(
                 place(props.clientRect?.());
             },
             onKeyDown: (props: SuggestionKeyDownProps) => {
+                if (props.event.isComposing || props.event.keyCode === 229) return false;
                 if (props.event.key === "Escape") return false;
                 return renderer?.ref?.onKeyDown(props) ?? false;
             },

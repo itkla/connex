@@ -146,9 +146,12 @@ public class UserService implements UserDetailsService {
         if (userMapper.lockById(id) == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
-        List<Integer> ownedWorkspaceIds = workspaceService.lockOwnedWorkspaceRoots(id);
         UserOffboardingService.AccountNotificationLocks notificationLocks =
             userOffboardingService.snapshotAccountNotificationRecipients(id);
+        List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
+        workspaceService.lockAccountWorkspaceRoots(
+            ownedWorkspaceIds,
+            userOffboardingService.workflowWorkspaceIds(notificationLocks));
         userOffboardingService.lockAccountNotificationRecipientMemberships(id, notificationLocks);
         workspaceService.assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);

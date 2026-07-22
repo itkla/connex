@@ -119,6 +119,49 @@ class DealAnalyticsIntegrationTest {
     }
 
     @Test
+    void memberScopeParamsBindResolveAndValidateAcrossAnalytics() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User user = newMember(workspace);
+        workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), "admin");
+        MockHttpSession session = login(user.getUsername());
+
+        mockMvc.perform(get("/api/deals/aging")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("scope", "me")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
+
+        mockMvc.perform(get("/api/activities/volume")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("range", "30d")
+                .param("scope", "me")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(6));
+
+        mockMvc.perform(get("/api/tasks/summary")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("scope", "me")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.todo").value(0));
+
+        mockMvc.perform(get("/api/deals/aging")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("scope", "everyone")
+                .session(session))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/tasks/summary")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("scope", "members")
+                .session(session))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void nonMemberWorkspaceIsRejected() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace memberWorkspace = newWorkspace();

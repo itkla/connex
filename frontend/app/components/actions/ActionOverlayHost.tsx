@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
@@ -8,7 +8,7 @@ import { getContactById, getContacts, getDealById, getDeals, getUsers } from "@/
 import type { Contact, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
-import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { publishRecordMutation } from "@/app/lib/record-mutation-events";
 import { toastError } from "@/app/lib/toast";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
@@ -17,6 +17,7 @@ const ActivityDialog = dynamic(() => import("@/app/components/activity/activitie
 const CompanyCreateContainer = dynamic(() => import("@/app/components/actions/create/CompanyCreateContainer"));
 const ContactCreateContainer = dynamic(() => import("@/app/components/actions/create/ContactCreateContainer"));
 const DealCreateContainer = dynamic(() => import("@/app/components/actions/create/DealCreateContainer"));
+const ImportDialog = dynamic(() => import("@/app/components/import/ImportDialog"));
 
 const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-task",
@@ -41,16 +42,22 @@ function includeSelected<T extends { id: number }>(items: T[], selected: T | nul
     return [selected, ...items];
 }
 
-async function loadReferences(defaultPersonId?: number, defaultDealId?: number) {
+async function loadReferences(defaultPersonId: number | undefined, defaultDealId: number | undefined, init: RequestInit) {
     const [fetchedPersons, fetchedDeals] = await Promise.all([
-        getContacts({}).catch(() => [] as Contact[]),
-        getDeals().catch(() => [] as Deal[]),
+        getContacts({}, init).catch((error: unknown) => {
+            if (init.signal?.aborted) throw error;
+            return [] as Contact[];
+        }),
+        getDeals(init).catch((error: unknown) => {
+            if (init.signal?.aborted) throw error;
+            return [] as Deal[];
+        }),
     ]);
     const selectedPerson = defaultPersonId != null && !fetchedPersons.some((person) => person.id === defaultPersonId)
-        ? await getContactById(defaultPersonId)
+        ? await getContactById(defaultPersonId, init)
         : null;
     const selectedDeal = defaultDealId != null && !fetchedDeals.some((deal) => deal.id === defaultDealId)
-        ? await getDealById(defaultDealId)
+        ? await getDealById(defaultDealId, init)
         : null;
     return {
         persons: includeSelected(fetchedPersons, selectedPerson),
@@ -70,19 +77,47 @@ async function loadReferences(defaultPersonId?: number, defaultDealId?: number) 
  */
 export default function ActionOverlayHost({
     overlay,
+    overlayGeneration,
+    originWorkspaceId,
+    requestSignal,
     user,
     onClose,
 }: {
     overlay: OverlayRequest | null;
+    overlayGeneration: number | null;
+    originWorkspaceId: number | null;
+    requestSignal: AbortSignal | null;
     user: User | null;
     onClose: () => void;
 }) {
     const t = useTranslations("Actions");
-    const { activeWorkspaceId } = useWorkspace();
 
-    const [rendered, setRendered] = useState<OverlayRequest | null>(overlay);
-    if (overlay && overlay !== rendered) setRendered(overlay);
+    const [rendered, setRendered] = useState<{
+        generation: number;
+        originWorkspaceId: number | null;
+        request: OverlayRequest;
+        signal: AbortSignal | null;
+    } | null>(() => overlay && overlayGeneration !== null ? {
+        generation: overlayGeneration,
+        originWorkspaceId,
+        request: overlay,
+        signal: requestSignal,
+    } : null);
+    if (overlay && overlayGeneration !== null && overlayGeneration !== rendered?.generation) {
+        setRendered({
+            generation: overlayGeneration,
+            originWorkspaceId,
+            request: overlay,
+            signal: requestSignal,
+        });
+    }
     const visible = overlay != null;
+    const requestInit = useMemo<RequestInit>(() => ({
+        ...(rendered?.signal ? { signal: rendered.signal } : {}),
+        ...(rendered?.originWorkspaceId !== null && rendered?.originWorkspaceId !== undefined
+            ? { headers: { "X-Workspace-Id": String(rendered.originWorkspaceId) } }
+            : {}),
+    }), [rendered]);
 
     const [loadedUsers, setLoadedUsers] = useState<{ key: string; users: User[] } | null>(null);
     const [loadedReferences, setLoadedReferences] = useState<{
@@ -91,51 +126,51 @@ export default function ActionOverlayHost({
         deals: Deal[];
     } | null>(null);
 
-    const kind = rendered?.kind;
+    const kind = rendered?.request.kind;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
-    const defaults = rendered && "defaults" in rendered ? rendered.defaults : undefined;
+    const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
     const defaultPersonId = defaults?.personId;
     const defaultDealId = defaults?.dealId;
     const referenceKey = needsReference
-        ? [activeWorkspaceId, kind, defaultPersonId, defaultDealId].join(":")
+        ? [rendered?.generation, kind, defaultPersonId, defaultDealId].join(":")
         : null;
-    const usersKey = needsUsers ? [activeWorkspaceId, kind].join(":") : null;
+    const usersKey = needsUsers ? [rendered?.generation, kind].join(":") : null;
 
     useEffect(() => {
         if (!referenceKey) return;
         let cancelled = false;
-        loadReferences(defaultPersonId, defaultDealId)
+        loadReferences(defaultPersonId, defaultDealId, requestInit)
             .then((references) => {
-                if (cancelled) return;
+                if (cancelled || requestInit.signal?.aborted) return;
                 setLoadedReferences({ key: referenceKey, ...references });
             })
             .catch(() => {
-                if (cancelled) return;
+                if (cancelled || requestInit.signal?.aborted) return;
                 toastError(t("feedback.linkedRecordLoadFailed"));
                 onClose();
             });
         return () => {
             cancelled = true;
         };
-    }, [defaultDealId, defaultPersonId, onClose, referenceKey, t]);
+    }, [defaultDealId, defaultPersonId, onClose, referenceKey, requestInit, t]);
 
     useEffect(() => {
         if (!usersKey) return;
         let cancelled = false;
-        getUsers()
+        getUsers(requestInit)
             .then((fetched) => {
-                if (cancelled) return;
+                if (cancelled || requestInit.signal?.aborted) return;
                 setLoadedUsers({ key: usersKey, users: fetched });
             })
             .catch(() => {
-                if (cancelled) return;
+                if (cancelled || requestInit.signal?.aborted) return;
                 setLoadedUsers({ key: usersKey, users: [] });
             });
         return () => {
             cancelled = true;
         };
-    }, [usersKey]);
+    }, [requestInit, usersKey]);
 
     if (!user) return null;
 
@@ -143,65 +178,102 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
 
+    const handleCompaniesImported = () => publishRecordMutation("company");
+    const handleContactsImported = () => publishRecordMutation("contact");
+
     const references = loadedReferences?.key === referenceKey ? loadedReferences : null;
     const users = loadedUsers?.key === usersKey ? loadedUsers.users : null;
     const persons = references?.persons ?? [];
     const deals = references?.deals ?? [];
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
+    const activityDraft = rendered?.request.kind === "create-activity" ? rendered.request.draft : undefined;
+    const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
     return (
         <>
-            {rendered?.kind === "create-task" && users && references ? (
-                <TaskDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    persons={persons}
-                    deals={deals}
-                    users={users}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultDueDate={rendered.draft?.dueDate ?? ""}
-                    defaultDescription={rendered.draft?.description ?? ""}
-                />
-            ) : null}
-            {rendered?.kind === "create-note" && references ? (
-                <NoteDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    note={null}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultContent={rendered.draft?.content ?? ""}
-                />
-            ) : null}
-            {rendered?.kind === "create-activity" && references ? (
-                <ActivityDialog
-                    open={visible}
-                    onOpenChange={handleOpenChange}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={user.id}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultType={ACTIVITY_TYPES.find((activityType) => activityType === rendered.draft?.type)}
-                    defaultSubject={rendered.draft?.subject ?? ""}
-                    defaultNotes={rendered.draft?.notes ?? ""}
-                />
-            ) : null}
-            {rendered?.kind === "create-company" ? (
-                <CompanyCreateContainer open={visible} onOpenChange={handleOpenChange} />
-            ) : null}
-            {rendered?.kind === "create-person" ? (
-                <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.defaults} />
-            ) : null}
-            {rendered?.kind === "create-deal" ? (
-                <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.defaults} />
-            ) : null}
+            <Fragment key={rendered?.generation}>
+                {rendered?.request.kind === "create-task" && users && references ? (
+                    <TaskDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        persons={persons}
+                        deals={deals}
+                        users={users}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultDueDate={rendered.request.draft?.dueDate ?? ""}
+                        defaultDescription={rendered.request.draft?.description ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-note" && references ? (
+                    <NoteDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        note={null}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultContent={rendered.request.draft?.content ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-activity" && references ? (
+                    <ActivityDialog
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={user.id}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultType={defaultActivityType}
+                        defaultSubject={activityDraft?.subject ?? ""}
+                        defaultNotes={activityDraft?.notes ?? ""}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "create-company" ? (
+                    <CompanyCreateContainer open={visible} onOpenChange={handleOpenChange} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "create-person" ? (
+                    <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "create-deal" ? (
+                    <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
+                ) : null}
+                {rendered?.request.kind === "import-companies" ? (
+                    <ImportDialog
+                        entity="companies"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={handleCompaniesImported}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "import-contacts" ? (
+                    <ImportDialog
+                        entity="persons"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={handleContactsImported}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "import-deals" ? (
+                    <ImportDialog
+                        entity="deals"
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        onImported={() => {}}
+                        requestInit={requestInit}
+                    />
+                ) : null}
+            </Fragment>
         </>
     );
 }

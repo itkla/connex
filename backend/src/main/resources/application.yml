@@ -30,6 +30,8 @@ spring:
             resolve-lazily: true
     jackson:
         default-property-inclusion: non_null
+        read:
+            strict-duplicate-detection: true
 
 connex:
     audit:
@@ -133,6 +135,7 @@ connex:
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
         business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
+        workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
     object-storage:
         provider: ${CONNEX_OBJECT_STORAGE_PROVIDER:filesystem}
@@ -179,6 +182,7 @@ connex:
         connect-timeout: ${CONNEX_OCR_CONNECT_TIMEOUT:2s}
         request-timeout: ${CONNEX_OCR_REQUEST_TIMEOUT:15s}
         readiness-cache: ${CONNEX_OCR_READINESS_CACHE:5s}
+        local-first-wait: ${CONNEX_OCR_LOCAL_FIRST_WAIT:2s}
         max-response-bytes: ${CONNEX_OCR_MAX_RESPONSE_BYTES:1048576}
         max-image-bytes: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:8388608}
         max-width: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:8192}
@@ -235,6 +239,18 @@ connex:
             enabled: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_ENABLED:false}
             client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
+    connected-accounts:
+        # Per-user connected accounts (#60) — OAuth clients for connecting a user's own mailbox
+        # and calendar with offline access. Deliberately separate client apps from social login:
+        # a sign-in client must never hold mail/calendar scopes. Off until configured.
+        google:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_SECRET:}
+        microsoft:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_SECRET:}
     ai:
         # Instance-level switch for AI features (#94/#386). Defaults false pending live public/APPI
         # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,
@@ -252,6 +268,9 @@ connex:
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
+        max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
+        max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}
+        max-media-working-bytes: ${CONNEX_AI_MAX_MEDIA_WORKING_BYTES:67108864}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

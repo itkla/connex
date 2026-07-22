@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SuppressionMapper">
+
+  <sql id="columns">
+    id, workspace_id, scope, channel, address, person_id, reason, note,
+    created_by_id, created_at
+  </sql>
+
+  <select id="getAll" resultType="SuppressionEntry">
+    SELECT <include refid="columns"/> FROM suppression_entry
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getById" resultType="SuppressionEntry">
+    SELECT <include refid="columns"/> FROM suppression_entry
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO suppression_entry
+      (workspace_id, scope, channel, address, person_id, reason, note, created_by_id)
+    VALUES
+      (#{workspaceId}, #{scope}, #{channel}, #{address}, #{personId}, #{reason}, #{note}, #{createdById})
+  </insert>
+
+  <delete id="delete">
+    DELETE FROM suppression_entry WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <update id="clearCreatorsAnywhere">
+    UPDATE suppression_entry SET created_by_id = NULL WHERE created_by_id = #{userId}
+  </update>
+
+</mapper>

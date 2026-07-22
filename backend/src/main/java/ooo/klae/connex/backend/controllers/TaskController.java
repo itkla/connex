@@ -11,13 +11,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.TaskMoveRequest;
 import ooo.klae.connex.backend.dto.TaskRescheduleRequest;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.TaskService;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
@@ -37,6 +40,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TaskController {
     private final TaskService taskService;
+    private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
 
     /**
      * GET endpoint to retrieve tasks, with optional filtering by assignedToId, personId, or dealId.
@@ -77,8 +82,28 @@ public class TaskController {
      * GET endpoint for workspace-wide task status and due-date counts.
      */
     @GetMapping("/summary")
-    public TaskSummaryDto getTaskSummary() {
-        return taskService.getTaskSummary();
+    public TaskSummaryDto getTaskSummary(
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
+    ) {
+        return taskService.getTaskSummary(analyticsMemberScope(scope, memberIds));
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
+    }
+
+    /**
+     * Resolves a member scope for per-member analytics, restricting any
+     * non-workspace-wide scope to workspace managers (admin or owner). Members
+     * retain the all-team view.
+     */
+    private MemberScope analyticsMemberScope(String scope, List<Integer> memberIds) {
+        MemberScope resolved = resolveMemberScope(scope, memberIds);
+        if (resolved.mode() != MemberScope.Mode.ALL_TEAM) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        return resolved;
     }
 
     /** Returns a bounded due-date-ordered preview of open tasks for the dashboard. */

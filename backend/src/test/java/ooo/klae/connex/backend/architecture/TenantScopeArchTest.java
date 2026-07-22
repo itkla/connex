@@ -45,23 +45,36 @@ class TenantScopeArchTest {
 
     private static final Pattern WORKSPACE_PARAM = Pattern.compile("#\\{\\s*(?:\\w+\\.)?workspaceId\\b");
 
+    @Test
+    void workflowPersistenceRemainsOnTheWorkspaceScopedPlane() {
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowMapper"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowVersionMapper"));
+    }
+
     /**
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
      * Each is provably tenant-safe without it: the notification inbox is
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
      * it binds {@code #{recipientId}}), the scheduler helpers only enumerate
      * workspace or schedule references while pinned to one catalog for per-workspace
-     * background fan-out (they return no tenant content rows),
+     * background or startup fan-out (they return no tenant content rows),
      * and the org-scoped audit reads are org-filtered ({@code #{orgId}}) and gated by
      * org membership (MULTITENANCY_PLAN §0.6). The {@code count*Anywhere} selects are
      * the account-offboarding guards (#440 increment 3): identity-scoped counts that
      * mirror the dropped RESTRICT constraints across every workspace. The
      * recipient membership lock and actor-recipient projection are identity-scoped
-     * coordination reads for notification offboarding.
+     * coordination reads for notification offboarding. Workflow offboarding discovery
+     * is bound to the departing user and only returns exact workspace/workflow/version/rule
+     * keys that are point-locked before mutation.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsByCategory",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsBySeverity",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.countsByWorkspace",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getUnreadCounts",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getNextSnoozeExpiry",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
@@ -69,10 +82,12 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.getInboxCutoffId",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getDatabaseUtcTimestamp",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.findByIdForUpdate",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
+        "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithRules",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
         "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",
@@ -80,7 +95,13 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
         "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",
         "ooo.klae.connex.backend.mappers.ActivityMapper.countCreatedAnywhere",
-        "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere"
+        "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere",
+        "ooo.klae.connex.backend.mappers.WorkflowMapper.findAffectedByUserAnywhere",
+        "ooo.klae.connex.backend.mappers.WorkflowVersionMapper.findLockCandidatesByUserAnywhere",
+        "ooo.klae.connex.backend.mappers.RuleMapper.findLockCandidatesByUserAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignSendMapper.workspaceIdsWithQueuedSends",
+        "ooo.klae.connex.backend.mappers.CampaignDeliveryMapper.getByToken",
+        "ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper.findByWebhookTokenHash"
     );
 
     /**
@@ -102,22 +123,29 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.dismiss",
         "ooo.klae.connex.backend.mappers.NotificationMapper.restore",
         "ooo.klae.connex.backend.mappers.NotificationMapper.snooze",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.unsnooze",
         "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead",
         "ooo.klae.connex.backend.mappers.NotificationMapper.deleteAllForRecipientAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.clearActorAnywhere",
+        "ooo.klae.connex.backend.mappers.CompanyMapper.clearOwnershipAnywhere",
+        "ooo.klae.connex.backend.mappers.PersonMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
         "ooo.klae.connex.backend.mappers.TaskMapper.unassignAnywhere",
         "ooo.klae.connex.backend.mappers.AttachmentMapper.clearUploaderAnywhere",
-        "ooo.klae.connex.backend.mappers.RuleMapper.clearRunAsAnywhere",
-        "ooo.klae.connex.backend.mappers.RuleMapper.clearCreatedByAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignMapper.clearCampaignUserReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.CampaignMapper.clearSnapshotCreatorsAnywhere",
+        "ooo.klae.connex.backend.mappers.ConsentMapper.clearEventCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearCompanyShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPersonShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.SavedViewMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper.deletePinsForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere",
         "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearDefinitionCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearSnapshotGeneratorsAnywhere",
+        "ooo.klae.connex.backend.mappers.SuppressionMapper.clearCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions"
     );
 
