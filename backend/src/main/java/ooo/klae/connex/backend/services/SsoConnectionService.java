@@ -352,7 +352,7 @@ public class SsoConnectionService {
     }
 
     private static Set<String> normalizeDomains(List<String> domains) {
-        Set<String> normalized = new LinkedHashSet<>();
+        Set<String> normalized = new TreeSet<>();
         if (domains == null) {
             return normalized;
         }

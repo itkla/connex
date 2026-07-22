@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -79,5 +82,32 @@ class SsoConnectionLockOrderTest {
         order.verify(organizationMapper).lockById(7);
         order.verify(orgMemberService).requireOrgAdminForUpdate(7, 9);
         verifyNoInteractions(ssoConnectionMapper, ssoSecretCipher, auditService);
+    }
+
+    @Test
+    void saveInsertsNormalizedDomainsInGlobalOrder() {
+        SsoConnectionRequest request = new SsoConnectionRequest();
+        request.setProtocol("oidc");
+        request.setJitWorkspaceId(3);
+        request.setDomains(List.of("b.example", "A.example"));
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspaceForShare(3)).thenReturn(3);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.getOrgId(5)).thenReturn(7);
+        when(workspaceMapper.getOrgId(3)).thenReturn(7);
+        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(ssoProperties.isEnabled()).thenReturn(true);
+        when(ssoDomainMapper.listByOrg(7)).thenReturn(List.of());
+        when(ssoDomainMapper.findOrgByDomain("a.example")).thenReturn(null);
+        when(ssoDomainMapper.findOrgByDomain("b.example")).thenReturn(null);
+
+        assertDoesNotThrow(() -> ssoConnectionService.save(5, 9, request));
+
+        InOrder order = inOrder(ssoDomainMapper);
+        order.verify(ssoDomainMapper).listByOrg(7);
+        order.verify(ssoDomainMapper).findOrgByDomain("a.example");
+        order.verify(ssoDomainMapper).insert("a.example", 7);
+        order.verify(ssoDomainMapper).findOrgByDomain("b.example");
+        order.verify(ssoDomainMapper).insert("b.example", 7);
     }
 }
