@@ -48,6 +48,7 @@ import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tas
 import Rise from '@/app/components/motion/Rise';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -168,6 +169,8 @@ export default function TasksBrowser({
     const locale = useLocale();
     const router = useRouter();
     const reduce = useReducedMotion() ?? false;
+    const { activeWorkspaceId, switching } = useWorkspace();
+    const [originWorkspaceId] = useState(activeWorkspaceId);
 
     const [now] = useState(() => Date.now());
     const [tasks, setTasks] = useState<Task[]>(initialTasks);
@@ -199,6 +202,15 @@ export default function TasksBrowser({
     const rowRefs = useRef(new Map<number, HTMLLIElement>());
     const pendingFocusRef = useRef<number | null>(null);
     const timers = useRef<number[]>([]);
+    const workspaceCurrent = !switching
+        && originWorkspaceId !== null
+        && activeWorkspaceId === originWorkspaceId;
+
+    useEffect(() => {
+        if (workspaceCurrent) return;
+        const timer = window.setTimeout(() => setDeletingTask(null), 0);
+        return () => window.clearTimeout(timer);
+    }, [workspaceCurrent]);
 
     const searchParams = useSearchParams();
     useEffect(() => {
@@ -487,7 +499,13 @@ export default function TasksBrowser({
     };
 
     const handleDeleteTask = async () => {
-        if (!deletingTask || deleting) return;
+        if (
+            !deletingTask
+            || deleting
+            || !workspaceCurrent
+            || pendingToggle.has(deletingTask.id)
+            || completing.has(deletingTask.id)
+        ) return;
         const deletingIndex = visibleTasks.findIndex((task) => task.id === deletingTask.id);
         const focusTarget =
             deletingIndex >= 0
@@ -496,7 +514,9 @@ export default function TasksBrowser({
 
         setDeleting(true);
         try {
-            await deleteTask(deletingTask.id);
+            await deleteTask(deletingTask.id, {
+                headers: { 'X-Workspace-Id': String(originWorkspaceId) },
+            });
             pendingFocusRef.current = focusTarget?.id ?? null;
             setRovingTaskId(focusTarget?.id ?? null);
             setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
@@ -513,6 +533,7 @@ export default function TasksBrowser({
     const drawerCompanyId = editingTask?.personId
         ? personById.get(editingTask.personId)?.companyId ?? null
         : null;
+    const visibleDeletingTask = workspaceCurrent ? deletingTask : null;
 
     const hasAnyTasks = tasks.length > 0;
     const isEmpty = filtered.length === 0;
@@ -540,10 +561,13 @@ export default function TasksBrowser({
 
     const renderRow = (task: Task, bucket: Bucket) => {
         const label = noteSnippet(task.description, 60) || t('entityLabel');
+        const taskMutationPending = pendingToggle.has(task.id) || completing.has(task.id);
         const menuModel: RecordMenuModel = {
             record: { type: 'task', id: task.id, label },
             includeCreateActions: false,
-            onDelete: canDeleteTasks ? () => setDeletingTask(task) : undefined,
+            onDelete: canDeleteTasks && workspaceCurrent && !taskMutationPending
+                ? () => setDeletingTask(task)
+                : undefined,
         };
 
         return (
@@ -828,12 +852,12 @@ export default function TasksBrowser({
             )}
 
             <DeleteRecordDialog<Task>
-                open={deletingTask !== null}
+                open={visibleDeletingTask !== null}
                 onOpenChange={(open) => {
                     if (!open && !deleting) setDeletingTask(null);
                 }}
-                selectedIds={new Set(deletingTask ? [deletingTask.id] : [])}
-                selectedItems={deletingTask ? [deletingTask] : []}
+                selectedIds={new Set(visibleDeletingTask ? [visibleDeletingTask.id] : [])}
+                selectedItems={visibleDeletingTask ? [visibleDeletingTask] : []}
                 entityLabel={t('entityLabel')}
                 getDisplayName={(task) => noteSnippet(task.description, 60) || t('entityLabel')}
                 isDeleting={deleting}
@@ -1126,7 +1150,11 @@ function TaskRow({
                     )}
                 </div>
 
-                <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+                <div
+                    className="shrink-0"
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
                     <RecordActionMenuTrigger model={menuModel} triggerClassName="opacity-100" />
                 </div>
             </motion.li>
