@@ -12,6 +12,14 @@ import {
 } from "@heroicons/react/24/outline";
 
 import {
+    Autocomplete,
+    AutocompleteContent,
+    AutocompleteEmpty,
+    AutocompleteInput,
+    AutocompleteItem,
+    AutocompleteList,
+} from "@/components/ui/autocomplete";
+import {
     ResponsiveDialog,
     ResponsiveDialogClose,
     ResponsiveDialogContent,
@@ -770,11 +778,36 @@ function ValueInput({
 
     if (spec.valueSource === "industries") {
         return (
-            <ValueSelect value={condition.value} placeholder={t("pickIndustry")} onChange={(value) => onChange({ ...condition, value })}>
-                {(fields?.industries ?? []).map((industry) => (
-                    <SelectItem key={industry} value={industry}>{industry}</SelectItem>
-                ))}
-            </ValueSelect>
+            <Autocomplete
+                items={fields?.industries ?? []}
+                value={condition.value ?? ""}
+                onValueChange={(value, eventDetails) => {
+                    if (eventDetails.reason === "escape-key") {
+                        eventDetails.allowPropagation();
+                        return;
+                    }
+                    onChange({ ...condition, value });
+                }}
+                mode="list"
+                openOnInputClick
+            >
+                <AutocompleteInput
+                    placeholder={t("pickIndustry")}
+                    aria-label={t("industryValueLabel")}
+                    maxLength={255}
+                    className="w-full min-w-0 flex-1"
+                />
+                <AutocompleteContent>
+                    <AutocompleteEmpty>{t("industryNoMatches")}</AutocompleteEmpty>
+                    <AutocompleteList>
+                        {(industry: string) => (
+                            <AutocompleteItem key={industry} value={industry}>
+                                {industry}
+                            </AutocompleteItem>
+                        )}
+                    </AutocompleteList>
+                </AutocompleteContent>
+            </Autocomplete>
         );
     }
 
