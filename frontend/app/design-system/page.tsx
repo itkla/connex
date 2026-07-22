@@ -7,6 +7,8 @@ import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
 
 import { cn } from "@/lib/utils";
 import { PageShell } from "@/app/components/PageShell";
+import { useShortcutPlatform } from "@/app/hooks/useShortcutPlatform";
+import { formatShortcut } from "@/app/lib/actions/shortcut";
 import {
   instant,
   springJiggle,
@@ -286,6 +288,7 @@ function CssMotionDemo({ label, spec, style }: { label: string; spec: string; st
 
 export default function DesignSystemPage() {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const shortcutPlatform = useShortcutPlatform();
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -573,8 +576,11 @@ export default function DesignSystemPage() {
 
                 <Button variant="outline" onClick={() => setPaletteOpen(true)}>
                   Command palette
-                  <Badge variant="ghost" className="font-mono">
-                    ⌘K
+                  <Badge
+                    variant="ghost"
+                    className={cn("w-16 justify-center font-mono", !shortcutPlatform && "invisible")}
+                  >
+                    {formatShortcut("mod+k", shortcutPlatform ?? "other")}
                   </Badge>
                 </Button>
               </div>
