@@ -270,6 +270,9 @@ public class SsoConnectionService {
     }
 
     private void replaceDomains(int orgId, List<String> requested) {
+        if (ssoDomainMapper.lockMutationRoot() == null) {
+            throw new IllegalStateException("SSO domain mutation lock is unavailable");
+        }
         Set<String> desired = normalizeDomains(requested);
         Set<String> current = new LinkedHashSet<>(ssoDomainMapper.listByOrg(orgId));
         for (String domain : current) {

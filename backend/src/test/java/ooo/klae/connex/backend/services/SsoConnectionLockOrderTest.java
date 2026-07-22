@@ -85,7 +85,7 @@ class SsoConnectionLockOrderTest {
     }
 
     @Test
-    void saveInsertsNormalizedDomainsInGlobalOrder() {
+    void saveLocksGlobalDomainRootBeforeSortedWrites() {
         SsoConnectionRequest request = new SsoConnectionRequest();
         request.setProtocol("oidc");
         request.setJitWorkspaceId(3);
@@ -97,6 +97,7 @@ class SsoConnectionLockOrderTest {
         when(workspaceMapper.getOrgId(3)).thenReturn(7);
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(ssoProperties.isEnabled()).thenReturn(true);
+        when(ssoDomainMapper.lockMutationRoot()).thenReturn(1);
         when(ssoDomainMapper.listByOrg(7)).thenReturn(List.of());
         when(ssoDomainMapper.findOrgByDomain("a.example")).thenReturn(null);
         when(ssoDomainMapper.findOrgByDomain("b.example")).thenReturn(null);
@@ -104,6 +105,7 @@ class SsoConnectionLockOrderTest {
         assertDoesNotThrow(() -> ssoConnectionService.save(5, 9, request));
 
         InOrder order = inOrder(ssoDomainMapper);
+        order.verify(ssoDomainMapper).lockMutationRoot();
         order.verify(ssoDomainMapper).listByOrg(7);
         order.verify(ssoDomainMapper).findOrgByDomain("a.example");
         order.verify(ssoDomainMapper).insert("a.example", 7);

@@ -14,6 +14,8 @@ import org.apache.ibatis.annotations.Param;
  */
 public interface SsoDomainMapper {
 
+    Integer lockMutationRoot();
+
     Integer findOrgByDomain(String domain);
 
     List<String> listByOrg(int orgId);
