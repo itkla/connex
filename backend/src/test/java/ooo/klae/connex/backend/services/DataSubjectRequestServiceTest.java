@@ -7,10 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -18,6 +25,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
@@ -27,11 +35,42 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class DataSubjectRequestServiceTest extends AbstractServiceTest {
     @Autowired private DataSubjectRequestService dataSubjectRequestService;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private AuditLogMapper auditLogMapper;
+    @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    private final List<Integer> createdUserIds = new ArrayList<>();
+    private final List<Integer> createdOrganizationIds = new ArrayList<>();
+    private final List<Integer> createdWorkspaceIds = new ArrayList<>();
+    private final List<Integer> createdPersonIds = new ArrayList<>();
+    private final List<Integer> createdCompanyIds = new ArrayList<>();
+
+    @AfterEach
+    void cleanUpCommittedFixtures() {
+        createdPersonIds.forEach(id -> jdbcTemplate.update("DELETE FROM person WHERE id = ?", id));
+        createdCompanyIds.forEach(id -> jdbcTemplate.update("DELETE FROM company WHERE id = ?", id));
+        createdOrganizationIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM data_subject_request WHERE org_id = ?", id));
+        createdWorkspaceIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
+        createdOrganizationIds.forEach(id -> jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", id));
+        createdOrganizationIds.forEach(id -> jdbcTemplate.update("DELETE FROM organization WHERE id = ?", id));
+        createdUserIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", id));
+        createdUserIds.forEach(id -> jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", id));
+    }
+
+    @Override
+    protected User newUser() {
+        User user = super.newUser();
+        createdUserIds.add(user.getId());
+        return user;
+    }
 
     @Test
     void createDefaultsRequiresOrgAdminAndStepUpAndWritesMetadataOnlyAudit() {
@@ -173,6 +212,26 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void disclosureAuditCommitsOutsideAnAmbientCallerTransaction() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        DataSubjectRequestDto request = dataSubjectRequestService.create(
+            org.getId(), currentUser.getId(), linkedRequest(subjectWorkspace.getId(), subject.getId()));
+        TransactionTemplate callerTransaction = new TransactionTemplate(transactionManager);
+
+        callerTransaction.executeWithoutResult(status -> {
+            dataSubjectRequestService.disclosure(org.getId(), request.getId(), currentUser.getId());
+            status.setRollbackOnly();
+        });
+
+        long disclosureAudits = auditLogMapper.findRecentByOrg(org.getId(), 50, 0).stream()
+            .filter(entry -> "appi.subject_request.disclosure".equals(entry.getAction()))
+            .count();
+        assertEquals(1, disclosureAudits);
+    }
+
+    @Test
     void updateAuditsFieldLevelChangesWithoutSubjectPii() {
         Organization org = orgOwnedByCurrentUser();
         DataSubjectRequestDto created = dataSubjectRequestService.create(
@@ -221,6 +280,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         org.setName("Subject Request Org " + unique());
         org.setSlug("subject-request-org-" + unique());
         organizationMapper.insert(org);
+        createdOrganizationIds.add(org.getId());
         orgMemberService.addFoundingOwner(org.getId(), currentUser.getId());
         return org;
     }
@@ -231,6 +291,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         subjectWorkspace.setName("Subject Workspace " + unique());
         subjectWorkspace.setSlug("subject-workspace-" + unique());
         workspaceMapper.insert(subjectWorkspace);
+        createdWorkspaceIds.add(subjectWorkspace.getId());
         return subjectWorkspace;
     }
 
@@ -239,12 +300,14 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         company.setWorkspaceId(workspaceId);
         company.setName("Subject Company " + unique());
         companyMapper.insert(company);
+        createdCompanyIds.add(company.getId());
         Person person = new Person();
         person.setWorkspaceId(workspaceId);
         person.setName("Subject Name " + unique());
         person.setEmail(unique() + "@example.com");
         person.setCompany(company);
         personMapper.insert(person);
+        createdPersonIds.add(person.getId());
         return person;
     }
 

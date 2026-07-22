@@ -2,245 +2,187 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ActivityDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AttachmentDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.CustomFieldValueDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.DealAssociationDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.EmploymentDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.IntroductionDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RelationshipEdgeDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.TagDto;
-import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.TaskDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ThirdPartyProvisionDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.DisclosureControlData;
+import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.WorkspaceSnapshot;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class DataSubjectRequestServiceUnitTest {
-    @Mock private DataSubjectRequestMapper dataSubjectRequestMapper;
-    @Mock private OrgMemberService orgMemberService;
-    @Mock private AuditService auditService;
-    @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private DataSubjectRequestControlOperations controlOperations;
+    @Mock private DataSubjectDisclosureAccess disclosureAccess;
+    @Mock private TenantWorkScope tenantWorkScope;
 
     private DataSubjectRequestService service;
 
     @BeforeEach
     void setUp() {
-        service = new DataSubjectRequestService(
-            dataSubjectRequestMapper, orgMemberService, auditService, sessionSecurityService);
+        when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(0);
+            return work.get();
+        });
+        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope);
     }
 
     @Test
-    void createGatesBeforePersistenceAndWritesMetadataOnlyAudit() {
-        AtomicReference<DataSubjectRequest> inserted = new AtomicReference<>();
-        doAnswer(invocation -> {
-            DataSubjectRequest request = invocation.getArgument(0);
-            request.setId(9);
-            inserted.set(request);
-            return 1;
-        }).when(dataSubjectRequestMapper).insert(org.mockito.ArgumentMatchers.any(DataSubjectRequest.class));
-        when(dataSubjectRequestMapper.findById(3, 9)).thenAnswer(invocation -> inserted.get());
+    void createAuthorizesBeforeDelegatingAValidatedControlWrite() {
+        when(controlOperations.create(any(Integer.class), any(Integer.class), any(DataSubjectRequest.class)))
+            .thenAnswer(invocation -> {
+                DataSubjectRequest request = invocation.getArgument(2);
+                request.setId(9);
+                return DataSubjectRequestDto.from(request);
+            });
 
         DataSubjectRequestDto created = service.create(3, 7, request("disclosure"));
 
         assertEquals(9, created.getId());
         assertEquals("received", created.getStatus());
-        InOrder order = inOrder(orgMemberService, sessionSecurityService, dataSubjectRequestMapper);
-        order.verify(orgMemberService).requireOrgAdmin(3, 7);
-        order.verify(sessionSecurityService).requireRecentAuthentication(7);
-        order.verify(dataSubjectRequestMapper).insert(inserted.get());
-        verify(auditService).record(eq("appi.subject_request.create"), eq("organization"), eq(3),
-            eq("Subject request 9"), eq("APPI data-subject request created"),
-            eq(Map.of("requestId", 9L, "requestType", "disclosure", "status", "received")));
+        InOrder order = inOrder(controlOperations);
+        order.verify(controlOperations).requireMutationAccess(3, 7);
+        order.verify(controlOperations).create(any(Integer.class), any(Integer.class), any(DataSubjectRequest.class));
+        verify(disclosureAccess, never()).subjectPersonExists(any(Integer.class), any(Integer.class),
+            any(Integer.class), any(Integer.class));
     }
 
     @Test
-    void subjectLinkValidationIsDefensiveAtTheServiceBoundary() {
+    void subjectLinkValidationRequiresBothControlAndTenantProof() {
         DataSubjectRequestUpsertRequest oneSided = request("disclosure");
         oneSided.setSubjectWorkspaceId(4);
         assertThrows(BadRequestException.class, () -> service.create(3, 7, oneSided));
 
-        DataSubjectRequestUpsertRequest missing = request("disclosure");
-        missing.setSubjectWorkspaceId(4);
-        missing.setSubjectPersonId(5);
-        when(dataSubjectRequestMapper.subjectPersonInOrg(3, 4, 5)).thenReturn(false);
-        assertThrows(BadRequestException.class, () -> service.create(3, 7, missing));
-
-        verify(orgMemberService, org.mockito.Mockito.times(2)).requireOrgAdmin(3, 7);
-        verify(sessionSecurityService, org.mockito.Mockito.times(2)).requireRecentAuthentication(7);
-        verify(dataSubjectRequestMapper).subjectPersonInOrg(3, 4, 5);
-    }
-
-    @Test
-    void updateAllowsTypeCorrectionAndWritesMetadataOnlyAudit() {
-        DataSubjectRequest stored = storedRequest();
-        when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(stored);
-        DataSubjectRequestUpsertRequest update = request("cease_use");
-        update.setStatus("closed");
-
-        DataSubjectRequestDto updated = service.update(3, 9, 7, update);
-
-        assertEquals("cease_use", updated.getRequestType());
-        assertEquals("closed", updated.getStatus());
-        verify(auditService).record(eq("appi.subject_request.update"), eq("organization"), eq(3),
-            eq("Subject request 9"), eq("APPI data-subject request updated"),
-            eq(Map.of("requestId", 9L, "requestType", "cease_use", "status", "closed")));
-    }
-
-    @Test
-    void disclosureRequiresALinkAndRevalidatesThePerson() {
-        DataSubjectRequest unlinked = storedVerifiedRequest();
-        when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(unlinked);
-        assertThrows(BadRequestException.class, () -> service.disclosure(3, 9, 7));
-
-        DataSubjectRequest linked = storedVerifiedRequest();
+        DataSubjectRequestUpsertRequest linked = request("disclosure");
         linked.setSubjectWorkspaceId(4);
         linked.setSubjectPersonId(5);
-        when(dataSubjectRequestMapper.findById(3, 10)).thenReturn(linked);
-        when(dataSubjectRequestMapper.findDisclosurePerson(3, 4, 5)).thenReturn(null);
-        assertThrows(ResourceNotFoundException.class, () -> service.disclosure(3, 10, 7));
+        when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(false, true, true);
+        assertThrows(BadRequestException.class, () -> service.create(3, 7, linked));
+        verify(disclosureAccess, never()).subjectPersonExists(3, 7, 4, 5);
 
-        verify(orgMemberService, org.mockito.Mockito.times(2)).requireOrgAdmin(3, 7);
-        verify(sessionSecurityService, org.mockito.Mockito.times(2)).requireRecentAuthentication(7);
+        when(disclosureAccess.subjectPersonExists(3, 7, 4, 5)).thenReturn(false, true);
+        assertThrows(BadRequestException.class, () -> service.create(3, 7, linked));
+
+        when(controlOperations.create(any(Integer.class), any(Integer.class), any(DataSubjectRequest.class)))
+            .thenAnswer(invocation -> DataSubjectRequestDto.from(invocation.getArgument(2)));
+        service.create(3, 7, linked);
+        verify(disclosureAccess, org.mockito.Mockito.times(2)).subjectPersonExists(3, 7, 4, 5);
     }
 
     @Test
-    void disclosureRequiresADisclosureTypeRequestWithVerifiedIdentity() {
-        DataSubjectRequest wrongType = storedVerifiedRequest();
-        wrongType.setRequestType("correction");
-        wrongType.setSubjectWorkspaceId(4);
-        wrongType.setSubjectPersonId(5);
-        when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(wrongType);
-        assertThrows(BadRequestException.class, () -> service.disclosure(3, 9, 7));
-
-        DataSubjectRequest unverified = storedRequest();
-        unverified.setSubjectWorkspaceId(4);
-        unverified.setSubjectPersonId(5);
-        when(dataSubjectRequestMapper.findById(3, 10)).thenReturn(unverified);
-        assertThrows(BadRequestException.class, () -> service.disclosure(3, 10, 7));
-
-        verify(dataSubjectRequestMapper, org.mockito.Mockito.never())
-            .findDisclosurePerson(org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
-    }
-
-    @Test
-    void disclosureAssemblesAndAuditsLinkedSubjectIdentifiers() {
-        DataSubjectRequest linked = storedVerifiedRequest();
-        linked.setSubjectWorkspaceId(4);
-        linked.setSubjectPersonId(5);
-        PersonDto person = new PersonDto();
-        person.setId(5);
-        person.setWorkspaceId(4);
-        TagDto tag = new TagDto();
-        CustomFieldValueDto customField = new CustomFieldValueDto();
-        ActivityDto activity = new ActivityDto();
-        NoteDto note = new NoteDto();
-        TaskDto task = new TaskDto();
-        AttachmentDto attachment = new AttachmentDto();
-        EmploymentDto employment = new EmploymentDto();
-        RelationshipEdgeDto edge = new RelationshipEdgeDto();
-        DealAssociationDto deal = new DealAssociationDto();
-        IntroductionDto introduction = new IntroductionDto();
-        ThirdPartyProvisionDto provision = new ThirdPartyProvisionDto();
-        AuditEntryDto audit = new AuditEntryDto();
-        when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(linked);
-        when(dataSubjectRequestMapper.findDisclosurePerson(3, 4, 5)).thenReturn(person);
-        when(dataSubjectRequestMapper.findDisclosureTags(3, 4, 5)).thenReturn(List.of(tag));
-        when(dataSubjectRequestMapper.findDisclosureCustomFields(3, 4, 5)).thenReturn(List.of(customField));
-        when(dataSubjectRequestMapper.findDisclosureActivities(3, 4, 5)).thenReturn(List.of(activity));
-        when(dataSubjectRequestMapper.findDisclosureNotes(3, 4, 5)).thenReturn(List.of(note));
-        when(dataSubjectRequestMapper.findDisclosureTasks(3, 4, 5)).thenReturn(List.of(task));
-        when(dataSubjectRequestMapper.findDisclosureAttachments(3, 4, 5)).thenReturn(List.of(attachment));
-        when(dataSubjectRequestMapper.findDisclosureEmployment(3, 4, 5)).thenReturn(List.of(employment));
-        when(dataSubjectRequestMapper.findDisclosureEdges(3, 4, 5)).thenReturn(List.of(edge));
-        when(dataSubjectRequestMapper.findDisclosureDeals(3, 4, 5)).thenReturn(List.of(deal));
-        when(dataSubjectRequestMapper.findDisclosureIntroductions(3, 4, 5)).thenReturn(List.of(introduction));
-        when(dataSubjectRequestMapper.findDisclosureProvisions(3, 4, 5)).thenReturn(List.of(provision));
-        when(dataSubjectRequestMapper.findDisclosureAudit(3, 4, 5, 1_000)).thenReturn(List.of(audit));
-        when(dataSubjectRequestMapper.countDisclosureAudit(3, 4, 5)).thenReturn(1_234L);
-
-        DataSubjectDisclosureDto disclosure = service.disclosure(3, 9, 7);
-
-        assertEquals(5, disclosure.getPerson().getId());
-        assertEquals(List.of(tag), disclosure.getTags());
-        assertEquals(List.of(customField), disclosure.getCustomFieldValues());
-        assertEquals(List.of(activity), disclosure.getActivities());
-        assertEquals(List.of(note), disclosure.getNotes());
-        assertEquals(List.of(task), disclosure.getTasks());
-        assertEquals(List.of(attachment), disclosure.getAttachments());
-        assertEquals(List.of(employment), disclosure.getEmploymentHistory());
-        assertEquals(List.of(edge), disclosure.getRelationshipEdges());
-        assertEquals(List.of(deal), disclosure.getDealAssociations());
-        assertEquals(List.of(introduction), disclosure.getIntroductions());
-        assertEquals(List.of(provision), disclosure.getThirdPartyProvisions());
-        assertEquals(List.of(audit), disclosure.getAuditTrail());
-        assertEquals(1_234, disclosure.getAuditTrailTotal());
-        assertNotNull(disclosure.getGeneratedAt());
-        verify(auditService).recordStrict(eq("appi.subject_request.disclosure"), eq("organization"), eq(3),
-            eq("Subject request 9"), eq("Subject-scoped disclosure export assembled"),
-            eq(Map.of("requestId", 9L, "subjectPersonId", 5, "subjectWorkspaceId", 4)));
-    }
-
-    @Test
-    void updatePreservesOmittedFieldsClearsBlankTextAndAuditsTheFieldDiff() {
+    void updatePreservesOmittedFieldsAndDelegatesSnapshotsSeparately() {
         DataSubjectRequest stored = storedVerifiedRequest();
         stored.setSubjectWorkspaceId(4);
         stored.setSubjectPersonId(5);
-        stored.setDueAt(LocalDateTime.of(2026, 2, 1, 0, 0));
         stored.setSummary("Original summary");
-        when(dataSubjectRequestMapper.findById(3, 9)).thenReturn(stored);
-        when(dataSubjectRequestMapper.subjectPersonInOrg(3, 4, 5)).thenReturn(true);
-        when(auditService.diff(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.anySet())).thenReturn(Map.of("dueAt", Map.of()));
+        when(controlOperations.loadForMutation(3, 9, 7)).thenReturn(stored);
+        when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(true);
+        when(disclosureAccess.subjectPersonExists(3, 7, 4, 5)).thenReturn(true);
+        when(controlOperations.update(any(Integer.class), any(Long.class), any(Integer.class),
+                any(DataSubjectRequest.class), any(DataSubjectRequest.class)))
+            .thenAnswer(invocation -> DataSubjectRequestDto.from(invocation.getArgument(4)));
         DataSubjectRequestUpsertRequest update = request("disclosure");
         update.setResolution("   ");
 
         DataSubjectRequestDto updated = service.update(3, 9, 7, update);
 
-        assertEquals("received", updated.getStatus());
         assertEquals(4, updated.getSubjectWorkspaceId());
         assertEquals(5, updated.getSubjectPersonId());
-        assertNotNull(updated.getIdentityVerifiedAt());
-        assertEquals(LocalDateTime.of(2026, 2, 1, 0, 0), updated.getDueAt());
         assertEquals("Original summary", updated.getSummary());
-        assertNull(updated.getResolution());
-        assertNotNull(updated.getReceivedAt());
-        verify(auditService).record(eq("appi.subject_request.update"), eq("organization"), eq(3),
-            eq("Subject request 9"), eq("APPI data-subject request updated"),
-            eq(Map.of("requestId", 9L, "requestType", "disclosure", "status", "received",
-                "fields", Map.of("dueAt", Map.of()))));
+        ArgumentCaptor<DataSubjectRequest> before = ArgumentCaptor.forClass(DataSubjectRequest.class);
+        ArgumentCaptor<DataSubjectRequest> after = ArgumentCaptor.forClass(DataSubjectRequest.class);
+        verify(controlOperations).update(
+            org.mockito.ArgumentMatchers.eq(3), org.mockito.ArgumentMatchers.eq(9L),
+            org.mockito.ArgumentMatchers.eq(7), before.capture(), after.capture());
+        assertEquals("Original summary", before.getValue().getSummary());
+        assertEquals(4, after.getValue().getSubjectWorkspaceId());
     }
 
-    private static DataSubjectRequest storedRequest() {
+    @Test
+    void disclosureHydratesControlLabelsAndAuditsOnlyAfterTenantAssembly() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        AuditEntryDto audit = new AuditEntryDto();
+        WorkspaceSnapshot workspaces = new WorkspaceSnapshot(List.of(4, 6), Map.of(4, "Owner", 6, "Overlay"));
+        when(controlOperations.prepareDisclosure(3, 9, 7))
+            .thenReturn(new DisclosureControlData(request, workspaces, List.of(audit), 1_234));
+        ThirdPartyProvisionDto provision = new ThirdPartyProvisionDto();
+        provision.setTargetWorkspaceId(6);
+        DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
+        assembled.setThirdPartyProvisions(List.of(provision));
+        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4, 6))).thenReturn(assembled);
+
+        DataSubjectDisclosureDto disclosure = service.disclosure(3, 9, 7);
+
+        assertEquals("Overlay", disclosure.getThirdPartyProvisions().getFirst().getTargetWorkspaceName());
+        assertEquals(List.of(audit), disclosure.getAuditTrail());
+        assertEquals(1_234, disclosure.getAuditTrailTotal());
+        assertNotNull(disclosure.getGeneratedAt());
+        InOrder order = inOrder(controlOperations, disclosureAccess);
+        order.verify(controlOperations).prepareDisclosure(3, 9, 7);
+        order.verify(disclosureAccess).assemble(3, 7, 4, 5, List.of(4, 6));
+        order.verify(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+    }
+
+    @Test
+    void disclosureFailsClosedWhenTheFinalAuditCannotBeWritten() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        WorkspaceSnapshot workspaces = new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner"));
+        when(controlOperations.prepareDisclosure(3, 9, 7))
+            .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
+        DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
+        assembled.setThirdPartyProvisions(List.of());
+        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4))).thenReturn(assembled);
+        org.mockito.Mockito.doThrow(new IllegalStateException("audit unavailable"))
+            .when(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+
+        assertThrows(ServiceUnavailableException.class, () -> service.disclosure(3, 9, 7));
+    }
+
+    @Test
+    void tenantAssemblyFailureNeverWritesTheDisclosureAudit() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        WorkspaceSnapshot workspaces = new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner"));
+        when(controlOperations.prepareDisclosure(3, 9, 7))
+            .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
+        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4)))
+            .thenThrow(new IllegalStateException("tenant unavailable"));
+
+        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7));
+        verify(controlOperations, never()).recordDisclosureAudit(any(Integer.class), any(Long.class),
+            any(Integer.class), any(Integer.class));
+    }
+
+    private static DataSubjectRequest storedVerifiedRequest() {
         DataSubjectRequest request = new DataSubjectRequest();
         request.setId(9);
         request.setOrgId(3);
@@ -249,11 +191,6 @@ class DataSubjectRequestServiceUnitTest {
         request.setRequesterName("Requester");
         request.setSubjectName("Subject");
         request.setReceivedAt(LocalDateTime.of(2026, 1, 2, 3, 4));
-        return request;
-    }
-
-    private static DataSubjectRequest storedVerifiedRequest() {
-        DataSubjectRequest request = storedRequest();
         request.setIdentityVerifiedAt(LocalDateTime.of(2026, 1, 3, 3, 4));
         return request;
     }

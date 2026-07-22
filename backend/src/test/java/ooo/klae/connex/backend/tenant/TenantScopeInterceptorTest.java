@@ -52,6 +52,7 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUser"));
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
         assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "DataSubjectDisclosureMapper.findPerson"));
     }
 
     @Test

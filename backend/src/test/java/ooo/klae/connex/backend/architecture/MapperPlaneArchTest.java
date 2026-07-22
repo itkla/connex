@@ -51,10 +51,6 @@ class MapperPlaneArchTest {
         Map.entry("AttachmentMapper", Set.of("app_user")),
         Map.entry("AuditLogMapper", Set.of("app_user", "audit_log")),
         Map.entry("CompanyMapper", Set.of("workspace")),
-        Map.entry("DataSubjectRequestMapper", Set.of(
-            "activity", "attachment", "company", "custom_field_definition", "custom_field_value", "deal",
-            "deal_person", "introduction", "note", "person", "person_edge", "person_employment",
-            "person_share", "person_tag", "stage", "tag", "task")),
         Map.entry("DealMapper", Set.of("app_user", "workspace", "workspace_member")),
         Map.entry("IntroductionMapper", Set.of("app_user", "workspace")),
         Map.entry("NoteMapper", Set.of("app_user", "workspace")),

@@ -83,236 +83,31 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <select id="subjectPersonInOrg" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1
-      FROM workspace w
-      JOIN person p ON p.workspace_id = w.id
-      WHERE w.id = #{workspaceId} AND w.org_id = #{orgId} AND p.id = #{personId}
-    )
-  </select>
-
-  <select id="findDisclosurePerson"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$PersonDto">
-    SELECT p.id, p.workspace_id, p.name, p.email, p.phone, p.title,
-           CASE WHEN company_workspace.id IS NULL THEN NULL ELSE c.id END AS company_id,
-           CASE WHEN company_workspace.id IS NULL THEN NULL ELSE c.name END AS company_name,
-           p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
-           p.provision_ceased_at, p.created_at, p.updated_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    LEFT JOIN company c ON c.id = p.company_id
-    LEFT JOIN workspace company_workspace
-      ON company_workspace.id = c.workspace_id AND company_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-  </select>
-
-  <select id="findDisclosureTags"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TagDto">
-    SELECT t.id, t.workspace_id, t.name, t.color
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN person_tag pt ON pt.person_id = p.id
-    JOIN tag t ON t.id = pt.tag_id
-    JOIN workspace tag_workspace
-      ON tag_workspace.id = t.workspace_id AND tag_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY t.name, t.id
-  </select>
-
-  <select id="findDisclosureCustomFields"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$CustomFieldValueDto">
-    SELECT v.id, v.workspace_id, v.definition_id, d.field_key, d.label, d.field_type,
-           d.data_classification, d.options_json, d.required, d.position, d.archived,
-           v.value_text, v.value_number, v.value_date, v.value_bool, v.created_at, v.updated_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN custom_field_value v ON v.entity_type = 'person' AND v.entity_id = p.id
-    JOIN workspace value_workspace
-      ON value_workspace.id = v.workspace_id AND value_workspace.org_id = #{orgId}
-    JOIN custom_field_definition d
-      ON d.workspace_id = v.workspace_id AND d.id = v.definition_id AND d.entity_type = 'person'
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY v.workspace_id, d.position, d.id
-  </select>
-
-  <select id="findDisclosureActivities"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ActivityDto">
-    SELECT a.id, a.workspace_id, a.type, a.subject, a.notes, a.person_id, a.deal_id,
-           a.created_by_id, a.timestamp
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN activity a ON a.person_id = p.id
-    JOIN workspace activity_workspace
-      ON activity_workspace.id = a.workspace_id AND activity_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY a.timestamp DESC, a.id DESC
-  </select>
-
-  <select id="findDisclosureNotes"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$NoteDto">
-    SELECT n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id,
-           n.visibility, n.created_at, n.updated_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN note n ON n.person_id = p.id
-    JOIN workspace note_workspace
-      ON note_workspace.id = n.workspace_id AND note_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY n.created_at DESC, n.id DESC
-  </select>
-
-  <select id="findDisclosureTasks"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TaskDto">
-    SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-           t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN task t ON t.person_id = p.id
-    JOIN workspace task_workspace
-      ON task_workspace.id = t.workspace_id AND task_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY t.created_at DESC, t.id DESC
-  </select>
-
-  <select id="findDisclosureAttachments"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$AttachmentDto">
-    SELECT a.id, a.workspace_id, a.file_name, a.content_type, a.size, a.uploaded_by_id, a.created_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN attachment a ON a.entity_type = 'person' AND a.entity_id = p.id
-    JOIN workspace attachment_workspace
-      ON attachment_workspace.id = a.workspace_id AND attachment_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY a.created_at DESC, a.id DESC
-  </select>
-
-  <select id="findDisclosureEmployment"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$EmploymentDto">
-    SELECT e.id, e.workspace_id, e.person_id, e.company_id, e.company_name, e.title,
-           e.started_at, e.ended_at, e.created_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN person_employment e ON e.person_id = p.id
-    JOIN workspace employment_workspace
-      ON employment_workspace.id = e.workspace_id AND employment_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY e.started_at DESC, e.created_at DESC, e.id DESC
-  </select>
-
-  <select id="findDisclosureEdges"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$RelationshipEdgeDto">
-    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
-           CASE WHEN e.source_person_id = p.id THEN e.target_person_id ELSE e.source_person_id END
-             AS counterpart_person_id,
-           counterpart.name AS counterpart_person_name,
-           e.type, e.strength, e.note, e.created_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN person_edge e ON e.source_person_id = p.id OR e.target_person_id = p.id
-    JOIN workspace edge_workspace
-      ON edge_workspace.id = e.workspace_id AND edge_workspace.org_id = #{orgId}
-    JOIN person counterpart
-      ON counterpart.id = CASE WHEN e.source_person_id = p.id THEN e.target_person_id ELSE e.source_person_id END
-    JOIN workspace counterpart_workspace
-      ON counterpart_workspace.id = counterpart.workspace_id AND counterpart_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY e.created_at DESC, e.id DESC
-  </select>
-
-  <select id="findDisclosureDeals"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$DealAssociationDto">
-    SELECT d.workspace_id, d.id AS deal_id, d.name AS deal_name,
-           s.id AS stage_id, s.name AS stage_name, dp.role
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN deal_person dp ON dp.person_id = p.id
-    JOIN deal d ON d.id = dp.deal_id
-    JOIN workspace deal_workspace
-      ON deal_workspace.id = d.workspace_id AND deal_workspace.org_id = #{orgId}
-    JOIN stage s ON s.id = d.stage_id
-    JOIN workspace stage_workspace
-      ON stage_workspace.id = s.workspace_id AND stage_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY d.updated_at DESC, d.id DESC
-  </select>
-
-  <select id="findDisclosureIntroductions"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$IntroductionDto">
-    SELECT i.id, i.workspace_id, i.introducer_user_id,
-           i.person_a_id, person_a.name AS person_a_name,
-           i.person_b_id, person_b.name AS person_b_name,
-           i.status, i.note, i.introduced_at, i.created_at, i.updated_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN introduction i ON i.person_a_id = p.id OR i.person_b_id = p.id
-    JOIN workspace introduction_workspace
-      ON introduction_workspace.id = i.workspace_id AND introduction_workspace.org_id = #{orgId}
-    JOIN person person_a ON person_a.id = i.person_a_id
-    JOIN workspace person_a_workspace
-      ON person_a_workspace.id = person_a.workspace_id AND person_a_workspace.org_id = #{orgId}
-    JOIN person person_b ON person_b.id = i.person_b_id
-    JOIN workspace person_b_workspace
-      ON person_b_workspace.id = person_b.workspace_id AND person_b_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY i.introduced_at DESC, i.id DESC
-  </select>
-
-  <select id="findDisclosureProvisions"
-          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ThirdPartyProvisionDto">
-    SELECT target_workspace.id AS target_workspace_id,
-           target_workspace.name AS target_workspace_name,
-           ps.granted_by, ps.can_edit, ps.created_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN person_share ps ON ps.person_id = p.id
-    JOIN workspace target_workspace
-      ON target_workspace.id = ps.workspace_id AND target_workspace.org_id = #{orgId}
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY ps.created_at DESC, target_workspace.id
-  </select>
-
   <select id="findDisclosureAudit"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$AuditEntryDto">
-    SELECT al.action, al.actor_label, al.outcome, al.summary, al.created_at
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN audit_log al
-      ON al.entity_type = 'person' AND al.entity_id = p.id
-    LEFT JOIN workspace audit_workspace ON audit_workspace.id = al.workspace_id
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-      AND ((al.workspace_id IS NOT NULL AND audit_workspace.org_id = #{orgId})
-        OR (al.workspace_id IS NULL AND al.org_id = #{orgId})
-        OR (al.workspace_id IS NULL AND al.org_id IS NULL))
-    ORDER BY al.created_at DESC, al.id DESC
+    SELECT action, actor_label, outcome, summary, created_at
+    FROM audit_log
+    WHERE entity_type = 'person' AND entity_id = #{personId}
+      AND ((workspace_id IS NOT NULL AND workspace_id IN
+        <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+          #{candidateWorkspaceId}
+        </foreach>)
+        OR (workspace_id IS NULL AND org_id = #{orgId})
+        OR (workspace_id IS NULL AND org_id IS NULL))
+    ORDER BY created_at DESC, id DESC
     LIMIT #{limit}
   </select>
 
   <select id="countDisclosureAudit" resultType="long">
     SELECT COUNT(*)
-    FROM person p
-    JOIN workspace subject_workspace
-      ON subject_workspace.id = p.workspace_id AND subject_workspace.org_id = #{orgId}
-    JOIN audit_log al
-      ON al.entity_type = 'person' AND al.entity_id = p.id
-    LEFT JOIN workspace audit_workspace ON audit_workspace.id = al.workspace_id
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-      AND ((al.workspace_id IS NOT NULL AND audit_workspace.org_id = #{orgId})
-        OR (al.workspace_id IS NULL AND al.org_id = #{orgId})
-        OR (al.workspace_id IS NULL AND al.org_id IS NULL))
-</select>
+    FROM audit_log
+    WHERE entity_type = 'person' AND entity_id = #{personId}
+      AND ((workspace_id IS NOT NULL AND workspace_id IN
+        <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+          #{candidateWorkspaceId}
+        </foreach>)
+        OR (workspace_id IS NULL AND org_id = #{orgId})
+        OR (workspace_id IS NULL AND org_id IS NULL))
+  </select>
 
 </mapper>
