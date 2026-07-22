@@ -33,7 +33,6 @@ class SsoConnectionLockOrderTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private OrganizationMapper organizationMapper;
     @Mock private UserMapper userMapper;
-    @Mock private WorkspaceService workspaceService;
     @Mock private OrgMemberService orgMemberService;
     @Mock private SsoSecretCipher ssoSecretCipher;
     @Mock private SamlSpCredentialFactory samlSpCredentialFactory;
@@ -58,16 +57,24 @@ class SsoConnectionLockOrderTest {
 
     @Test
     void saveLocksCurrentAuthorizationBeforeReadingRequestOrWritingConfig() {
+        SsoConnectionRequest request = new SsoConnectionRequest();
+        request.setJitWorkspaceId(3);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspaceForShare(3)).thenReturn(3);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.getOrgId(5)).thenReturn(7);
         when(workspaceMapper.getOrgId(3)).thenReturn(7);
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(ssoProperties.isEnabled()).thenReturn(false);
 
         assertThrows(BadRequestException.class,
-                () -> ssoConnectionService.save(3, 9, new SsoConnectionRequest()));
+                () -> ssoConnectionService.save(5, 9, request));
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper, orgMemberService);
         order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).lockWorkspaceForShare(3);
+        order.verify(workspaceMapper).lockWorkspaceForShare(5);
+        order.verify(workspaceMapper).getOrgId(5);
         order.verify(workspaceMapper).getOrgId(3);
         order.verify(organizationMapper).lockById(7);
         order.verify(orgMemberService).requireOrgAdminForUpdate(7, 9);

@@ -4,6 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,7 +53,6 @@ public class SsoConnectionService {
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
     private final UserMapper userMapper;
-    private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
     private final SsoSecretCipher ssoSecretCipher;
     private final SamlSpCredentialFactory samlSpCredentialFactory;
@@ -104,7 +104,7 @@ public class SsoConnectionService {
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
-        int orgId = lockAdministrableOrg(workspaceId, actorId);
+        int orgId = lockAdministrableOrg(workspaceId, request.getJitWorkspaceId(), actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
@@ -112,8 +112,6 @@ public class SsoConnectionService {
 
         String protocol = request.getProtocol().trim().toLowerCase();
         String role = resolveRole(request.getDefaultRole());
-        requireSameOrgWorkspace(request.getJitWorkspaceId(), orgId);
-
         SsoConnection existing = ssoConnectionMapper.findByOrg(orgId);
         if (request.isEnabled()) {
             validateEnabled(protocol, request, existing);
@@ -155,9 +153,27 @@ public class SsoConnectionService {
         return getForWorkspace(workspaceId, actorId);
     }
 
-    private int lockAdministrableOrg(int workspaceId, int actorId) {
+    private int lockAdministrableOrg(int workspaceId, Integer jitWorkspaceId, int actorId) {
+        if (jitWorkspaceId == null) {
+            throw new BadRequestException("The provisioning workspace must belong to this organization");
+        }
+        TreeSet<Integer> workspaceIds = new TreeSet<>();
+        workspaceIds.add(workspaceId);
+        workspaceIds.add(jitWorkspaceId);
+        for (int lockedWorkspaceId : workspaceIds) {
+            if (workspaceMapper.lockWorkspaceForShare(lockedWorkspaceId) == null) {
+                if (lockedWorkspaceId == workspaceId) {
+                    throw new ForbiddenException("Requires an organization administrator role");
+                }
+                throw new BadRequestException("The provisioning workspace must belong to this organization");
+            }
+        }
         Integer orgId = workspaceMapper.getOrgId(workspaceId);
-        if (orgId == null || organizationMapper.lockById(orgId) == null) {
+        Integer jitOrgId = workspaceMapper.getOrgId(jitWorkspaceId);
+        if (orgId == null || !orgId.equals(jitOrgId)) {
+            throw new BadRequestException("The provisioning workspace must belong to this organization");
+        }
+        if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
         orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
@@ -294,13 +310,6 @@ public class SsoConnectionService {
         }
         if (!Objects.equals(existing.getSamlSpPrivateKeyEnc(), replacement.getSamlSpPrivateKeyEnc())) {
             ssoSecretCipher.deleteSamlSpPrivateKeyReference(existing.getOrgId(), existing.getSamlSpPrivateKeyEnc());
-        }
-    }
-
-    private void requireSameOrgWorkspace(int jitWorkspaceId, int orgId) {
-        if (workspaceService.getOrgId(jitWorkspaceId) != orgId) {
-            throw new BadRequestException(
-                    "The provisioning workspace must belong to this organization");
         }
     }
 
