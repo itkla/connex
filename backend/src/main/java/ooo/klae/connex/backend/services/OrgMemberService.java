@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -36,6 +37,7 @@ public class OrgMemberService {
     }
 
     private final OrgMemberMapper orgMemberMapper;
+    private final OrganizationMapper organizationMapper;
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
@@ -117,18 +119,27 @@ public class OrgMemberService {
     /**
      * Adds a user to the organization or changes their org role. Requires the actor
      * to be an org owner; the target must be a real user; and the organization must
-     * always keep at least one owner (a sole owner cannot be demoted to admin).
+     * always keep at least one owner (a sole owner cannot be demoted to admin). The
+     * organization, target user, and owner rows are locked in that order so role
+     * changes serialize with organization mutations and account deletion.
      */
     @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
+        if (organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires the organization owner role");
+        }
+        if (userMapper.lockById(targetUserId) == null) {
+            throw new ResourceNotFoundException("User not found: " + targetUserId);
+        }
         User target = userMapper.getUserById(targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User not found: " + targetUserId);
         }
-        if (role != OrgRole.OWNER && isSoleOwner(orgId, targetUserId)) {
+        List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
+        if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }
         orgMemberMapper.addMember(orgId, targetUserId, role.name().toLowerCase());
@@ -144,7 +155,11 @@ public class OrgMemberService {
     public void removeMember(int orgId, int actorId, int targetUserId) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        if (isSoleOwner(orgId, targetUserId)) {
+        if (organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires the organization owner role");
+        }
+        List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
+        if (isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }
         if (orgMemberMapper.removeMember(orgId, targetUserId) == 0) {
@@ -155,14 +170,20 @@ public class OrgMemberService {
     }
 
     /**
-     * Whether {@code userId} is the organization's only owner. Reads the owner rows
-     * under a row lock (so it must run inside a transaction), making the last-owner
-     * check and the subsequent mutation a single serialized step rather than a racy
-     * check-then-act.
+     * Locks the organization's owner rows and verifies the actor's current owner
+     * authority. The lock makes authorization, the last-owner check, and the
+     * subsequent mutation one serialized step inside the surrounding transaction.
      */
-    private boolean isSoleOwner(int orgId, int userId) {
-        List<Integer> owners = orgMemberMapper.lockOwnerIds(orgId);
-        return owners.size() <= 1 && owners.contains(userId);
+    private List<Integer> lockCurrentOwnerIds(int orgId, int actorId) {
+        List<Integer> ownerIds = orgMemberMapper.lockOwnerIds(orgId);
+        if (!ownerIds.contains(actorId)) {
+            throw new ForbiddenException("Requires the organization owner role");
+        }
+        return ownerIds;
+    }
+
+    private boolean isSoleOwner(List<Integer> ownerIds, int userId) {
+        return ownerIds.size() <= 1 && ownerIds.contains(userId);
     }
 
     private OrgRole parseRole(String raw) {

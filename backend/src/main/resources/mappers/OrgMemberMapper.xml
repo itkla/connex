@@ -36,7 +36,11 @@
   <!-- Locks every owner row of the org for the duration of the transaction so the
        last-owner guard is a serialized read-then-mutate, not a racy check-then-act. -->
   <select id="lockOwnerIds" resultType="int">
-    SELECT user_id FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner' FOR UPDATE
+    SELECT user_id
+    FROM org_member
+    WHERE org_id = #{orgId} AND org_role = 'owner'
+    ORDER BY user_id
+    FOR UPDATE
   </select>
 
   <!-- Organizations this user owns. The account-deletion guard iterates this set and locks each

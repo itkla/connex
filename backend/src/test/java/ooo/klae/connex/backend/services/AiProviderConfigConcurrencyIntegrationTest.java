@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 class AiProviderConfigConcurrencyIntegrationTest {
 
     @Autowired private AiProviderConfigService service;
+    @Autowired private OrgMemberService orgMemberService;
     @Autowired private AiProviderConfigMapper aiProviderConfigMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -64,6 +65,7 @@ class AiProviderConfigConcurrencyIntegrationTest {
     private Workspace firstWorkspace;
     private Workspace secondWorkspace;
     private User actor;
+    private User secondOwner;
 
     @BeforeEach
     void setUp() {
@@ -83,9 +85,17 @@ class AiProviderConfigConcurrencyIntegrationTest {
         actor.setPasswordHash("hash_" + unique);
         actor.setTimezone("UTC");
         userMapper.insert(actor);
+        secondOwner = new User();
+        secondOwner.setUsername("ai_mutation_owner_" + unique);
+        secondOwner.setDisplayName("AI Mutation Owner " + unique);
+        secondOwner.setEmail("owner-" + unique + "@example.com");
+        secondOwner.setPasswordHash("hash_" + unique);
+        secondOwner.setTimezone("UTC");
+        userMapper.insert(secondOwner);
         workspaceMapper.addMember(firstWorkspace.getId(), actor.getId(), "admin");
         workspaceMapper.addMember(secondWorkspace.getId(), actor.getId(), "admin");
         orgMemberMapper.addMember(organization.getId(), actor.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), secondOwner.getId(), "owner");
 
         String credentialRef = aiProviderSecretCipher.encryptCredential(
                 organization.getId(),
@@ -100,11 +110,13 @@ class AiProviderConfigConcurrencyIntegrationTest {
         aiProviderConfigMapper.deleteByOrg(organization.getId());
         jdbcTemplate.update("DELETE FROM secret_value WHERE org_id = ?", organization.getId());
         orgMemberMapper.removeMember(organization.getId(), actor.getId());
+        orgMemberMapper.removeMember(organization.getId(), secondOwner.getId());
         workspaceMapper.removeMember(firstWorkspace.getId(), actor.getId());
         workspaceMapper.removeMember(secondWorkspace.getId(), actor.getId());
         jdbcTemplate.update("DELETE FROM workspace WHERE id IN (?, ?)",
                 firstWorkspace.getId(), secondWorkspace.getId());
         userMapper.delete(actor.getId());
+        userMapper.delete(secondOwner.getId());
         jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
     }
 
@@ -246,6 +258,54 @@ class AiProviderConfigConcurrencyIntegrationTest {
         assertNull(aiProviderConfigMapper.findByOrg(organization.getId()));
         assertEquals(0, credentialCount());
         assertNull(orgMemberMapper.getRole(organization.getId(), actor.getId()));
+    }
+
+    @Test
+    void roleChangeWaitsForAiMutationWithoutReversingOrganizationMembershipLocks() throws Exception {
+        CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
+        CountDownLatch releaseRevoke = new CountDownLatch(1);
+        CountDownLatch roleChangeAttempted = new CountDownLatch(1);
+        AtomicInteger organizationLockCalls = new AtomicInteger();
+        OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
+        OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
+        doAnswer(invocation -> {
+            if (organizationLockCalls.incrementAndGet() == 2) {
+                roleChangeAttempted.countDown();
+            }
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
+        doAnswer(invocation -> {
+            String role = realOrgMemberMapper.getRoleForUpdate(organization.getId(), actor.getId());
+            currentAuthorizationLocked.countDown();
+            if (!releaseRevoke.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Authorized AI config mutation did not resume");
+            }
+            return role;
+        }).when(orgMemberMapper).getRoleForUpdate(organization.getId(), actor.getId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> revoke = executor.submit(
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId()));
+            assertTrue(currentAuthorizationLocked.await(10, TimeUnit.SECONDS));
+
+            Future<?> roleChange = executor.submit(() -> orgMemberService.setMember(
+                    organization.getId(), secondOwner.getId(), actor.getId(), "admin"));
+            assertTrue(roleChangeAttempted.await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> roleChange.get(500, TimeUnit.MILLISECONDS));
+            releaseRevoke.countDown();
+
+            revoke.get(20, TimeUnit.SECONDS);
+            roleChange.get(20, TimeUnit.SECONDS);
+        } finally {
+            releaseRevoke.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNull(aiProviderConfigMapper.findByOrg(organization.getId()));
+        assertEquals(0, credentialCount());
+        assertEquals("admin", orgMemberMapper.getRole(organization.getId(), actor.getId()));
     }
 
     private LockBarrier holdFirstOrganizationLock() {
