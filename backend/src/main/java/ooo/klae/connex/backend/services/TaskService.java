@@ -128,7 +128,8 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
-        lockAndValidateReferences(task, workspaceId);
+        lockAssignee(task, workspaceId);
+        validateLinkedRecords(task, workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         taskMapper.insert(task);
@@ -149,7 +150,7 @@ public class TaskService {
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndValidateReferences(task, workspaceId);
+        lockAssignee(task, workspaceId);
         Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         if (before.isCompleted() != task.isCompleted()) {
@@ -161,6 +162,7 @@ public class TaskService {
         User actor = currentActorOrNull();
         task.setId(id);
         task.setWorkspaceId(workspaceId);
+        validateLinkedRecords(task, workspaceId);
         String beforeStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         String resolved = task.isCompleted() ? STATUS_DONE
             : (STATUS_DONE.equals(beforeStatus) ? STATUS_TODO : beforeStatus);
@@ -353,9 +355,8 @@ public class TaskService {
         return hydrate(workspaceId, after);
     }
 
-    private void lockAndValidateReferences(Task task, int workspaceId) {
+    private void lockAssignee(Task task, int workspaceId) {
         workspaceService.lockAndRequireMember(workspaceId, requireAssigneeId(task));
-        validateLinkedRecords(task, workspaceId);
     }
 
     private int requireAssigneeId(Task task) {
