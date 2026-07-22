@@ -1,6 +1,9 @@
 import type { SegmentCondition, SegmentDefinition } from '@/app/lib/types';
 
 const MAX_SEGMENT_DEPTH = 4;
+const MAX_SEGMENT_CONDITIONS = 32;
+const MAX_GROUP_CONDITIONS = 16;
+const MAX_GROUPS = 8;
 
 type SegmentConditionEntry = {
     condition: SegmentCondition;
@@ -38,25 +41,35 @@ function normalizeCondition(value: unknown): SegmentCondition | null {
         ...(value.op !== undefined ? { op: value.op } : {}),
         ...(value.value !== undefined ? { value: value.value } : {}),
         ...(value.values !== undefined ? { values: [...value.values] } : {}),
-        ...(value.negate !== undefined ? { negate: value.negate } : {}),
+        ...(value.negate === true ? { negate: true } : {}),
     };
 }
 
-function normalizeDefinition(value: unknown, depth: number): SegmentDefinition | null {
+function normalizeDefinition(
+    value: unknown,
+    depth: number,
+    conditionCount: { value: number },
+): SegmentDefinition | null {
     if (!isRecord(value) || depth > MAX_SEGMENT_DEPTH || (value.match !== 'all' && value.match !== 'any')) return null;
     if (value.conditions !== undefined && value.conditions !== null && !Array.isArray(value.conditions)) return null;
     if (value.groups !== undefined && value.groups !== null && !Array.isArray(value.groups)) return null;
     if (value.negate !== undefined && typeof value.negate !== 'boolean') return null;
 
+    const rawConditions = value.conditions ?? [];
+    const rawGroups = value.groups ?? [];
+    if (rawConditions.length > MAX_GROUP_CONDITIONS || rawGroups.length > MAX_GROUPS) return null;
+    conditionCount.value += rawConditions.length;
+    if (conditionCount.value > MAX_SEGMENT_CONDITIONS) return null;
+
     const conditions: SegmentCondition[] = [];
-    for (const condition of value.conditions ?? []) {
+    for (const condition of rawConditions) {
         const normalized = normalizeCondition(condition);
         if (!normalized) return null;
         conditions.push(normalized);
     }
     const groups: SegmentDefinition[] = [];
-    for (const group of value.groups ?? []) {
-        const normalized = normalizeDefinition(group, depth + 1);
+    for (const group of rawGroups) {
+        const normalized = normalizeDefinition(group, depth + 1, conditionCount);
         if (!normalized) return null;
         groups.push(normalized);
     }
@@ -64,7 +77,7 @@ function normalizeDefinition(value: unknown, depth: number): SegmentDefinition |
         match: value.match,
         conditions,
         ...(groups.length > 0 ? { groups } : {}),
-        ...(value.negate !== undefined ? { negate: value.negate } : {}),
+        ...(value.negate === true ? { negate: true } : {}),
     };
 }
 
@@ -77,12 +90,7 @@ function isEvaluableCondition(condition: SegmentCondition): boolean {
 
 /** Normalizes a bounded segment tree from a saved-view or API boundary, or returns null when malformed. */
 export function normalizeSegmentDefinition(value: unknown): SegmentDefinition | null {
-    return normalizeDefinition(value, 1);
-}
-
-/** Whether an unknown value already has the complete recursive SegmentDefinition shape. */
-export function isSegmentDefinition(value: unknown): value is SegmentDefinition {
-    return isRecord(value) && Array.isArray(value.conditions) && normalizeSegmentDefinition(value) !== null;
+    return normalizeDefinition(value, 1, { value: 0 });
 }
 
 function evaluableCondition(condition: SegmentCondition): SegmentCondition | null {
@@ -134,7 +142,7 @@ export function segmentConditionEntries(
 }
 
 function hasMembers(definition: SegmentDefinition): boolean {
-    return definition.conditions.length > 0 || (definition.groups?.length ?? 0) > 0;
+    return definition.conditions.length > 0 || (definition.groups?.some(hasMembers) ?? false);
 }
 
 /** Removes one condition by recursive path and prunes any groups left structurally empty. */
@@ -144,9 +152,11 @@ export function removeSegmentCondition(
     conditionIndex: number,
 ): SegmentDefinition {
     if (groupPath.length === 0) {
+        const groups = (definition.groups ?? []).filter(hasMembers);
         return {
             ...definition,
             conditions: definition.conditions.filter((_, index) => index !== conditionIndex),
+            groups: groups.length > 0 ? groups : undefined,
         };
     }
     const [targetGroup, ...remainingPath] = groupPath;

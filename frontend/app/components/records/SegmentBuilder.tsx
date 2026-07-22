@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -353,6 +353,9 @@ function GroupEditor({
     advanced,
     allowGroups,
     totalConditions,
+    groupNumber,
+    focusOnMount = false,
+    onFocusHandled,
     depth,
     onChange,
     onRemove,
@@ -364,12 +367,18 @@ function GroupEditor({
     advanced: boolean;
     allowGroups: boolean;
     totalConditions: number;
+    groupNumber?: number;
+    focusOnMount?: boolean;
+    onFocusHandled?: () => void;
     depth: number;
     onChange: (group: SegmentDefinition) => void;
     onRemove?: () => void;
 }) {
     const t = useTranslations("SmartSegments");
     const reduce = useReducedMotion();
+    const matchTriggerRef = useRef<HTMLButtonElement>(null);
+    const addGroupButtonRef = useRef<HTMLButtonElement>(null);
+    const [pendingFocusGroup, setPendingFocusGroup] = useState<number | null>(null);
     const conditions = group.conditions ?? [];
     const groups = group.groups ?? [];
     const nested = depth > 1;
@@ -384,14 +393,24 @@ function GroupEditor({
         && depth < catalog.limits.maxDepth;
     const empty = conditions.length === 0 && groups.length === 0;
 
+    useEffect(() => {
+        if (!focusOnMount) return;
+        matchTriggerRef.current?.focus();
+        onFocusHandled?.();
+    }, [focusOnMount, onFocusHandled]);
+
     const addCondition = (subject: string) => setConditions([...conditions, newCondition(catalog, subject)]);
 
     return (
-        <div className={cn("flex flex-col gap-3", nested && "rounded-2xl bg-muted/40 p-3 ring-1 ring-border")}>
-            <div className="flex items-center gap-2">
+        <div
+            role={nested ? "group" : undefined}
+            aria-label={nested ? t("groupLabel", { number: groupNumber ?? 1 }) : undefined}
+            className={cn("flex flex-col gap-3", nested && "rounded-2xl bg-muted/40 p-3 ring-1 ring-border")}
+        >
+            <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground">{t("matchPrefix")}</span>
                 <Select value={group.match} onValueChange={(value) => onChange({ ...group, match: value as SegmentMatch })}>
-                    <SelectTrigger size="sm" aria-label={t("a11yMatch")} className="w-[5.5rem]">
+                    <SelectTrigger ref={matchTriggerRef} size="sm" aria-label={t("a11yMatch")} className="w-[5.5rem] shrink-0">
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -450,9 +469,15 @@ function GroupEditor({
                     advanced={advanced}
                     allowGroups={allowGroups}
                     totalConditions={totalConditions}
+                    groupNumber={index + 1}
+                    focusOnMount={pendingFocusGroup === index}
+                    onFocusHandled={() => setPendingFocusGroup(null)}
                     depth={depth + 1}
                     onChange={(next) => setGroups(groups.map((existing, i) => (i === index ? next : existing)))}
-                    onRemove={() => setGroups(groups.filter((_, i) => i !== index))}
+                    onRemove={() => {
+                        setGroups(groups.filter((_, i) => i !== index));
+                        window.requestAnimationFrame(() => addGroupButtonRef.current?.focus());
+                    }}
                 />
             ))}
 
@@ -460,18 +485,20 @@ function GroupEditor({
                 {canAddCondition && <AddConditionMenu catalog={catalog} onAdd={addCondition} />}
                 {canAddGroup && (
                     <Button
+                        ref={addGroupButtonRef}
                         variant="ghost"
                         size="sm"
                         className="gap-1.5 text-muted-foreground hover:text-foreground"
-                        onClick={() =>
+                        onClick={() => {
+                            setPendingFocusGroup(groups.length);
                             setGroups([
                                 ...groups,
                                 {
                                     match: group.match === "all" ? "any" : "all",
                                     conditions: [newCondition(catalog, firstSubject(catalog))],
                                 },
-                            ])
-                        }
+                            ]);
+                        }}
                     >
                         <AdjustmentsHorizontalIcon className="size-4" />
                         {t("addGroup")}
