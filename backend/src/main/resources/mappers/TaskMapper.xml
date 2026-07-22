@@ -216,6 +216,11 @@
     ORDER BY position, id
   </select>
 
+  <select id="listWorkspaceTaskIds" resultType="java.lang.Integer">
+    SELECT id FROM task
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="nextTaskPosition" resultType="int">
     SELECT COALESCE(MAX(position) + 1, 0) FROM task
     WHERE workspace_id = #{workspaceId} AND status = #{status}

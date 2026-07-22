@@ -84,6 +84,31 @@ class TaskMapperXmlTest {
         verify(statement).setInt(2, 23);
     }
 
+    @Test
+    void boardMoveDiscoveryIsNonLockingAndWorkspaceScoped() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = Map.of("workspaceId", 11);
+
+        BoundSql boundSql = configuration
+            .getMappedStatement(TaskMapper.class.getName() + ".listWorkspaceTaskIds")
+            .getBoundSql(parameters);
+        String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertEquals(
+            "SELECT id FROM task WHERE workspace_id = ?",
+            sql
+        );
+        assertEquals(1, boundSql.getParameterMappings().size());
+
+        PreparedStatement statement = mock(PreparedStatement.class);
+        configuration.newParameterHandler(
+            configuration.getMappedStatement(TaskMapper.class.getName() + ".listWorkspaceTaskIds"),
+            parameters,
+            boundSql
+        ).setParameters(statement);
+        verify(statement).setInt(1, 11);
+    }
+
     private static Configuration configuration() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");

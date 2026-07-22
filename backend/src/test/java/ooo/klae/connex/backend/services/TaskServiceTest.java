@@ -129,6 +129,45 @@ class TaskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void update_completionByNonAssignee_throwsForbidden() {
+        User assignee = newUser();
+        Task task = newTask(assignee, null, null);
+        Task update = updateDraft(task, "Cannot complete");
+        update.setCompleted(true);
+
+        assertThrows(ForbiddenException.class, () -> taskService.update(task.getId(), update));
+
+        assertFalse(taskService.getTaskById(task.getId()).isCompleted());
+    }
+
+    @Test
+    void update_reopenByNonAssignee_throwsForbidden() {
+        User assignee = newUser();
+        Task task = newTask(assignee, null, null);
+        taskMapper.moveTask(workspace.getId(), task.getId(), "done", true, 0);
+        Task persisted = taskService.getTaskById(task.getId());
+        Task update = updateDraft(persisted, "Cannot reopen");
+        update.setCompleted(false);
+
+        assertThrows(ForbiddenException.class, () -> taskService.update(task.getId(), update));
+
+        assertTrue(taskService.getTaskById(task.getId()).isCompleted());
+    }
+
+    @Test
+    void update_nonCompletionFieldsByNonAssignee_succeeds() {
+        User assignee = newUser();
+        Task task = newTask(assignee, null, null);
+        Task update = updateDraft(task, "Allowed edit");
+
+        Task updated = taskService.update(task.getId(), update);
+
+        assertEquals("Allowed edit", updated.getDescription());
+        assertFalse(updated.isCompleted());
+        assertEquals(assignee.getId(), updated.getAssignedTo().getId());
+    }
+
+    @Test
     void reschedule_updatesOnlyDueDate() {
         Task task = newTask(currentUser, null, null);
         String originalDescription = taskService.getTaskById(task.getId()).getDescription();
@@ -179,5 +218,16 @@ class TaskServiceTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
 
         assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary(MemberScope.allTeam()));
+    }
+
+    private Task updateDraft(Task task, String description) {
+        Task update = new Task();
+        update.setDescription(description);
+        update.setCompleted(task.isCompleted());
+        update.setDueDate(task.getDueDate());
+        update.setAssignedTo(task.getAssignedTo());
+        update.setPerson(task.getPerson());
+        update.setDeal(task.getDeal());
+        return update;
     }
 }

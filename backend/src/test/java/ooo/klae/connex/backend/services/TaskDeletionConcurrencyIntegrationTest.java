@@ -18,6 +18,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +63,8 @@ class TaskDeletionConcurrencyIntegrationTest {
     @MockitoSpyBean private TaskMapper taskMapperSpy;
     @MockitoBean private AuditService auditService;
     @MockitoBean private NotificationChangePublisher notificationChanges;
+    @MockitoBean private ReferenceService referenceService;
+    @MockitoBean private RuleTriggerPublisher ruleTriggers;
 
     private Organization organization;
     private Workspace workspace;
@@ -215,6 +219,109 @@ class TaskDeletionConcurrencyIntegrationTest {
         assertDeleteSideEffectsOccurredOnce();
     }
 
+    @Test
+    void lockingDeleteMakesConcurrentUpdateHitDatabaseLockTimeout() throws Exception {
+        int workspaceId = workspace.getId();
+        int taskId = task.getId();
+        int orgId = organization.getId();
+        CountDownLatch firstLocked = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondReadStarted = new CountDownLatch(1);
+        AtomicInteger lockReads = new AtomicInteger();
+        TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
+        doAnswer(invocation -> {
+            int lockRead = lockReads.incrementAndGet();
+            if (lockRead == 2) {
+                secondReadStarted.countDown();
+                Integer previousTimeout = jdbcTemplate.queryForObject(
+                    "SELECT @@SESSION.innodb_lock_wait_timeout",
+                    Integer.class
+                );
+                jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                try {
+                    return realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+                } finally {
+                    if (previousTimeout != null) {
+                        jdbcTemplate.execute(
+                            "SET SESSION innodb_lock_wait_timeout = " + previousTimeout);
+                    }
+                }
+            }
+            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+            if (lockRead == 1) {
+                firstLocked.countDown();
+                assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
+            }
+            return locked;
+        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), eq(taskId));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<Boolean> deletion = executor.submit(() -> deleteTask(taskId, workspaceId, orgId));
+            assertTrue(firstLocked.await(10, TimeUnit.SECONDS));
+            Future<Task> update = executor.submit(() -> updateTask(taskId, workspaceId, orgId));
+            assertTrue(secondReadStarted.await(10, TimeUnit.SECONDS));
+
+            ExecutionException failure = assertThrows(
+                ExecutionException.class,
+                () -> update.get(5, TimeUnit.SECONDS)
+            );
+            assertTrue(hasCause(failure, CannotAcquireLockException.class));
+            releaseFirst.countDown();
+            assertTrue(deletion.get(20, TimeUnit.SECONDS));
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertDeleteSideEffectsOccurredOnce();
+    }
+
+    @Test
+    void updateWaitingOnCommittedDeleteReturnsNotFoundWithoutSuccessSideEffects() throws Exception {
+        int workspaceId = workspace.getId();
+        int taskId = task.getId();
+        int orgId = organization.getId();
+        CountDownLatch deleteLocked = new CountDownLatch(1);
+        CountDownLatch releaseDelete = new CountDownLatch(1);
+        CountDownLatch updateReadStarted = new CountDownLatch(1);
+        AtomicInteger lockReads = new AtomicInteger();
+        TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
+        doAnswer(invocation -> {
+            int lockRead = lockReads.incrementAndGet();
+            if (lockRead == 2) updateReadStarted.countDown();
+            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+            if (lockRead == 1) {
+                deleteLocked.countDown();
+                assertTrue(releaseDelete.await(30, TimeUnit.SECONDS));
+            }
+            return locked;
+        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), eq(taskId));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<Boolean> deletion = executor.submit(() -> deleteTask(taskId, workspaceId, orgId));
+            assertTrue(deleteLocked.await(10, TimeUnit.SECONDS));
+            Future<Task> update = executor.submit(() -> updateTask(taskId, workspaceId, orgId));
+            assertTrue(updateReadStarted.await(10, TimeUnit.SECONDS));
+            releaseDelete.countDown();
+
+            assertTrue(deletion.get(20, TimeUnit.SECONDS));
+            ExecutionException failure = assertThrows(
+                ExecutionException.class,
+                () -> update.get(20, TimeUnit.SECONDS)
+            );
+            assertTrue(hasCause(failure, ResourceNotFoundException.class));
+        } finally {
+            releaseDelete.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertDeleteSideEffectsOccurredOnce();
+    }
+
     private boolean deleteTaskAfterRelease(
             int taskId,
             int workspaceId,
@@ -242,6 +349,25 @@ class TaskDeletionConcurrencyIntegrationTest {
         }
     }
 
+    private Task updateTask(int taskId, int workspaceId, int orgId) {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                currentUser, null, currentUser.getAuthorities()));
+        tenantContext.set(workspaceId, orgId, currentUser.getId(), "owner", null);
+        Task update = new Task();
+        update.setDescription("Concurrent update");
+        update.setCompleted(false);
+        update.setStatus("todo");
+        update.setDueDate("2026-08-01");
+        update.setAssignedTo(currentUser);
+        try {
+            return taskService.update(taskId, update);
+        } finally {
+            SecurityContextHolder.clearContext();
+            tenantContext.clear();
+        }
+    }
+
     private void assertDeleteSideEffectsOccurredOnce() {
         int workspaceId = workspace.getId();
         int taskId = task.getId();
@@ -255,6 +381,13 @@ class TaskDeletionConcurrencyIntegrationTest {
             anyMap()
         );
         verify(notificationChanges, times(1)).publish(workspaceId, "task", taskId);
+        verify(referenceService, times(1)).deleteReferences(
+            workspaceId,
+            ReferenceService.SOURCE_TASK,
+            taskId
+        );
+        verifyNoMoreInteractions(referenceService);
+        verifyNoInteractions(ruleTriggers);
     }
 
     private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {

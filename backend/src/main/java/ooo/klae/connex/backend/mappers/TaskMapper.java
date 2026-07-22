@@ -54,6 +54,8 @@ public interface TaskMapper {
 
     /** Task ids in a status column, in board order (position, then id), for renumbering on a move. */
     List<Integer> getTaskIdsInStatusOrdered(@Param("workspaceId") int workspaceId, @Param("status") String status);
+    /** Discovers candidate task ids before exact board-move locks are acquired in Java-sorted order. */
+    List<Integer> listWorkspaceTaskIds(@Param("workspaceId") int workspaceId);
     /** The next free tail position in a status column ({@code MAX(position)+1}, or 0 when empty). */
     int nextTaskPosition(@Param("workspaceId") int workspaceId, @Param("status") String status);
     /** Sets manual sort positions for tasks that still belong to the expected workspace status. */
