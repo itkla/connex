@@ -581,6 +581,15 @@
       severity = incoming.severity
   </insert>
 
+  <update id="claimEmailDelivery">
+    UPDATE notification
+    SET email_delivery_claimed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND dedupe_key = #{dedupeKey}
+      AND email_delivery_claimed_at IS NULL
+  </update>
+
   <select id="findByDedupe" resultMap="NotificationResult">
     SELECT <include refid="notificationColumns"/>
     FROM notification n
