@@ -145,6 +145,13 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getTaskByIdForUpdate" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="search" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task

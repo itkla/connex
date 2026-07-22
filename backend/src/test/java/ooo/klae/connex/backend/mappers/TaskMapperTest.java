@@ -89,6 +89,16 @@ class TaskMapperTest extends AbstractMapperTest {
         assertNull(taskMapper.getTaskById(workspace.getId(), -1));
     }
 
+    @Test
+    void getTaskByIdForUpdateKeepsWorkspaceScope() {
+        Task task = build("Locked task", newUser(), null, null);
+        taskMapper.insert(task);
+        Workspace foreignWorkspace = newWorkspace();
+
+        assertNotNull(taskMapper.getTaskByIdForUpdate(workspace.getId(), task.getId()));
+        assertNull(taskMapper.getTaskByIdForUpdate(foreignWorkspace.getId(), task.getId()));
+    }
+
     /**
      * Inserts a new task and checks if the person and deal are null when they are not provided.
      */
