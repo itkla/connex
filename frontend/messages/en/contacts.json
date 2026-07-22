@@ -228,6 +228,7 @@
     "businessCard": "Business card",
     "businessCardDescription": "Scan or upload a JPEG, PNG, or WebP image, then review every detail. Automatic reading runs on this Connex instance when available; otherwise, the metadata-free image may be sent to your organization's configured AI provider. A metadata-free copy is saved with the contact when you create it.",
     "cardAvailabilityLoading": "Checking business-card availability…",
+    "scanBusinessCard": "Scan business card",
     "scanCard": "Scan with camera",
     "uploadCard": "Upload image",
     "scanAnotherCard": "Scan another",
