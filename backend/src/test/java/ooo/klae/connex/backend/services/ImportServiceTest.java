@@ -10,9 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -33,7 +37,10 @@ import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
 import ooo.klae.connex.backend.dto.ImportRequest;
 import ooo.klae.connex.backend.dto.ImportResult;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class ImportServiceTest extends AbstractServiceTest {
 
@@ -43,8 +50,12 @@ class ImportServiceTest extends AbstractServiceTest {
     @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
     @Autowired CustomFieldDefinitionMapper customFieldDefinitionMapper;
+    @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @MockitoSpyBean PersonMapper personMapperSpy;
+    @MockitoSpyBean CompanyMapper companyMapperSpy;
 
     private static ColumnMapping map(String column, String field) {
         return new ColumnMapping(column, field, null, null, null);
@@ -52,6 +63,11 @@ class ImportServiceTest extends AbstractServiceTest {
 
     private static ImportRequest req(List<ColumnMapping> mapping, List<Map<String, String>> rows, String onDuplicate) {
         return new ImportRequest(rows, mapping, onDuplicate, null);
+    }
+
+    private static ImportRequest req(List<ColumnMapping> mapping, List<Map<String, String>> rows,
+            String onDuplicate, Map<Integer, Integer> links) {
+        return new ImportRequest(rows, mapping, onDuplicate, links);
     }
 
     private User memberWithPermissions(String... permissions) {
@@ -149,6 +165,245 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, preview.getToSkip());
+    }
+
+    @Test
+    void personImport_rejectsSharedManualLinkWithoutSideEffects() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        Person shared = personInWorkspace(ownerWorkspace, ownerCompany);
+        assertEquals(1, shareMapper.sharePerson(
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+        Company activeCompany = newCompany();
+        Tag activeTag = newTag();
+        CustomFieldDefinition custom = customDefinition("person");
+        List<ColumnMapping> mapping = List.of(
+            map("Name", "name"),
+            map("Email", "email"),
+            map("Title", "title"),
+            map("Company", "company"),
+            map("Tags", "tags"),
+            map("Custom", "custom:" + custom.getId()));
+        ImportRequest request = req(mapping, List.of(Map.of(
+            "Name", "Rejected shared update",
+            "Email", unique() + "@x.test",
+            "Title", "Rejected title",
+            "Company", activeCompany.getName(),
+            "Tags", activeTag.getName(),
+            "Custom", "rejected value")), "overwrite", Map.of(0, shared.getId()));
+        Map<String, Object> before = personSnapshot(ownerWorkspace.getId(), shared.getId());
+        int tagCount = rowCount("SELECT COUNT(*) FROM person_tag WHERE person_id = ?", shared.getId());
+        int employmentCount = rowCount(
+            "SELECT COUNT(*) FROM person_employment WHERE person_id = ?", shared.getId());
+        int customCount = rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'person' AND entity_id = ?",
+            shared.getId());
+        int auditCount = rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'person' AND entity_id = ?", shared.getId());
+
+        ImportPreviewResult preview = importService.previewPersons(request);
+        ImportResult result = importService.commitPersons(request);
+
+        assertEquals(1, preview.getInvalid());
+        assertEquals(0, preview.getToUpdate());
+        assertTrue(preview.getRows().getFirst().getErrors().getFirst().contains("not found"));
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+        assertEquals(before, personSnapshot(ownerWorkspace.getId(), shared.getId()));
+        assertEquals(tagCount, rowCount("SELECT COUNT(*) FROM person_tag WHERE person_id = ?", shared.getId()));
+        assertEquals(employmentCount, rowCount(
+            "SELECT COUNT(*) FROM person_employment WHERE person_id = ?", shared.getId()));
+        assertEquals(customCount, rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'person' AND entity_id = ?",
+            shared.getId()));
+        assertEquals(auditCount, rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'person' AND entity_id = ?", shared.getId()));
+    }
+
+    @Test
+    void companyImport_rejectsSharedManualLinkWithoutSideEffects() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company shared = companyInWorkspace(ownerWorkspace);
+        assertEquals(1, shareMapper.shareCompany(
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+        Tag activeTag = newTag();
+        CustomFieldDefinition custom = customDefinition("company");
+        List<ColumnMapping> mapping = List.of(
+            map("Name", "name"),
+            map("Website", "website"),
+            map("Industry", "industry"),
+            map("Phone", "phone"),
+            map("Address", "address"),
+            map("Tags", "tags"),
+            map("Custom", "custom:" + custom.getId()));
+        ImportRequest request = req(mapping, List.of(Map.of(
+            "Name", "Rejected shared company",
+            "Website", "https://" + unique() + ".test",
+            "Industry", "Rejected industry",
+            "Phone", "+1-555-0100",
+            "Address", "Rejected address",
+            "Tags", activeTag.getName(),
+            "Custom", "rejected value")), "overwrite", Map.of(0, shared.getId()));
+        Map<String, Object> before = companySnapshot(ownerWorkspace.getId(), shared.getId());
+        int tagCount = rowCount("SELECT COUNT(*) FROM company_tag WHERE company_id = ?", shared.getId());
+        int customCount = rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
+            shared.getId());
+        int auditCount = rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'company' AND entity_id = ?", shared.getId());
+
+        ImportPreviewResult preview = importService.previewCompanies(request);
+        ImportResult result = importService.commitCompanies(request);
+
+        assertEquals(1, preview.getInvalid());
+        assertEquals(0, preview.getToUpdate());
+        assertTrue(preview.getRows().getFirst().getErrors().getFirst().contains("not found"));
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+        assertEquals(before, companySnapshot(ownerWorkspace.getId(), shared.getId()));
+        assertEquals(tagCount, rowCount("SELECT COUNT(*) FROM company_tag WHERE company_id = ?", shared.getId()));
+        assertEquals(customCount, rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
+            shared.getId()));
+        assertEquals(auditCount, rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'company' AND entity_id = ?", shared.getId()));
+    }
+
+    @Test
+    void recordImports_rejectUnsharedForeignManualLinks() {
+        Workspace foreignWorkspace = newForeignWorkspace();
+        Company foreignCompany = companyInWorkspace(foreignWorkspace);
+        Person foreignPerson = personInWorkspace(foreignWorkspace, foreignCompany);
+        ImportRequest personRequest = req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Rejected foreign person")),
+            "overwrite",
+            Map.of(0, foreignPerson.getId()));
+        ImportRequest companyRequest = req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Rejected foreign company")),
+            "overwrite",
+            Map.of(0, foreignCompany.getId()));
+        Map<String, Object> personBefore = personSnapshot(foreignWorkspace.getId(), foreignPerson.getId());
+        Map<String, Object> companyBefore = companySnapshot(foreignWorkspace.getId(), foreignCompany.getId());
+
+        ImportPreviewResult personPreview = importService.previewPersons(personRequest);
+        ImportResult personResult = importService.commitPersons(personRequest);
+        ImportPreviewResult companyPreview = importService.previewCompanies(companyRequest);
+        ImportResult companyResult = importService.commitCompanies(companyRequest);
+
+        assertEquals(1, personPreview.getInvalid());
+        assertEquals(1, personResult.getFailed().size());
+        assertEquals(1, companyPreview.getInvalid());
+        assertEquals(1, companyResult.getFailed().size());
+        assertEquals(personBefore, personSnapshot(foreignWorkspace.getId(), foreignPerson.getId()));
+        assertEquals(companyBefore, companySnapshot(foreignWorkspace.getId(), foreignCompany.getId()));
+    }
+
+    @Test
+    void recordImports_updateOwnedManualLinks() {
+        Person person = newPerson(newCompany());
+        Company company = newCompany();
+        String personName = "Owned linked person " + unique();
+        String personEmail = unique() + "@x.test";
+        String companyName = "Owned linked company " + unique();
+        String companyWebsite = "https://" + unique() + ".test";
+        ImportRequest personRequest = req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", personName, "Email", personEmail)),
+            "overwrite",
+            Map.of(0, person.getId()));
+        ImportRequest companyRequest = req(
+            List.of(map("Name", "name"), map("Website", "website")),
+            List.of(Map.of("Name", companyName, "Website", companyWebsite)),
+            "overwrite",
+            Map.of(0, company.getId()));
+
+        ImportPreviewResult personPreview = importService.previewPersons(personRequest);
+        ImportResult personResult = importService.commitPersons(personRequest);
+        ImportPreviewResult companyPreview = importService.previewCompanies(companyRequest);
+        ImportResult companyResult = importService.commitCompanies(companyRequest);
+
+        assertEquals(1, personPreview.getToUpdate());
+        assertEquals(1, personResult.getUpdated());
+        assertEquals(1, companyPreview.getToUpdate());
+        assertEquals(1, companyResult.getUpdated());
+        Person updatedPerson = personMapper.getPersonById(workspace.getId(), person.getId());
+        Company updatedCompany = companyMapper.getCompanyById(workspace.getId(), company.getId());
+        assertEquals(personName, updatedPerson.getName());
+        assertEquals(personEmail, updatedPerson.getEmail());
+        assertEquals(companyName, updatedCompany.getName());
+        assertEquals(companyWebsite, updatedCompany.getWebsite());
+    }
+
+    @Test
+    void recordImports_failVanishedMatchesBeforeTargetSideEffects() {
+        Person person = newPerson(newCompany());
+        Company company = newCompany();
+        Company replacementCompany = newCompany();
+        Tag tag = newTag();
+        CustomFieldDefinition personCustom = customDefinition("person");
+        CustomFieldDefinition companyCustom = customDefinition("company");
+        ImportRequest personRequest = req(
+            List.of(
+                map("Name", "name"),
+                map("Company", "company"),
+                map("Tags", "tags"),
+                map("Custom", "custom:" + personCustom.getId())),
+            List.of(Map.of(
+                "Name", "Vanished person update",
+                "Company", replacementCompany.getName(),
+                "Tags", tag.getName(),
+                "Custom", "vanished value")),
+            "overwrite",
+            Map.of(0, person.getId()));
+        ImportRequest companyRequest = req(
+            List.of(
+                map("Name", "name"),
+                map("Tags", "tags"),
+                map("Custom", "custom:" + companyCustom.getId())),
+            List.of(Map.of(
+                "Name", "Vanished company update",
+                "Tags", tag.getName(),
+                "Custom", "vanished value")),
+            "overwrite",
+            Map.of(0, company.getId()));
+        Map<String, Object> personBefore = personSnapshot(workspace.getId(), person.getId());
+        Map<String, Object> companyBefore = companySnapshot(workspace.getId(), company.getId());
+        int personTagCount = rowCount("SELECT COUNT(*) FROM person_tag WHERE person_id = ?", person.getId());
+        int companyTagCount = rowCount("SELECT COUNT(*) FROM company_tag WHERE company_id = ?", company.getId());
+        int employmentCount = rowCount(
+            "SELECT COUNT(*) FROM person_employment WHERE person_id = ?", person.getId());
+        int personCustomCount = rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'person' AND entity_id = ?",
+            person.getId());
+        int companyCustomCount = rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
+            company.getId());
+        doReturn(0).when(personMapperSpy).update(any(Person.class));
+        doReturn(0).when(companyMapperSpy).update(any(Company.class));
+
+        ImportResult personResult = importService.commitPersons(personRequest);
+        ImportResult companyResult = importService.commitCompanies(companyRequest);
+
+        assertEquals(0, personResult.getUpdated());
+        assertEquals(1, personResult.getFailed().size());
+        assertEquals(0, companyResult.getUpdated());
+        assertEquals(1, companyResult.getFailed().size());
+        assertEquals(personBefore, personSnapshot(workspace.getId(), person.getId()));
+        assertEquals(companyBefore, companySnapshot(workspace.getId(), company.getId()));
+        assertEquals(personTagCount, rowCount(
+            "SELECT COUNT(*) FROM person_tag WHERE person_id = ?", person.getId()));
+        assertEquals(companyTagCount, rowCount(
+            "SELECT COUNT(*) FROM company_tag WHERE company_id = ?", company.getId()));
+        assertEquals(employmentCount, rowCount(
+            "SELECT COUNT(*) FROM person_employment WHERE person_id = ?", person.getId()));
+        assertEquals(personCustomCount, rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'person' AND entity_id = ?",
+            person.getId()));
+        assertEquals(companyCustomCount, rowCount(
+            "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
+            company.getId()));
     }
 
     @Test
@@ -542,5 +797,77 @@ class ImportServiceTest extends AbstractServiceTest {
             List.of(map("Name", "name"), custom),
             List.of(Map.of("Name", "New Person", "Custom", "value")),
             "fill_empty")));
+    }
+
+    private Workspace newWorkspaceInSameOrg() {
+        Workspace other = new Workspace();
+        other.setName("Shared owner " + unique());
+        other.setSlug("shared-owner-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Workspace newForeignWorkspace() {
+        Workspace other = new Workspace();
+        other.setName("Foreign owner " + unique());
+        other.setSlug("foreign-owner-" + unique());
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Company companyInWorkspace(Workspace target) {
+        Company company = new Company();
+        company.setWorkspaceId(target.getId());
+        company.setName("Foreign company " + unique());
+        company.setWebsite("https://" + unique() + ".example.com");
+        company.setIndustry("Owner industry");
+        company.setPhone("+81-90-0000-0000");
+        company.setAddress("Owner address");
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private Person personInWorkspace(Workspace target, Company company) {
+        Person person = new Person();
+        person.setWorkspaceId(target.getId());
+        person.setName("Foreign person " + unique());
+        person.setEmail(unique() + ".foreign@example.com");
+        person.setPhone("+81-90-1111-1111");
+        person.setTitle("Owner title");
+        person.setCompany(company);
+        personMapper.insert(person);
+        return person;
+    }
+
+    private CustomFieldDefinition customDefinition(String entityType) {
+        CustomFieldDefinition definition = new CustomFieldDefinition();
+        definition.setWorkspaceId(workspace.getId());
+        definition.setEntityType(entityType);
+        definition.setFieldKey("import_guard_" + unique());
+        definition.setLabel("Import guard " + unique());
+        definition.setFieldType("text");
+        customFieldDefinitionMapper.insert(definition);
+        return definition;
+    }
+
+    private Map<String, Object> personSnapshot(int workspaceId, int personId) {
+        return jdbcTemplate.queryForMap(
+            "SELECT workspace_id, owner_id, name, email, phone, company_id, title, image_url, created_at, updated_at "
+                + "FROM person WHERE workspace_id = ? AND id = ?",
+            workspaceId,
+            personId);
+    }
+
+    private Map<String, Object> companySnapshot(int workspaceId, int companyId) {
+        return jdbcTemplate.queryForMap(
+            "SELECT workspace_id, owner_id, name, website, industry, phone, address, logo_url, created_at, updated_at "
+                + "FROM company WHERE workspace_id = ? AND id = ?",
+            workspaceId,
+            companyId);
+    }
+
+    private int rowCount(String sql, Object... args) {
+        return jdbcTemplate.queryForObject(sql, Integer.class, args);
     }
 }
