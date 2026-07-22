@@ -547,30 +547,29 @@ export default function TasksBrowser({
         };
 
         return (
-            <RecordContextMenu key={task.id} model={menuModel}>
-                <TaskRow
-                    task={task}
-                    reduce={reduce}
-                    checked={completing.has(task.id) || task.completed}
-                    person={task.personId ? personById.get(task.personId) : undefined}
-                    deal={task.dealId ? dealById.get(task.dealId) : undefined}
-                    assignee={userById.get(task.assignedToId)}
-                    bucket={bucket}
-                    onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
-                    onOpen={() => setEditingTask(task)}
-                    pending={pendingToggle.has(task.id)}
-                    ariaCompleteLabel={t('ariaCompleteTask')}
-                    due={formatDue(task.dueDate, t, locale)}
-                    menuModel={menuModel}
-                    tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
-                    rowRef={(row) => {
-                        if (row) rowRefs.current.set(task.id, row);
-                        else rowRefs.current.delete(task.id);
-                    }}
-                    onFocus={() => setRovingTaskId(task.id)}
-                    onKeyDown={(event) => handleTaskRowKeyDown(event, task)}
-                />
-            </RecordContextMenu>
+            <TaskRow
+                key={task.id}
+                task={task}
+                reduce={reduce}
+                checked={completing.has(task.id) || task.completed}
+                person={task.personId ? personById.get(task.personId) : undefined}
+                deal={task.dealId ? dealById.get(task.dealId) : undefined}
+                assignee={userById.get(task.assignedToId)}
+                bucket={bucket}
+                onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
+                onOpen={() => setEditingTask(task)}
+                pending={pendingToggle.has(task.id)}
+                ariaCompleteLabel={t('ariaCompleteTask')}
+                due={formatDue(task.dueDate, t, locale)}
+                menuModel={menuModel}
+                tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
+                rowRef={(row) => {
+                    if (row) rowRefs.current.set(task.id, row);
+                    else rowRefs.current.delete(task.id);
+                }}
+                onFocus={() => setRovingTaskId(task.id)}
+                onKeyDown={(event) => handleTaskRowKeyDown(event, task)}
+            />
         );
     };
 
@@ -1030,109 +1029,108 @@ function TaskRow({
     const isCompletedRow = bucket === 'completed';
 
     return (
-        <motion.li
-            ref={rowRef}
-            layout={!reduce}
-            initial={false}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
-            transition={{ duration: 0.22, ease: EASE_OUT }}
-            className={cn(
-                'group flex cursor-pointer items-center gap-3 px-5 py-3 outline-hidden transition-colors hover:bg-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
-                (checked || isCompletedRow) && 'opacity-55',
-            )}
-            tabIndex={tabIndex}
-            aria-keyshortcuts="Shift+F10"
-            onFocus={onFocus}
-            onKeyDown={onKeyDown}
-            onClick={onOpen}
-        >
-            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                <Checkbox
-                    checked={checked}
-                    onCheckedChange={(value) => onToggle(value === true)}
-                    disabled={pending && !checked}
-                    aria-label={ariaCompleteLabel}
-                    className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
-                />
-            </div>
-
-            <span
+        <RecordContextMenu model={menuModel}>
+            <motion.li
+                ref={rowRef}
+                layout={!reduce}
+                initial={false}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
+                transition={{ duration: 0.22, ease: EASE_OUT }}
                 className={cn(
-                    'min-w-0 flex-1 truncate text-sm',
-                    checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
+                    'group flex cursor-pointer items-center gap-3 px-5 py-3 outline-hidden transition-colors hover:bg-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
+                    (checked || isCompletedRow) && 'opacity-55',
                 )}
+                tabIndex={tabIndex}
+                aria-keyshortcuts="Shift+F10"
+                onFocus={onFocus}
+                onKeyDown={onKeyDown}
+                onClick={onOpen}
             >
-                <NoteContent content={task.description} references={task.references} />
-            </span>
+                <div onClick={(event) => event.stopPropagation()} className="shrink-0">
+                    <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => onToggle(value === true)}
+                        disabled={pending && !checked}
+                        aria-label={ariaCompleteLabel}
+                        className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
+                    />
+                </div>
 
-            <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-                {person && (
-                    <Link
-                        href={`/records/contacts/${person.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
-                        title={person.name}
-                    >
-                        <UserIcon className="size-3 shrink-0" />
-                        <span className="truncate">{person.name}</span>
-                    </Link>
-                )}
-                {deal && (
-                    <Link
-                        href={`/records/deals/${deal.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
-                        title={deal.name}
-                    >
-                        <BriefcaseIcon className="size-3 shrink-0" />
-                        <span className="truncate">{deal.name}</span>
-                    </Link>
-                )}
-            </div>
+                <span
+                    className={cn(
+                        'min-w-0 flex-1 truncate text-sm',
+                        checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
+                    )}
+                >
+                    <NoteContent content={task.description} references={task.references} />
+                </span>
 
-            <div className="w-18 shrink-0 text-right">
-                {due && !isCompletedRow ? (
-                    <span
-                        className={cn(
-                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
-                            DUE_CHIP[due.tone],
-                        )}
-                    >
-                        {due.label}
-                    </span>
-                ) : null}
-            </div>
+                <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
+                    {person && (
+                        <Link
+                            href={`/records/contacts/${person.id}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                            title={person.name}
+                        >
+                            <UserIcon className="size-3 shrink-0" />
+                            <span className="truncate">{person.name}</span>
+                        </Link>
+                    )}
+                    {deal && (
+                        <Link
+                            href={`/records/deals/${deal.id}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
+                            title={deal.name}
+                        >
+                            <BriefcaseIcon className="size-3 shrink-0" />
+                            <span className="truncate">{deal.name}</span>
+                        </Link>
+                    )}
+                </div>
 
-            <div className="shrink-0">
-                {assignee ? (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Avatar size="sm" className="ring-1 ring-border">
-                                {assignee.profilePictureUrl ? (
-                                    <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
-                                ) : (
-                                    <AvatarFallback>
-                                        <UserIcon className="size-3 text-muted-foreground" />
-                                    </AvatarFallback>
-                                )}
-                            </Avatar>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" align="end">
-                            {assignee.displayName || assignee.username}
-                        </TooltipContent>
-                    </Tooltip>
-                ) : (
-                    <div className="size-6" />
-                )}
-            </div>
+                <div className="w-18 shrink-0 text-right">
+                    {due && !isCompletedRow ? (
+                        <span
+                            className={cn(
+                                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
+                                DUE_CHIP[due.tone],
+                            )}
+                        >
+                            {due.label}
+                        </span>
+                    ) : null}
+                </div>
 
-            <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
-                <RecordActionMenuTrigger
-                    model={menuModel}
-                    triggerClassName="opacity-100 sm:opacity-0"
-                />
-            </div>
-        </motion.li>
+                <div className="shrink-0">
+                    {assignee ? (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Avatar size="sm" className="ring-1 ring-border">
+                                    {assignee.profilePictureUrl ? (
+                                        <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
+                                    ) : (
+                                        <AvatarFallback>
+                                            <UserIcon className="size-3 text-muted-foreground" />
+                                        </AvatarFallback>
+                                    )}
+                                </Avatar>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" align="end">
+                                {assignee.displayName || assignee.username}
+                            </TooltipContent>
+                        </Tooltip>
+                    ) : (
+                        <div className="size-6" />
+                    )}
+                </div>
+
+                <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+                    <RecordActionMenuTrigger model={menuModel} triggerClassName="opacity-100" />
+                </div>
+            </motion.li>
+        </RecordContextMenu>
     );
 }
 
