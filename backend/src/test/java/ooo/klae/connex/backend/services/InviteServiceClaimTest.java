@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
+import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
@@ -62,9 +63,39 @@ class InviteServiceClaimTest {
         order.verify(workspaceMapper).lockWorkspaceForShare(invite.getWorkspaceId());
         order.verify(inviteMapper).claimAcceptance(
             invite.getId(), invite.getToken(), invite.getWorkspaceId(), user.getId());
-        verify(workspaceMapper, never()).isMember(invite.getWorkspaceId(), user.getId());
+        verify(workspaceMapper, never()).lockAuthorizationMembership(invite.getWorkspaceId(), user.getId());
         verify(workspaceMapper, never()).addMember(invite.getWorkspaceId(), user.getId(), invite.getRole());
         verify(workspaceMapper, never()).getMembershipsForUser(user.getId());
+        verifyNoInteractions(userOffboardingService, notificationStateVersionService, auditService);
+    }
+
+    @Test
+    void currentMembershipAfterSupersedeCheckStopsPendingInsertion() {
+        User actor = user("owner@example.com");
+        User existing = user("recipient@example.com");
+        existing.setId(10);
+        WorkspaceMember currentMembership = new WorkspaceMember();
+        currentMembership.setWorkspaceId(7);
+        currentMembership.setUserId(existing.getId());
+        currentMembership.setStatus("active");
+        when(workspaceService.getOrgId(7)).thenReturn(3);
+        when(orgAllowedDomainService.isJoinAllowed(3, existing.getEmail())).thenReturn(true);
+        when(userMapper.getUserByEmail(existing.getEmail())).thenReturn(existing);
+        when(workspaceMapper.getMember(7, existing.getId())).thenReturn(null);
+        when(workspaceMapper.lockAuthorizationMembership(7, existing.getId()))
+            .thenReturn(currentMembership);
+
+        BadRequestException exception = assertThrows(
+            BadRequestException.class,
+            () -> inviteService.createInvite(7, actor, existing.getEmail(), "member"));
+
+        assertEquals(
+            "That person is already a member of or invited to this workspace",
+            exception.getMessage());
+        InOrder order = inOrder(inviteMapper, workspaceMapper);
+        order.verify(inviteMapper).revokePendingForEmail(7, existing.getEmail());
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, existing.getId());
+        verify(workspaceService, never()).addPendingMember(7, actor, existing, "member");
         verifyNoInteractions(userOffboardingService, notificationStateVersionService, auditService);
     }
 

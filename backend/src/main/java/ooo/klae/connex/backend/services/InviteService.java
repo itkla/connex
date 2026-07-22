@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
+import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
@@ -67,6 +68,9 @@ public class InviteService {
                 throw new BadRequestException("That person is already a member of or invited to this workspace");
             }
             inviteMapper.revokePendingForEmail(workspaceId, email);
+            if (workspaceMapper.lockAuthorizationMembership(workspaceId, existing.getId()) != null) {
+                throw new BadRequestException("That person is already a member of or invited to this workspace");
+            }
             MemberDto member = workspaceService.addPendingMember(workspaceId, actor, existing, role);
             return new InviteResultDto(null, member);
         }
@@ -159,10 +163,14 @@ public class InviteService {
                 invite.getId(), token, workspaceId, lockedUser.getId()) != 1) {
             throw new BadRequestException("This invite is no longer available");
         }
-        if (!workspaceMapper.isMember(workspaceId, lockedUser.getId())) {
+        WorkspaceMember membership =
+            workspaceMapper.lockAuthorizationMembership(workspaceId, lockedUser.getId());
+        if (membership == null) {
             userOffboardingService.prepareFreshMembership(workspaceId, lockedUser.getId());
             workspaceMapper.addMember(workspaceId, lockedUser.getId(), invite.getRole());
             notificationStateVersionService.markChanged(lockedUser.getId());
+        } else if (!"active".equals(membership.getStatus())) {
+            throw new BadRequestException("That person is already a member of or invited to this workspace");
         }
         auditService.recordScoped(
                 "workspace.invite.accept", "workspace", workspaceId, workspaceId, orgId,

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -202,6 +203,68 @@ class InviteAcceptanceConcurrencyIntegrationTest {
         verify(userOffboardingService).prepareFreshMembership(workspace.getId(), recipient.getId());
         verify(notificationStateVersionService).markChanged(recipient.getId());
         verify(auditService).recordScoped(
+            "workspace.invite.accept", "workspace", workspace.getId(), workspace.getId(),
+            organization.getId(), recipient.getDisplayName(),
+            recipient.getDisplayName() + " joined via invite", null);
+    }
+
+    @Test
+    void membershipRemovedAfterSnapshotIsRestoredAfterClaim() throws Exception {
+        workspaceMapper.addMember(workspace.getId(), recipient.getId(), "member");
+        InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
+        CountDownLatch claimReached = new CountDownLatch(1);
+        CountDownLatch releaseClaim = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            claimReached.countDown();
+            if (!releaseClaim.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Acceptance claim was not released");
+            }
+            return realMapper.claimAcceptance(
+                invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+        }).when(inviteMapper).claimAcceptance(
+            invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<WorkspaceMembershipDto> acceptance = executor.submit(
+                () -> inviteService.acceptInvite(invite.getToken(), recipient));
+            assertTrue(claimReached.await(10, TimeUnit.SECONDS));
+
+            assertEquals(1, workspaceMapper.removeMember(workspace.getId(), recipient.getId()));
+            releaseClaim.countDown();
+
+            assertEquals(workspace.getId(), acceptance.get(20, TimeUnit.SECONDS).getId());
+        } finally {
+            releaseClaim.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        WorkspaceInvite accepted = realMapper.findByToken(invite.getToken());
+        assertEquals("accepted", accepted.getStatus());
+        assertEquals(recipient.getId(), accepted.getAcceptedById());
+        assertTrue(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
+        verify(userOffboardingService).prepareFreshMembership(workspace.getId(), recipient.getId());
+        verify(notificationStateVersionService).markChanged(recipient.getId());
+    }
+
+    @Test
+    void failureAfterClaimRollsAcceptanceBackToPending() {
+        doThrow(new IllegalStateException("cleanup failed"))
+            .when(userOffboardingService)
+            .prepareFreshMembership(workspace.getId(), recipient.getId());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> inviteService.acceptInvite(invite.getToken(), recipient));
+
+        WorkspaceInvite pending = inviteMapper.findByToken(invite.getToken());
+        assertEquals("pending", pending.getStatus());
+        assertNull(pending.getAcceptedById());
+        assertNull(pending.getAcceptedAt());
+        assertFalse(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
+        verify(notificationStateVersionService, never()).markChanged(recipient.getId());
+        verify(auditService, never()).recordScoped(
             "workspace.invite.accept", "workspace", workspace.getId(), workspace.getId(),
             organization.getId(), recipient.getDisplayName(),
             recipient.getDisplayName() + " joined via invite", null);
