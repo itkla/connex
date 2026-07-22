@@ -63,7 +63,7 @@ type Props = {
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
-    ownsInitialDraft?: boolean;
+    initialDraftGeneration?: number;
     requestInit?: RequestInit;
 };
 
@@ -90,7 +90,7 @@ function ScopedTaskDialog({
     defaultDeal = null,
     defaultDueDate = '',
     defaultDescription = '',
-    ownsInitialDraft = false,
+    initialDraftGeneration,
     requestInit,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
@@ -106,6 +106,7 @@ function ScopedTaskDialog({
             scope: 'global',
         },
         version: DRAFT_VERSIONS.task,
+        initialKeyGeneration: initialDraftGeneration,
     });
 
     const handleOpenChange = (next: boolean) => {
@@ -138,7 +139,7 @@ function ScopedTaskDialog({
                         defaultDeal={defaultDeal}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
-                        ownsInitialDraft={ownsInitialDraft}
+                        ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;

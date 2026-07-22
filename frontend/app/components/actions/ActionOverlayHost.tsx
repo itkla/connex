@@ -42,21 +42,30 @@ function includeSelected<T extends { id: number }>(items: T[], selected: T | nul
     return [selected, ...items];
 }
 
-async function loadReferences(defaultPersonId: number | undefined, defaultDealId: number | undefined, init: RequestInit) {
+async function loadReferences(
+    defaultPersonId: number | undefined,
+    defaultDealId: number | undefined,
+    init: RequestInit,
+    restoredPersonId: number | null | undefined,
+    restoredDealId: number | null | undefined,
+    rosterOnly: boolean,
+) {
     const [fetchedPersons, fetchedDeals] = await Promise.all([
         getContacts({}, init).catch((error: unknown) => {
             if (init.signal?.aborted) throw error;
+            if (restoredPersonId != null) throw error;
             return [] as Contact[];
         }),
         getDeals(init).catch((error: unknown) => {
             if (init.signal?.aborted) throw error;
+            if (restoredDealId != null) throw error;
             return [] as Deal[];
         }),
     ]);
-    const selectedPerson = defaultPersonId != null && !fetchedPersons.some((person) => person.id === defaultPersonId)
+    const selectedPerson = !rosterOnly && defaultPersonId != null && !fetchedPersons.some((person) => person.id === defaultPersonId)
         ? await getContactById(defaultPersonId, init)
         : null;
-    const selectedDeal = defaultDealId != null && !fetchedDeals.some((deal) => deal.id === defaultDealId)
+    const selectedDeal = !rosterOnly && defaultDealId != null && !fetchedDeals.some((deal) => deal.id === defaultDealId)
         ? await getDealById(defaultDealId, init)
         : null;
     return {
@@ -132,15 +141,38 @@ export default function ActionOverlayHost({
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
     const defaultPersonId = defaults?.personId;
     const defaultDealId = defaults?.dealId;
+    const rosterOnly = rendered !== null &&
+        "restoredDraftGeneration" in rendered.request &&
+        rendered.request.restoredDraftGeneration !== undefined;
+    const restoredPersonId = rosterOnly
+        ? rendered.request.kind === "create-task" || rendered.request.kind === "create-note"
+            ? rendered.request.draft?.personId
+            : defaultPersonId
+        : undefined;
+    const restoredDealId = rosterOnly
+        ? rendered.request.kind === "create-task" || rendered.request.kind === "create-note"
+            ? rendered.request.draft?.dealId
+            : defaultDealId
+        : undefined;
+    const restoredAssigneeId = rosterOnly && rendered.request.kind === "create-task"
+        ? rendered.request.draft?.assigneeId
+        : undefined;
     const referenceKey = needsReference
-        ? [rendered?.generation, kind, defaultPersonId, defaultDealId].join(":")
+        ? [rendered?.generation, kind, defaultPersonId, defaultDealId, rosterOnly].join(":")
         : null;
     const usersKey = needsUsers ? [rendered?.generation, kind].join(":") : null;
 
     useEffect(() => {
         if (!referenceKey) return;
         let cancelled = false;
-        loadReferences(defaultPersonId, defaultDealId, requestInit)
+        loadReferences(
+            defaultPersonId,
+            defaultDealId,
+            requestInit,
+            restoredPersonId,
+            restoredDealId,
+            rosterOnly,
+        )
             .then((references) => {
                 if (cancelled || requestInit.signal?.aborted) return;
                 setLoadedReferences({ key: referenceKey, ...references });
@@ -153,7 +185,17 @@ export default function ActionOverlayHost({
         return () => {
             cancelled = true;
         };
-    }, [defaultDealId, defaultPersonId, onClose, referenceKey, requestInit, t]);
+    }, [
+        defaultDealId,
+        defaultPersonId,
+        onClose,
+        referenceKey,
+        requestInit,
+        restoredDealId,
+        restoredPersonId,
+        rosterOnly,
+        t,
+    ]);
 
     useEffect(() => {
         if (!usersKey) return;
@@ -165,12 +207,17 @@ export default function ActionOverlayHost({
             })
             .catch(() => {
                 if (cancelled || requestInit.signal?.aborted) return;
+                if (restoredAssigneeId != null) {
+                    toastError(t("feedback.linkedRecordLoadFailed"));
+                    onClose();
+                    return;
+                }
                 setLoadedUsers({ key: usersKey, users: [] });
             });
         return () => {
             cancelled = true;
         };
-    }, [requestInit, usersKey]);
+    }, [onClose, requestInit, restoredAssigneeId, t, usersKey]);
 
     if (!user) return null;
 
@@ -197,6 +244,13 @@ export default function ActionOverlayHost({
     const taskDefaultDeal = taskDraft && taskDraft.dealId !== undefined
         ? deals.find((candidate) => candidate.id === taskDraft.dealId) ?? null
         : defaultDeal;
+    const noteDraft = rendered?.request.kind === "create-note" ? rendered.request.draft : undefined;
+    const noteDefaultPerson = noteDraft && noteDraft.personId !== undefined
+        ? persons.find((candidate) => candidate.id === noteDraft.personId) ?? null
+        : defaultPerson;
+    const noteDefaultDeal = noteDraft && noteDraft.dealId !== undefined
+        ? deals.find((candidate) => candidate.id === noteDraft.dealId) ?? null
+        : defaultDeal;
     const activityDraft = rendered?.request.kind === "create-activity" ? rendered.request.draft : undefined;
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
@@ -216,7 +270,7 @@ export default function ActionOverlayHost({
                         defaultDeal={taskDefaultDeal}
                         defaultDueDate={taskDraft?.dueDate ?? ""}
                         defaultDescription={taskDraft?.description ?? ""}
-                        ownsInitialDraft={rendered.request.restoredDraft === true}
+                        initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         requestInit={requestInit}
                     />
                 ) : null}
@@ -228,9 +282,10 @@ export default function ActionOverlayHost({
                         persons={persons}
                         deals={deals}
                         currentUserId={user.id}
-                        defaultPerson={defaultPerson}
-                        defaultDeal={defaultDeal}
-                        defaultContent={rendered.request.draft?.content ?? ""}
+                        defaultPerson={noteDefaultPerson}
+                        defaultDeal={noteDefaultDeal}
+                        defaultContent={noteDraft?.content ?? ""}
+                        initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         requestInit={requestInit}
                     />
                 ) : null}
@@ -246,6 +301,7 @@ export default function ActionOverlayHost({
                         defaultType={defaultActivityType}
                         defaultSubject={activityDraft?.subject ?? ""}
                         defaultNotes={activityDraft?.notes ?? ""}
+                        initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         requestInit={requestInit}
                     />
                 ) : null}
