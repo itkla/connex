@@ -476,7 +476,9 @@ function GroupEditor({
                     onChange={(next) => setGroups(groups.map((existing, i) => (i === index ? next : existing)))}
                     onRemove={() => {
                         setGroups(groups.filter((_, i) => i !== index));
-                        window.requestAnimationFrame(() => addGroupButtonRef.current?.focus());
+                        window.requestAnimationFrame(() =>
+                            (addGroupButtonRef.current ?? matchTriggerRef.current)?.focus(),
+                        );
                     }}
                 />
             ))}
