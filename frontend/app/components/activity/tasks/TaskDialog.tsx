@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -64,6 +64,7 @@ type Props = {
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
     initialDraftGeneration?: number;
+    onDraftMounted?: () => void;
     requestInit?: RequestInit;
 };
 
@@ -91,6 +92,7 @@ function ScopedTaskDialog({
     defaultDueDate = '',
     defaultDescription = '',
     initialDraftGeneration,
+    onDraftMounted,
     requestInit,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
@@ -108,6 +110,10 @@ function ScopedTaskDialog({
         version: DRAFT_VERSIONS.task,
         initialKeyGeneration: initialDraftGeneration,
     });
+
+    useLayoutEffect(() => {
+        onDraftMounted?.();
+    }, [onDraftMounted]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;

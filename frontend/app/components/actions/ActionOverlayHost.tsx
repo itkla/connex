@@ -41,6 +41,10 @@ function createRestoredDraftMount(): RestoredDraftMount {
     };
 }
 
+function subscribeToDraftGeneration(onStoreChange: () => void): () => void {
+    return subscribeDraftChanges(onStoreChange);
+}
+
 function getServerDraftGeneration(): number {
     return -1;
 }
@@ -210,39 +214,25 @@ export default function ActionOverlayHost({
                 : getDraftKeyGeneration(restoredDraftKey),
         [rendered?.generation, restoredDraftGeneration, restoredDraftKey, restoredDraftMount],
     );
-    const subscribeToRestoredDraftGeneration = useCallback(
-        (onStoreChange: () => void) => {
-            const unsubscribe = subscribeDraftChanges(onStoreChange);
-            if (
-                rosterOnly &&
-                referencesReady &&
-                usersReady &&
-                rendered !== null &&
-                restoredDraftGeneration !== undefined &&
-                restoredDraftKey !== null &&
-                getDraftKeyGeneration(restoredDraftKey) === restoredDraftGeneration
-            ) {
-                restoredDraftMount.accept(rendered.generation);
-            }
-            return unsubscribe;
-        },
-        [
-            referencesReady,
-            rendered,
-            restoredDraftGeneration,
-            restoredDraftKey,
-            restoredDraftMount,
-            rosterOnly,
-            usersReady,
-        ],
-    );
     const observedRestoredDraftGeneration = useSyncExternalStore(
-        subscribeToRestoredDraftGeneration,
+        subscribeToDraftGeneration,
         getRestoredDraftGeneration,
         getServerDraftGeneration,
     );
     const restoredDraftCanMount = !rosterOnly ||
         observedRestoredDraftGeneration === restoredDraftGeneration;
+    const handleRestoredDraftMounted = useCallback(() => {
+        if (
+            rendered === null ||
+            restoredDraftGeneration === undefined ||
+            restoredDraftKey === null ||
+            getDraftKeyGeneration(restoredDraftKey) !== restoredDraftGeneration
+        ) {
+            onClose();
+            return;
+        }
+        restoredDraftMount.accept(rendered.generation);
+    }, [onClose, rendered, restoredDraftGeneration, restoredDraftKey, restoredDraftMount]);
 
     useEffect(() => {
         if (!referenceKey) return;
@@ -263,6 +253,12 @@ export default function ActionOverlayHost({
                 ) {
                     onClose();
                     return;
+                }
+                if (
+                    (restoredPersonId != null && !references.persons.some((person) => person.id === restoredPersonId)) ||
+                    (restoredDealId != null && !references.deals.some((deal) => deal.id === restoredDealId))
+                ) {
+                    toastWarn(t("feedback.restoredLinkUnavailable"));
                 }
                 setLoadedReferences({ key: referenceKey, ...references });
             })
@@ -411,6 +407,7 @@ export default function ActionOverlayHost({
                         defaultDueDate={taskDraft?.dueDate ?? ""}
                         defaultDescription={taskDraft?.description ?? ""}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
+                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
                     />
                 ) : null}
@@ -426,6 +423,7 @@ export default function ActionOverlayHost({
                         defaultDeal={noteDefaultDeal}
                         defaultContent={noteDraft?.content ?? ""}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
+                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
                     />
                 ) : null}
@@ -442,6 +440,7 @@ export default function ActionOverlayHost({
                         defaultSubject={activityDraft?.subject ?? ""}
                         defaultNotes={activityDraft?.notes ?? ""}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
+                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
                     />
                 ) : null}

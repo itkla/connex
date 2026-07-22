@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -78,6 +78,7 @@ type Props = {
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
     initialDraftGeneration?: number;
+    onDraftMounted?: () => void;
     requestInit?: RequestInit;
 };
 
@@ -114,6 +115,7 @@ export default function ActivityDialog({
     defaultSubject = '',
     defaultNotes = '',
     initialDraftGeneration,
+    onDraftMounted,
     requestInit,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
@@ -131,6 +133,10 @@ export default function ActivityDialog({
         version: DRAFT_VERSIONS.activity,
         initialKeyGeneration: initialDraftGeneration,
     });
+
+    useLayoutEffect(() => {
+        onDraftMounted?.();
+    }, [onDraftMounted]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
