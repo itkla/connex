@@ -1519,14 +1519,25 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
     const workspaceId = clientWorkspaceId();
-    const headers = new Headers(init.headers);
-    headers.set("Accept-Language", locale);
-    if (workspaceId && !headers.has("X-Workspace-Id")) headers.set("X-Workspace-Id", workspaceId);
-    const res = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        credentials: "include",
-        headers,
-    });
+    const mutating = isMutating(init.method);
+    const send = (csrf: Record<string, string>) => {
+        const headers = new Headers({
+            ...(init.body ? { "Content-Type": "application/json" } : {}),
+            "Accept-Language": locale,
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
+            ...init,
+            credentials: "include",
+            headers,
+        });
+    };
+    let res = await send(mutating ? await csrfHeader() : {});
+    if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
+        res = await send(await csrfHeader(true));
+    }
     if (!res.ok) {
         throw await getApiError(res);
     }
@@ -1564,6 +1575,14 @@ export function exportDealsCsv(params: Types.DealFilterParams = {}, init: Reques
         scope: params.scope, memberIds: params.memberIds,
     });
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
+}
+
+export function exportDealSegmentCsv(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
+    return downloadCsv(`/api/exports/deals/segment`, "deals.csv", {
+        ...init,
+        method: "POST",
+        body: JSON.stringify(params),
+    });
 }
 
 export function getPersonFacets(init: RequestInit = {}) {
@@ -2030,6 +2049,24 @@ export function getDealsPage(params: Types.DealsPageParams = {}, init: RequestIn
     return getJson<Types.Page<Types.Deal>>(`/api/deals/page${buildQuery(params)}`, init);
 }
 
+export function getDealsSegmentPage(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
+    return postJson<Types.Page<Types.Deal>>(`/api/deals/segment/page`, params, init);
+}
+
+/** Ids of every deal matching the active filters, capped by the backend bulk-operation limit. */
+export function getDealIds(params: Types.DealsPageParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({
+        q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
+        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        scope: params.scope, memberIds: params.memberIds,
+    });
+    return getJson<number[]>(`/api/deals/ids${query}`, init);
+}
+
+export function getDealSegmentIds(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
+    return postJson<number[]>(`/api/deals/segment/ids`, params, init);
+}
+
 /** Returns one complete, server-bounded pipeline board for absolute Kanban ordering. */
 export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
     return getJson<Types.Deal[]>(`/api/deals/board${buildQuery({ pipelineId })}`, init);
@@ -2046,6 +2083,10 @@ export function getDealsFromCookie(cookie: string | null) {
  */
 export function getDealMetrics(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
     return getJson<Types.DealMetrics>(`/api/deals/metrics${buildQuery(params)}`, init);
+}
+
+export function getDealSegmentMetrics(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
+    return postJson<Types.DealMetrics>(`/api/deals/segment/metrics`, params, init);
 }
 
 export function getDealMetricsFromCookie(cookie: string | null, params: Types.DealFilterParams = {}) {
