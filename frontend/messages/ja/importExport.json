@@ -89,8 +89,14 @@
     "reviewLinkHint": "最初の100行を表示しています。「リンク」で行を既存のレコードに紐付けできます。",
     "linkAction": "リンク…",
     "linkSearchPlaceholder": "既存を検索…",
+    "linkSearchLabel": "既存レコードを検索",
+    "linkSearchPrompt": "2文字以上入力してください",
     "linkSearching": "検索中…",
     "linkNoResults": "一致なし",
-    "linkedTo": "リンク済み: {name}"
+    "linkSearchError": "検索できませんでした。",
+    "linkRetry": "再試行",
+    "linkResults": "{count}件見つかりました",
+    "linkedTo": "リンク済み: {name}",
+    "linkClear": "{name}へのリンクを解除"
   }
 }

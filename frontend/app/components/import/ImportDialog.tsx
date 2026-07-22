@@ -8,6 +8,14 @@ import { LoaderCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Combobox,
+    ComboboxContent,
+    ComboboxEmpty,
+    ComboboxInput,
+    ComboboxItem,
+    ComboboxList,
+} from '@/components/ui/combobox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -41,6 +49,30 @@ type Step = 'upload' | 'map' | 'review' | 'done';
 const STEPS: Step[] = ['upload', 'map', 'review', 'done'];
 
 type ColumnTarget = { target: string; customType: InferredType };
+type RowLinkOption =
+    | { kind: 'record'; id: number; label: string }
+    | { kind: 'retry'; id: 'retry'; label: string };
+type RowLinkSearchState =
+    | { key: string; status: 'success'; results: RowLinkOption[] }
+    | { key: string; status: 'error' }
+    | null;
+
+function createScopedRequest(requestInit?: RequestInit) {
+    const controller = new AbortController();
+    const upstreamSignal = requestInit?.signal;
+    const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+    if (upstreamSignal?.aborted) abortFromUpstream();
+    else upstreamSignal?.addEventListener('abort', abortFromUpstream, { once: true });
+    return {
+        controller,
+        requestInit: { ...requestInit, signal: controller.signal },
+        release: () => upstreamSignal?.removeEventListener('abort', abortFromUpstream),
+    };
+}
+
+function requestWorkspaceKey(requestInit?: RequestInit): string {
+    return new Headers(requestInit?.headers).get('X-Workspace-Id') ?? '';
+}
 
 function firstFieldError(error: unknown, fallback: string): string {
     if (isFieldError(error)) {
@@ -82,8 +114,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const [previewing, setPreviewing] = useState(false);
     const [links, setLinks] = useState<Record<number, number>>({});
     const [linkLabels, setLinkLabels] = useState<Record<number, string>>({});
+    const previewControllerRef = useRef<AbortController | null>(null);
+    const previewGenerationRef = useRef(0);
 
     function reset() {
+        previewGenerationRef.current += 1;
+        previewControllerRef.current?.abort();
+        previewControllerRef.current = null;
         setStep('upload');
         setParsed(null);
         setFileName('');
@@ -93,6 +130,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         setPreview(null);
         setResult(null);
         setBusy(false);
+        setPreviewing(false);
         setLinks({});
         setLinkLabels({});
     }
@@ -172,46 +210,73 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
 
     async function goToReview() {
         if (!parsed) return;
+        const generation = previewGenerationRef.current + 1;
+        previewGenerationRef.current = generation;
+        previewControllerRef.current?.abort();
+        const scopedRequest = createScopedRequest(requestInit);
+        previewControllerRef.current = scopedRequest.controller;
         setBusy(true);
         try {
             const data = await previewImport(
                 entity,
                 { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
-                requestInit,
+                scopedRequest.requestInit,
             );
-            if (requestInit?.signal?.aborted) return;
+            if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             setPreview(data);
             setStep('review');
         } catch (error) {
-            if (requestInit?.signal?.aborted) return;
+            if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             toastError(firstFieldError(error, t('errorPreview')));
         } finally {
-            if (!requestInit?.signal?.aborted) setBusy(false);
+            scopedRequest.release();
+            if (previewControllerRef.current === scopedRequest.controller) {
+                previewControllerRef.current = null;
+                if (!requestInit?.signal?.aborted) setBusy(false);
+            }
         }
     }
 
     async function runPreview(action: ImportDuplicateAction, nextLinks: Record<number, number>) {
         if (!parsed) return;
+        const generation = previewGenerationRef.current + 1;
+        previewGenerationRef.current = generation;
+        previewControllerRef.current?.abort();
+        const scopedRequest = createScopedRequest(requestInit);
+        previewControllerRef.current = scopedRequest.controller;
         setPreviewing(true);
         try {
             const data = await previewImport(
                 entity,
                 { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action, links: nextLinks },
-                requestInit,
+                scopedRequest.requestInit,
             );
-            if (requestInit?.signal?.aborted) return;
+            if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             setPreview(data);
         } catch (error) {
-            if (requestInit?.signal?.aborted) return;
+            if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             toastError(firstFieldError(error, t('errorPreview')));
         } finally {
-            if (!requestInit?.signal?.aborted) setPreviewing(false);
+            scopedRequest.release();
+            if (previewControllerRef.current === scopedRequest.controller) {
+                previewControllerRef.current = null;
+                if (!requestInit?.signal?.aborted) setPreviewing(false);
+            }
         }
     }
 
     function selectAction(action: ImportDuplicateAction) {
         setOnDuplicate(action);
         void runPreview(action, links);
+    }
+
+    function returnToStep(nextStep: 'upload' | 'map') {
+        previewGenerationRef.current += 1;
+        previewControllerRef.current?.abort();
+        previewControllerRef.current = null;
+        setBusy(false);
+        setPreviewing(false);
+        setStep(nextStep);
     }
 
     function linkRow(rowIndex: number, recordId: number, label: string) {
@@ -257,7 +322,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-3xl">
+            <DialogContent
+                className="gap-0 overflow-hidden p-0 sm:max-w-3xl"
+                onEscapeKeyDown={(event) => {
+                    const target = event.target instanceof Element ? event.target : null;
+                    if (target?.closest('[data-row-linker-input][aria-expanded="true"]')) event.preventDefault();
+                }}
+            >
                 <DialogHeader className="border-b border-border px-6 py-4">
                     <DialogTitle>{t(`title.${entity}`)}</DialogTitle>
                     <DialogDescription className="sr-only">{t('description')}</DialogDescription>
@@ -295,7 +366,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     <div className="flex items-center gap-2">
                         {step === 'map' && (
                             <>
-                                <Button variant="ghost" onClick={() => setStep('upload')}>{t('back')}</Button>
+                                <Button variant="ghost" onClick={() => returnToStep('upload')}>{t('back')}</Button>
                                 <Button onClick={goToReview} disabled={busy || !hasName}>
                                     {busy && <LoaderCircle className="size-4 animate-spin" />}
                                     {t('next')}
@@ -304,7 +375,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                         )}
                         {step === 'review' && preview && (
                             <>
-                                <Button variant="ghost" onClick={() => setStep('map')}>{t('back')}</Button>
+                                <Button variant="ghost" onClick={() => returnToStep('map')}>{t('back')}</Button>
                                 <Button onClick={commit} disabled={busy || previewing || preview.toCreate + preview.toUpdate === 0}>
                                     {busy && <LoaderCircle className="size-4 animate-spin" />}
                                     {t('import')}
@@ -596,38 +667,108 @@ function RowLinker({
     const t = useTranslations('importExport');
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
-    const [results, setResults] = useState<{ id: number; label: string }[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [remoteSearch, setRemoteSearch] = useState<RowLinkSearchState>(null);
+    const [searchAttempt, setSearchAttempt] = useState(0);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const actionButtonRef = useRef<HTMLButtonElement>(null);
+    const queryText = query.trim();
+    const queryReady = queryText.length >= 2;
+    const requestKey = queryReady
+        ? [requestWorkspaceKey(requestInit), entity, queryText, searchAttempt].join('\u0000')
+        : null;
 
     useEffect(() => {
-        const q = query.trim();
-        if (!open || q.length < 2) return;
-        let active = true;
+        if (!open || requestKey === null) return;
+        const scopedRequest = createScopedRequest(requestInit);
+        const upstreamSignal = requestInit?.signal;
+        const closeFromUpstream = () => {
+            setOpen(false);
+            setRemoteSearch(null);
+        };
+        if (upstreamSignal?.aborted) {
+            scopedRequest.controller.abort(upstreamSignal.reason);
+            closeFromUpstream();
+            return;
+        }
+        upstreamSignal?.addEventListener('abort', closeFromUpstream, { once: true });
         const handle = setTimeout(() => {
-            search(q, requestInit)
+            search(queryText, scopedRequest.requestInit)
                 .then((r) => {
-                    if (!active) return;
+                    if (scopedRequest.controller.signal.aborted) return;
                     const items = entity === 'persons' ? r.people : entity === 'companies' ? r.companies : r.deals;
-                    setResults(items.slice(0, 6).map((item) => ({ id: item.id, label: item.name || `#${item.id}` })));
+                    setRemoteSearch({
+                        key: requestKey,
+                        status: 'success',
+                        results: items.slice(0, 6).map((item) => ({
+                            kind: 'record',
+                            id: item.id,
+                            label: item.name || `#${item.id}`,
+                        })),
+                    });
                 })
                 .catch(() => {
-                    if (active) setResults([]);
-                })
-                .finally(() => {
-                    if (active) setLoading(false);
+                    if (scopedRequest.controller.signal.aborted) return;
+                    setRemoteSearch({ key: requestKey, status: 'error' });
                 });
         }, 250);
         return () => {
-            active = false;
             clearTimeout(handle);
+            upstreamSignal?.removeEventListener('abort', closeFromUpstream);
+            scopedRequest.release();
+            scopedRequest.controller.abort();
         };
-    }, [query, open, entity, requestInit]);
+    }, [entity, open, queryText, requestInit, requestKey]);
+
+    const currentSearch = remoteSearch?.key === requestKey ? remoteSearch : null;
+    const results = currentSearch?.status === 'success' ? currentSearch.results : [];
+    const searchState = !queryReady
+        ? 'idle'
+        : currentSearch?.status ?? 'loading';
+
+    function resetSearch() {
+        setQuery('');
+        setRemoteSearch(null);
+        setSearchAttempt(0);
+    }
+
+    function handleOpenChange(next: boolean, restoreFocus: boolean) {
+        setOpen(next);
+        if (!next) resetSearch();
+        if (restoreFocus) window.requestAnimationFrame(() => actionButtonRef.current?.focus());
+    }
+
+    function handleQueryChange(value: string) {
+        setQuery(value);
+    }
+
+    function retrySearch() {
+        inputRef.current?.focus();
+        setSearchAttempt((attempt) => attempt + 1);
+    }
+
+    const stateLabel = !queryReady
+        ? t('linkSearchPrompt')
+        : searchState === 'loading'
+          ? t('linkSearching')
+          : searchState === 'error'
+            ? t('linkSearchError')
+            : results.length === 0
+              ? t('linkNoResults')
+              : t('linkResults', { count: results.length });
+    const options: RowLinkOption[] = searchState === 'error'
+        ? [{ kind: 'retry', id: 'retry', label: `${stateLabel} ${t('linkRetry')}` }]
+        : results;
 
     if (linkedLabel) {
         return (
             <button
+                ref={actionButtonRef}
                 type="button"
-                onClick={onClear}
+                onClick={() => {
+                    onClear();
+                    window.requestAnimationFrame(() => actionButtonRef.current?.focus());
+                }}
+                aria-label={t('linkClear', { name: linkedLabel })}
                 className="inline-flex max-w-full items-center gap-1 rounded-sm bg-accent px-2 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-accent/70"
             >
                 <span className="truncate">{t('linkedTo', { name: linkedLabel })}</span>
@@ -638,6 +779,7 @@ function RowLinker({
     if (!open) {
         return (
             <button
+                ref={actionButtonRef}
                 type="button"
                 onClick={() => setOpen(true)}
                 className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
@@ -647,46 +789,78 @@ function RowLinker({
         );
     }
     return (
-        <div className="inline-block w-52 text-left align-top">
-            <input
+        <Combobox
+            items={options}
+            value={null}
+            inputValue={query}
+            open
+            filter={null}
+            autoHighlight
+            itemToStringLabel={(item: RowLinkOption) => item.label}
+            onOpenChange={(next, details) => {
+                if (!next && details.reason === 'none') {
+                    details.cancel();
+                    return;
+                }
+                handleOpenChange(next, details.reason === 'escape-key');
+            }}
+            onInputValueChange={(value, details) => {
+                if (details.reason !== 'item-press') handleQueryChange(value);
+            }}
+            onValueChange={(item, details) => {
+                if (!item) return;
+                if (item.kind === 'retry') {
+                    details.cancel();
+                    retrySearch();
+                    return;
+                }
+                onLink(item.id, item.label);
+                handleOpenChange(false, true);
+            }}
+        >
+            <ComboboxInput
+                ref={inputRef}
                 autoFocus
-                value={query}
-                onChange={(event) => {
-                    const value = event.target.value;
-                    setQuery(value);
-                    setResults([]);
-                    setLoading(value.trim().length >= 2);
-                }}
-                onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+                showTrigger={false}
                 placeholder={t('linkSearchPlaceholder')}
-                className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/40"
+                aria-label={t('linkSearchLabel')}
+                data-row-linker-input
+                className="h-7 w-52 text-xs"
             />
-            {query.trim().length >= 2 && (
-                <ul className="mt-1 max-h-44 w-full overflow-auto rounded-md border border-border bg-popover p-1 text-left shadow-sm">
-                    {loading && <li className="px-2 py-1 text-xs text-muted-foreground">{t('linkSearching')}</li>}
-                    {!loading && results.length === 0 && (
-                        <li className="px-2 py-1 text-xs text-muted-foreground">{t('linkNoResults')}</li>
-                    )}
-                    {!loading &&
-                        results.map((item) => (
-                            <li key={item.id}>
-                                <button
-                                    type="button"
-                                    onMouseDown={(event) => {
-                                        event.preventDefault();
-                                        onLink(item.id, item.label);
-                                        setOpen(false);
-                                        setQuery('');
-                                    }}
-                                    className="block w-full truncate rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
-                                >
-                                    {item.label}
-                                </button>
-                            </li>
-                        ))}
-                </ul>
-            )}
-        </div>
+            <ComboboxContent className="pointer-events-auto w-52 min-w-52 duration-0 data-open:animate-none data-closed:animate-none">
+                <ComboboxEmpty className="justify-start px-2 py-2 text-left text-xs">
+                    {stateLabel}
+                </ComboboxEmpty>
+                {options.length > 0 && (
+                    <p
+                        className="sr-only"
+                        role={searchState === 'error' ? 'alert' : 'status'}
+                        aria-live={searchState === 'error' ? 'assertive' : 'polite'}
+                        aria-atomic="true"
+                    >
+                        {stateLabel}
+                    </p>
+                )}
+                <ComboboxList>
+                    {options.map((item) => (
+                        <ComboboxItem
+                            key={item.id}
+                            value={item}
+                            className="py-1 text-xs"
+                        >
+                            {item.kind === 'retry' ? (
+                                <>
+                                    <span className="min-w-0 flex-1 truncate">{stateLabel}</span>
+                                    <span className="shrink-0 font-medium text-foreground">{t('linkRetry')}</span>
+                                </>
+                            ) : (
+                                <span className="truncate">{item.label}</span>
+                            )}
+                        </ComboboxItem>
+                    ))}
+                </ComboboxList>
+            </ComboboxContent>
+        </Combobox>
     );
 }
 
