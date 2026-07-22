@@ -37,8 +37,8 @@ class OrgMemberServiceLockOrderTest {
         User target = targetUser(1);
         when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
-        when(userMapper.lockById(1)).thenReturn(1);
-        when(userMapper.lockById(9)).thenReturn(9);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(userMapper.getUserById(1)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
 
@@ -46,8 +46,8 @@ class OrgMemberServiceLockOrderTest {
 
         InOrder order = inOrder(organizationMapper, userMapper, orgMemberMapper);
         order.verify(orgMemberMapper).getRole(7, 9);
-        order.verify(userMapper).lockById(1);
-        order.verify(userMapper).lockById(9);
+        order.verify(userMapper).lockByIdForShare(1);
+        order.verify(userMapper).lockByIdForShare(9);
         order.verify(organizationMapper).lockById(7);
         order.verify(userMapper).getUserById(1);
         order.verify(orgMemberMapper).lockOwnerIds(7);
@@ -58,8 +58,8 @@ class OrgMemberServiceLockOrderTest {
     void removeMemberLocksSortedUsersAndOrganizationBeforeOwnerRowsAndDelete() {
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
-        when(userMapper.lockById(1)).thenReturn(1);
-        when(userMapper.lockById(9)).thenReturn(9);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(1));
         when(orgMemberMapper.removeMember(7, 9)).thenReturn(1);
 
@@ -67,8 +67,8 @@ class OrgMemberServiceLockOrderTest {
 
         InOrder order = inOrder(organizationMapper, userMapper, orgMemberMapper);
         order.verify(orgMemberMapper).getRole(7, 1);
-        order.verify(userMapper).lockById(1);
-        order.verify(userMapper).lockById(9);
+        order.verify(userMapper).lockByIdForShare(1);
+        order.verify(userMapper).lockByIdForShare(9);
         order.verify(organizationMapper).lockById(7);
         order.verify(orgMemberMapper).lockOwnerIds(7);
         order.verify(orgMemberMapper).removeMember(7, 9);
@@ -79,9 +79,8 @@ class OrgMemberServiceLockOrderTest {
         User target = targetUser(9);
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
-        when(userMapper.lockById(1)).thenReturn(1);
-        when(userMapper.lockById(9)).thenReturn(9);
-        when(userMapper.lockById(9)).thenReturn(9);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(userMapper.getUserById(9)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
 
@@ -95,7 +94,8 @@ class OrgMemberServiceLockOrderTest {
     void removeMemberRevalidatesCurrentOwnerAuthorityBeforeWriting() {
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
-        when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
 
         assertThrows(ForbiddenException.class, () -> service.removeMember(7, 1, 9));

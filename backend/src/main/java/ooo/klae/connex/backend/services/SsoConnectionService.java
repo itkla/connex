@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
@@ -48,6 +49,7 @@ public class SsoConnectionService {
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
     private final SsoSecretCipher ssoSecretCipher;
@@ -97,6 +99,9 @@ public class SsoConnectionService {
      */
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
         int orgId = requireAdministrableOrg(workspaceId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         if (!ssoProperties.isEnabled()) {

@@ -201,6 +201,9 @@ public class WorkspaceService {
 
     @Transactional
     WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
+        if (userMapper.lockByIdForShare(ownerUserId) == null) {
+            throw new ResourceNotFoundException("User not found: " + ownerUserId);
+        }
         int orgId = orgIdForOwner(ownerUserId, name);
         Workspace workspace = new Workspace();
         workspace.setOrgId(orgId);

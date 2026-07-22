@@ -204,7 +204,7 @@ public class OrgMemberService {
     }
 
     private void lockMembershipUserRoot(int userId, int actorId) {
-        if (userMapper.lockById(userId) != null) {
+        if (userMapper.lockByIdForShare(userId) != null) {
             return;
         }
         if (userId == actorId) {

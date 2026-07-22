@@ -76,7 +76,6 @@ class AiProviderConfigServiceTest {
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
-        lenient().when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
         lenient().when(organizationMapper.lockByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
@@ -355,7 +354,7 @@ class AiProviderConfigServiceTest {
         service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
 
         InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
-        mutations.verify(userMapper).lockById(ACTOR_ID);
+        mutations.verify(userMapper).lockByIdForShare(ACTOR_ID);
         mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
@@ -382,7 +381,7 @@ class AiProviderConfigServiceTest {
         service.revoke(WORKSPACE_ID, ACTOR_ID);
 
         InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
-        mutations.verify(userMapper).lockById(ACTOR_ID);
+        mutations.verify(userMapper).lockByIdForShare(ACTOR_ID);
         mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
@@ -414,7 +413,7 @@ class AiProviderConfigServiceTest {
 
     @Test
     void save_missingCurrentActorFailsBeforeMembershipAndConfigLocks() {
-        when(userMapper.lockById(ACTOR_ID)).thenReturn(null);
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(null);
 
         assertThrows(ForbiddenException.class,
                 () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));

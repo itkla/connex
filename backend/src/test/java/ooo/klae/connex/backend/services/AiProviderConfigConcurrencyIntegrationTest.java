@@ -266,20 +266,17 @@ class AiProviderConfigConcurrencyIntegrationTest {
     }
 
     @Test
-    void accountDeletionCannotReachMembershipLocksWhileAiMutationHoldsActorUser() throws Exception {
+    void accountDeletionCannotReachOrganizationLocksWhileAiMutationHoldsActorUser() throws Exception {
         CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
         CountDownLatch releaseRevoke = new CountDownLatch(1);
         CountDownLatch deletionUserLockAttempted = new CountDownLatch(1);
         CountDownLatch deletionOrganizationLockAttempted = new CountDownLatch(1);
-        AtomicInteger userLockCalls = new AtomicInteger();
         AtomicInteger organizationLockCalls = new AtomicInteger();
         UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
         OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
         doAnswer(invocation -> {
-            if (userLockCalls.incrementAndGet() == 2) {
-                deletionUserLockAttempted.countDown();
-            }
+            deletionUserLockAttempted.countDown();
             return realUserMapper.lockById(actor.getId());
         }).when(userMapper).lockById(actor.getId());
         doAnswer(invocation -> {
@@ -333,16 +330,13 @@ class AiProviderConfigConcurrencyIntegrationTest {
         CountDownLatch releaseDeletion = new CountDownLatch(1);
         CountDownLatch aiUserLockAttempted = new CountDownLatch(1);
         CountDownLatch aiOrganizationLockAttempted = new CountDownLatch(1);
-        AtomicInteger userLockCalls = new AtomicInteger();
         AtomicInteger organizationLockCalls = new AtomicInteger();
         UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
         OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         doAnswer(invocation -> {
-            if (userLockCalls.incrementAndGet() == 2) {
-                aiUserLockAttempted.countDown();
-            }
-            return realUserMapper.lockById(actor.getId());
-        }).when(userMapper).lockById(actor.getId());
+            aiUserLockAttempted.countDown();
+            return realUserMapper.lockByIdForShare(actor.getId());
+        }).when(userMapper).lockByIdForShare(actor.getId());
         doAnswer(invocation -> {
             if (organizationLockCalls.incrementAndGet() == 2) {
                 aiOrganizationLockAttempted.countDown();
@@ -396,16 +390,16 @@ class AiProviderConfigConcurrencyIntegrationTest {
     void roleChangeFirstMakesAiMutationWaitWithoutReversingOrganizationMembershipLocks() throws Exception {
         CountDownLatch ownerRowsLocked = new CountDownLatch(1);
         CountDownLatch releaseRoleChange = new CountDownLatch(1);
-        CountDownLatch aiUserLockAttempted = new CountDownLatch(1);
-        AtomicInteger actorUserLockCalls = new AtomicInteger();
-        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        CountDownLatch aiOrganizationLockAttempted = new CountDownLatch(1);
+        AtomicInteger organizationLockCalls = new AtomicInteger();
+        OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
         doAnswer(invocation -> {
-            if (actorUserLockCalls.incrementAndGet() == 2) {
-                aiUserLockAttempted.countDown();
+            if (organizationLockCalls.incrementAndGet() == 2) {
+                aiOrganizationLockAttempted.countDown();
             }
-            return realUserMapper.lockById(actor.getId());
-        }).when(userMapper).lockById(actor.getId());
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
         doAnswer(invocation -> {
             List<Integer> ownerIds = realOrgMemberMapper.lockOwnerIds(organization.getId());
             ownerRowsLocked.countDown();
@@ -423,7 +417,7 @@ class AiProviderConfigConcurrencyIntegrationTest {
 
             Future<?> revoke = executor.submit(
                     () -> service.revoke(firstWorkspace.getId(), actor.getId()));
-            assertTrue(aiUserLockAttempted.await(10, TimeUnit.SECONDS));
+            assertTrue(aiOrganizationLockAttempted.await(10, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
             releaseRoleChange.countDown();
 

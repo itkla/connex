@@ -418,7 +418,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     }
 
     private AiProviderConfig lockCurrentConfig(int orgId, int actorId) {
-        if (userMapper.lockById(actorId) == null) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
         if (organizationMapper.lockById(orgId) == null) {

@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.secrets;
 
+import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -47,6 +49,7 @@ public class SecretStore {
 
     @Transactional
     public String put(SecretPurpose purpose, int scopeId, String plaintext) {
+        lockScopeParentsForShare(purpose.scopeType(), scopeId);
         StoredSecret secret = new StoredSecret();
         secret.setScopeType(purpose.scopeType());
         secret.setScopeId(scopeId);
@@ -83,9 +86,10 @@ public class SecretStore {
     public int rewrapBatchToActiveKey(int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 10_000));
         int count = 0;
-        for (StoredSecret secret : secretValueMapper.listRewrapCandidates(crypto.activeKeyId(), safeLimit)) {
+        List<StoredSecret> candidates = secretValueMapper.listRewrapCandidates(crypto.activeKeyId(), safeLimit);
+        lockBatchScopeParentsForShare(candidates);
+        for (StoredSecret secret : candidates) {
             try {
-                lockScopeParentsForShare(secret.getScopeType(), secret.getScopeId());
                 requireSupportedAlgorithms(secret);
                 String plaintext = crypto.decrypt(secret.getKeyId(), secret.getEncryptedDataKey(),
                         secret.getCiphertext(), aad(secret));
@@ -114,6 +118,7 @@ public class SecretStore {
     public void delete(SecretPurpose purpose, int scopeId, String reference) {
         SecretReference parsed = SecretReference.parseOrNull(reference);
         if (parsed != null) {
+            lockScopeParentsForShare(purpose.scopeType(), scopeId);
             StoredSecret secret = secretValueMapper.findById(parsed.id());
             if (secret != null && matches(secret, purpose, scopeId)) {
                 secretValueMapper.delete(secret.getId());
@@ -180,6 +185,36 @@ public class SecretStore {
         } else if ("organization".equals(scopeType)
                 && organizationMapper.lockByIdForShare(scopeId) == null) {
             throw new ResourceNotFoundException("Secret scope not found");
+        }
+    }
+
+    private void lockBatchScopeParentsForShare(List<StoredSecret> candidates) {
+        TreeSet<Integer> userIds = new TreeSet<>();
+        TreeSet<Integer> workspaceIds = new TreeSet<>();
+        TreeSet<Integer> organizationIds = new TreeSet<>();
+        Integer actorId = currentActorId();
+        if (actorId != null) {
+            userIds.add(actorId);
+        }
+        for (StoredSecret secret : candidates) {
+            if ("user".equals(secret.getScopeType())) {
+                userIds.add(secret.getScopeId());
+            } else if ("workspace".equals(secret.getScopeType())) {
+                workspaceIds.add(secret.getScopeId());
+            } else if ("organization".equals(secret.getScopeType())) {
+                organizationIds.add(secret.getScopeId());
+            }
+        }
+        userIds.forEach(this::lockUserForShare);
+        for (int workspaceId : workspaceIds) {
+            if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
+        }
+        for (int organizationId : organizationIds) {
+            if (organizationMapper.lockByIdForShare(organizationId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
         }
     }
 
