@@ -50,11 +50,22 @@ public class OrgMemberService {
     /**
      * Refuses when the user is the only owner of any organization — deleting the account would
      * leave that org ownerless (org_member is {@code ON DELETE CASCADE}, bypassing the last-owner
-     * guard on the org-member API). Each owned org's owner rows are read under a lock so concurrent
-     * co-owner deletions serialize; must run in a transaction. They must transfer ownership first.
+     * guard on the org-member API). The user, sorted organization roots, and owner rows are locked
+     * in that order so concurrent co-owner deletions and org mutations serialize. Must run in a
+     * transaction. They must transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyOrg(int userId) {
-        for (int orgId : orgMemberMapper.orgIdsOwnedBy(userId)) {
+        if (userMapper.lockById(userId) == null) {
+            throw new ResourceNotFoundException("User not found: " + userId);
+        }
+        List<Integer> ownedOrgIds = orgMemberMapper.orgIdsOwnedBy(userId).stream()
+                .distinct()
+                .sorted()
+                .toList();
+        for (int orgId : ownedOrgIds) {
+            organizationMapper.lockById(orgId);
+        }
+        for (int orgId : ownedOrgIds) {
             if (orgMemberMapper.lockOwnerIds(orgId).size() <= 1) {
                 throw new BadRequestException("Transfer organization ownership before deleting your account");
             }
@@ -120,8 +131,8 @@ public class OrgMemberService {
      * Adds a user to the organization or changes their org role. Requires the actor
      * to be an org owner; the target must be a real user; and the organization must
      * always keep at least one owner (a sole owner cannot be demoted to admin). The
-     * organization, sorted actor/target users, and owner rows are locked in that
-     * order so role changes serialize with organization mutations, audit
+     * sorted actor/target users, the organization, and owner rows are locked in
+     * that order so role changes serialize with organization mutations, audit
      * attribution, and account deletion.
      */
     @Transactional
@@ -129,10 +140,10 @@ public class OrgMemberService {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
+        lockMembershipUserRoots(actorId, targetUserId);
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
-        lockMembershipUserRoots(actorId, targetUserId);
         User target = userMapper.getUserById(targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User not found: " + targetUserId);
@@ -148,16 +159,17 @@ public class OrgMemberService {
 
     /**
      * Removes a user's org membership. Requires the actor to be an org owner; the
-     * organization must always keep at least one owner.
+     * organization must always keep at least one owner. Sorted actor/target users
+     * are locked before the organization and owner rows.
      */
     @Transactional
     public void removeMember(int orgId, int actorId, int targetUserId) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        lockMembershipUserRoots(actorId, targetUserId);
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
-        lockMembershipUserRoot(actorId, actorId);
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
         if (isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");

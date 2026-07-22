@@ -353,8 +353,8 @@ class AiProviderConfigServiceTest {
         service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
 
         InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
-        mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(userMapper).lockById(ACTOR_ID);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).upsert(any(AiProviderConfig.class));
@@ -380,8 +380,8 @@ class AiProviderConfigServiceTest {
         service.revoke(WORKSPACE_ID, ACTOR_ID);
 
         InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
-        mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(userMapper).lockById(ACTOR_ID);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).deleteByOrg(ORG_ID);
@@ -417,6 +417,7 @@ class AiProviderConfigServiceTest {
         assertThrows(ForbiddenException.class,
                 () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
 
+        verify(organizationMapper, never()).lockById(ORG_ID);
         verify(orgMemberService, never()).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
         verify(aiProviderConfigMapper, never()).upsert(any());

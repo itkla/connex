@@ -270,9 +270,11 @@ class AiProviderConfigConcurrencyIntegrationTest {
         CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
         CountDownLatch releaseRevoke = new CountDownLatch(1);
         CountDownLatch deletionUserLockAttempted = new CountDownLatch(1);
-        CountDownLatch deletionOwnerRowsAttempted = new CountDownLatch(1);
+        CountDownLatch deletionOrganizationLockAttempted = new CountDownLatch(1);
         AtomicInteger userLockCalls = new AtomicInteger();
+        AtomicInteger organizationLockCalls = new AtomicInteger();
         UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
         doAnswer(invocation -> {
             if (userLockCalls.incrementAndGet() == 2) {
@@ -281,6 +283,12 @@ class AiProviderConfigConcurrencyIntegrationTest {
             return realUserMapper.lockById(actor.getId());
         }).when(userMapper).lockById(actor.getId());
         doAnswer(invocation -> {
+            if (organizationLockCalls.incrementAndGet() == 2) {
+                deletionOrganizationLockAttempted.countDown();
+            }
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
+        doAnswer(invocation -> {
             String role = realOrgMemberMapper.getRoleForUpdate(organization.getId(), actor.getId());
             currentAuthorizationLocked.countDown();
             if (!releaseRevoke.await(10, TimeUnit.SECONDS)) {
@@ -288,10 +296,6 @@ class AiProviderConfigConcurrencyIntegrationTest {
             }
             return role;
         }).when(orgMemberMapper).getRoleForUpdate(organization.getId(), actor.getId());
-        doAnswer(invocation -> {
-            deletionOwnerRowsAttempted.countDown();
-            return realOrgMemberMapper.lockOwnerIds(organization.getId());
-        }).when(orgMemberMapper).lockOwnerIds(organization.getId());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -302,11 +306,12 @@ class AiProviderConfigConcurrencyIntegrationTest {
             Future<?> deletion = executor.submit(() -> new TransactionTemplate(transactionManager)
                     .executeWithoutResult(status -> {
                         userMapper.lockById(actor.getId());
+                        organizationMapper.lockById(organization.getId());
                         orgMemberMapper.lockOwnerIds(organization.getId());
                         orgMemberMapper.removeMember(organization.getId(), actor.getId());
                     }));
             assertTrue(deletionUserLockAttempted.await(10, TimeUnit.SECONDS));
-            assertFalse(deletionOwnerRowsAttempted.await(500, TimeUnit.MILLISECONDS));
+            assertFalse(deletionOrganizationLockAttempted.await(500, TimeUnit.MILLISECONDS));
             releaseRevoke.countDown();
 
             revoke.get(20, TimeUnit.SECONDS);
@@ -323,19 +328,84 @@ class AiProviderConfigConcurrencyIntegrationTest {
     }
 
     @Test
-    void roleChangeFirstMakesAiMutationWaitWithoutReversingOrganizationMembershipLocks() throws Exception {
-        CountDownLatch ownerRowsLocked = new CountDownLatch(1);
-        CountDownLatch releaseRoleChange = new CountDownLatch(1);
+    void accountDeletionFirstMakesAiMutationWaitBeforeOrganizationLock() throws Exception {
+        CountDownLatch deletionLocksHeld = new CountDownLatch(1);
+        CountDownLatch releaseDeletion = new CountDownLatch(1);
+        CountDownLatch aiUserLockAttempted = new CountDownLatch(1);
         CountDownLatch aiOrganizationLockAttempted = new CountDownLatch(1);
+        AtomicInteger userLockCalls = new AtomicInteger();
         AtomicInteger organizationLockCalls = new AtomicInteger();
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
         OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
-        OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
+        doAnswer(invocation -> {
+            if (userLockCalls.incrementAndGet() == 2) {
+                aiUserLockAttempted.countDown();
+            }
+            return realUserMapper.lockById(actor.getId());
+        }).when(userMapper).lockById(actor.getId());
         doAnswer(invocation -> {
             if (organizationLockCalls.incrementAndGet() == 2) {
                 aiOrganizationLockAttempted.countDown();
             }
             return realOrganizationMapper.lockById(organization.getId());
         }).when(organizationMapper).lockById(organization.getId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> deletion = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        userMapper.lockById(actor.getId());
+                        organizationMapper.lockById(organization.getId());
+                        orgMemberMapper.lockOwnerIds(organization.getId());
+                        deletionLocksHeld.countDown();
+                        try {
+                            if (!releaseDeletion.await(10, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("Account deletion did not resume");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Account deletion was interrupted", exception);
+                        }
+                        orgMemberMapper.removeMember(organization.getId(), actor.getId());
+                    }));
+            assertTrue(deletionLocksHeld.await(10, TimeUnit.SECONDS));
+
+            Future<ForbiddenException> revoke = executor.submit(() -> assertThrows(
+                    ForbiddenException.class,
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId())));
+            assertTrue(aiUserLockAttempted.await(10, TimeUnit.SECONDS));
+            assertFalse(aiOrganizationLockAttempted.await(500, TimeUnit.MILLISECONDS));
+            releaseDeletion.countDown();
+
+            deletion.get(20, TimeUnit.SECONDS);
+            assertEquals(
+                    "Requires an organization administrator role",
+                    revoke.get(20, TimeUnit.SECONDS).getMessage());
+        } finally {
+            releaseDeletion.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNotNull(aiProviderConfigMapper.findByOrg(organization.getId()));
+        assertEquals(1, credentialCount());
+        assertNull(orgMemberMapper.getRole(organization.getId(), actor.getId()));
+    }
+
+    @Test
+    void roleChangeFirstMakesAiMutationWaitWithoutReversingOrganizationMembershipLocks() throws Exception {
+        CountDownLatch ownerRowsLocked = new CountDownLatch(1);
+        CountDownLatch releaseRoleChange = new CountDownLatch(1);
+        CountDownLatch aiUserLockAttempted = new CountDownLatch(1);
+        AtomicInteger actorUserLockCalls = new AtomicInteger();
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
+        doAnswer(invocation -> {
+            if (actorUserLockCalls.incrementAndGet() == 2) {
+                aiUserLockAttempted.countDown();
+            }
+            return realUserMapper.lockById(actor.getId());
+        }).when(userMapper).lockById(actor.getId());
         doAnswer(invocation -> {
             List<Integer> ownerIds = realOrgMemberMapper.lockOwnerIds(organization.getId());
             ownerRowsLocked.countDown();
@@ -353,7 +423,7 @@ class AiProviderConfigConcurrencyIntegrationTest {
 
             Future<?> revoke = executor.submit(
                     () -> service.revoke(firstWorkspace.getId(), actor.getId()));
-            assertTrue(aiOrganizationLockAttempted.await(10, TimeUnit.SECONDS));
+            assertTrue(aiUserLockAttempted.await(10, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
             releaseRoleChange.countDown();
 

@@ -46,19 +46,20 @@ class OrgMemberServiceLockOrderTest {
 
         InOrder order = inOrder(organizationMapper, userMapper, orgMemberMapper);
         order.verify(orgMemberMapper).getRole(7, 9);
-        order.verify(organizationMapper).lockById(7);
         order.verify(userMapper).lockById(1);
         order.verify(userMapper).lockById(9);
+        order.verify(organizationMapper).lockById(7);
         order.verify(userMapper).getUserById(1);
         order.verify(orgMemberMapper).lockOwnerIds(7);
         order.verify(orgMemberMapper).addMember(7, 1, "admin");
     }
 
     @Test
-    void removeMemberLocksOrganizationAndActorBeforeOwnerRowsAndDelete() {
+    void removeMemberLocksSortedUsersAndOrganizationBeforeOwnerRowsAndDelete() {
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockById(9)).thenReturn(9);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(1));
         when(orgMemberMapper.removeMember(7, 9)).thenReturn(1);
 
@@ -66,8 +67,9 @@ class OrgMemberServiceLockOrderTest {
 
         InOrder order = inOrder(organizationMapper, userMapper, orgMemberMapper);
         order.verify(orgMemberMapper).getRole(7, 1);
-        order.verify(organizationMapper).lockById(7);
         order.verify(userMapper).lockById(1);
+        order.verify(userMapper).lockById(9);
+        order.verify(organizationMapper).lockById(7);
         order.verify(orgMemberMapper).lockOwnerIds(7);
         order.verify(orgMemberMapper).removeMember(7, 9);
     }
@@ -78,6 +80,7 @@ class OrgMemberServiceLockOrderTest {
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockById(9)).thenReturn(9);
         when(userMapper.lockById(9)).thenReturn(9);
         when(userMapper.getUserById(9)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
@@ -99,6 +102,26 @@ class OrgMemberServiceLockOrderTest {
 
         verify(orgMemberMapper, never()).removeMember(7, 9);
         verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void accountGuardLocksUserAndSortedOrganizationsBeforeOwnerRows() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(orgMemberMapper.orgIdsOwnedBy(9)).thenReturn(List.of(7, 3, 7));
+        when(organizationMapper.lockById(3)).thenReturn(3);
+        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(orgMemberMapper.lockOwnerIds(3)).thenReturn(List.of(9, 11));
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9, 12));
+
+        service.assertNotSoleOwnerOfAnyOrg(9);
+
+        InOrder order = inOrder(userMapper, organizationMapper, orgMemberMapper);
+        order.verify(userMapper).lockById(9);
+        order.verify(orgMemberMapper).orgIdsOwnedBy(9);
+        order.verify(organizationMapper).lockById(3);
+        order.verify(organizationMapper).lockById(7);
+        order.verify(orgMemberMapper).lockOwnerIds(3);
+        order.verify(orgMemberMapper).lockOwnerIds(7);
     }
 
     private static User targetUser(int userId) {

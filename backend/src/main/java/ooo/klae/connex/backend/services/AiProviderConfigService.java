@@ -412,10 +412,10 @@ public class AiProviderConfigService implements AiProviderReadiness {
     }
 
     private AiProviderConfig lockCurrentConfig(int orgId, int actorId) {
-        if (organizationMapper.lockById(orgId) == null) {
+        if (userMapper.lockById(actorId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
-        if (userMapper.lockById(actorId) == null) {
+        if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
         orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
