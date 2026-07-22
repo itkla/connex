@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ApprovalPolicyMapper">
+
+  <resultMap id="ApprovalPolicyResult" type="ApprovalPolicy">
+    <id     property="id"                 column="id"/>
+    <result property="workspaceId"        column="workspace_id"/>
+    <result property="name"               column="name"/>
+    <result property="active"             column="active"/>
+    <result property="documentType"       column="document_type"/>
+    <result property="currency"           column="currency"/>
+    <result property="minTotal"           column="min_total"/>
+    <result property="minDiscountPercent" column="min_discount_percent"/>
+    <result property="createdAt"          column="created_at"/>
+    <result property="updatedAt"          column="updated_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, workspace_id, name, active, document_type, currency, min_total, min_discount_percent,
+    created_at, updated_at
+  </sql>
+
+  <select id="getAll" resultMap="ApprovalPolicyResult">
+    SELECT <include refid="cols"/> FROM approval_policy
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY name, id
+  </select>
+
+  <select id="getActive" resultMap="ApprovalPolicyResult">
+    SELECT <include refid="cols"/> FROM approval_policy
+    WHERE workspace_id = #{workspaceId} AND active = TRUE
+    ORDER BY name, id
+  </select>
+
+  <select id="getById" resultMap="ApprovalPolicyResult">
+    SELECT <include refid="cols"/> FROM approval_policy
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO approval_policy (
+      workspace_id, name, active, document_type, currency, min_total, min_discount_percent
+    ) VALUES (
+      #{workspaceId}, #{name}, #{active}, #{documentType}, #{currency}, #{minTotal}, #{minDiscountPercent}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE approval_policy SET
+      name = #{name},
+      active = #{active},
+      document_type = #{documentType},
+      currency = #{currency},
+      min_total = #{minTotal},
+      min_discount_percent = #{minDiscountPercent}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM approval_policy WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+</mapper>

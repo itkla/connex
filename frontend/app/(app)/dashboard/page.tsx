@@ -198,8 +198,8 @@ export default async function Dashboard() {
             getIntroSuggestionsFromCookie(cookie, 4),
             getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
             getDashboardLayoutFromCookie(cookie),
-            getNotifications({ state: 'unread', page: 1, size: 6 }, init)
-                .catch(() => ({ items: [], total: 0, stateVersion: 0 }) as NotificationPage),
+            getNotifications({ status: 'unread', page: 1, size: 6 }, init)
+                .catch(() => ({ items: [], total: 0, stateVersion: 0, asOf: '1970-01-01T00:00:00Z' }) as NotificationPage),
             getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
             getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),
             getContactsPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Contact>),
@@ -249,10 +249,10 @@ export default async function Dashboard() {
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
         getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, user.timezone, init).catch(
+        getDealRevenueTimeseries(currency, user.timezone, {}, init).catch(
             () => ({ closed: [], projected: [] }) as DealRevenueSeries,
         ),
-        getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
+        getDealStageDistribution(currency, {}, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
     const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(

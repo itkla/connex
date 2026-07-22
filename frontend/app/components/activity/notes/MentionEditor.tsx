@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { useTranslations } from 'next-intl';
+import { Loader2Icon } from 'lucide-react';
 import { BoltIcon, BriefcaseIcon, BuildingOffice2Icon, CheckCircleIcon, DocumentTextIcon, PaperClipIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { getActiveWorkspaceMembers, getCompanies, getDeals, search } from '@/app/lib/api';
 import { type Company, type Deal, type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
+import { filterSlashCommands, type SlashCommandDef } from './commands/slashCommandRegistry';
 
 const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file|task|activity):(\d+)\)/g;
-const HANDLE = /[A-Za-z0-9_.\-]/;
+const HANDLE = /[A-Za-z0-9_.\-぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟＡ-Ｚａ-ｚ０-９]/;
 const MAX_SUGGESTIONS = 8;
 const MENU_WIDTH = 288;
 const MENU_MAX_HEIGHT = 320;
@@ -19,9 +22,9 @@ const SEARCH_DEBOUNCE_MS = 220;
 
 const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon, note: DocumentTextIcon, file: PaperClipIcon, task: CheckCircleIcon, activity: BoltIcon };
 
-type Trigger = '@' | '#';
+type Trigger = '@' | '#' | '/';
 
-const TRIGGER_TYPES: Record<Trigger, readonly NoteReferenceType[]> = {
+const MENTION_TRIGGER_TYPES: Record<'@' | '#', readonly NoteReferenceType[]> = {
     '@': ['user', 'person'],
     '#': ['deal', 'company'],
 };
@@ -211,6 +214,10 @@ type Props = {
     ariaInvalid?: boolean;
     ariaDescribedby?: string;
     autoFocus?: boolean;
+    /** Slash commands offered from the Stage-A `/` menu; when omitted, `/` stays literal text. */
+    commands?: readonly SlashCommandDef[];
+    /** Invoked when a `run-action` slash command is chosen, with the command's `actionId`. */
+    onRunAction?: (actionId: string) => void;
 };
 
 /**
@@ -221,6 +228,11 @@ type Props = {
  * ARIA combobox popup, positioned from the caret and flipping above when there
  * isn't room below. `@` searches people (workspace members and contacts); `#`
  * searches records (deals and companies). A selection inserts a non-editable chip.
+ *
+ * When {@link Props.commands} are supplied, typing `/` at the start of a block or
+ * after whitespace opens a two-stage menu: Stage A lists the commands, and choosing
+ * an `insert-reference` command scopes Stage B to a record picker whose selection
+ * inserts a chip; `run-action` commands hand off to {@link Props.onRunAction}.
  */
 export default function MentionEditor({
     id,
@@ -232,17 +244,24 @@ export default function MentionEditor({
     ariaInvalid,
     ariaDescribedby,
     autoFocus,
+    commands,
+    onRunAction,
 }: Props) {
+    const t = useTranslations('ActivityNotesEditor');
     const editorRef = useRef<HTMLDivElement>(null);
     const lastValue = useRef<string | null>(null);
     const savedRange = useRef<Range | null>(null);
+    const composingRef = useRef(false);
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [records, setRecords] = useState<Suggestion[]>([]);
     const [results, setResults] = useState<SearchResults | null>(null);
     const [query, setQuery] = useState<ActiveQuery | null>(null);
+    const [pickerScope, setPickerScope] = useState<NoteReferenceType[] | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
+
+    const hasCommands = (commands?.length ?? 0) > 0;
 
     useEffect(() => {
         let cancelled = false;
@@ -254,9 +273,10 @@ export default function MentionEditor({
         };
     }, []);
 
-    const trigger = query?.trigger;
+    const needsRecords =
+        query?.trigger === '#' || (pickerScope?.some((type) => type === 'company' || type === 'deal') ?? false);
     useEffect(() => {
-        if (trigger !== '#') return;
+        if (!needsRecords) return;
         let cancelled = false;
         loadRecords().then((list) => {
             if (!cancelled) setRecords(list);
@@ -264,7 +284,7 @@ export default function MentionEditor({
         return () => {
             cancelled = true;
         };
-    }, [trigger]);
+    }, [needsRecords]);
 
     useEffect(() => {
         const el = editorRef.current;
@@ -279,9 +299,12 @@ export default function MentionEditor({
         if (autoFocus) editorRef.current?.focus();
     }, [autoFocus]);
 
+    const stageA = query?.trigger === '/' && pickerScope === null;
+    const stageB = query?.trigger === '/' && pickerScope !== null;
+
     const queryText = query?.text ?? '';
     useEffect(() => {
-        if (queryText.length < 1) return;
+        if (stageA || queryText.length < 1) return;
         let cancelled = false;
         const handle = window.setTimeout(() => {
             search(queryText)
@@ -294,31 +317,49 @@ export default function MentionEditor({
             cancelled = true;
             window.clearTimeout(handle);
         };
-    }, [queryText]);
+    }, [queryText, stageA]);
+
+    const commandMatches = useMemo(() => {
+        if (!stageA || !query || !commands) return [];
+        const supported = commands.filter(
+            (def) =>
+                def.kind === 'insert-reference' || (def.kind === 'run-action' && onRunAction !== undefined),
+        );
+        return filterSlashCommands(supported, query.text, t);
+    }, [stageA, query, commands, onRunAction, t]);
 
     const suggestions = useMemo(() => {
         if (!query) return [];
-        const allowed = TRIGGER_TYPES[query.trigger];
+        const allowed =
+            query.trigger === '/' ? pickerScope : MENTION_TRIGGER_TYPES[query.trigger];
+        if (!allowed) return [];
         const needle = query.text.toLowerCase();
-        const pool = query.trigger === '@' ? memberSuggestions(members, excludeUserId) : records;
+        const localPool: Suggestion[] = [
+            ...(allowed.includes('user') ? memberSuggestions(members, excludeUserId) : []),
+            ...(allowed.includes('company') || allowed.includes('deal') ? records : []),
+        ];
         if (needle.length === 0) {
-            return pool.slice(0, MAX_SUGGESTIONS);
+            return localPool.filter((suggestion) => allowed.includes(suggestion.type)).slice(0, MAX_SUGGESTIONS);
         }
         if (results) {
             return searchSuggestions(results, excludeUserId)
                 .filter((suggestion) => allowed.includes(suggestion.type))
                 .slice(0, MAX_SUGGESTIONS);
         }
-        return pool
+        return localPool
             .filter(
                 (suggestion) =>
-                    suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle),
+                    allowed.includes(suggestion.type) &&
+                    (suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle)),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, members, records, results, excludeUserId]);
+    }, [query, pickerScope, members, records, results, excludeUserId]);
 
-    const menuOpen = query !== null && suggestions.length > 0;
-    const activeOptionId = menuOpen ? `${listboxId}-opt-${activeIndex}` : undefined;
+    const menuOpen =
+        query !== null && (stageA ? commandMatches.length > 0 : stageB ? true : suggestions.length > 0);
+    const optionCount = stageA ? commandMatches.length : suggestions.length;
+    const boundedIndex = optionCount > 0 ? Math.min(activeIndex, optionCount - 1) : 0;
+    const activeOptionId = menuOpen && optionCount > 0 ? `${listboxId}-opt-${boundedIndex}` : undefined;
 
     const emit = useCallback(() => {
         const el = editorRef.current;
@@ -330,6 +371,7 @@ export default function MentionEditor({
 
     const closeMenu = useCallback(() => {
         setQuery(null);
+        setPickerScope(null);
         setActiveIndex(0);
     }, []);
 
@@ -351,7 +393,11 @@ export default function MentionEditor({
         let handle = '';
         while (index >= 0) {
             const char = textBefore[index];
-            if (char === '@' || char === '#') {
+            if (char === '@' || char === '#' || char === '/') {
+                if (char === '/' && !hasCommands) {
+                    closeMenu();
+                    return;
+                }
                 const preceding = index === 0 ? ' ' : textBefore[index - 1];
                 if (/\s/.test(preceding) || (index === 0 && !(node.previousSibling instanceof Text))) {
                     const rect = range.getBoundingClientRect();
@@ -367,6 +413,7 @@ export default function MentionEditor({
                         bottom: above ? window.innerHeight - rect.top + 6 : undefined,
                         above,
                     });
+                    if (char !== '/') setPickerScope(null);
                     setActiveIndex(0);
                     return;
                 }
@@ -378,11 +425,11 @@ export default function MentionEditor({
             index -= 1;
         }
         closeMenu();
-    }, [closeMenu]);
+    }, [closeMenu, hasCommands]);
 
     const handleInput = useCallback(() => {
         emit();
-        detectQuery();
+        if (!composingRef.current) detectQuery();
     }, [emit, detectQuery]);
 
     const insertReference = useCallback(
@@ -452,43 +499,123 @@ export default function MentionEditor({
         [closeMenu, emit, reduceMotion, query],
     );
 
+    const rewriteSlashSpan = useCallback(
+        (keepSlash: boolean): boolean => {
+            const el = editorRef.current;
+            if (!el) return false;
+            const selection = window.getSelection();
+            if (selection && savedRange.current) {
+                el.focus();
+                selection.removeAllRanges();
+                selection.addRange(savedRange.current);
+            }
+            if (!selection || selection.rangeCount === 0) return false;
+            const range = selection.getRangeAt(0);
+            const node = range.startContainer;
+            if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) return false;
+            const text = node.textContent ?? '';
+            const caret = range.startOffset;
+            const at = text.lastIndexOf('/', caret - 1);
+            if (at === -1) return false;
+            const end = keepSlash ? at + 1 : at;
+            node.textContent = text.slice(0, end) + text.slice(caret);
+            const next = document.createRange();
+            next.setStart(node, end);
+            next.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(next);
+            if (keepSlash) savedRange.current = next.cloneRange();
+            emit();
+            return true;
+        },
+        [emit],
+    );
+
+    const beginReferencePicker = useCallback(
+        (def: SlashCommandDef) => {
+            if (!rewriteSlashSpan(true)) {
+                closeMenu();
+                return;
+            }
+            setResults(null);
+            setActiveIndex(0);
+            setQuery((current) => (current ? { ...current, text: '' } : current));
+            setPickerScope(def.entityTypes ? [...def.entityTypes] : []);
+        },
+        [rewriteSlashSpan, closeMenu],
+    );
+
+    const selectCommand = useCallback(
+        (def: SlashCommandDef) => {
+            if (def.kind === 'insert-reference') {
+                beginReferencePicker(def);
+                return;
+            }
+            if (def.kind === 'run-action') {
+                rewriteSlashSpan(false);
+                closeMenu();
+                if (def.actionId) onRunAction?.(def.actionId);
+            }
+        },
+        [beginReferencePicker, rewriteSlashSpan, closeMenu, onRunAction],
+    );
+
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
+            if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (menuOpen) {
-                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
+                if (optionCount > 0 && (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey))) {
                     event.preventDefault();
-                    setActiveIndex((index) => (index + 1) % suggestions.length);
+                    setActiveIndex((boundedIndex + 1) % optionCount);
                     return;
                 }
-                if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
+                if (optionCount > 0 && (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey))) {
                     event.preventDefault();
-                    setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+                    setActiveIndex((boundedIndex - 1 + optionCount) % optionCount);
                     return;
                 }
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && stageA) {
                     event.preventDefault();
-                    insertReference(suggestions[activeIndex]);
+                    const def = commandMatches[boundedIndex];
+                    if (def) selectCommand(def);
                     return;
                 }
-                if (event.key === ' ' && query !== null && query.text.length >= 1) {
+                if (event.key === 'Enter' && !stageA && suggestions[boundedIndex]) {
                     event.preventDefault();
-                    insertReference(suggestions[activeIndex]);
+                    insertReference(suggestions[boundedIndex]);
                     return;
+                }
+                if (event.key === ' ' && !stageA && query !== null && query.text.length >= 1) {
+                    const suggestion = suggestions[boundedIndex];
+                    if (suggestion) {
+                        event.preventDefault();
+                        insertReference(suggestion);
+                        return;
+                    }
                 }
                 if (event.key === 'Escape') {
                     event.preventDefault();
+                    event.stopPropagation();
                     closeMenu();
                     return;
                 }
             }
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
                 event.preventDefault();
                 document.execCommand('insertText', false, '\n');
                 emit();
             }
         },
-        [menuOpen, suggestions, activeIndex, insertReference, closeMenu, emit, query],
+        [menuOpen, optionCount, stageA, commandMatches, suggestions, boundedIndex, selectCommand, insertReference, closeMenu, emit, query],
     );
+
+    const showStageBState = stageB && optionCount === 0;
+    const stageBSearchPending = stageB && queryText.length >= 1 && results === null;
+    const stageBStateLabel = stageBSearchPending
+        ? t('slashPickerSearching')
+        : queryText.length < 1
+          ? t('slashPickerPrompt')
+          : t('slashPickerNoResults');
 
     return (
         <>
@@ -507,6 +634,14 @@ export default function MentionEditor({
                 spellCheck
                 onInput={handleInput}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={() => {
+                    composingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                    composingRef.current = false;
+                    emit();
+                    detectQuery();
+                }}
                 onBlur={() => window.setTimeout(closeMenu, 120)}
                 data-placeholder={placeholder}
                 className={cn(
@@ -523,6 +658,7 @@ export default function MentionEditor({
                         key="mention-menu"
                         id={listboxId}
                         role="listbox"
+                        data-slot="editor-suggestion"
                         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
                         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
                         exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, transition: { duration: 0.1 } }}
@@ -535,50 +671,90 @@ export default function MentionEditor({
                         }}
                         className="pointer-events-auto fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
-                        {suggestions.map((suggestion, index) => {
-                            const optionId = `${listboxId}-opt-${index}`;
-                            const RecordIcon = suggestion.type === 'user' ? null : RECORD_ICON[suggestion.type];
-                            return (
-                                <li
-                                    key={`${suggestion.type}-${suggestion.id}`}
-                                    id={optionId}
-                                    role="option"
-                                    aria-selected={index === activeIndex}
-                                >
-                                    <button
-                                        type="button"
-                                        tabIndex={-1}
-                                        onMouseDown={(event) => {
-                                            event.preventDefault();
-                                            insertReference(suggestion);
-                                        }}
-                                        onMouseEnter={() => setActiveIndex(index)}
-                                        className={cn(
-                                            'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
-                                            index === activeIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
-                                        )}
-                                    >
-                                        {RecordIcon ? (
-                                            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                                                <RecordIcon className="size-3" />
-                                            </span>
-                                        ) : (
-                                            <Avatar size="sm" className="ring-1 ring-border">
-                                                {suggestion.avatarUrl ? (
-                                                    <AvatarImage src={suggestion.avatarUrl} alt={suggestion.label} />
-                                                ) : (
-                                                    <AvatarFallback>
-                                                        <UserIcon className="size-3 text-muted-foreground" />
-                                                    </AvatarFallback>
+                        {stageA
+                            ? commandMatches.map((def, index) => {
+                                  const optionId = `${listboxId}-opt-${index}`;
+                                  const CommandIcon = def.icon;
+                                  return (
+                                      <li
+                                          key={def.id}
+                                          id={optionId}
+                                          role="option"
+                                          aria-selected={index === boundedIndex}
+                                      >
+                                          <button
+                                              type="button"
+                                              tabIndex={-1}
+                                              onMouseDown={(event) => {
+                                                  event.preventDefault();
+                                                  selectCommand(def);
+                                              }}
+                                              onMouseEnter={() => setActiveIndex(index)}
+                                              className={cn(
+                                                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
+                                                  index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
+                                              )}
+                                          >
+                                              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                                  <CommandIcon className="size-3" />
+                                              </span>
+                                              <span className="min-w-0 flex-1 truncate font-medium">{t(def.labelKey)}</span>
+                                              <span className="shrink-0 truncate text-xs text-muted-foreground">{t(def.subtitleKey)}</span>
+                                          </button>
+                                      </li>
+                                  );
+                              })
+                            : showStageBState
+                              ? (
+                                  <li role="presentation" className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+                                      {stageBSearchPending && <Loader2Icon className="size-3.5 animate-spin" />}
+                                      <span className="truncate">{stageBStateLabel}</span>
+                                  </li>
+                              )
+                              : suggestions.map((suggestion, index) => {
+                                    const optionId = `${listboxId}-opt-${index}`;
+                                    const RecordIcon = suggestion.type === 'user' ? null : RECORD_ICON[suggestion.type];
+                                    return (
+                                        <li
+                                            key={`${suggestion.type}-${suggestion.id}`}
+                                            id={optionId}
+                                            role="option"
+                                            aria-selected={index === boundedIndex}
+                                        >
+                                            <button
+                                                type="button"
+                                                tabIndex={-1}
+                                                onMouseDown={(event) => {
+                                                    event.preventDefault();
+                                                    insertReference(suggestion);
+                                                }}
+                                                onMouseEnter={() => setActiveIndex(index)}
+                                                className={cn(
+                                                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
+                                                    index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
                                                 )}
-                                            </Avatar>
-                                        )}
-                                        <span className="min-w-0 flex-1 truncate font-medium">{suggestion.label}</span>
-                                        <span className="shrink-0 truncate text-xs text-muted-foreground">{suggestion.sublabel}</span>
-                                    </button>
-                                </li>
-                            );
-                        })}
+                                            >
+                                                {RecordIcon ? (
+                                                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                                        <RecordIcon className="size-3" />
+                                                    </span>
+                                                ) : (
+                                                    <Avatar size="sm" className="ring-1 ring-border">
+                                                        {suggestion.avatarUrl ? (
+                                                            <AvatarImage src={suggestion.avatarUrl} alt={suggestion.label} />
+                                                        ) : (
+                                                            <AvatarFallback>
+                                                                <UserIcon className="size-3 text-muted-foreground" />
+                                                            </AvatarFallback>
+                                                        )}
+                                                    </Avatar>
+                                                )}
+                                                <span className="min-w-0 flex-1 truncate font-medium">{suggestion.label}</span>
+                                                <span className="shrink-0 truncate text-xs text-muted-foreground">{suggestion.sublabel}</span>
+                                            </button>
+                                        </li>
+                                    );
+                                })}
                     </motion.ul>
                 )}
                     </AnimatePresence>,

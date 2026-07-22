@@ -108,6 +108,8 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             routeLimit = properties.getUploadMaxBodyBytes();
         } else if (path.equals("/api/auth/webauthn") || path.startsWith("/api/auth/webauthn/")) {
             routeLimit = properties.getWebauthnMaxBodyBytes();
+        } else if (path.equals("/api/workflows") || path.startsWith("/api/workflows/")) {
+            routeLimit = properties.getWorkflowMaxBodyBytes();
         } else {
             routeLimit = properties.getMaxBodyBytes();
         }

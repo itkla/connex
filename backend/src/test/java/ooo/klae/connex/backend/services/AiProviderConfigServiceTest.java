@@ -270,7 +270,8 @@ class AiProviderConfigServiceTest {
         when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any())).thenReturn("secret:v1:valid");
         for (String modelId : List.of(
                 "anthropic.claude-3-5-sonnet-20240620-v1:0",
-                "apac.anthropic.claude-sonnet-4-5-20250929-v1:0")) {
+                "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+                "global.anthropic.claude-sonnet-4-5-20250929-v1:0")) {
             AiProviderConfigRequest request = validRequest();
             request.setModelId(modelId);
 
@@ -383,17 +384,96 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
-    void isReadyForOrg_rechecksOpenAiCompatibleEndpointAddressPolicy() {
+    void runtimeReadinessDefersOpenAiCompatibleAddressVettingToThePinnedTransport() {
         stored = readyOpenAiCompatibleConfig("https://10.0.0.12:11434/v1");
-        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", false)).thenReturn(false);
 
-        assertFalse(service.isReadyForOrg(ORG_ID));
+        assertTrue(service.isReadyForOrg(ORG_ID));
 
         stored.setAllowInternalEndpoint(true);
         when(aiProperties.isAllowInternalEndpoints()).thenReturn(true);
-        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", true)).thenReturn(true);
 
         assertTrue(service.isReadyForOrg(ORG_ID));
+        verify(aiEndpointAddressValidator, never()).isFetchable(anyString(), anyBoolean());
+    }
+
+    @Test
+    void imageReadinessRejectsKnownTextOnlyClaudeFamilies() {
+        stored = readyConfig();
+        stored.setModelId("anthropic.claude-v2:1");
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("anthropic.claude-3-5-sonnet-20240620-v1:0");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setRegion("us-east-1");
+        stored.setModelId("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setRegion("ap-northeast-1");
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("apac.anthropic.claude-sonnet-4-20250514-v1:0");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("apac.anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+    }
+
+    @Test
+    void imageReadinessRequiresVerifiedOpenAiCompatibleModelFamily() {
+        stored = readyOpenAiCompatibleConfig("https://provider.example.test/v1");
+        stored.setModelId("llama3.3:70b");
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("gemma-4-31b-it");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("gpt-5.2");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+    }
+
+    @Test
+    void vertexImageReadinessRejectsModelsThatRequireUnsupportedLocationRouting() {
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any()))
+                .thenReturn("secret:v1:vertex");
+        AiProviderConfigRequest request = vertexRequest();
+        request.setModelId("gemini-3.1-pro-preview");
+
+        service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+    }
+
+    @Test
+    void vertexImageReadinessRequiresCompatibleCurrentModelLocationPair() {
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any()))
+                .thenReturn("secret:v1:vertex");
+        AiProviderConfigRequest request = vertexRequest();
+
+        service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+
+        request.setRegion("us-east5");
+        service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        request.setModelId("claude-3-5-haiku@20241022");
+        service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
     }
 
     @Test
@@ -437,6 +517,7 @@ class AiProviderConfigServiceTest {
         assertNull(resolved.deployment());
         assertNull(resolved.projectId());
         assertFalse(resolved.allowInternalEndpoint());
+        assertTrue(resolved.imageInputSupported());
         assertEquals("AKIA_TEST", resolved.credentials().require("accessKeyId"));
         assertEquals("SECRET_ACCESS_KEY", resolved.credentials().require("secretAccessKey"));
         assertEquals("SESSION_TOKEN", resolved.credentials().get("sessionToken"));

@@ -7,6 +7,7 @@ import { BanknotesIcon } from '@heroicons/react/24/outline';
 
 import { Input } from '@/components/ui/input';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
@@ -314,6 +315,7 @@ export default function QuickEditDealSheet({
                                                 id={`deal-closed-reason-${d.id}`}
                                                 value={draft.closedReason ?? ''}
                                                 onChange={(value) => updateDraft(d.id, { closedReason: value })}
+                                                commands={ENTITY_COMMANDS}
                                                 className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                                             />
                                         </QuickEditField>

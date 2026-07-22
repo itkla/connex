@@ -1,0 +1,84 @@
+package ooo.klae.connex.backend.controllers;
+
+import java.net.URI;
+import java.util.List;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+
+import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
+import ooo.klae.connex.backend.dto.WorkflowDto;
+import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
+import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
+import ooo.klae.connex.backend.dto.WorkflowValidationDto;
+import ooo.klae.connex.backend.dto.WorkflowVersionDto;
+import ooo.klae.connex.backend.services.WorkflowService;
+
+/** HTTP lifecycle contract for workspace-scoped versioned workflows. */
+@RestController
+@RequestMapping("/api/workflows")
+@RequiredArgsConstructor
+public class WorkflowController {
+
+    private final WorkflowService workflowService;
+
+    @GetMapping
+    public List<WorkflowDto> list() {
+        return workflowService.list();
+    }
+
+    @PostMapping
+    public ResponseEntity<WorkflowDto> create(
+            @Valid @RequestBody WorkflowCreateRequest request) {
+        WorkflowDto workflow = workflowService.create(request);
+        return ResponseEntity.created(URI.create("/api/workflows/" + workflow.id())).body(workflow);
+    }
+
+    @GetMapping("/{id}")
+    public WorkflowDto get(@PathVariable int id) {
+        return workflowService.getById(id);
+    }
+
+    @PutMapping("/{id}/draft")
+    public WorkflowDto saveDraft(
+            @PathVariable int id,
+            @Valid @RequestBody WorkflowDraftRequest request) {
+        return workflowService.saveDraft(id, request);
+    }
+
+    @PostMapping("/{id}/validate")
+    public WorkflowValidationDto validate(@PathVariable int id) {
+        return workflowService.validate(id);
+    }
+
+    @PostMapping("/{id}/publish")
+    public WorkflowDto publish(
+            @PathVariable int id,
+            @Valid @RequestBody WorkflowPublishRequest request) {
+        return workflowService.publish(id, request);
+    }
+
+    @PostMapping("/{id}/enable")
+    public WorkflowDto enable(@PathVariable int id) {
+        return workflowService.enable(id);
+    }
+
+    @PostMapping("/{id}/disable")
+    public WorkflowDto disable(@PathVariable int id) {
+        return workflowService.disable(id);
+    }
+
+    @GetMapping("/{id}/versions")
+    public List<WorkflowVersionDto> versions(@PathVariable int id) {
+        return workflowService.versions(id);
+    }
+}

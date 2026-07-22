@@ -42,7 +42,8 @@ public class RoleService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
+        workspaceService.lockRoleMutationAuthorization(
+            workspaceId, actorId, null, toEnumSet(valid));
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(workspaceId);
         role.setName(name.trim());
@@ -58,7 +59,8 @@ public class RoleService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
+        workspaceService.lockRoleMutationAuthorization(
+            workspaceId, actorId, roleId, toEnumSet(valid));
         if (roleMapper.updateRoleName(workspaceId, roleId, name.trim()) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
@@ -68,9 +70,11 @@ public class RoleService {
         return roleMapper.findRole(workspaceId, roleId);
     }
 
+    @Transactional
     public void deleteRole(int workspaceId, int actorId, int roleId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        workspaceService.lockRoleDeletionAuthorization(workspaceId, actorId, roleId);
         if (roleMapper.deleteRole(workspaceId, roleId) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }

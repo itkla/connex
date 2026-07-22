@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignMapper">
+
+  <sql id="campaignColumns">
+    id, workspace_id, name, objective, type, status, owner_user_id,
+    budget_amount, budget_currency, start_at, end_at, parent_campaign_id,
+    created_by_id, created_at, updated_at
+  </sql>
+
+  <sql id="audienceColumns">
+    id, campaign_id, workspace_id, record_type, definition_json, mode, updated_at
+  </sql>
+
+  <sql id="snapshotColumns">
+    id, campaign_id, workspace_id, version, record_type, definition_json,
+    estimated_included, excluded_total, excluded_consent, excluded_suppressed,
+    excluded_restricted, created_by_id, created_at
+  </sql>
+
+  <sql id="memberColumns">
+    id, snapshot_id, workspace_id, record_type, record_id, status, exclusion_reason
+  </sql>
+
+  <select id="getCampaigns" resultType="Campaign">
+    SELECT <include refid="campaignColumns"/> FROM campaign
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="getCampaign" resultType="Campaign">
+    SELECT <include refid="campaignColumns"/> FROM campaign
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getCampaignForUpdate" resultType="Campaign">
+    SELECT <include refid="campaignColumns"/> FROM campaign
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertCampaign" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign
+      (workspace_id, name, objective, type, status, owner_user_id,
+       budget_amount, budget_currency, start_at, end_at, parent_campaign_id, created_by_id)
+    VALUES
+      (#{workspaceId}, #{name}, #{objective}, #{type}, #{status}, #{ownerUserId},
+       #{budgetAmount}, #{budgetCurrency}, #{startAt}, #{endAt}, #{parentCampaignId}, #{createdById})
+  </insert>
+
+  <update id="updateCampaign">
+    UPDATE campaign
+    SET name = #{name}, objective = #{objective}, type = #{type}, status = #{status},
+        owner_user_id = #{ownerUserId}, budget_amount = #{budgetAmount},
+        budget_currency = #{budgetCurrency}, start_at = #{startAt}, end_at = #{endAt},
+        parent_campaign_id = #{parentCampaignId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="clearParentReferences">
+    UPDATE campaign SET parent_campaign_id = NULL
+    WHERE workspace_id = #{workspaceId} AND parent_campaign_id = #{parentCampaignId}
+  </update>
+
+  <delete id="deleteCampaign">
+    DELETE FROM campaign WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <select id="getAudience" resultType="CampaignAudience">
+    SELECT <include refid="audienceColumns"/> FROM campaign_audience
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+  </select>
+
+  <insert id="upsertAudience">
+    INSERT INTO campaign_audience
+      (campaign_id, workspace_id, record_type, definition_json, mode)
+    VALUES
+      (#{campaignId}, #{workspaceId}, #{recordType}, #{definitionJson}, #{mode})
+    ON DUPLICATE KEY UPDATE
+      record_type = VALUES(record_type), definition_json = VALUES(definition_json),
+      mode = VALUES(mode), updated_at = CURRENT_TIMESTAMP
+  </insert>
+
+  <select id="nextSnapshotVersion" resultType="int">
+    SELECT COALESCE(MAX(version), 0) + 1
+    FROM campaign_audience_snapshot
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+  </select>
+
+  <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_audience_snapshot
+      (campaign_id, workspace_id, version, record_type, definition_json,
+       estimated_included, excluded_total, excluded_consent, excluded_suppressed,
+       excluded_restricted, created_by_id)
+    VALUES
+      (#{campaignId}, #{workspaceId}, #{version}, #{recordType}, #{definitionJson},
+       #{estimatedIncluded}, #{excludedTotal}, #{excludedConsent}, #{excludedSuppressed},
+       #{excludedRestricted}, #{createdById})
+  </insert>
+
+  <select id="getSnapshots" resultType="ooo.klae.connex.backend.dto.CampaignAudienceSnapshotSummaryDto">
+    SELECT version, record_type, estimated_included, excluded_total, excluded_consent,
+           excluded_suppressed, excluded_restricted, created_by_id, created_at
+    FROM campaign_audience_snapshot
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+    ORDER BY version DESC
+  </select>
+
+  <select id="getSnapshot" resultType="CampaignAudienceSnapshot">
+    SELECT <include refid="snapshotColumns"/> FROM campaign_audience_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND campaign_id = #{campaignId}
+      AND version = #{version}
+  </select>
+
+  <select id="getSnapshotMembers" resultType="CampaignAudienceMember">
+    SELECT <include refid="memberColumns"/> FROM campaign_audience_member
+    WHERE workspace_id = #{workspaceId} AND snapshot_id = #{snapshotId}
+    ORDER BY record_id
+  </select>
+
+  <insert id="insertSnapshotMembers">
+    INSERT INTO campaign_audience_member
+      (snapshot_id, workspace_id, record_type, record_id, status, exclusion_reason)
+    VALUES
+    <foreach item="member" collection="members" separator=",">
+      (#{member.snapshotId}, #{workspaceId}, #{member.recordType}, #{member.recordId},
+       #{member.status}, #{member.exclusionReason})
+    </foreach>
+  </insert>
+
+  <select id="restrictedPersonIds" resultType="int">
+    SELECT id FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      AND (suspended_at IS NOT NULL OR provision_ceased_at IS NOT NULL)
+  </select>
+
+  <select id="grantedConsentPersonIds" resultType="int">
+    SELECT person_id FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      AND channel = #{channel}
+      AND purpose = #{purpose}
+      AND status = 'granted'
+  </select>
+
+  <select id="revokedConsentPersonIds" resultType="int">
+    SELECT person_id FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      AND channel = #{channel}
+      AND purpose = #{purpose}
+      AND status = 'revoked'
+  </select>
+
+  <select id="suppressedAddresses" resultType="string">
+    SELECT DISTINCT suppression.address FROM suppression_entry suppression
+    WHERE suppression.workspace_id = #{workspaceId}
+      AND suppression.channel = #{channel}
+      AND suppression.address COLLATE utf8mb4_bin IN
+        <foreach item="address" collection="addresses" open="(" separator="," close=")">#{address}</foreach>
+  </select>
+
+  <select id="suppressedPersonRefIds" resultType="int">
+    SELECT DISTINCT person_id FROM suppression_entry
+    WHERE workspace_id = #{workspaceId}
+      AND channel = #{channel}
+      AND person_id IN <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
+  <update id="clearMemberOwnership">
+    UPDATE campaign SET owner_user_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_user_id = #{userId}
+  </update>
+
+  <update id="clearCampaignUserReferencesAnywhere">
+    UPDATE campaign
+    SET owner_user_id = CASE WHEN owner_user_id = #{userId} THEN NULL ELSE owner_user_id END,
+        created_by_id = CASE WHEN created_by_id = #{userId} THEN NULL ELSE created_by_id END
+    WHERE owner_user_id = #{userId} OR created_by_id = #{userId}
+  </update>
+
+  <update id="clearSnapshotCreatorsAnywhere">
+    UPDATE campaign_audience_snapshot SET created_by_id = NULL WHERE created_by_id = #{userId}
+  </update>
+
+</mapper>

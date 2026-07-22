@@ -177,8 +177,9 @@ public class AiRelationshipContext {
     private void appendConnectionLines(List<String> lines, int personId, MaskingContext context) {
         try {
             List<PersonConnectionDto> connections = new ArrayList<>();
-            for (PersonConnectionDto connection : safeList(connectionService.getConnections(personId))) {
-                if (connection != null && !isBlank(connection.getPersonName())
+            for (PersonConnectionDto connection : safeList(
+                    connectionService.getTopConnections(personId, MAX_CONNECTIONS))) {
+                if (connection != null && !isBlankConnectionName(connection.getPersonName())
                         && connection.getSuspendedAt() == null
                         && connection.getProvisionCeasedAt() == null) {
                     connections.add(connection);
@@ -289,5 +290,15 @@ public class AiRelationshipContext {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static boolean isBlankConnectionName(String value) {
+        return value == null || value.codePoints().allMatch(AiRelationshipContext::isConnectionWhitespace);
+    }
+
+    private static boolean isConnectionWhitespace(int codePoint) {
+        return Character.isWhitespace(codePoint)
+                || Character.isSpaceChar(codePoint)
+                || codePoint == 0x0085;
     }
 }

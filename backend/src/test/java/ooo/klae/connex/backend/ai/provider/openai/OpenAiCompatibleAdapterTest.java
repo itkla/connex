@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
@@ -113,6 +114,38 @@ class OpenAiCompatibleAdapterTest {
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
         assertFalse(result.toString().contains("Hello world"));
+    }
+
+    @Test
+    void completeEmbedsImageBytesInTheFirstUserTurn() throws Exception {
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+                .thenReturn(validResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                target("https://api.example.test/v1", false, "openai/gpt-5.2"),
+                credentials(),
+                "Extract literal fields",
+                List.of(new AiMessage("user", "Read the card")),
+                List.of(image()),
+                64,
+                0);
+
+        adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
+                any(AiCredentials.class), bodyCaptor.capture());
+        JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
+                .path("messages").path(1).path("content");
+        assertEquals("text", content.path(0).path("type").asString());
+        assertEquals("Read the card", content.path(0).path("text").asString());
+        assertEquals("image_url", content.path(1).path("type").asString());
+        assertEquals("data:image/jpeg;base64,/9j/AQ==",
+                content.path(1).path("image_url").path("url").asString());
+        assertEquals("high", content.path(1).path("image_url").path("detail").asString());
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertEquals(64, body.path("max_completion_tokens").asInt());
+        assertFalse(body.has("max_tokens"));
+        assertFalse(body.has("temperature"));
     }
 
     @Test
@@ -253,8 +286,12 @@ class OpenAiCompatibleAdapterTest {
     }
 
     private static AiProviderTarget target(String endpoint, boolean allowInternalEndpoint) {
+        return target(endpoint, allowInternalEndpoint, "llama3.3:70b");
+    }
+
+    private static AiProviderTarget target(String endpoint, boolean allowInternalEndpoint, String modelId) {
         return new AiProviderTarget(
-                "openai_compatible", null, "llama3.3:70b", endpoint,
+                "openai_compatible", null, modelId, endpoint,
                 null, null, null, allowInternalEndpoint);
     }
 
@@ -264,6 +301,11 @@ class OpenAiCompatibleAdapterTest {
 
     private static AiCredentials emptyCredentials() {
         return AiCredentials.of(Map.of());
+    }
+
+    private static AiInputImage image() {
+        return new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
     }
 
     private static String validResponse() {

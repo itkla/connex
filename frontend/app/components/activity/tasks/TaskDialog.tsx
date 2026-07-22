@@ -1,11 +1,14 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
     ResponsiveDialog,
@@ -24,11 +27,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createTask, isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
@@ -45,6 +50,7 @@ type Props = {
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
+    requestInit?: RequestInit;
 };
 
 export default function TaskDialog({
@@ -58,13 +64,16 @@ export default function TaskDialog({
     defaultDeal = null,
     defaultDueDate = '',
     defaultDescription = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const [prevOpen, setPrevOpen] = useState(open);
@@ -72,31 +81,37 @@ export default function TaskDialog({
     if (open !== prevOpen) {
         setPrevOpen(open);
         if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
     }
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <TaskDialogForm
-                    key={openCount}
-                    persons={persons}
-                    deals={deals}
-                    users={users}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultDueDate={defaultDueDate}
-                    defaultDescription={defaultDescription}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onCancel={() => onOpenChange(false)}
-                    onClose={() => onOpenChange(false)}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <TaskDialogForm
+                        key={openCount}
+                        persons={persons}
+                        deals={deals}
+                        users={users}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultDueDate={defaultDueDate}
+                        defaultDescription={defaultDescription}
+                        requestInit={requestInit}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -109,7 +124,10 @@ type TaskDialogFormProps = {
     defaultDeal: Deal | null;
     defaultDueDate: string;
     defaultDescription: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -130,7 +148,9 @@ export function TaskDialogForm({
     defaultDeal,
     defaultDueDate,
     defaultDescription,
+    requestInit,
     onSubmittingChange,
+    onDirtyChange,
     onCancel,
     onClose,
 }: TaskDialogFormProps) {
@@ -146,6 +166,25 @@ export function TaskDialogForm({
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
+    const [initial] = useState(() => ({
+        description,
+        dueDate,
+        assigneeId: assignee?.id ?? null,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (description.trim() !== initial.description.trim() ||
+            dueDate !== initial.dueDate ||
+            (assignee?.id ?? null) !== initial.assigneeId ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
+
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
         const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
@@ -159,18 +198,23 @@ export function TaskDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createTask({
-                description: description.trim(),
-                dueDate: dueDate || undefined,
-                assignedToId,
-                personId: selectedPerson?.id ?? undefined,
-                dealId: selectedDeal?.id ?? undefined,
-            });
+            await createTask(
+                {
+                    description: description.trim(),
+                    dueDate: dueDate || undefined,
+                    assignedToId,
+                    personId: selectedPerson?.id ?? undefined,
+                    dealId: selectedDeal?.id ?? undefined,
+                },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -188,8 +232,10 @@ export function TaskDialogForm({
                       : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
@@ -213,7 +259,16 @@ export function TaskDialogForm({
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && description.trim()) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
                         <div className="group relative">
@@ -229,6 +284,7 @@ export function TaskDialogForm({
                                 ariaInvalid={Boolean(fieldErrors.description)}
                                 ariaDescribedby={fieldErrors.description ? 'task-description-error' : undefined}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
                             />
                         </div>

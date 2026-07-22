@@ -1,10 +1,15 @@
 package ooo.klae.connex.backend.services;
 
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
@@ -36,7 +41,7 @@ class AuditServiceTest {
     @BeforeEach
     void setUp() {
         service = new AuditService(auditLogMapper, auditIntegrityService, objectMapper, tenantContext, new ClientIpResolver(""));
-        when(tenantContext.getWorkspaceId()).thenReturn(7);
+        lenient().when(tenantContext.getWorkspaceId()).thenReturn(7);
     }
 
     @Test
@@ -127,6 +132,44 @@ class AuditServiceTest {
         assertEquals("Updated a note", entry.getSummary());
         assertFalse(entry.getChanges().contains("Private"));
         assertTrue(entry.getChanges().contains("See a note"));
+    }
+
+    @Test
+    void strictIndependentScopedRecordUsesExactScopeAndIndependentAppend() {
+        service.recordStrictIndependentScoped(
+            "ai.llm.call", "ai_call", null, 17, 23, "bedrock/us-east-1", "AI call attempt",
+            Map.of("outcome", "attempt"));
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(17, entry.getWorkspaceId());
+        assertEquals(23, entry.getOrgId());
+        assertEquals("ai.llm.call", entry.getAction());
+        assertTrue(entry.getChanges().contains("attempt"));
+    }
+
+    @Test
+    void strictIndependentScopedRecordPropagatesPersistenceFailure() {
+        IllegalStateException failure = new IllegalStateException("audit unavailable");
+        doThrow(failure).when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+            () -> service.recordStrictIndependentScoped(
+                "ai.llm.call", "ai_call", null, 17, 23, "bedrock/us-east-1", "AI call attempt",
+                Map.of("outcome", "attempt")));
+
+        assertEquals(failure, thrown);
+    }
+
+    @Test
+    void independentScopedRecordRemainsBestEffort() {
+        doThrow(new IllegalStateException("audit unavailable"))
+            .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.recordIndependentScoped(
+            "ai.llm.call", "ai_call", null, 17, 23, "bedrock/us-east-1", "AI call success",
+            Map.of("outcome", "success")));
     }
 
     @Test

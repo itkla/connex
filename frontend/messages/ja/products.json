@@ -1,0 +1,51 @@
+{
+  "RecordsProductsLayout": {
+    "title": "商品",
+    "description": "商品・サービスのカタログ"
+  },
+  "ProductsBrowser": {
+    "title": "商品",
+    "newButton": "商品を追加",
+    "sectionCatalog": "カタログ",
+    "searchPlaceholder": "商品を検索",
+    "empty": "商品がまだありません。最初のカタログ項目を追加してください。",
+    "noMatches": "検索に一致する商品がありません。",
+    "columnName": "名前",
+    "columnSku": "SKU",
+    "columnPrice": "単価",
+    "columnBilling": "請求",
+    "columnStatus": "状態",
+    "perUnit": "{unit}あたり",
+    "oneTime": "一括",
+    "recurring": "継続",
+    "active": "有効",
+    "inactive": "無効",
+    "actions": "操作",
+    "edit": "編集",
+    "delete": "削除",
+    "deleted": "商品を削除しました",
+    "deleteFailed": "商品を削除できませんでした",
+    "entityLabel": "商品"
+  },
+  "ProductDialog": {
+    "createTitle": "商品を追加",
+    "editTitle": "商品を編集",
+    "description": "カタログ項目は明細として取引に追加できます。",
+    "name": "名前",
+    "sku": "SKU",
+    "unit": "単位",
+    "unitPlaceholder": "例: 席、時間",
+    "unitPrice": "単価",
+    "currency": "通貨",
+    "taxRate": "税率 %",
+    "billingFrequency": "請求",
+    "oneTime": "一括",
+    "recurring": "継続",
+    "descriptionLabel": "説明",
+    "active": "有効（新規明細で選択可）",
+    "nameRequired": "名前は必須です",
+    "saveFailed": "商品を保存できませんでした",
+    "cancel": "キャンセル",
+    "save": "保存"
+  }
+}

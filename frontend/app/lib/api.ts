@@ -3,6 +3,8 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
+import { clearAllDrafts } from "@/app/lib/formDrafts";
+
 import type {
     AuthenticationResponseJSON,
     PublicKeyCredentialCreationOptionsJSON,
@@ -80,7 +82,10 @@ if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
         if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
             invalidateClientRequestIdentity();
-            if (event.newValue?.startsWith("refresh:")) {
+            if (event.newValue?.startsWith("logout:")) {
+                clearAllDrafts();
+                window.location.reload();
+            } else if (event.newValue?.startsWith("refresh:")) {
                 window.location.reload();
             }
         }
@@ -143,22 +148,23 @@ function invalidateClientRequestIdentity() {
     inFlightReportRequests.clear();
 }
 
-function broadcastClientRequestIdentityTransition(refreshTabs: boolean) {
+type ClientIdentityTransition = "invalidate" | "refresh" | "logout";
+
+function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
     try {
         const eventId = typeof window.crypto.randomUUID === "function"
             ? window.crypto.randomUUID()
             : `${Date.now()}:${clientRequestIdentityEpoch}`;
-        const action = refreshTabs ? "refresh" : "invalidate";
         window.localStorage.setItem(CLIENT_IDENTITY_EVENT_KEY, `${action}:${eventId}`);
     } catch {
         return;
     }
 }
 
-function signalClientRequestIdentityTransition(refreshTabs: boolean) {
+function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
     invalidateClientRequestIdentity();
-    broadcastClientRequestIdentityTransition(refreshTabs);
+    broadcastClientRequestIdentityTransition(action);
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
@@ -176,7 +182,7 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
         invalidateClientRequestIdentity();
         if (serverIdentityChanged) {
-            broadcastClientRequestIdentityTransition(true);
+            broadcastClientRequestIdentityTransition("refresh");
         }
     }
     csrfTokenCache = currentCsrf;
@@ -270,11 +276,14 @@ function businessCardRequestInit(
     return { ...init, headers };
 }
 
-async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
-    signalClientRequestIdentityTransition(false);
+async function withClientRequestIdentityReset<T>(
+    request: () => Promise<T>,
+    successTransition: ClientIdentityTransition = "refresh",
+): Promise<T> {
+    signalClientRequestIdentityTransition("invalidate");
     try {
         const result = await request();
-        signalClientRequestIdentityTransition(true);
+        signalClientRequestIdentityTransition(successTransition);
         return result;
     } catch (error) {
         invalidateClientRequestIdentity();
@@ -372,20 +381,26 @@ async function requestMultipart<T>(
     path: string,
     method: "POST" | "PUT",
     body: FormData,
+    init: RequestInit = {},
 ): Promise<T> {
-    const locale = requestLocale({});
+    const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const stepUpGeneration = passkeyStepUpGeneration;
-    const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
-        method,
-        body,
-        credentials: "include",
-        headers: {
+    const send = (csrf: Record<string, string>) => {
+        const headers = new Headers({
             "Accept-Language": locale,
             ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
             ...csrf,
-        },
-    });
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
+            ...init,
+            method,
+            body,
+            credentials: "include",
+            headers,
+        });
+    };
     const sendWithCsrfRetry = async () => {
         let response = await send(await csrfHeader());
         if (await shouldRetryWithFreshCsrf(path, response, true)) {
@@ -816,6 +831,33 @@ async function getApiError(res: Response): Promise<ApiError> {
     }
 }
 
+/**
+ * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
+ * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
+ * @param path the API path to request
+ * @param method the HTTP method
+ * @param init optional fetch overrides
+ * @returns the parsed JSON body, or {@code undefined} for an empty response
+ * @throws ApiError when the response status is not ok
+ */
+async function publicJson<T>(
+    path: string,
+    method: "GET" | "POST",
+    init: RequestInit = {},
+): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+        cache: "no-store",
+        ...init,
+        method,
+        headers: { Accept: "application/json", ...init.headers },
+    });
+    if (!res.ok) {
+        throw await getApiError(res);
+    }
+    const text = await res.text();
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
 
 /**
  * Logs in a user with the provided credentials.
@@ -864,7 +906,8 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
 }
 
 export function logout() {
-    return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"));
+    clearAllDrafts();
+    return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
 }
 
 /**
@@ -921,6 +964,39 @@ export function validateEmailVerificationToken(token: string, init: RequestInit 
  */
 export function confirmEmailVerification(token: string) {
     return postJson<Types.AuthResponse>("/api/auth/verify-email/confirm", { token });
+}
+
+/**
+ * Requests a verified change of the signed-in user's email address. The backend emails a
+ * confirmation link to the new address and only applies the change once it is redeemed.
+ *
+ * @param payload - The new email and the current password proving ownership
+ * @returns A promise resolving to the confirmation message
+ * @throws ApiError with fieldErrors when the password is wrong or the email is invalid or taken
+ */
+export function requestEmailChange(payload: Types.EmailChangePayload) {
+    return postJson<Types.AuthResponse>("/api/users/me/email-change", payload);
+}
+
+/**
+ * Checks whether an email-change token is still valid (unconsumed and unexpired).
+ * @param token - The raw token from the confirmation link
+ * @returns A promise resolving to the validation result
+ */
+export function validateEmailChangeToken(token: string, init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>(
+        `/api/auth/email-change/validate?token=${encodeURIComponent(token)}`,
+        init,
+    );
+}
+
+/**
+ * Applies a pending email change behind a valid confirmation token.
+ * @param token - The raw token from the confirmation link
+ * @returns A promise resolving to the confirmation message
+ */
+export function confirmEmailChange(token: string) {
+    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", { token });
 }
 
 export function getPasskeys(init: RequestInit = {}) {
@@ -999,10 +1075,31 @@ export function getCapabilities(init: RequestInit = {}) {
 export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
+    connectedAccounts: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
     businessCardImport: false,
 };
+
+export function getProviderConnections(init: RequestInit = {}) {
+    return getJson<Types.ProviderConnection[]>(`/api/account/connections`, { cache: "no-store", ...init });
+}
+
+export function beginProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<{ url: string }>(`/api/account/connections/${provider}/authorize`, {});
+}
+
+export function pauseProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ProviderConnection>(`/api/account/connections/${provider}/pause`, {});
+}
+
+export function resumeProviderConnection(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ProviderConnection>(`/api/account/connections/${provider}/resume`, {});
+}
+
+export function disconnectProviderConnection(provider: Types.ConnectedAccountProvider, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
+}
 
 export function discoverSso(email: string, init: RequestInit = {}) {
     return getJson<Types.SsoDiscovery>(
@@ -1311,7 +1408,10 @@ export function getCompanyFacets(init: RequestInit = {}) {
 
 /** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
 export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids });
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
 
@@ -1327,18 +1427,18 @@ export function getCompanyById(id: number, init: RequestInit = {}) {
     return getJson<Types.Company>(`/api/companies/${id}`, init);
 }
 
-export function createCompany(payload: Types.CreateCompanyPayload) {
-    return postJson<Types.Company>(`/api/companies`, payload);
+export function createCompany(payload: Types.CreateCompanyPayload, init: RequestInit = {}) {
+    return postJson<Types.Company>(`/api/companies`, payload, init);
 }
 
 export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
     return putJson<Types.Company>(`/api/companies/${id}`, payload);
 }
 
-export async function uploadCompanyLogo(companyId: number, file: File) {
+export async function uploadCompanyLogo(companyId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData);
+    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData, init);
     return company.logoUrl;
 }
 
@@ -1412,18 +1512,20 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
 }
 
 /**
- * Streams a CSV from the backend with the active workspace + locale headers (a plain anchor would
- * not carry the workspace context) and triggers a browser download.
+ * Streams a CSV from the backend with locale and workspace headers (a plain anchor would not carry
+ * the workspace context) and triggers a browser download. Callers may pin a workspace header for an
+ * operation that must remain bound to its invocation scope.
  */
-export async function downloadCsv(path: string, filename: string): Promise<void> {
+export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
     const workspaceId = clientWorkspaceId();
+    const headers = new Headers(init.headers);
+    headers.set("Accept-Language", locale);
+    if (workspaceId && !headers.has("X-Workspace-Id")) headers.set("X-Workspace-Id", workspaceId);
     const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
         credentials: "include",
-        headers: {
-            "Accept-Language": locale,
-            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-        },
+        headers,
     });
     if (!res.ok) {
         throw await getApiError(res);
@@ -1439,19 +1541,29 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
     URL.revokeObjectURL(url);
 }
 
-export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
-    return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
+export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
+    return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
 
-export function exportCompaniesCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
-    return downloadCsv(`/api/exports/companies${query}`, "companies.csv");
+export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({
+        q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
+        scope: params.scope, memberIds: params.memberIds,
+    });
+    return downloadCsv(`/api/exports/companies${query}`, "companies.csv", init);
 }
 
-export function exportDealsCsv(ids?: number[]) {
-    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
-    return downloadCsv(`/api/exports/deals${query}`, "deals.csv");
+export function exportDealsCsv(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({
+        q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
+        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        scope: params.scope, memberIds: params.memberIds,
+    });
+    return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
 }
 
 export function getPersonFacets(init: RequestInit = {}) {
@@ -1512,6 +1624,22 @@ export function bulkDeleteCompanies(ids: number[]) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/delete`, { ids: chunk }));
 }
 
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function updateCompanyOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Company>(`/api/companies/${id}/owner`, { ownerId });
+}
+
+export function updatePersonOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
+}
+
 export function bulkAddTagToDeals(ids: number[], tagId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
 }
@@ -1534,7 +1662,10 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    const query = buildQuery({
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        scope: params.scope, memberIds: params.memberIds,
+    });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
 
@@ -1649,14 +1780,6 @@ export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: num
 }
 
 /**
- * As {@link getIntroSuggestionsFromCookie}, but failure-aware (see {@link resultWithCookie}), so
- * the introductions page can distinguish a backend fault from a genuinely empty workspace.
- */
-export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
-    return resultWithCookie<Types.IntroSuggestion[]>((init) => getIntroSuggestions(init, limit), cookie);
-}
-
-/**
  * Failure-aware variant of {@link getIntroductions} for the introductions page (see
  * {@link resultWithCookie}), so a lineage fetch failure is not presented as zero intros made.
  */
@@ -1682,8 +1805,53 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
     return postJson<void>(`/api/introductions/dismiss`, payload, init);
 }
 
-export function createContact(payload: Types.CreateContactPayload) {
-    return postJson<Types.Contact>(`/api/persons`, payload);
+/*
+* == Warm paths (the "receive side" of the graph, #614)
+*/
+
+/** The combined introductions feed — suggestions + warm paths from one backend warmth pass. */
+export function getIntroOverview(init: RequestInit = {}, suggestions?: number, paths?: number) {
+    return getJson<Types.IntroOverview>(
+        `/api/introductions/overview${buildQuery({ suggestions, paths })}`,
+        init,
+    );
+}
+
+/**
+ * Failure-aware overview fetch for the introductions page (see {@link resultWithCookie}), so a
+ * backend fault renders as error states instead of an empty page.
+ */
+export function getIntroOverviewResultFromCookie(
+    cookie: string | null,
+    suggestions?: number,
+    paths?: number,
+) {
+    return resultWithCookie<Types.IntroOverview>(
+        (init) => getIntroOverview(init, suggestions, paths),
+        cookie,
+    );
+}
+
+/** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
+export function acceptWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/introductions/paths/accept`, payload, init);
+}
+
+/** Dismisses one avenue when {@code bridgePersonId} is set, otherwise every path to the target. */
+export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/introductions/paths/dismiss`, payload, init);
+}
+
+export function createContact(payload: Types.CreateContactPayload, init: RequestInit = {}) {
+    return postJson<Types.Contact>(`/api/persons`, payload, init);
+}
+
+/** Reads business-card readiness for the authorized active workspace. */
+export function getBusinessCardAvailability(init: RequestInit = {}) {
+    return getJson<Types.BusinessCardAvailability>("/api/business-cards/availability", {
+        cache: "no-store",
+        ...init,
+    });
 }
 
 /** Reads contact candidates from one business-card image without mutating workspace data. */
@@ -1779,10 +1947,10 @@ export function updateContact(id: number, payload: Types.UpdateContactPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}`, payload);
 }
 
-export async function uploadContactPicture(contactId: number, file: File) {
+export async function uploadContactPicture(contactId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData);
+    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
     return contact.imageUrl;
 }
 
@@ -1888,9 +2056,11 @@ export function getDealMetricsFromCookie(cookie: string | null, params: Types.De
 }
 
 /**
- * Stable filter-facet vocabulary (status, stage, pipeline, company, currency) with counts,
- * computed server-side over the whole workspace so options never vanish when the visible page
- * lacks them (e.g. the "Closed" status option).
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
+ * counts, computed server-side over the whole workspace so options never vanish when the
+ * visible page lacks them (e.g. the "Closed" status option). The owners facet in particular
+ * always reflects all-team counts — including the `__empty__` unassigned bucket — regardless
+ * of any active member scope, so the owner picker stays complete while a scope is applied.
  */
 export function getDealFacets(init: RequestInit = {}) {
     return getJson<Types.DealFacets>(`/api/deals/facets`, init);
@@ -1901,8 +2071,11 @@ export function getDealFacets(init: RequestInit = {}) {
  * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
  * applies the viewer's historical offset rules when bucketing realized revenue.
  */
-export function getDealRevenueTimeseries(currency?: string, timezone?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, timezone })}`, init);
+export function getDealRevenueTimeseries(
+    currency?: string, timezone?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealRevenueSeries>(
+        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
@@ -1911,8 +2084,10 @@ const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: 
  * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
  * Replaces the client-side KPI/win-rate math over a bounded page slice.
  */
-export function getDealKpis(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, init);
+export function getDealKpis(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1920,8 +2095,11 @@ export function getDealKpisFromCookie(cookie: string | null, currency?: string, 
 }
 
 /** Server-computed per-pipeline won-in-range + open rollup. */
-export function getDealPipelineValue(currency?: string, range?: string, init: RequestInit = {}) {
-    return getJson<Types.DealPipelineValue[]>(`/api/deals/pipeline-value${buildQuery({ currency, range })}`, init);
+export function getDealPipelineValue(
+    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealPipelineValue[]>(
+        `/api/deals/pipeline-value${buildQuery({ currency, range, ...scope })}`, init);
 }
 
 export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -1929,8 +2107,8 @@ export function getDealPipelineValueFromCookie(cookie: string | null, currency?:
 }
 
 /** Server-computed per-stage open-deal age buckets. */
-export function getDealAging(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency })}`, init);
+export function getDealAging(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealAgingFromCookie(cookie: string | null, currency?: string) {
@@ -1938,8 +2116,8 @@ export function getDealAgingFromCookie(cookie: string | null, currency?: string)
 }
 
 /** Server-computed top open/won deals, optionally scoped to a currency. */
-export function getDealTop(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, init);
+export function getDealTop(currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealTopFromCookie(cookie: string | null, currency?: string) {
@@ -1960,8 +2138,8 @@ export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, li
 }
 
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
-export function getActivityVolume(range?: string, init: RequestInit = {}) {
-    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, init);
+export function getActivityVolume(range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range, ...scope })}`, init);
 }
 
 export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
@@ -1987,8 +2165,8 @@ export function getUpcomingActivityCountFromCookie(cookie: string | null, days?:
 }
 
 /** Server-computed task status + due-window counts over ALL tasks. */
-export function getTaskSummary(init: RequestInit = {}) {
-    return getJson<Types.TaskSummary>(`/api/tasks/summary`, init);
+export function getTaskSummary(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.TaskSummary>(`/api/tasks/summary${buildQuery({ ...scope })}`, init);
 }
 
 export function getTaskSummaryFromCookie(cookie: string | null) {
@@ -2013,8 +2191,11 @@ export function getRelationshipDashboardFromCookie(cookie: string | null) {
  * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
  * Feeds the deals page stage-distribution chart.
  */
-export function getDealStageDistribution(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealStageDistribution[]>(`/api/deals/stage-distribution${buildQuery({ currency })}`, init);
+export function getDealStageDistribution(
+    currency?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+) {
+    return getJson<Types.DealStageDistribution[]>(
+        `/api/deals/stage-distribution${buildQuery({ currency, ...scope })}`, init);
 }
 
 export function getDealFacetsFromCookie(cookie: string | null) {
@@ -2066,6 +2247,11 @@ export function getDealRiskAnalyticsFromCookie(cookie: string | null) {
     return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics`, withCookie(cookie));
 }
 
+/** Server-computed compact per-currency deal-risk analytics, optionally scoped to a member. */
+export function getDealRiskAnalytics(scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealRiskAnalytics>(`/api/deals/risk/analytics${buildQuery({ ...scope })}`, init);
+}
+
 /**
  * AI-generated brief for a deal. Returns a graceful unavailability result (never an error) when AI
  * is not configured for the organization; generation is slow (an LLM call), so invoke client-side.
@@ -2108,12 +2294,22 @@ export function revokeAiProviderConfig(workspaceId: number) {
     return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
 }
 
-export function createDeal(payload: Types.CreateDealPayload) {
-    return postJson<Types.Deal>(`/api/deals`, payload);
+export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals`, payload, init);
 }
 
 export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
     return putJson<Types.Deal>(`/api/deals/${id}`, payload);
+}
+
+/** Renames a deal without touching any other field (safe against concurrent edits). */
+export function updateDealName(id: number, name: string) {
+    return putJson<Types.Deal>(`/api/deals/${id}/name`, { name });
+}
+
+/** Updates only a deal's projected value; rejected with 409 while the deal has line items. */
+export function updateDealValue(id: number, value: number) {
+    return putJson<Types.Deal>(`/api/deals/${id}/value`, { value });
 }
 
 export function deleteDeal(id: number, init: RequestInit = {}) {
@@ -2240,6 +2436,13 @@ export function getNotificationCounts(init: RequestInit = {}) {
     });
 }
 
+export function getNotificationFacets(init: RequestInit = {}) {
+    return getJson<Types.NotificationFacets>("/api/notifications/facets", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
 export function getNotificationPreferences(init: RequestInit = {}) {
     return getJson<Types.NotificationPreference[]>("/api/notification-preferences", {
         cache: "no-store",
@@ -2257,7 +2460,7 @@ export function getContextNotifications(
     init: RequestInit = {},
 ) {
     return getNotifications(
-        { contextType, contextId, state: "unread", page: 1, size: 50 },
+        { contextType, contextId, status: "unread", page: 1, size: 50 },
         init,
     );
 }
@@ -2278,8 +2481,23 @@ export function restoreNotification(id: number) {
     return postJson<Types.Notification>(`/api/notifications/${id}/restore`);
 }
 
-export function snoozeNotification(id: number, hours: number) {
-    return postJson<Types.Notification>(`/api/notifications/${id}/snooze`, { hours });
+export function snoozeNotification(id: number, body: Types.SnoozeRequest) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/snooze`, body);
+}
+
+export function unsnoozeNotification(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/unsnooze`);
+}
+
+export function getQuietHours(init: RequestInit = {}) {
+    return getJson<Types.QuietHours>("/api/notification-preferences/quiet-hours", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function updateQuietHours(config: Types.QuietHoursConfig) {
+    return putJson<Types.QuietHours>("/api/notification-preferences/quiet-hours", config);
 }
 
 export function markAllNotificationsRead() {
@@ -2365,6 +2583,141 @@ export function updateTag(id: number, payload: Types.UpdateTagPayload) {
 
 export function deleteTag(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/tags/${id}`, init);
+}
+
+export function getProducts(init: RequestInit = {}) {
+    return getJson<Types.Product[]>(`/api/products`, init);
+}
+
+export function getProductsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Product>((init) => getProducts(init), cookie);
+}
+
+export function getProductById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Product>(`/api/products/${id}`, init);
+}
+
+export function createProduct(payload: Types.CreateProductPayload) {
+    return postJson<Types.Product>(`/api/products`, payload);
+}
+
+export function updateProduct(id: number, payload: Types.UpdateProductPayload) {
+    return putJson<Types.Product>(`/api/products/${id}`, payload);
+}
+
+export function deleteProduct(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/products/${id}`, init);
+}
+
+export function getDocumentTemplates(init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate[]>(`/api/document-templates`, init);
+}
+
+export function getDocumentTemplatesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DocumentTemplate>((init) => getDocumentTemplates(init), cookie);
+}
+
+export function getDocumentTemplateById(id: number, init: RequestInit = {}) {
+    return getJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, init);
+}
+
+export function createDocumentTemplate(payload: Types.CreateDocumentTemplatePayload) {
+    return postJson<Types.DocumentTemplate>(`/api/document-templates`, payload);
+}
+
+export function updateDocumentTemplate(id: number, payload: Types.UpdateDocumentTemplatePayload) {
+    return putJson<Types.DocumentTemplate>(`/api/document-templates/${id}`, payload);
+}
+
+export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/document-templates/${id}`, init);
+}
+
+export function getDealDocuments(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
+}
+
+export function getDealDocumentsFromCookie(dealId: number, cookie: string | null) {
+    return safeWithCookie<Types.DealDocument>(
+        (init) => getDealDocuments(dealId, init), cookie);
+}
+
+export function getDealDocumentById(dealId: number, documentId: number, init: RequestInit = {}) {
+    return getJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
+export function generateDealDocument(dealId: number, templateId: number) {
+    return postJson<Types.DealDocument>(`/api/deals/${dealId}/documents`, { templateId });
+}
+
+export function updateDealDocumentStatus(dealId: number, documentId: number, status: Types.DocumentClientStatus) {
+    return putJson<Types.DealDocument>(`/api/deals/${dealId}/documents/${documentId}/status`, { status });
+}
+
+export function deleteDealDocument(dealId: number, documentId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${dealId}/documents/${documentId}`, init);
+}
+
+export function getApprovalPolicies(init: RequestInit = {}) {
+    return getJson<Types.ApprovalPolicy[]>(`/api/approval-policies`, init);
+}
+
+export function getApprovalPoliciesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
+}
+
+export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload) {
+    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload);
+}
+
+export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload) {
+    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload);
+}
+
+export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/approval-policies/${id}`, init);
+}
+
+export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval`, { comment: comment ?? null });
+}
+
+export function decideDocumentApproval(
+    dealId: number,
+    documentId: number,
+    decision: 'approved' | 'rejected',
+    comment?: string | null,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/decision`, { decision, comment: comment ?? null });
+}
+
+export function cancelDocumentApproval(dealId: number, documentId: number) {
+    return postJson<Types.DocumentApproval>(`/api/deals/${dealId}/documents/${documentId}/approval/cancel`, {});
+}
+
+export function getDealLineItems(dealId: number, init: RequestInit = {}) {
+    return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
+}
+
+export function getDealLineItemsFromCookie(dealId: number, cookie: string | null) {
+    return getJson<Types.DealLineItemsResponse>(
+        `/api/deals/${dealId}/line-items`,
+        cookie ? { headers: { cookie }, cache: 'no-store' } : {},
+    );
+}
+
+export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload) {
+    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload);
+}
+
+export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload) {
+    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload);
+}
+
+export function deleteDealLineItem(dealId: number, itemId: number, init: RequestInit = {}) {
+    return deleteJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, init);
 }
 
 export function getPeopleForTag(id: number, init: RequestInit = {}) {
@@ -2535,6 +2888,45 @@ export function getOrgAudit(orgId: number, params: Types.AuditLogParams = {}, in
 }
 
 /*
+* == Data-subject requests (APPI 開示等, issue #221)
+*/
+
+export function getDataSubjectRequests(
+    orgId: number,
+    params: { status?: Types.DataSubjectRequestStatus; limit?: number; offset?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.DataSubjectRequest[]>(
+        `/api/orgs/${orgId}/data-subject-requests${buildQuery(params)}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export function createDataSubjectRequest(orgId: number, body: Types.DataSubjectRequestBody) {
+    return postJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests`, body);
+}
+
+export function updateDataSubjectRequest(orgId: number, requestId: number, body: Types.DataSubjectRequestBody) {
+    return putJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests/${requestId}`, body);
+}
+
+/**
+ * Assembles the subject-scoped disclosure for a verified disclosure request. The payload is the
+ * operator-facing raw material (Art. 33 assembly); callers save it as a file rather than render it.
+ */
+export function getDataSubjectDisclosure(orgId: number, requestId: number) {
+    return getJson<Record<string, unknown>>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/disclosure`,
+        { cache: "no-store" },
+    );
+}
+
+/** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
+export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+    return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
+}
+
+/*
 * == Workspaces (tenancy)
 */
 
@@ -2642,12 +3034,20 @@ export function getRules(init: RequestInit = {}) {
     return getJson<Types.Rule[]>(`/api/rules`, { cache: "no-store", ...init });
 }
 
-export function createRule(payload: Types.RuleRequest) {
-    return postJson<Types.Rule>(`/api/rules`, payload);
+export function createRule(payload: Types.RuleRequest, init: RequestInit = {}) {
+    return postJson<Types.Rule>(`/api/rules`, payload, init);
 }
 
 export function updateRule(id: number, payload: Types.RuleRequest) {
     return putJson<Types.Rule>(`/api/rules/${id}`, payload);
+}
+
+export function getRuleById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Rule>(`/api/rules/${id}`, init);
+}
+
+export function getRuleExecutions(id: number, init: RequestInit = {}) {
+    return getJson<Types.RuleExecution[]>(`/api/rules/${id}/executions`, { cache: "no-store", ...init });
 }
 
 export function deleteRule(id: number) {
@@ -2780,24 +3180,131 @@ export async function getEntityCustomFieldValuesFromCookie(
 * == Saved views
 */
 
-export function getSavedViews(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
-    return getJson<Types.SavedView[]>(`/api/saved-views?recordType=${recordType}`, { cache: "no-store", ...init });
+/**
+ * The wire shape of a persisted saved-view config: versioned, with a nested {@code sort} object and
+ * the deferred column/paging fields. Kept distinct from the browser's flat {@link Types.SavedViewConfig}
+ * so the two can be mapped without leaking the persisted layout into the UI.
+ */
+type SavedViewConfigDto = {
+    version?: number;
+    filters?: Record<string, string[]>;
+    query?: string;
+    sort?: { key: string | null; direction: "asc" | "desc" } | null;
+    segments?: Types.SegmentDefinition;
+    visibleColumns?: string[] | null;
+    columnOrder?: string[] | null;
+    pageSize?: number | null;
+};
+
+type SavedViewWire = Omit<Types.SavedView, "config"> & { config: SavedViewConfigDto };
+
+/**
+ * Flattens a persisted saved-view config into the browser's working shape. Deferred column/paging
+ * fields are preserved so a later {@link toSavedViewConfigDto} never drops them on write.
+ */
+export function fromSavedViewConfigDto(dto: SavedViewConfigDto): Types.SavedViewConfig {
+    return {
+        filters: dto.filters ?? {},
+        query: dto.query ?? "",
+        sortKey: dto.sort?.key ?? null,
+        sortDirection: dto.sort?.direction ?? "asc",
+        segments: dto.segments,
+        visibleColumns: dto.visibleColumns ?? null,
+        columnOrder: dto.columnOrder ?? null,
+        pageSize: dto.pageSize ?? null,
+    };
+}
+
+/** Expands the browser's flat config into the persisted DTO (version 1, nested sort), preserving deferred fields. */
+export function toSavedViewConfigDto(config: Types.SavedViewConfig): SavedViewConfigDto {
+    return {
+        version: 1,
+        filters: config.filters ?? {},
+        query: config.query ?? "",
+        sort: { key: config.sortKey ?? null, direction: config.sortDirection ?? "asc" },
+        segments: config.segments,
+        visibleColumns: config.visibleColumns ?? null,
+        columnOrder: config.columnOrder ?? null,
+        pageSize: config.pageSize ?? null,
+    };
+}
+
+function fromSavedViewWire(wire: SavedViewWire): Types.SavedView {
+    return { ...wire, config: fromSavedViewConfigDto(wire.config) };
+}
+
+function toSavedViewBody(payload: Types.SavedViewInput) {
+    return {
+        recordType: payload.recordType,
+        name: payload.name,
+        ...(payload.visibility !== undefined ? { visibility: payload.visibility } : {}),
+        config: toSavedViewConfigDto(payload.config),
+        ...(payload.position !== undefined ? { position: payload.position } : {}),
+    };
+}
+
+export async function getSavedViews(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
+    const views = await getJson<SavedViewWire[]>(`/api/saved-views?recordType=${recordType}`, { cache: "no-store", ...init });
+    return views.map(fromSavedViewWire);
 }
 
 export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
     return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
 }
 
-export function createSavedView(payload: Types.SavedViewInput) {
-    return postJson<Types.SavedView>(`/api/saved-views`, payload);
+export async function getSavedView(id: number, init: RequestInit = {}) {
+    return fromSavedViewWire(await getJson<SavedViewWire>(`/api/saved-views/${id}`, { cache: "no-store", ...init }));
 }
 
-export function updateSavedView(id: number, payload: Types.SavedViewInput) {
-    return putJson<Types.SavedView>(`/api/saved-views/${id}`, payload);
+export async function createSavedView(payload: Types.SavedViewInput) {
+    return fromSavedViewWire(await postJson<SavedViewWire>(`/api/saved-views`, toSavedViewBody(payload)));
+}
+
+export async function updateSavedView(id: number, payload: Types.SavedViewInput) {
+    return fromSavedViewWire(await putJson<SavedViewWire>(`/api/saved-views/${id}`, toSavedViewBody(payload)));
 }
 
 export function deleteSavedView(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/saved-views/${id}`, init);
+}
+
+export async function getSavedViewPins(init: RequestInit = {}) {
+    const views = await getJson<SavedViewWire[]>(`/api/saved-views/pins`, { cache: "no-store", ...init });
+    return views.map(fromSavedViewWire);
+}
+
+export function getSavedViewPinsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.SavedView>((init) => getSavedViewPins(init), cookie);
+}
+
+export async function pinSavedView(id: number, position?: number): Promise<void> {
+    await putJson<void>(`/api/saved-views/${id}/pin`, position !== undefined ? { position } : {});
+}
+
+export function unpinSavedView(id: number, init: RequestInit = {}): Promise<void> {
+    return deleteJson<void>(`/api/saved-views/${id}/pin`, init);
+}
+
+export async function getDefaultSavedView(recordType: Types.SavedViewRecordType, init: RequestInit = {}): Promise<Types.SavedView | null> {
+    const result = await getJson<{ view: SavedViewWire | null }>(`/api/saved-views/defaults/${recordType}`, { cache: "no-store", ...init });
+    return result.view ? fromSavedViewWire(result.view) : null;
+}
+
+export async function getDefaultSavedViewFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null): Promise<Types.SavedView | null> {
+    if (!cookie) return null;
+    try {
+        return await getDefaultSavedView(recordType, { headers: { cookie }, cache: "no-store" });
+    } catch {
+        return null;
+    }
+}
+
+export async function setDefaultSavedView(recordType: Types.SavedViewRecordType, savedViewId: number): Promise<void> {
+    await putJson<void>(`/api/saved-views/defaults/${recordType}`, { savedViewId });
+}
+
+export function clearDefaultSavedView(recordType: Types.SavedViewRecordType, init: RequestInit = {}): Promise<void> {
+    return deleteJson<void>(`/api/saved-views/defaults/${recordType}`, init);
 }
 
 /*
@@ -2936,15 +3443,19 @@ export function deleteGoal(id: number) {
     return deleteJson<void>(`/api/goals/${id}`);
 }
 
-export async function generateReport(id: number, payload: Types.ReportGenerateInput = {}) {
+export async function generateReport(
+    id: number,
+    payload: Types.ReportGenerateInput = {},
+    mode: Types.ReportNarrativeMode = "cached",
+) {
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate`, payload);
+        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
     }
     const identity = await currentClientRequestIdentity();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate`;
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
@@ -3085,6 +3596,10 @@ export function getSegmentFields(recordType: Types.SavedViewRecordType) {
     return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store" });
 }
 
+export function getSegmentCatalog(recordType: Types.SavedViewRecordType) {
+    return getJson<Types.SegmentCatalog>(`/api/segments/catalog?recordType=${recordType}`);
+}
+
 export function getShares(type: string, id: number, init: RequestInit = {}) {
     return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
 }
@@ -3173,4 +3688,231 @@ export function deleteWorkspaceMailConfig(workspaceId: number) {
 
 export function sendWorkspaceMailTest(workspaceId: number) {
     return postJson<Types.MailTestResult>(`/api/workspaces/${workspaceId}/mail-config/test`, {});
+}
+
+export function getDeliveryProviders(init: RequestInit = {}) {
+    return getJson<Types.DeliveryProviderConfig[]>(`/api/delivery/providers`, { cache: "no-store", ...init });
+}
+
+export function getDeliveryProvidersFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DeliveryProviderConfig>((init) => getDeliveryProviders(init), cookie);
+}
+
+export function saveDeliveryProvider(payload: Types.DeliveryProviderConfigPayload) {
+    return putJson<Types.DeliveryProviderConfig>(`/api/delivery/providers`, payload);
+}
+
+export function issueDeliveryWebhookToken(channel: string) {
+    return postJson<Types.DeliveryWebhookToken>(
+        `/api/delivery/providers/${encodeURIComponent(channel)}/webhook-token`,
+        {},
+    );
+}
+
+export function deleteDeliveryProvider(channel: string) {
+    return deleteJson<void>(`/api/delivery/providers/${encodeURIComponent(channel)}`);
+}
+
+export function getConnectors(init: RequestInit = {}) {
+    return getJson<Types.ConnectorConfig[]>(`/api/delivery/connectors`, { cache: "no-store", ...init });
+}
+
+export function getConnectorsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ConnectorConfig>((init) => getConnectors(init), cookie);
+}
+
+export function saveConnector(payload: Types.ConnectorConfigPayload) {
+    return putJson<Types.ConnectorConfig>(`/api/delivery/connectors`, payload);
+}
+
+export function deleteConnector(connector: string) {
+    return deleteJson<void>(`/api/delivery/connectors/${encodeURIComponent(connector)}`);
+}
+
+export function getCampaigns(init: RequestInit = {}) {
+    return getJson<Types.Campaign[]>(`/api/campaigns`, init);
+}
+
+export function getCampaignsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
+}
+
+export function getCampaign(id: number, init: RequestInit = {}) {
+    return getJson<Types.Campaign>(`/api/campaigns/${id}`, init);
+}
+
+export function getCampaignFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.Campaign>((init) => getCampaign(id, init), cookie);
+}
+
+export function createCampaign(payload: Types.CampaignPayload) {
+    return postJson<Types.Campaign>(`/api/campaigns`, payload);
+}
+
+export function updateCampaign(id: number, payload: Types.CampaignPayload) {
+    return putJson<Types.Campaign>(`/api/campaigns/${id}`, payload);
+}
+
+export function deleteCampaign(id: number) {
+    return deleteJson<void>(`/api/campaigns/${id}`);
+}
+
+export function getCampaignAudience(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudience | undefined>(`/api/campaigns/${id}/audience`, init);
+}
+
+export function getCampaignAudienceFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.CampaignAudience | undefined>(
+        (init) => getCampaignAudience(id, init),
+        cookie,
+    );
+}
+
+export function setCampaignAudience(id: number, payload: Types.CampaignAudiencePayload) {
+    return putJson<Types.CampaignAudience>(`/api/campaigns/${id}/audience`, payload);
+}
+
+export function estimateCampaignAudience(id: number) {
+    return postJson<Types.CampaignAudienceEstimate>(`/api/campaigns/${id}/audience/estimate`, {});
+}
+
+export function snapshotCampaignAudience(id: number) {
+    return postJson<Types.CampaignAudienceSnapshot>(`/api/campaigns/${id}/audience/snapshot`, {});
+}
+
+export function getCampaignSnapshots(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceSnapshotSummary[]>(
+        `/api/campaigns/${id}/audience/snapshots`,
+        init,
+    );
+}
+
+export function getCampaignSnapshot(id: number, version: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceSnapshot>(
+        `/api/campaigns/${id}/audience/snapshots/${version}`,
+        init,
+    );
+}
+
+export function getCampaignMessages(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignMessage[]>(`/api/campaigns/${id}/messages`, init);
+}
+
+export function createCampaignMessage(id: number, payload: Types.CampaignMessagePayload) {
+    return postJson<Types.CampaignMessage>(`/api/campaigns/${id}/messages`, payload);
+}
+
+export function getCampaignMessage(id: number, messageId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignMessage>(`/api/campaigns/${id}/messages/${messageId}`, init);
+}
+
+export function addCampaignMessageRevision(
+    id: number,
+    messageId: number,
+    payload: Types.CampaignMessageRevisionPayload,
+) {
+    return postJson<Types.CampaignMessage>(
+        `/api/campaigns/${id}/messages/${messageId}/revisions`,
+        payload,
+    );
+}
+
+export function getCampaignSends(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignSend[]>(`/api/campaigns/${id}/sends`, init);
+}
+
+export function createCampaignSend(id: number, payload: Types.CampaignSendPayload) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends`, payload);
+}
+
+export function getCampaignSend(id: number, sendId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}`, init);
+}
+
+export function queueCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/queue`, {});
+}
+
+export function pauseCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/pause`, {});
+}
+
+export function cancelCampaignSend(id: number, sendId: number) {
+    return postJson<Types.CampaignSend>(`/api/campaigns/${id}/sends/${sendId}/cancel`, {});
+}
+
+export function getCampaignExports(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceExport[]>(`/api/campaigns/${id}/exports`, init);
+}
+
+export function getCampaignExportsFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
+}
+
+export function createCampaignExport(id: number, payload: Types.CampaignAudienceExportPayload) {
+    return postJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports`, payload);
+}
+
+export function getCampaignExport(id: number, exportId: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports/${exportId}`, init);
+}
+
+export function getCampaignEngagement(id: number, init: RequestInit = {}) {
+    return getJson<Types.CampaignEngagement>(`/api/campaigns/${id}/engagement`, init);
+}
+
+export function getCampaignEngagementFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.CampaignEngagement>(
+        (init) => getCampaignEngagement(id, init),
+        cookie,
+    );
+}
+
+/**
+ * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
+ * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
+ * @param token the 64-character hex delivery token from the unsubscribe link
+ * @param init optional fetch overrides (used by SSR to disable caching)
+ * @returns the masked address, channel, and current suppression state
+ */
+export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
+    return publicJson<Types.DeliveryUnsubscribeInfo>(
+        `/api/delivery/unsubscribe/${token}`,
+        "GET",
+        init,
+    );
+}
+
+/**
+ * Confirms an unsubscribe for a delivery token, suppressing the resolved address. Public and
+ * idempotent: repeat confirmations return the already-unsubscribed state without error.
+ * @param token the 64-character hex delivery token from the unsubscribe link
+ * @returns the masked address, channel, and resulting suppression state
+ */
+export function confirmUnsubscribe(token: string) {
+    return publicJson<Types.DeliveryUnsubscribeInfo>(`/api/delivery/unsubscribe/${token}`, "POST");
+}
+
+export function getPersonConsent(personId: number, init: RequestInit = {}) {
+    return getJson<Types.ContactChannelConsent[]>(`/api/persons/${personId}/consent`, init);
+}
+
+export function setPersonConsent(personId: number, payload: Types.ContactChannelConsentPayload) {
+    return putJson<Types.ContactChannelConsent>(`/api/persons/${personId}/consent`, payload);
+}
+
+export function getSuppressions(init: RequestInit = {}) {
+    return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+export function getSuppressionsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.SuppressionEntry>((init) => getSuppressions(init), cookie);
+}
+
+export function createSuppression(payload: Types.SuppressionEntryPayload) {
+    return postJson<Types.SuppressionEntry>(`/api/suppressions`, payload);
+}
+
+export function deleteSuppression(id: number) {
+    return deleteJson<void>(`/api/suppressions/${id}`);
 }

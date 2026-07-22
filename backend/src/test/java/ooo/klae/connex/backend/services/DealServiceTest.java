@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,10 +12,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -34,6 +44,7 @@ import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpisDto;
+import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
@@ -43,17 +54,24 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
+@RecordApplicationEvents
 class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
+    @Autowired DealLineItemService dealLineItemService;
     @Autowired AuditService auditService;
+    @Autowired ApplicationEvents applicationEvents;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
+    @MockitoSpyBean DealMapper dealMapperSpy;
 
     @Test
     void aggregateReadsAreAssembledAndIsolatedByWorkspace() {
@@ -88,6 +106,7 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setClosedAt("2026-01-01 00:00:00");
         dealMapper.insert(foreign);
 
+        MemberScope allTeamScope = MemberScope.fromRequest(null, null, currentUser.getId());
         DealMetricsDto metrics = dealService.getDealMetrics(null, null, null, null, null, null);
         DealFacets facets = dealService.getDealFacets();
         List<Deal> page = dealService.getDealsPage(
@@ -103,11 +122,11 @@ class DealServiceTest extends AbstractServiceTest {
         var multiFilteredPage = dealService.queryDealsPage(
             "%Local Won%", "value", "desc", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null, 25, 0);
+            false, List.of("won", "lost"), null, allTeamScope, 25, 0);
         DealMetricsDto multiFilteredMetrics = dealService.queryDealMetrics(
             "%Local Won%", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null);
+            false, List.of("won", "lost"), null, allTeamScope);
 
         assertEquals(3, metrics.totalCount());
         assertEquals(1, metrics.byCurrency().size());
@@ -124,6 +143,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(Map.of(Integer.toString(stage.getId()), 3L), facetCounts(facets.stages()));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 3L), facetCounts(facets.pipelines()));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L), facetCounts(facets.companies()));
+        assertEquals(Map.of(Integer.toString(currentUser.getId()), 3L), facetCounts(facets.owners()));
         assertEquals(Map.of("JPY", 3L), facetCounts(facets.currencies()));
         assertEquals(3, count);
         assertEquals(3, page.size());
@@ -139,6 +159,27 @@ class DealServiceTest extends AbstractServiceTest {
             multiFilteredPage.items().stream().map(Deal::getId).toList());
         assertEquals(2, multiFilteredMetrics.totalCount());
         assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
+    }
+
+    @Test
+    void oversizedBoardRejectsKanbanReordering() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<Deal> deals = IntStream.rangeClosed(1, 2001)
+            .mapToObj(position -> boardDeal(pipeline, stage, position))
+            .toList();
+        deals.get(0).setOwnerId(currentUser.getId());
+        dealMapper.insertBatch(deals);
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+            () -> dealService.getDealBoard(pipeline.getId()));
+
+        assertEquals("This pipeline is too large for Kanban reordering; use the paginated table view",
+            exception.getMessage());
     }
 
     @Test
@@ -178,10 +219,10 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setWon(true);
         dealMapper.insert(foreign);
 
-        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null);
-        List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null);
-        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null);
-        List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY");
+        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null, MemberScope.allTeam());
+        List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null, MemberScope.allTeam());
+        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam());
+        List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY", MemberScope.allTeam());
 
         assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),
             monthTotals(series.closed()));
@@ -220,13 +261,13 @@ class DealServiceTest extends AbstractServiceTest {
         updateChartDeal(newDeal(pipeline, stage, company),
             20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
 
-        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC");
-        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York");
+        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC", MemberScope.allTeam());
+        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York", MemberScope.allTeam());
 
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0), monthTotals(utc.closed()));
         assertEquals(Map.of("2025-12", 90.0, "2026-6", 10.0), monthTotals(newYork.closed()));
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0),
-            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00").closed()));
+            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00", MemberScope.allTeam()).closed()));
     }
 
     @Test
@@ -261,10 +302,10 @@ class DealServiceTest extends AbstractServiceTest {
         analyticsDeal(otherWorkspace, otherPipeline, otherStage, otherCompany, "Foreign Open",
             6000.0, 0.0, "JPY", null, 3, null, 61);
 
-        DealKpisDto kpis = dealService.getDealKpis("JPY", 30);
-        List<DealPipelineValueDto> pipelineValues = dealService.getDealPipelineValue("JPY", 30);
-        List<DealAgingDto> aging = dealService.getDealAging("JPY");
-        DealTopDto top = dealService.getTopDeals("JPY");
+        DealKpisDto kpis = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
+        List<DealPipelineValueDto> pipelineValues = dealService.getDealPipelineValue("JPY", 30, MemberScope.allTeam());
+        List<DealAgingDto> aging = dealService.getDealAging("JPY", MemberScope.allTeam());
+        DealTopDto top = dealService.getTopDeals("JPY", MemberScope.allTeam());
 
         assertEquals(80.0, kpis.wonRevenue(), 0.0001);
         assertEquals(40.0, kpis.wonRevenuePrev(), 0.0001);
@@ -308,7 +349,7 @@ class DealServiceTest extends AbstractServiceTest {
         workspace = emptyWorkspace;
         authenticateAs(currentUser, workspace.getId());
 
-        DealKpisDto kpis = dealService.getDealKpis("JPY", 90);
+        DealKpisDto kpis = dealService.getDealKpis("JPY", 90, MemberScope.allTeam());
 
         assertEquals(0.0, kpis.wonRevenue(), 0.0001);
         assertEquals(0.0, kpis.newPipeline(), 0.0001);
@@ -337,7 +378,7 @@ class DealServiceTest extends AbstractServiceTest {
         analyticsDeal(workspace, pipeline, stage, company, "Previous Zero Lost",
             0.0, 0.0, "JPY", false, 45, 40, 1);
 
-        DealKpisDto lostOnly = dealService.getDealKpis("JPY", 30);
+        DealKpisDto lostOnly = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
 
         assertNull(lostOnly.wonRevenuePrev());
         assertNull(lostOnly.avgCycleDaysPrev());
@@ -347,7 +388,7 @@ class DealServiceTest extends AbstractServiceTest {
 
         analyticsDeal(workspace, pipeline, stage, company, "Previous Zero Won",
             0.0, 0.0, "JPY", true, 50, 40, 1);
-        DealKpisDto withWon = dealService.getDealKpis("JPY", 30);
+        DealKpisDto withWon = dealService.getDealKpis("JPY", 30, MemberScope.allTeam());
 
         assertEquals(0.0, withWon.wonRevenuePrev(), 0.0001);
         assertEquals(10.0, withWon.avgCycleDaysPrev(), 0.0001);
@@ -469,17 +510,34 @@ class DealServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Deal d1 = newDeal(pipeline, from, company);
         Deal d2 = newDeal(pipeline, from, company);
-        Deal d3 = newDeal(pipeline, to, company);
+        Deal d3 = newDeal(pipeline, from, company);
+        Deal d4 = newDeal(pipeline, to, company);
+        Deal d5 = newDeal(pipeline, to, company);
 
-        dealService.move(d1.getId(), to.getId(), 0);
+        dealService.move(d1.getId(), to.getId(), 1);
 
         List<Deal> target = dealService.getDealsByStageId(to.getId());
-        assertEquals(List.of(d1.getId(), d3.getId()), target.stream().map(Deal::getId).toList());
-        assertEquals(List.of(0, 1), target.stream().map(Deal::getPosition).toList());
+        assertEquals(List.of(d4.getId(), d1.getId(), d5.getId()),
+            target.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
 
         List<Deal> source = dealService.getDealsByStageId(from.getId());
-        assertEquals(List.of(d2.getId()), source.stream().map(Deal::getId).toList());
-        assertEquals(0, source.get(0).getPosition());
+        assertEquals(List.of(d2.getId(), d3.getId()), source.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1), source.stream().map(Deal::getPosition).toList());
+    }
+
+    @Test
+    void move_onlySourceDealIntoEmptyStageSkipsEmptySourceBatch() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Deal deal = newDeal(pipeline, from, newCompany());
+
+        Deal moved = dealService.move(deal.getId(), to.getId(), 0);
+
+        assertEquals(to.getId(), moved.getStageId());
+        assertEquals(0, moved.getPosition());
+        assertTrue(dealService.getDealsByStageId(from.getId()).isEmpty());
     }
 
     @Test
@@ -524,7 +582,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_recordsInitialStageHistory() {
+    void create_open_recordsConversionEligibleInitialHistory() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
@@ -542,6 +600,31 @@ class DealServiceTest extends AbstractServiceTest {
         List<DealStageHistory> history = dealService.getStageHistory(created.getId());
         assertEquals(1, history.size());
         assertEquals(stage.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
+    }
+
+    @Test
+    void create_closedAtIngest_recordsConversionIneligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        for (boolean won : new boolean[] {true, false}) {
+            Deal deal = new Deal();
+            deal.setName("Deal " + unique());
+            deal.setWorkspaceId(workspace.getId());
+            deal.setValue(1000.0);
+            deal.setCurrency("JPY");
+            deal.setPipelineId(pipeline.getId());
+            deal.setStageId(stage.getId());
+            deal.setCompanyId(newCompany().getId());
+            deal.setWon(won);
+            Deal created = dealService.create(deal);
+
+            List<DealStageHistory> history = dealService.getStageHistory(created.getId());
+            assertEquals(1, history.size());
+            assertFalse(history.get(0).isConversionEligible(),
+                "a deal created already " + (won ? "won" : "lost") + " never occupied the stage while open");
+        }
     }
 
     @Test
@@ -577,6 +660,212 @@ class DealServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class, () -> dealService.update(deal.getId(), deal));
 
         assertEquals(originalCompany.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getCompanyId());
+    }
+
+    @Test
+    void updateNameChangesOnlyNameAndRemainsAvailableWithLineItems() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        deal.setValue(125000.0);
+        deal.setActualValue(75000.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        deal.setWon(true);
+        deal.setClosedAt("2026-07-01 12:00:00");
+        deal.setClosedReason("Signed");
+        dealMapper.update(deal);
+        addLineItem(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        Deal updated = dealService.updateName(deal.getId(), "FY27 Renewal");
+
+        assertEquals("FY27 Renewal", updated.getName());
+        assertEquals(before.getValue(), updated.getValue());
+        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(before.getCurrency(), updated.getCurrency());
+        assertEquals(before.getPipelineId(), updated.getPipelineId());
+        assertEquals(before.getStageId(), updated.getStageId());
+        assertEquals(before.getPosition(), updated.getPosition());
+        assertEquals(before.getOwnerId(), updated.getOwnerId());
+        assertEquals(before.getCompanyId(), updated.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), updated.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), updated.getClosedAt());
+        assertEquals(before.getClosedReason(), updated.getClosedReason());
+        assertEquals(before.getWon(), updated.getWon());
+        JsonNode changes = auditChanges(deal.getId(), "deal.update");
+        assertEquals(1, changes.size());
+        assertEquals(before.getName(), changes.path("name").path("old").asText());
+        assertEquals("FY27 Renewal", changes.path("name").path("new").asText());
+        assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void updateNameNoOpSkipsWriteAuditAndEvents() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateName(deal.getId(), deal.getName());
+
+        assertEquals(deal.getName(), updated.getName());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateName(anyInt(), anyInt(), any(String.class));
+    }
+
+    @Test
+    void updateValueChangesOnlyValueAndPublishesExistingValueEvent() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        deal.setActualValue(500.0);
+        deal.setExpectedCloseDate("2027-03-31");
+        dealMapper.update(deal);
+        Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("125000.00"));
+
+        assertEquals(125000.0, updated.getValue());
+        assertEquals(before.getName(), updated.getName());
+        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(before.getCurrency(), updated.getCurrency());
+        assertEquals(before.getPipelineId(), updated.getPipelineId());
+        assertEquals(before.getStageId(), updated.getStageId());
+        assertEquals(before.getPosition(), updated.getPosition());
+        assertEquals(before.getOwnerId(), updated.getOwnerId());
+        assertEquals(before.getCompanyId(), updated.getCompanyId());
+        assertEquals(before.getExpectedCloseDate(), updated.getExpectedCloseDate());
+        assertEquals(before.getClosedAt(), updated.getClosedAt());
+        assertEquals(before.getClosedReason(), updated.getClosedReason());
+        assertEquals(before.getWon(), updated.getWon());
+        JsonNode changes = auditChanges(deal.getId(), "deal.update");
+        assertEquals(1, changes.size());
+        assertEquals(before.getValue(), changes.path("value").path("old").asDouble());
+        assertEquals(125000.0, changes.path("value").path("new").asDouble());
+        assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
+        assertTrue(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void updateValueNoOpSkipsWriteAuditAndEvents() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
+
+        assertEquals(1000.0, updated.getValue());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
+    }
+
+    @Test
+    void updateValueNoOpRemainsAvailableWithLineItems() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+        long auditCount = dealUpdateAuditCount(deal.getId());
+        clearInvocations(dealMapperSpy);
+        applicationEvents.clear();
+
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
+
+        assertEquals(1000.0, updated.getValue());
+        assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
+        assertEquals(0, applicationEvents.stream().count());
+        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
+    }
+
+    @Test
+    void updateValueRejectsDealsWithLineItemsAndPreservesValue() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+
+        ConflictException exception = assertThrows(ConflictException.class,
+            () -> dealService.updateValue(deal.getId(), new BigDecimal("125000.00")));
+
+        assertEquals(
+            "Cannot manually edit the deal value while line items exist; update or remove the line items first",
+            exception.getMessage());
+        BigDecimal storedValue = jdbcTemplate.queryForObject(
+            "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
+            BigDecimal.class, workspace.getId(), deal.getId());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void legacyUpdateRejectsChangedValueWhenLineItemsExist() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        addLineItem(deal);
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setValue(125000.0);
+
+        assertThrows(ConflictException.class, () -> dealService.update(deal.getId(), edit));
+
+        BigDecimal storedValue = jdbcTemplate.queryForObject(
+            "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
+            BigDecimal.class, workspace.getId(), deal.getId());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+    }
+
+    @Test
+    void legacyUpdateTreatsScaleEquivalentValueAsUnchanged() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateValue(workspace.getId(), deal.getId(), new BigDecimal("125000.0"));
+        addLineItem(deal);
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setName("Scale-insensitive renewal");
+        edit.setValue(new BigDecimal("125000.00").doubleValue());
+
+        Deal updated = dealService.update(deal.getId(), edit);
+
+        assertEquals("Scale-insensitive renewal", updated.getName());
+        assertEquals(125000.0, updated.getValue());
+        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+    }
+
+    @Test
+    void targetedUpdatesReturnNotFoundForMissingAndForeignDeals() {
+        assertThrows(ResourceNotFoundException.class, () -> dealService.updateName(-1, "Missing"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateValue(-1, new BigDecimal("1.00")));
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal local = newDeal(pipeline, stage, newCompany());
+        String originalName = local.getName();
+        double originalValue = local.getValue();
+        Workspace foreignWorkspace = newWorkspace();
+        workspaceMapper.addMember(foreignWorkspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, foreignWorkspace.getId());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateName(local.getId(), "Foreign rename"));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.updateValue(local.getId(), new BigDecimal("999.00")));
+
+        authenticateAs(currentUser, workspace.getId());
+        Deal unchanged = dealMapper.getDealById(workspace.getId(), local.getId());
+        assertEquals(originalName, unchanged.getName());
+        assertEquals(originalValue, unchanged.getValue());
     }
 
     @Test
@@ -901,6 +1190,34 @@ class DealServiceTest extends AbstractServiceTest {
         return deal;
     }
 
+    private void addLineItem(Deal deal) {
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setName("Ad-hoc line " + unique());
+        request.setUnitPrice(new BigDecimal("25.00"));
+        request.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), request);
+    }
+
+    private boolean hasDealEvent(int dealId, String event) {
+        return applicationEvents.stream(RuleTriggerEvent.class)
+            .anyMatch(trigger -> trigger.workspaceId() == workspace.getId()
+                && trigger.entityId() == dealId
+                && "deal".equals(trigger.recordType())
+                && event.equals(trigger.event()));
+    }
+
+    private Deal boardDeal(Pipeline pipeline, Stage stage, int position) {
+        Deal deal = new Deal();
+        deal.setWorkspaceId(workspace.getId());
+        deal.setName("Bounded Board " + position);
+        deal.setValue(1);
+        deal.setCurrency("USD");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setPosition(position - 1);
+        return deal;
+    }
+
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,
             String currency, Boolean won) {
         deal.setName(name);
@@ -974,6 +1291,12 @@ class DealServiceTest extends AbstractServiceTest {
             .orElseThrow();
         assertNotNull(audit.getChanges());
         return objectMapper.readTree(audit.getChanges());
+    }
+
+    private long dealUpdateAuditCount(int dealId) {
+        return auditService.forEntity("deal", dealId, 20, 0).stream()
+            .filter(entry -> "deal.update".equals(entry.getAction()))
+            .count();
     }
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {

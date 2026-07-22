@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ConnectorConfigMapper">
+
+  <resultMap id="ConnectorConfigResult" type="ConnectorConfig">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="connector" column="connector"/>
+    <result property="endpoint" column="endpoint"/>
+    <result property="externalListId" column="external_list_id"/>
+    <result property="credentialRef" column="credential_ref"/>
+    <result property="credentialLast4" column="credential_last4"/>
+    <result property="enabled" column="enabled"/>
+    <result property="createdById" column="created_by_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="columns">
+    id, workspace_id, connector, endpoint, external_list_id,
+    credential_ref, credential_last4, enabled, created_by_id, created_at, updated_at
+  </sql>
+
+  <select id="listByWorkspace" resultMap="ConnectorConfigResult">
+    SELECT <include refid="columns"/>
+    FROM connector_config
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY connector
+  </select>
+
+  <select id="findByWorkspaceConnector" resultMap="ConnectorConfigResult">
+    SELECT <include refid="columns"/>
+    FROM connector_config
+    WHERE workspace_id = #{workspaceId} AND connector = #{connector}
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO connector_config
+      (workspace_id, connector, endpoint, external_list_id,
+       credential_ref, credential_last4, enabled, created_by_id)
+    VALUES
+      (#{workspaceId}, #{connector}, #{endpoint}, #{externalListId},
+       #{credentialRef}, #{credentialLast4}, #{enabled}, #{createdById})
+    ON DUPLICATE KEY UPDATE
+      endpoint = VALUES(endpoint),
+      external_list_id = VALUES(external_list_id),
+      credential_ref = VALUES(credential_ref),
+      credential_last4 = VALUES(credential_last4),
+      enabled = VALUES(enabled)
+  </insert>
+
+  <delete id="delete">
+    DELETE FROM connector_config
+    WHERE workspace_id = #{workspaceId} AND connector = #{connector}
+  </delete>
+
+</mapper>

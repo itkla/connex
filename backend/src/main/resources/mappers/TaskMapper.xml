@@ -48,6 +48,14 @@
     SELECT COUNT(*) FROM task WHERE workspace_id = #{workspaceId}
   </select>
 
+  <sql id="taskMemberScope">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">AND t.assigned_to_id = #{memberScope.userId}</when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">AND t.assigned_to_id IN <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach></when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">AND t.assigned_to_id IS NULL</when>
+    </choose>
+  </sql>
+
   <select id="taskSummary" resultType="ooo.klae.connex.backend.dto.TaskSummaryDto">
     SELECT COALESCE(SUM(CASE WHEN t.status = 'todo' THEN 1 ELSE 0 END), 0) AS todo,
            COALESCE(SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END), 0) AS in_progress,
@@ -60,6 +68,7 @@
                THEN 1 ELSE 0 END), 0) AS due_soon
     FROM task t
     WHERE t.workspace_id = #{workspaceId}
+    <include refid="taskMemberScope"/>
   </select>
 
   <select id="getUpcomingOpenTasks" resultMap="TaskResult">
@@ -205,9 +214,20 @@
     WHERE workspace_id = #{workspaceId} AND status = #{status}
   </select>
 
-  <update id="setPosition">
-    UPDATE task SET position = #{position}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  <update id="setPositions">
+    UPDATE task
+    SET position = CASE id
+      <foreach collection="positions" item="entry">
+        WHEN #{entry.id} THEN #{entry.position}
+      </foreach>
+      ELSE position
+    END
+    WHERE workspace_id = #{workspaceId}
+      AND status = #{status}
+      AND id IN
+      <foreach collection="positions" item="entry" open="(" separator="," close=")">
+        #{entry.id}
+      </foreach>
   </update>
 
   <update id="moveTask">

@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { getCurrentUserFromCookie, getSavedViewsFromCookie } from "@/app/lib/api";
+import { getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getSavedViewsFromCookie } from "@/app/lib/api";
 import { type SavedView } from "@/app/lib/types";
 import { redirect } from "next/navigation";
 import CompaniesBrowser from "@/app/components/records/companies/CompaniesBrowser";
@@ -12,7 +12,10 @@ export default async function CompaniesPage() {
         redirect('/auth/login');
     }
 
-    const savedViews: SavedView[] = await getSavedViewsFromCookie("company", cookie);
+    const [savedViews, defaultView]: [SavedView[], SavedView | null] = await Promise.all([
+        getSavedViewsFromCookie("company", cookie),
+        getDefaultSavedViewFromCookie("company", cookie),
+    ]);
 
-    return <CompaniesBrowser savedViews={savedViews} />;
+    return <CompaniesBrowser savedViews={savedViews} defaultView={defaultView} />;
 }

@@ -1,4 +1,7 @@
 import {
+    ArrowTopRightOnSquareIcon,
+    ArrowUpRightIcon,
+    ArrowUpTrayIcon,
     BoltIcon,
     BriefcaseIcon,
     BuildingLibraryIcon,
@@ -20,7 +23,8 @@ import { toastSuccess } from "@/app/lib/toast";
 import { deriveCreateDefaults } from "./createDefaults";
 import type { ActiveRecordRef, AppAction, RecordType } from "./types";
 
-const RECORD_PATHS: Record<RecordType, string | null> = {
+/** Detail-page base path per record type; `null` for types without a detail route. */
+export const RECORD_PATHS: Record<RecordType, string | null> = {
     company: "/records/companies",
     person: "/records/contacts",
     deal: "/records/deals",
@@ -149,12 +153,72 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     },
 
     {
+        id: "utility.import-companies",
+        group: "utility",
+        labelKey: "utility.importCompanies",
+        icon: ArrowUpTrayIcon,
+        order: 30,
+        keywordsKey: "keywords.utility.importCompanies",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-companies" });
+        },
+    },
+    {
+        id: "utility.import-contacts",
+        group: "utility",
+        labelKey: "utility.importContacts",
+        icon: ArrowUpTrayIcon,
+        order: 40,
+        keywordsKey: "keywords.utility.importContacts",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-contacts" });
+        },
+    },
+    {
+        id: "utility.import-deals",
+        group: "utility",
+        labelKey: "utility.importDeals",
+        icon: ArrowUpTrayIcon,
+        order: 50,
+        keywordsKey: "keywords.utility.importDeals",
+        execute: (_context, helpers) => {
+            helpers.openOverlay({ kind: "import-deals" });
+        },
+    },
+
+    {
+        id: "record.open",
+        group: "record",
+        labelKey: "record.open",
+        icon: ArrowUpRightIcon,
+        order: 4,
+        isAvailable: (context) => context.record !== null && recordHref(context.record) !== null,
+        execute: (context, helpers) => {
+            if (!context.record) return;
+            const href = recordHref(context.record);
+            if (href) helpers.router.push(href);
+        },
+    },
+    {
+        id: "record.open-new-tab",
+        group: "record",
+        labelKey: "record.openNewTab",
+        icon: ArrowTopRightOnSquareIcon,
+        order: 6,
+        isAvailable: (context) => context.record !== null && recordHref(context.record) !== null,
+        execute: (context) => {
+            if (!context.record) return;
+            const href = recordHref(context.record);
+            if (href) window.open(`${window.location.origin}${href}`, "_blank", "noopener,noreferrer");
+        },
+    },
+    {
         id: "record.copy-link",
         group: "record",
         labelKey: "record.copyLink",
         icon: LinkIcon,
         order: 10,
-        isAvailable: (context) => context.record !== null,
+        isAvailable: (context) => context.record !== null && recordHref(context.record) !== null,
         execute: async (context, helpers) => {
             if (!context.record) return;
             const href = recordHref(context.record);

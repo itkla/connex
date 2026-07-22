@@ -41,7 +41,7 @@
 
 ## 7. AI features (if enabled) — customer is the data exporter
 - Where the Entruster enables AI, it operates under **BYOP** ([#94]): the Entruster brings a provider it has contracted with (Vertex / Bedrock / Azure AI), holds that provider's contract/DPA, and configures the endpoint.
-- For the transfer to that provider, **the Entruster is the data exporter to its own designated provider**; the AI provider is the Entruster's subprocessor, not Connex's. Connex pins region and applies SSRF controls, and masks payloads where feasible (caveat: masking does not change handler status — 容易照合性).
+- For the transfer to that provider, **the Entruster is the data exporter to its own designated provider**; the AI provider is the Entruster's subprocessor, not Connex's. Connex pins region and applies SSRF controls, and masks text payloads where feasible (caveat: masking does not change handler status — 容易照合性). Explicitly disclosed image features, including fallback business-card reading, send metadata-free image pixels that cannot be masked and may contain direct or special-care identifiers.
 
 ## 8. Return & deletion (APPI Art. 22)
 - On termination, Connex provides an **export** of the Entruster's data, then **deletes** it within **[30] days**, including from routine backups on their normal cycle. Deletion interacts with the append-only audit log per [#105]/[#91]; retained audit metadata is described there.

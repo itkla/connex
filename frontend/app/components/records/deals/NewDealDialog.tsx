@@ -18,8 +18,11 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { toastError } from '@/app/lib/toast';
 import {
     TagIcon,
@@ -35,6 +38,28 @@ const comboInputClass =
 const comboLeadIconClass =
     'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand';
 
+/**
+ * Whether a deal-create payload has diverged from its seeded baseline, so a container can drive the
+ * accidental-discard guard. Compares every field with null/undefined normalized, so an untouched
+ * form (still equal to its seed) is never reported dirty.
+ */
+export function isDealPayloadDirty(payload: CreateDealPayload, baseline: CreateDealPayload): boolean {
+    return (
+        payload.name !== baseline.name ||
+        payload.value !== baseline.value ||
+        payload.actualValue !== baseline.actualValue ||
+        payload.currency !== baseline.currency ||
+        (payload.pipeline ?? null) !== (baseline.pipeline ?? null) ||
+        (payload.stage ?? null) !== (baseline.stage ?? null) ||
+        (payload.company ?? null) !== (baseline.company ?? null) ||
+        (payload.ownerId ?? null) !== (baseline.ownerId ?? null) ||
+        (payload.expectedCloseDate ?? '') !== (baseline.expectedCloseDate ?? '') ||
+        (payload.closedAt ?? '') !== (baseline.closedAt ?? '') ||
+        (payload.closedReason ?? '') !== (baseline.closedReason ?? '') ||
+        (payload.won ?? null) !== (baseline.won ?? null)
+    );
+}
+
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -44,6 +69,8 @@ type Props = {
     stagesByPipeline: Record<number, Stage[]>;
     isCreating: boolean;
     isSuccess?: boolean;
+    /** Whether the payload has diverged from its seeded baseline; drives the accidental-discard guard. */
+    isDirty?: boolean;
     createNewDeal: () => void | Promise<void>;
 };
 
@@ -56,33 +83,38 @@ export default function NewDealDialog({
     stagesByPipeline,
     isCreating,
     isSuccess = false,
+    isDirty = false,
     createNewDeal,
 }: Props) {
     const t = useTranslations('DealsNewDialog');
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false), enabled: open && !isCreating });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && isCreating) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{t('title')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <NewDealForm
-                    active={open}
-                    onCancel={() => onOpenChange(false)}
-                    payload={payload}
-                    setPayload={setPayload}
-                    pipelines={pipelines}
-                    stagesByPipeline={stagesByPipeline}
-                    isCreating={isCreating}
-                    isSuccess={isSuccess}
-                    createNewDeal={createNewDeal}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('title')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <NewDealForm
+                        active={open}
+                        onCancel={guard.requestClose}
+                        payload={payload}
+                        setPayload={setPayload}
+                        pipelines={pipelines}
+                        stagesByPipeline={stagesByPipeline}
+                        isCreating={isCreating}
+                        isSuccess={isSuccess}
+                        createNewDeal={createNewDeal}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -172,7 +204,16 @@ export function NewDealForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !isCreating && !isSuccess) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="deal-name">{t('name')}</Label>
                         <div className="group relative">
