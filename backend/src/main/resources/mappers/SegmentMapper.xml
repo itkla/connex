@@ -227,11 +227,14 @@
                       AND a.type = 'meeting' AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY))
             </when>
             <when test="predicate == 'has_note'">
-                AND EXISTS (SELECT 1 FROM note n WHERE n.${fk} = ${alias}.id AND n.visibility = 'workspace')
+                AND EXISTS (SELECT 1 FROM note n
+                    WHERE n.workspace_id = #{workspaceId} AND n.${fk} = ${alias}.id
+                      AND n.visibility = 'workspace')
             </when>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
-                    WHERE att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
+                    WHERE att.workspace_id = #{workspaceId}
+                      AND att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
             </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
@@ -242,7 +245,8 @@
         <choose>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
-                    WHERE att.entity_type = 'company' AND att.entity_id = c.id)
+                    WHERE att.workspace_id = #{workspaceId}
+                      AND att.entity_type = 'company' AND att.entity_id = c.id)
             </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
