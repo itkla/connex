@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import {
     ApiError,
+    completeTask,
     dismissNotification,
     getNotificationFacets,
     getNotifications,
@@ -36,6 +37,7 @@ import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/ap
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
     Pagination,
     PaginationContent,
@@ -66,9 +68,10 @@ export default function NotificationsInbox() {
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, snoozed, refreshUnread } = useNotifications();
-    const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
+    const { executeInNotificationWorkspace, openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
+    const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [pageAsOf, setPageAsOf] = useState("");
@@ -97,6 +100,7 @@ export default function NotificationsInbox() {
     const inboxSectionRef = useRef<HTMLElement | null>(null);
     const retryingLoadRef = useRef(false);
     const retryingFacetsRef = useRef(false);
+    const completingRef = useRef<Set<number>>(new Set());
 
     useEffect(() => {
         serverStateVersionRef.current = 0;
@@ -267,6 +271,52 @@ export default function NotificationsInbox() {
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
+        }
+    }
+
+    function removeCompletedNotification(itemId: number) {
+        const rowButtons = Array.from(
+            inboxSectionRef.current?.querySelectorAll<HTMLButtonElement>("[data-notification-row]") ?? [],
+        );
+        const itemIndex = rowButtons.findIndex((button) => button.dataset.notificationRow === String(itemId));
+        const focusTarget = itemIndex < 0
+            ? null
+            : rowButtons[itemIndex + 1] ?? rowButtons[itemIndex - 1] ?? null;
+        setItems((current) => current.filter((entry) => entry.id !== itemId));
+        setTotal((value) => Math.max(0, value - 1));
+        requestAnimationFrame(() => {
+            if (focusTarget?.isConnected) focusTarget.focus();
+            else inboxSectionRef.current?.focus();
+        });
+    }
+
+    async function completeFromInbox(item: Notification) {
+        const taskId = item.sourceId;
+        if (
+            item.sourceType !== "task" ||
+            taskId == null ||
+            completingRef.current.has(item.id)
+        ) {
+            return;
+        }
+        completingRef.current.add(item.id);
+        setCompleting((current) => new Set(current).add(item.id));
+        try {
+            const completed = await executeInNotificationWorkspace(item, async () => {
+                await completeTask(taskId);
+                removeCompletedNotification(item.id);
+                await refreshUnread();
+            });
+            if (!completed) toastError(t("completeError"));
+        } catch {
+            toastError(t("completeError"));
+        } finally {
+            completingRef.current.delete(item.id);
+            setCompleting((current) => {
+                const next = new Set(current);
+                next.delete(item.id);
+                return next;
+            });
         }
     }
 
@@ -697,7 +747,9 @@ export default function NotificationsInbox() {
                             const reasons = item.data?.priorityReasons;
                             const hasPriority = Array.isArray(reasons) && reasons.length > 0;
                             const isNudge = item.type === "relationship.cooling";
+                            const isTask = item.sourceType === "task" && item.sourceId != null;
                             const isSnoozed = isNotificationSnoozedAt(item, pageAsOf);
+                            const isCompleting = completing.has(item.id);
                             return (
                                 <article
                                     key={item.id}
@@ -716,6 +768,7 @@ export default function NotificationsInbox() {
                                     </span>
                                     <button
                                         type="button"
+                                        data-notification-row={item.id}
                                         onClick={() => void navigate(item)}
                                         className="min-w-0 flex-1 text-left"
                                     >
@@ -766,6 +819,17 @@ export default function NotificationsInbox() {
                                             </>
                                         ) : (
                                             <>
+                                                {isTask ? (
+                                                    <Checkbox
+                                                        checked={isCompleting}
+                                                        disabled={isCompleting}
+                                                        onCheckedChange={(value) => {
+                                                            if (value === true) void completeFromInbox(item);
+                                                        }}
+                                                        aria-label={isCompleting ? t("completingTask") : t("completeTask")}
+                                                        className="mr-1 size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
+                                                    />
+                                                ) : null}
                                                 {isNudge && item.sourceId != null ? (
                                                     <Button
                                                         variant="ghost"
