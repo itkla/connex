@@ -130,7 +130,7 @@ class SecretStoreTest {
         assertThrows(IllegalStateException.class,
                 () -> testStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId(), reference));
         assertThrows(IllegalStateException.class,
-                () -> testStore.get(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, workspaceId, reference));
+                () -> testStore.get(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId(), reference));
     }
 
     @Test

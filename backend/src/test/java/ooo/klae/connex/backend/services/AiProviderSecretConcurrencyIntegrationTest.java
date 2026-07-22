@@ -121,9 +121,8 @@ class AiProviderSecretConcurrencyIntegrationTest {
     void activeKeyResolutionMakesRevokeWaitBeforeDownstreamLocks() throws Exception {
         CountDownLatch readerRootsLocked = new CountDownLatch(1);
         CountDownLatch releaseReader = new CountDownLatch(1);
-        CountDownLatch revokeUserLockAttempted = new CountDownLatch(1);
+        CountDownLatch revokeOrganizationLockAttempted = new CountDownLatch(1);
         AtomicInteger organizationShareCalls = new AtomicInteger();
-        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
         OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         doAnswer(invocation -> {
             Integer locked = realOrganizationMapper.lockByIdForShare(organization.getId());
@@ -136,9 +135,9 @@ class AiProviderSecretConcurrencyIntegrationTest {
             return locked;
         }).when(organizationMapper).lockByIdForShare(organization.getId());
         doAnswer(invocation -> {
-            revokeUserLockAttempted.countDown();
-            return realUserMapper.lockById(actor.getId());
-        }).when(userMapper).lockById(actor.getId());
+            revokeOrganizationLockAttempted.countDown();
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -148,7 +147,7 @@ class AiProviderSecretConcurrencyIntegrationTest {
 
             Future<?> revoke = executor.submit(
                     () -> aiProviderConfigService.revoke(workspace.getId(), actor.getId()));
-            assertTrue(revokeUserLockAttempted.await(10, TimeUnit.SECONDS));
+            assertTrue(revokeOrganizationLockAttempted.await(10, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
             releaseReader.countDown();
 
@@ -170,8 +169,8 @@ class AiProviderSecretConcurrencyIntegrationTest {
         replaceCredentialWithOldKey();
         CountDownLatch secretRewrapped = new CountDownLatch(1);
         CountDownLatch releaseReader = new CountDownLatch(1);
-        CountDownLatch revokeUserLockAttempted = new CountDownLatch(1);
-        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        CountDownLatch revokeOrganizationLockAttempted = new CountDownLatch(1);
+        OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         SecretValueMapper realSecretValueMapper = sqlSessionTemplate.getMapper(SecretValueMapper.class);
         doAnswer(invocation -> {
             int updated = realSecretValueMapper.updateRewrapped(
@@ -192,9 +191,9 @@ class AiProviderSecretConcurrencyIntegrationTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString());
         doAnswer(invocation -> {
-            revokeUserLockAttempted.countDown();
-            return realUserMapper.lockById(actor.getId());
-        }).when(userMapper).lockById(actor.getId());
+            revokeOrganizationLockAttempted.countDown();
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -204,7 +203,7 @@ class AiProviderSecretConcurrencyIntegrationTest {
 
             Future<?> revoke = executor.submit(
                     () -> aiProviderConfigService.revoke(workspace.getId(), actor.getId()));
-            assertTrue(revokeUserLockAttempted.await(10, TimeUnit.SECONDS));
+            assertTrue(revokeOrganizationLockAttempted.await(10, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
             releaseReader.countDown();
 
