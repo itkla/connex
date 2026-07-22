@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.beans.Introduction;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.IntroOverviewDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -58,6 +59,7 @@ public class IntroductionService {
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
     private final ScoringService scoringService;
+    private final WarmPathService warmPathService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final Clock clock;
@@ -105,6 +107,25 @@ public class IntroductionService {
     public List<IntroSuggestionDto> getSuggestions(int limit) {
         int resolved = limit <= 0 ? DEFAULT_SUGGESTION_LIMIT : Math.min(limit, MAX_SUGGESTION_LIMIT);
         return computeSuggestions(workspaceService.getCurrentWorkspaceId(), resolved);
+    }
+
+    /**
+     * The introductions page's combined feed — give-side suggestions and receive-side warm paths
+     * (issue #630) — computed from a single workspace warmth pass instead of one full rescore per
+     * section.
+     */
+    public IntroOverviewDto getOverview(int suggestionLimit, int pathLimit) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int resolvedSuggestions = suggestionLimit <= 0
+            ? DEFAULT_SUGGESTION_LIMIT
+            : Math.min(suggestionLimit, MAX_SUGGESTION_LIMIT);
+        Map<Integer, RelationshipTemperatureDto> warmth = new HashMap<>();
+        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
+            warmth.put(temperature.getId(), temperature);
+        }
+        return new IntroOverviewDto(
+            computeSuggestions(workspaceId, resolvedSuggestions, warmth),
+            warmPathService.computePaths(workspaceId, WarmPathService.resolveLimit(pathLimit), warmth));
     }
 
     /**

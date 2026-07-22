@@ -112,9 +112,25 @@
     </where>
   </sql>
 
+  <sql id="memberScopePredicate">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND d.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND d.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND d.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
   <sql id="dealListFilterWhere">
     <where>
       AND d.workspace_id = #{workspaceId}
+      <include refid="memberScopePredicate"/>
       <if test="query != null">
         AND (d.name LIKE #{query}
           OR d.currency LIKE #{query}
@@ -184,7 +200,7 @@
 
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
     SELECT dp.person_id AS deal_person_pid,
-           p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
+           p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
            p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at,
            c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url,
            dp.role
@@ -333,6 +349,17 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="getDealsFiltered" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    ORDER BY d.id
+  </select>
+
   <select id="countDealsFiltered" resultType="long">
     SELECT COUNT(*)
     FROM deal d
@@ -378,6 +405,7 @@
     SELECT MIN(d.closed_at) AS earliest, MAX(d.closed_at) AS latest
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -393,6 +421,7 @@
              SELECT SUM(d.actual_value)
              FROM deal d FORCE INDEX FOR JOIN (idx_deal_workspace_closed_at)
              WHERE d.workspace_id = #{workspaceId}
+             <include refid="memberScopePredicate"/>
              <if test="currency != null">
                AND d.currency = #{currency}
              </if>
@@ -419,6 +448,7 @@
            COALESCE(SUM(d.actual_value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -434,6 +464,7 @@
            COALESCE(SUM(d.value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -451,6 +482,7 @@
                THEN (CASE WHEN d.won THEN d.actual_value ELSE d.value END) END), 0) AS closed_value
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -480,6 +512,7 @@
                AND d.closed_at &gt;= d.created_at THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -515,6 +548,7 @@
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -530,6 +564,7 @@
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -546,6 +581,7 @@
            COALESCE(SUM(d.value), 0) AS value
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -564,6 +600,7 @@
            COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -581,6 +618,7 @@
            COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &gt; 60 THEN 1 END) AS stalled
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -616,6 +654,7 @@
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -628,6 +667,7 @@
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
     <if test="currency != null">
       AND d.currency = #{currency}
     </if>
@@ -662,13 +702,23 @@
     SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count, c.name AS label
     FROM deal d
     JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
-    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.company_id IS NOT NULL
     GROUP BY d.company_id, c.name
     UNION ALL
     SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
-    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NULL
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.company_id IS NULL
     HAVING COUNT(*) &gt; 0
+  </select>
+
+  <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(CAST(d.owner_id AS CHAR), '__empty__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY d.owner_id
   </select>
 
   <select id="countsByCurrency" resultType="ooo.klae.connex.backend.dto.FacetCount">
@@ -676,6 +726,14 @@
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
     GROUP BY d.currency
+  </select>
+
+  <select id="getDealBoard" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.pipeline_id = #{pipelineId}
+    ORDER BY d.stage_id, d.position, d.id
   </select>
 
   <select id="getDealsByPipelineId" resultMap="DealResult">
@@ -743,6 +801,13 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getDealByIdForUpdate" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal FORCE INDEX (uq_deal_workspace_id)
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -781,9 +846,10 @@
   </select>
 
   <select id="getRiskCandidateIds" resultType="int">
-    SELECT id FROM deal
-    WHERE workspace_id = #{workspaceId} AND won IS NULL AND risk_excluded = FALSE
-    ORDER BY expected_close_date IS NULL, expected_close_date, updated_at, id
+    SELECT d.id FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.won IS NULL AND d.risk_excluded = FALSE
+    <include refid="memberScopePredicate"/>
+    ORDER BY d.expected_close_date IS NULL, d.expected_close_date, d.updated_at, d.id
     LIMIT #{limit}
   </select>
 
@@ -829,6 +895,16 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateName">
+    UPDATE deal SET name = #{name}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateValue">
+    UPDATE deal SET value = #{value}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <select id="getDealIdsInStageOrdered" resultType="java.lang.Integer">
     SELECT id FROM deal
     WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
@@ -840,9 +916,20 @@
     WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
   </select>
 
-  <update id="setPosition">
-    UPDATE deal SET position = #{position}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  <update id="setPositions">
+    UPDATE deal
+    SET position = CASE id
+      <foreach collection="positions" item="entry">
+        WHEN #{entry.id} THEN #{entry.position}
+      </foreach>
+      ELSE position
+    END
+    WHERE workspace_id = #{workspaceId}
+      AND stage_id = #{stageId}
+      AND id IN
+      <foreach collection="positions" item="entry" open="(" separator="," close=")">
+        #{entry.id}
+      </foreach>
   </update>
 
   <update id="updateExpectedCloseDate">
@@ -906,7 +993,7 @@
     FROM deal d
     JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
-    ON DUPLICATE KEY UPDATE role = VALUES(role)
+    ON DUPLICATE KEY UPDATE role = #{role}
   </insert>
 
   <update id="updatePersonRole">

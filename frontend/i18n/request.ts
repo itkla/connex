@@ -22,6 +22,10 @@ const namespaces = [
     "contacts",
     "deals",
     "pipelines",
+    "products",
+    "document-templates",
+    "approval-policies",
+    "campaigns",
     "users",
     "map",
     "introductions",
@@ -32,6 +36,7 @@ const namespaces = [
     "importExport",
     "legal",
     "docs",
+    "unsubscribe",
 ] as const;
 
 async function loadMessages(locale: Locale) {

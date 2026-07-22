@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper">
+
+  <resultMap id="savedViewResult" type="SavedView">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="userId" column="user_id"/>
+    <result property="recordType" column="record_type"/>
+    <result property="name" column="name"/>
+    <result property="config" column="config_json"
+            typeHandler="ooo.klae.connex.backend.mappers.JsonNodeTypeHandler"/>
+    <result property="visibility" column="visibility"/>
+    <result property="position" column="position"/>
+    <result property="ownedByCurrentUser" column="owned_by_current_user"/>
+    <result property="pinned" column="pinned"/>
+    <result property="pinPosition" column="pin_position"/>
+    <result property="defaultView" column="is_default"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="projectedColumns">
+    sv.id, sv.workspace_id, sv.user_id, sv.record_type, sv.name, sv.config_json,
+    sv.visibility, sv.position,
+    CASE WHEN sv.user_id = #{userId} THEN TRUE ELSE FALSE END AS owned_by_current_user,
+    CASE WHEN pin.saved_view_id IS NULL THEN FALSE ELSE TRUE END AS pinned,
+    pin.position AS pin_position,
+    CASE WHEN def.saved_view_id IS NULL THEN FALSE ELSE TRUE END AS is_default,
+    sv.created_at, sv.updated_at
+  </sql>
+
+  <sql id="projectionJoins">
+    LEFT JOIN saved_view_pin pin
+      ON pin.workspace_id = sv.workspace_id
+     AND pin.user_id = #{userId}
+     AND pin.saved_view_id = sv.id
+    LEFT JOIN saved_view_default def
+      ON def.workspace_id = sv.workspace_id
+     AND def.user_id = #{userId}
+     AND def.record_type = sv.record_type
+     AND def.saved_view_id = sv.id
+  </sql>
+
+  <select id="getAccessiblePins" resultMap="savedViewResult">
+    SELECT <include refid="projectedColumns"/>
+    FROM saved_view_pin selected_pin
+    JOIN saved_view sv
+      ON sv.workspace_id = selected_pin.workspace_id
+     AND sv.id = selected_pin.saved_view_id
+    <include refid="projectionJoins"/>
+    WHERE selected_pin.workspace_id = #{workspaceId}
+      AND selected_pin.user_id = #{userId}
+      AND (sv.user_id = #{userId} OR sv.visibility = 'workspace')
+    ORDER BY selected_pin.position, sv.id
+  </select>
+
+  <select id="getPin" resultType="SavedViewPin">
+    SELECT workspace_id, user_id, saved_view_id, position, created_at, updated_at
+    FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND saved_view_id = #{savedViewId}
+  </select>
+
+  <select id="maxPinPosition" resultType="int">
+    SELECT COALESCE(MAX(position), -1)
+    FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </select>
+
+  <update id="resequencePins">
+    UPDATE saved_view_pin pin
+    JOIN (
+      SELECT saved_view_id,
+             ROW_NUMBER() OVER (ORDER BY position, saved_view_id) - 1 AS new_position
+      FROM saved_view_pin
+      WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    ) ordered ON ordered.saved_view_id = pin.saved_view_id
+    SET pin.position = ordered.new_position
+    WHERE pin.workspace_id = #{workspaceId} AND pin.user_id = #{userId}
+  </update>
+
+  <insert id="insertPin">
+    INSERT INTO saved_view_pin (workspace_id, user_id, saved_view_id, position)
+    VALUES (#{workspaceId}, #{userId}, #{savedViewId}, #{position})
+  </insert>
+
+  <update id="updatePinPosition">
+    UPDATE saved_view_pin
+    SET position = #{position}
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND saved_view_id = #{savedViewId}
+  </update>
+
+  <delete id="deletePin">
+    DELETE FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND saved_view_id = #{savedViewId}
+  </delete>
+
+  <select id="getAccessibleDefault" resultMap="savedViewResult">
+    SELECT <include refid="projectedColumns"/>
+    FROM saved_view_default selected_default
+    JOIN saved_view sv
+      ON sv.workspace_id = selected_default.workspace_id
+     AND sv.id = selected_default.saved_view_id
+     AND sv.record_type = selected_default.record_type
+    <include refid="projectionJoins"/>
+    WHERE selected_default.workspace_id = #{workspaceId}
+      AND selected_default.user_id = #{userId}
+      AND selected_default.record_type = #{recordType}
+      AND (sv.user_id = #{userId} OR sv.visibility = 'workspace')
+  </select>
+
+  <select id="getDefault" resultType="SavedViewDefault">
+    SELECT workspace_id, user_id, record_type, saved_view_id, created_at, updated_at
+    FROM saved_view_default
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND record_type = #{recordType}
+  </select>
+
+  <insert id="upsertDefault">
+    INSERT INTO saved_view_default (workspace_id, user_id, record_type, saved_view_id)
+    VALUES (#{workspaceId}, #{userId}, #{recordType}, #{savedViewId})
+    ON DUPLICATE KEY UPDATE saved_view_id = VALUES(saved_view_id)
+  </insert>
+
+  <delete id="deleteDefault">
+    DELETE FROM saved_view_default
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND record_type = #{recordType}
+  </delete>
+
+  <delete id="deleteNonOwnerPinsForView">
+    DELETE FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId}
+      AND saved_view_id = #{savedViewId}
+      AND user_id &lt;&gt; #{ownerUserId}
+  </delete>
+
+  <delete id="deleteNonOwnerDefaultsForView">
+    DELETE FROM saved_view_default
+    WHERE workspace_id = #{workspaceId}
+      AND saved_view_id = #{savedViewId}
+      AND user_id &lt;&gt; #{ownerUserId}
+  </delete>
+
+  <delete id="deletePinsForUser">
+    DELETE FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteDefaultsForUser">
+    DELETE FROM saved_view_default
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deletePinsForFreshMembership">
+    DELETE FROM saved_view_pin
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteDefaultsForFreshMembership">
+    DELETE FROM saved_view_default
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deletePinsForUserAnywhere">
+    DELETE FROM saved_view_pin WHERE user_id = #{userId}
+  </delete>
+
+  <delete id="deleteDefaultsForUserAnywhere">
+    DELETE FROM saved_view_default WHERE user_id = #{userId}
+  </delete>
+
+</mapper>

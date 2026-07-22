@@ -18,7 +18,9 @@
     "openTasksSubtitle": "{count} 件未完了",
     "dealsSubtitle": "{count} 件の案件",
     "loading": "読み込み中...",
-    "timeline": "タイムライン"
+    "timeline": "タイムライン",
+    "owner": "担当者",
+    "ownerUnassigned": "未割り当て"
   },
   "CompaniesBrowser": {
     "title": "企業",
@@ -70,7 +72,12 @@
     "clearSelection": "選択を解除",
     "pageSelected": "このページの{count}件をすべて選択しました。",
     "selecting": "選択中…",
-    "selectAllMatching": "{total}件すべてを選択"
+    "selectAllMatching": "{total}件すべてを選択",
+    "columnOwner": "担当者",
+    "assignOwner": "担当者を割り当て",
+    "toastOwnerAssigned": "{count}社の会社の担当者を更新しました",
+    "toastOwnerAssignedPartial": "{total}社中{succeeded}社の会社の担当者を更新しました",
+    "toastOwnerFailed": "{failed}社の会社を更新できませんでした"
   },
   "CompaniesActionsMenu": {
     "edit": "編集",
@@ -88,7 +95,10 @@
     "toastContactCreated": "コンタクトを作成しました",
     "toastCreateContactFailed": "コンタクトを作成できませんでした",
     "toastDealCreated": "案件を作成しました",
-    "toastCreateDealFailed": "案件を作成できませんでした"
+    "toastCreateDealFailed": "案件を作成できませんでした",
+    "assignOwner": "担当者を割り当て",
+    "toastOwnerAssigned": "担当者を更新しました",
+    "toastOwnerFailed": "担当者を更新できませんでした"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "企業ページを開く",
@@ -104,7 +114,8 @@
     "projected": "予測収益",
     "tooltipActivities": "アクティビティ · {count}",
     "tooltipTasks": "タスク · {count}",
-    "tooltipNotes": "メモ · {count}"
+    "tooltipNotes": "メモ · {count}",
+    "ownerLabel": "担当者: {name}"
   },
   "CompaniesContactsGrid": {
     "contacts": "コンタクト",

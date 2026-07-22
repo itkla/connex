@@ -33,6 +33,8 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.SSO)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_GOOGLE)).thenReturn(false);
         when(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT)).thenReturn(true);
+        when(capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_GOOGLE)).thenReturn(true);
+        when(capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_MICROSOFT)).thenReturn(false);
         when(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL)).thenReturn(false);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT)).thenReturn(true);
@@ -42,6 +44,8 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.sso").value(true))
                 .andExpect(jsonPath("$.socialLogin.google").value(false))
                 .andExpect(jsonPath("$.socialLogin.microsoft").value(true))
+                .andExpect(jsonPath("$.connectedAccounts.google").value(true))
+                .andExpect(jsonPath("$.connectedAccounts.microsoft").value(false))
                 .andExpect(jsonPath("$.mailManaged").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
                 .andExpect(jsonPath("$.businessCardImport").value(true));

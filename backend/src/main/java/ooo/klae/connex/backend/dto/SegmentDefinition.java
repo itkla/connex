@@ -4,6 +4,7 @@ import java.util.List;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
@@ -26,11 +27,11 @@ public class SegmentDefinition {
 
     @Valid
     @Size(max = 16)
-    private List<SegmentCondition> conditions;
+    private List<@NotNull @Valid SegmentCondition> conditions;
 
     @Valid
     @Size(max = 8)
-    private List<SegmentDefinition> groups;
+    private List<@NotNull @Valid SegmentDefinition> groups;
 
     private boolean negate;
 }

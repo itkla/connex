@@ -136,6 +136,18 @@ public class ReportService {
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
 
+    /**
+     * Controls how a generated document resolves its AI narrative. {@code NONE} skips it (exports),
+     * {@code CACHED} returns a cached narrative without ever calling the provider (interactive
+     * figures-first load), and {@code FULL} performs the blocking generation (client follow-up and
+     * snapshot freeze).
+     */
+    public enum NarrativeMode {
+        NONE,
+        CACHED,
+        FULL
+    }
+
     /** Returns all report definitions in the active workspace. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportDefinitionDto> list() {
@@ -274,17 +286,22 @@ public class ReportService {
                 "Deleted report " + definition.getName(), null);
     }
 
-    /** Generates deterministic figures and the optional grounded narrative. */
+    /**
+     * Generates deterministic figures and resolves the grounded narrative per the requested mode.
+     * {@link NarrativeMode#CACHED} never invokes the AI provider, so the figures return immediately
+     * and the client resolves a {@code not_cached} narrative with a follow-up {@link NarrativeMode#FULL}
+     * request.
+     */
     @RequirePermission(Permission.REPORT_READ)
-    public ReportDocumentDto generate(int id, ReportGenerateRequest request) {
-        return generateInternal(id, request, true);
+    public ReportDocumentDto generate(int id, ReportGenerateRequest request, NarrativeMode mode) {
+        return generateInternal(id, request, mode);
     }
 
     /** Freezes a generated report document as an immutable snapshot. */
     @RequirePermission(Permission.REPORT_CREATE)
     public ReportSnapshotDto createSnapshot(int id, ReportGenerateRequest request) {
         workspaceService.requirePermission(Permission.REPORT_READ);
-        ReportDocumentDto document = generateInternal(id, request, true);
+        ReportDocumentDto document = generateInternal(id, request, NarrativeMode.FULL);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String computedResult = serialize(document, MAX_SNAPSHOT_BYTES, "Report snapshot is too large");
         ReportSnapshot persisted = transactionTemplate.execute(status -> persistSnapshot(
@@ -366,7 +383,7 @@ public class ReportService {
     /** Exports a live report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportCsv(int id, ReportGenerateRequest request) {
-        return appendixCsv(generateInternal(id, request, false));
+        return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
@@ -375,7 +392,7 @@ public class ReportService {
         return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
     }
 
-    private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, boolean includeNarrative) {
+    private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, NarrativeMode mode) {
         ReportDefinition definition = requireDefinition(id);
         ReportConfig config = parseConfig(definition.getConfigJson());
         validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
@@ -383,10 +400,13 @@ public class ReportService {
         validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         GeneratedFigures figures = generateFigures(workspaceId, config, period);
-        ReportNarrativeDto narrative = includeNarrative
-                ? aiReportNarrativeService.generate(
-                        id, definition.getName(), period.start(), period.end(), figures.appendix())
-                : ReportNarrativeDto.unavailable("not_requested");
+        ReportNarrativeDto narrative = switch (mode) {
+            case NONE -> ReportNarrativeDto.unavailable("not_requested");
+            case CACHED -> aiReportNarrativeService.cachedNarrative(
+                    id, definition.getName(), period.start(), period.end(), figures.appendix());
+            case FULL -> aiReportNarrativeService.generate(
+                    id, definition.getName(), period.start(), period.end(), figures.appendix());
+        };
         List<ReportCitationDto> citations = citations(narrative, figures.appendix());
         return new ReportDocumentDto(
                 toDefinitionDto(definition), period.start(), period.end(), period.priorStart(), period.priorEnd(),
@@ -424,7 +444,32 @@ public class ReportService {
         }
         return widgetResult(
                 widget, widgetIndex, current, prior, effectiveBucket, period,
-                priorComparable(widget, filters));
+                priorComparable(widget, filters),
+                networkAuthoritativeTotalRows(widget, inputs));
+    }
+
+    /**
+     * Authoritative total rows for a grouped relationship-network widget: the ungrouped ("none")
+     * aggregation over the same snapshot, so a display cap (top-N paths, connectors, or reverse-intro
+     * pairs) never truncates the KPI scalar or a scheduled-delivery headline. Distinct-count measures
+     * (reachable accounts) also require this because summing per-connector rows double-counts a company
+     * reachable through several connectors. Returns {@code null} for non-network or already-ungrouped
+     * widgets, which keep deriving their total from their own rows.
+     */
+    private List<ReportAggregateRow> networkAuthoritativeTotalRows(
+            ReportWidgetConfig widget, GenerationInputs inputs) {
+        if ("none".equals(normalizeGroup(widget.groupBy()))) {
+            return null;
+        }
+        ReportWidgetConfig ungrouped = new ReportWidgetConfig(
+                widget.id(), widget.title(), widget.dataSource(), widget.measure(), "none", widget.chartType());
+        if (REVERSE_INTRO_MEASURES.contains(widget.measure())) {
+            return ReportNetworkService.aggregateReverseIntro(ungrouped, inputs.reverseIntroSuggestions());
+        }
+        if (WARM_INTRO_MEASURES.contains(widget.measure())) {
+            return ReportNetworkService.aggregateWarmIntro(ungrouped, inputs.warmIntroOpportunities());
+        }
+        return null;
     }
 
     private RowPair aggregateWidget(
@@ -506,7 +551,8 @@ public class ReportService {
             List<ReportAggregateRow> prior,
             String bucket,
             PeriodWindow period,
-            boolean priorComparable) {
+            boolean priorComparable,
+            List<ReportAggregateRow> authoritativeTotalRows) {
         Map<String, ReportAggregateRow> priorByKey = new HashMap<>();
         for (ReportAggregateRow row : prior) {
             priorByKey.put(comparisonKey(row, widget, bucket, period.priorStart()), row);
@@ -557,7 +603,17 @@ public class ReportService {
         boolean additive = !Set.of("win_rate", "avg_cycle_days").contains(widget.measure())
                 || "none".equals(normalizeGroup(widget.groupBy()));
         boolean emptyAttainment = "attainment".equals(widget.measure()) && current.isEmpty();
-        BigDecimal publicTotal = units.size() <= 1 && additive && !emptyAttainment ? total : null;
+        BigDecimal scalarTotal = total;
+        Set<String> scalarUnits = units;
+        if (authoritativeTotalRows != null) {
+            scalarTotal = BigDecimal.ZERO;
+            scalarUnits = new LinkedHashSet<>();
+            for (ReportAggregateRow row : authoritativeTotalRows) {
+                scalarTotal = scalarTotal.add(safe(row.value()));
+                scalarUnits.add(normalizedUnit(row.unit()));
+            }
+        }
+        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !emptyAttainment ? scalarTotal : null;
         BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable && !emptyAttainment
                 ? priorTotal
                 : null;

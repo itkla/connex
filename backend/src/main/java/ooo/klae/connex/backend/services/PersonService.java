@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -19,6 +20,8 @@ import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -26,6 +29,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.LinkedHashMap;
@@ -47,13 +51,16 @@ import lombok.RequiredArgsConstructor;
 public class PersonService {
     private final PersonMapper personMapper;
     private final ShareMapper shareMapper;
+    private final AiOutputCacheMapper aiOutputCacheMapper;
     private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
     private final DealMapper dealMapper;
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuthService authService;
     private final AuditService auditService;
+    private final NotificationChangePublisher notificationChanges;
     private final WorkspaceService workspaceService;
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
@@ -96,14 +103,16 @@ public class PersonService {
     }
 
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, int limit, int offset) {
+            List<String> titles, boolean noCompany, MemberScope memberScope, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
-            companies, titles, noCompany, limit, offset);
+            companies, titles, noCompany, memberScope, limit, offset);
     }
 
-    public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
-        return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
+    public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope) {
+        return personMapper.countPersons(
+            workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany, memberScope);
     }
 
     /**
@@ -112,24 +121,27 @@ public class PersonService {
      * bulk action can target the whole filtered set, not just the loaded page.
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
-            boolean noCompany) {
-        if (!hasMatchingIdFilter(query, companies, titles, noCompany)) {
+            boolean noCompany, MemberScope memberScope) {
+        if (!hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        long total = personMapper.countPersons(workspaceId, query, companies, titles, noCompany);
+        long total = personMapper.countPersons(
+            workspaceId, query, companies, titles, noCompany, memberScope);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
-        return personMapper.getPersonIdsFiltered(workspaceId, query, companies, titles, noCompany, MAX_MATCHING_IDS);
+        return personMapper.getPersonIdsFiltered(
+            workspaceId, query, companies, titles, noCompany, memberScope, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
-            boolean noCompany) {
+            boolean noCompany, MemberScope memberScope) {
         return query != null
             || (companies != null && !companies.isEmpty())
             || (titles != null && !titles.isEmpty())
-            || noCompany;
+            || noCompany
+            || (memberScope != null && memberScope.mode() != MemberScope.Mode.ALL_TEAM);
     }
 
     public List<String> distinctCompanies() {
@@ -142,6 +154,10 @@ public class PersonService {
 
     public boolean hasPersonWithoutCompany() {
         return personMapper.hasPersonWithoutCompany(workspaceService.getCurrentWorkspaceId());
+    }
+
+    public List<FacetCount> countsByOwner() {
+        return personMapper.countsByOwner(workspaceService.getCurrentWorkspaceId());
     }
 
     /**
@@ -171,6 +187,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
+        person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
@@ -194,6 +211,7 @@ public class PersonService {
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
+        person.setOwnerId(before.getOwnerId());
         person.setImageUrl(before.getImageUrl());
         personMapper.update(person);
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
@@ -205,6 +223,23 @@ public class PersonService {
             auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return after;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwner(int personId, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requireOwnedPerson(workspaceId, personId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        personMapper.updateOwner(workspaceId, personId, ownerId);
+        auditService.record("person.updateOwner", "person", personId, before.getName(),
+            "Updated owner on " + before.getName(),
+            auditService.singleChange("ownerId", before.getOwnerId(), ownerId));
+        notificationChanges.publish(workspaceId, "person", personId);
+        if (!Objects.equals(before.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "person", personId, "person.owner_changed");
+        }
+        return requireOwnedPerson(workspaceId, personId);
     }
 
     @Transactional
@@ -271,15 +306,21 @@ public class PersonService {
         Person before = requireOwnedPerson(workspaceId, id);
         personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
+        int purgedAiOutputs = suspended || provisionCeased
+            ? aiOutputCacheMapper.deleteForPerson(workspaceId, id)
+            : 0;
         Person after = requireOwnedPerson(workspaceId, id);
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
-        if (diff != null || revokedShares > 0) {
+        if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {
             Map<String, Object> changes = new LinkedHashMap<>();
             if (diff != null) {
                 changes.putAll(diff);
             }
             if (revokedShares > 0) {
                 changes.put("revokedShares", revokedShares);
+            }
+            if (purgedAiOutputs > 0) {
+                changes.put("purgedAiOutputs", purgedAiOutputs);
             }
             auditService.record("person.restrictions", "person", id, before.getName(),
                 "Updated processing restrictions for " + before.getName(), changes);

@@ -55,12 +55,31 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "PersonEmploymentMapper",
         MAPPERS + "PipelineMapper",
         MAPPERS + "TagMapper",
+        MAPPERS + "ProductMapper",
+        MAPPERS + "DealLineItemMapper",
+        MAPPERS + "DocumentTemplateMapper",
+        MAPPERS + "DealDocumentMapper",
+        MAPPERS + "ApprovalPolicyMapper",
+        MAPPERS + "DocumentApprovalMapper",
         MAPPERS + "CustomFieldDefinitionMapper",
         MAPPERS + "CustomFieldValueMapper",
         MAPPERS + "SavedViewMapper",
+        MAPPERS + "SavedViewPreferenceMapper",
         MAPPERS + "UserDashboardMapper",
         MAPPERS + "SegmentMapper",
         MAPPERS + "RuleMapper",
+        MAPPERS + "WorkflowMapper",
+        MAPPERS + "WorkflowVersionMapper",
+        MAPPERS + "CampaignMapper",
+        MAPPERS + "ConsentMapper",
+        MAPPERS + "SuppressionMapper",
+        MAPPERS + "CampaignMessageMapper",
+        MAPPERS + "CampaignSendMapper",
+        MAPPERS + "CampaignDeliveryMapper",
+        MAPPERS + "CampaignEngagementMapper",
+        MAPPERS + "DeliveryProviderConfigMapper",
+        MAPPERS + "ConnectorConfigMapper",
+        MAPPERS + "CampaignAudienceExportMapper",
         MAPPERS + "ActivityMapper",
         MAPPERS + "NoteMapper",
         MAPPERS + "ObjectDeletionQueueMapper",
@@ -113,9 +132,11 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "OrgPlacementMapper",
         MAPPERS + "ObjectStorageBackendIdentityMapper",
         MAPPERS + "PasswordResetTokenMapper",
+        MAPPERS + "NotificationQuietHoursMapper",
         MAPPERS + "PreferenceMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
         MAPPERS + "SecretValueMapper",
+        MAPPERS + "ProviderConnectionMapper",
         MAPPERS + "SsoConnectionMapper",
         MAPPERS + "SsoDomainMapper",
         MAPPERS + "SsoLinkChallengeMapper",
@@ -139,7 +160,8 @@ public class TenantScopeInterceptor implements Interceptor {
      * run without a resolved workspace context.
      *
      * <p>The offboarding statements (#440 increment 3) replace the dropped
-     * cross-plane foreign keys. The {@code *Anywhere} guards and erasures run
+     * cross-plane foreign keys, including company, contact, and deal ownership.
+     * The {@code *Anywhere} guards and erasures run
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
@@ -147,11 +169,19 @@ public class TenantScopeInterceptor implements Interceptor {
      * back invitation decline and the fresh-membership ghost clean (registration,
      * invites, invite links, SSO JIT provisioning — see
      * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
-     * with no active workspace may reach; both anchor {@code workspace_id} and
-     * the user id in SQL. The recipient
+     * with no active workspace may reach. The fresh-membership saved-view
+     * cleanup follows the same workspace-and-user-bound policy. These statements
+     * anchor {@code workspace_id} and the user id in SQL. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
-     * offboarding flows.
+     * offboarding flows. Workflow discovery is likewise bound to the departing
+     * user across workflow, immutable-version, and linked-rule creator/run-as
+     * columns; subsequent locks and writes use exact workspace-scoped keys. The
+     * AI-output-cache purge (issue #221 cease-of-use) is
+     * org-scoped: restricting a contact removes its cached AI outputs across every
+     * workspace in the contact's organization (including same-org grantee
+     * workspaces it was shared into), org-anchored via a {@code workspace} join
+     * rather than a single {@code workspace_id} predicate.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
@@ -167,21 +197,36 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
+        MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",
         MAPPERS + "TaskMapper.unassignAnywhere",
         MAPPERS + "AttachmentMapper.clearUploaderAnywhere",
-        MAPPERS + "RuleMapper.clearRunAsAnywhere",
-        MAPPERS + "RuleMapper.clearCreatedByAnywhere",
+        MAPPERS + "CampaignMapper.clearCampaignUserReferencesAnywhere",
+        MAPPERS + "CampaignMapper.clearSnapshotCreatorsAnywhere",
+        MAPPERS + "CampaignDeliveryMapper.getByToken",
+        MAPPERS + "DeliveryProviderConfigMapper.findByWebhookTokenHash",
+        MAPPERS + "ConsentMapper.clearEventCreatorsAnywhere",
+        MAPPERS + "WorkflowMapper.findAffectedByUserAnywhere",
+        MAPPERS + "WorkflowVersionMapper.findLockCandidatesByUserAnywhere",
+        MAPPERS + "RuleMapper.findLockCandidatesByUserAnywhere",
         MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
+        MAPPERS + "SavedViewMapper.deleteForFreshMembership",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
+        MAPPERS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
+        MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
+        MAPPERS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere",
+        MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere",
         MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",
         MAPPERS + "ReportMapper.clearDefinitionCreatorsAnywhere",
         MAPPERS + "ReportMapper.clearSnapshotGeneratorsAnywhere",
-        MAPPERS + "NotificationMapper.bumpStateVersions"
+        MAPPERS + "SuppressionMapper.clearCreatorsAnywhere",
+        MAPPERS + "NotificationMapper.bumpStateVersions",
+        MAPPERS + "AiOutputCacheMapper.deleteForPerson"
     );
 
     private final TenantContext tenantContext;

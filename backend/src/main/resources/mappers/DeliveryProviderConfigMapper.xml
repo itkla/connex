@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper">
+
+  <resultMap id="DeliveryProviderConfigResult" type="DeliveryProviderConfig">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="channel" column="channel"/>
+    <result property="provider" column="provider"/>
+    <result property="endpoint" column="endpoint"/>
+    <result property="fromAddress" column="from_address"/>
+    <result property="fromName" column="from_name"/>
+    <result property="credentialRef" column="credential_ref"/>
+    <result property="credentialLast4" column="credential_last4"/>
+    <result property="webhookTokenHash" column="webhook_token_hash"/>
+    <result property="webhookSecretRef" column="webhook_secret_ref"/>
+    <result property="enabled" column="enabled"/>
+    <result property="createdById" column="created_by_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="columns">
+    id, workspace_id, channel, provider, endpoint, from_address, from_name,
+    credential_ref, credential_last4, webhook_token_hash, webhook_secret_ref,
+    enabled, created_by_id, created_at, updated_at
+  </sql>
+
+  <select id="listByWorkspace" resultMap="DeliveryProviderConfigResult">
+    SELECT <include refid="columns"/>
+    FROM delivery_provider_config
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY channel
+  </select>
+
+  <select id="findByWorkspaceChannel" resultMap="DeliveryProviderConfigResult">
+    SELECT <include refid="columns"/>
+    FROM delivery_provider_config
+    WHERE workspace_id = #{workspaceId} AND channel = #{channel}
+  </select>
+
+  <select id="findByWebhookTokenHash" resultMap="DeliveryProviderConfigResult">
+    SELECT <include refid="columns"/>
+    FROM delivery_provider_config
+    WHERE webhook_token_hash = #{webhookTokenHash}
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO delivery_provider_config
+      (workspace_id, channel, provider, endpoint, from_address, from_name,
+       credential_ref, credential_last4, webhook_token_hash, webhook_secret_ref,
+       enabled, created_by_id)
+    VALUES
+      (#{workspaceId}, #{channel}, #{provider}, #{endpoint}, #{fromAddress}, #{fromName},
+       #{credentialRef}, #{credentialLast4}, #{webhookTokenHash}, #{webhookSecretRef},
+       #{enabled}, #{createdById})
+    ON DUPLICATE KEY UPDATE
+      provider = VALUES(provider),
+      endpoint = VALUES(endpoint),
+      from_address = VALUES(from_address),
+      from_name = VALUES(from_name),
+      credential_ref = VALUES(credential_ref),
+      credential_last4 = VALUES(credential_last4),
+      webhook_token_hash = VALUES(webhook_token_hash),
+      webhook_secret_ref = VALUES(webhook_secret_ref),
+      enabled = VALUES(enabled)
+  </insert>
+
+  <delete id="delete">
+    DELETE FROM delivery_provider_config
+    WHERE workspace_id = #{workspaceId} AND channel = #{channel}
+  </delete>
+
+</mapper>

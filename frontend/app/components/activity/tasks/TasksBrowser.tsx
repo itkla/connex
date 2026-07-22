@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -32,7 +32,8 @@ import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
-import { updateTask } from '@/app/lib/api';
+import { getTaskById, updateTask } from '@/app/lib/api';
+import { useUrlSync } from '@/app/hooks/useUrlSync';
 import { toastError } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -170,6 +171,16 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const timers = useRef<number[]>([]);
+
+    const searchParams = useSearchParams();
+    useEffect(() => {
+        const taskId = searchParams.get('task');
+        if (taskId && /^\d+$/.test(taskId)) {
+            getTaskById(Number(taskId)).then(setEditingTask).catch(() => {});
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useUrlSync({ task: editingTask ? String(editingTask.id) : undefined });
 
     useEffect(() => {
         const stored = window.localStorage.getItem(QUEUE_STORAGE_KEY);

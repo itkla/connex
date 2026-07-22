@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 public class Company {
     private int id; // auto-incremented primary key
     private int workspaceId; // owning workspace
+    private Integer ownerId;
     private String name;
     private String website;
     private String industry;

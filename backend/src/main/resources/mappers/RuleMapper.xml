@@ -15,9 +15,50 @@
     ORDER BY created_at DESC, id DESC
   </select>
 
+  <select id="getByWorkspaceForUpdate" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
+  <select id="countByWorkspace" resultType="int">
+    SELECT COUNT(*) FROM rule WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="getById" resultType="Rule">
     SELECT <include refid="columns"/> FROM rule
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="findLockCandidatesByUserAnywhere" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule r
+    WHERE r.created_by_id = #{userId}
+       OR r.run_as_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1 FROM workflow w
+         WHERE w.workspace_id = r.workspace_id
+           AND w.legacy_rule_id = r.id
+           AND (w.created_by_id = #{userId}
+             OR w.updated_by_id = #{userId}
+             OR w.draft_run_as_user_id = #{userId}
+             OR EXISTS (
+               SELECT 1 FROM workflow_version v
+               WHERE v.workspace_id = w.workspace_id
+                 AND v.workflow_id = w.id
+                 AND v.id = w.active_version_id
+                 AND (v.created_by_id = #{userId}
+                   OR v.published_by_id = #{userId}
+                   OR v.run_as_user_id = #{userId})
+             ))
+       )
+    ORDER BY r.workspace_id, r.id
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
@@ -38,6 +79,20 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateEnabled">
+    UPDATE rule SET enabled = #{enabled}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
+  </update>
+
+  <update id="redactUserReferences">
+    UPDATE rule
+    SET run_as_user_id = IF(run_as_user_id = #{userId}, NULL, run_as_user_id),
+        created_by_id = IF(created_by_id = #{userId}, NULL, created_by_id)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND (run_as_user_id = #{userId} OR created_by_id = #{userId})
+  </update>
+
   <delete id="delete">
     DELETE FROM rule WHERE workspace_id = #{workspaceId} AND id = #{id}
   </delete>
@@ -50,6 +105,10 @@
 
   <select id="workspaceIdsWithEnabledScheduleRules" resultType="int">
     SELECT DISTINCT workspace_id FROM rule WHERE trigger_type = 'schedule' AND enabled = TRUE
+  </select>
+
+  <select id="workspaceIdsWithRules" resultType="int">
+    SELECT DISTINCT workspace_id FROM rule ORDER BY workspace_id
   </select>
 
   <insert id="insertExecution" useGeneratedKeys="true" keyProperty="id">
@@ -70,13 +129,5 @@
     ORDER BY executed_at DESC, id DESC
     LIMIT #{limit}
   </select>
-
-  <update id="clearRunAsAnywhere">
-    UPDATE rule SET run_as_user_id = NULL WHERE run_as_user_id = #{userId}
-  </update>
-
-  <update id="clearCreatedByAnywhere">
-    UPDATE rule SET created_by_id = NULL WHERE created_by_id = #{userId}
-  </update>
 
 </mapper>

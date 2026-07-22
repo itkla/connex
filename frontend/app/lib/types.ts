@@ -15,13 +15,13 @@ export type PageParams = {
     dir?: 'asc' | 'desc';
 };
 
-export type ContactsPageParams = PageParams & {
+export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
 };
 
-export type CompaniesPageParams = PageParams & {
+export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
     noIndustry?: boolean;
     ids?: number[];
@@ -108,11 +108,13 @@ export type PersonFacets = {
     companies: string[];
     titles: string[];
     hasNoCompany: boolean;
+    owners: FacetCount[];
 };
 
 export type CompanyFacets = {
     industries: string[];
     hasNoIndustry: boolean;
+    owners: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -405,6 +407,56 @@ export type IntroductionPayload = {
     note?: string;
 };
 
+export type WarmPathEvidence = 'connection' | 'colleagues' | 'former_colleagues';
+
+export type WarmPathReachType = 'rewarm' | 'reach';
+
+/** One avenue to a warm-path target: a warm bridge contact plus the labeled evidence tier. */
+export type WarmPathBridge = {
+    personId: number;
+    name: string;
+    title?: string | null;
+    company?: string | null;
+    imageUrl?: string | null;
+    warmth?: TemperatureBand | null;
+    evidenceType: WarmPathEvidence;
+    evidenceCompany?: string | null;
+    overlapStartYear?: number | null;
+    overlapEndYear?: number | null;
+    score: number;
+};
+
+/**
+ * A warm introduction path surfaced to the user (the "receive side"): a target contact worth
+ * reaching — dormant ({@code rewarm}) or never engaged ({@code reach}) — plus the best bridges
+ * who can make the introduction, ordered by descending score.
+ */
+export type WarmPath = {
+    targetId: number;
+    targetName: string;
+    targetTitle?: string | null;
+    targetCompany?: string | null;
+    targetImageUrl?: string | null;
+    targetWarmth?: TemperatureBand | null;
+    targetDaysSinceTouch?: number | null;
+    reachType: WarmPathReachType;
+    score: number;
+    bridges: WarmPathBridge[];
+};
+
+/** Request body identifying the warm path an accept or dismiss targets. */
+export type WarmPathPayload = {
+    targetPersonId: number;
+    bridgePersonId?: number;
+    taskDescription?: string;
+};
+
+/** Combined introductions feed — suggestions + warm paths from one backend warmth pass (#630). */
+export type IntroOverview = {
+    suggestions: IntroSuggestion[];
+    paths: WarmPath[];
+};
+
 export type User = {
     id: number;
     username: string;
@@ -450,6 +502,11 @@ export type ForgotPasswordPayload = {
 export type ResetPasswordPayload = {
     token: string;
     newPassword: string;
+};
+
+export type EmailChangePayload = {
+    newEmail: string;
+    currentPassword: string;
 };
 
 export type ResetTokenValidation = {
@@ -675,6 +732,7 @@ export type UpdateNotePayload = {
 export type Company = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     website: string;
     industry: string;
@@ -738,6 +796,7 @@ export type UpdateCompanyPayload = {
 export type Contact = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     email: string;
     phone: string;
@@ -756,6 +815,61 @@ export type Contact = {
     /** Engine-evaluation opt-outs (issue #358); read-only, set via the evaluation endpoint. */
     riskExcluded?: boolean;
     introExcluded?: boolean;
+    /** APPI processing restrictions (issue #221); read-only, set via the restrictions endpoint. */
+    suspendedAt?: string | null;
+    provisionCeasedAt?: string | null;
+};
+
+export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';
+
+export type DataSubjectRequestStatus =
+    | 'received'
+    | 'verifying'
+    | 'in_progress'
+    | 'responded'
+    | 'refused'
+    | 'closed';
+
+export type DataSubjectRequest = {
+    id: number;
+    orgId: number;
+    requestType: DataSubjectRequestType;
+    status: DataSubjectRequestStatus;
+    channel?: string | null;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string | null;
+    subjectWorkspaceId?: number | null;
+    subjectPersonId?: number | null;
+    receivedAt: string;
+    identityVerifiedAt?: string | null;
+    dueAt?: string | null;
+    respondedAt?: string | null;
+    closedAt?: string | null;
+    summary?: string | null;
+    resolution?: string | null;
+    createdBy?: number | null;
+    updatedBy?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DataSubjectRequestBody = {
+    requestType: DataSubjectRequestType;
+    status?: DataSubjectRequestStatus;
+    channel?: string;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string;
+    subjectWorkspaceId?: number;
+    subjectPersonId?: number;
+    receivedAt?: string;
+    identityVerifiedAt?: string;
+    dueAt?: string;
+    respondedAt?: string;
+    closedAt?: string;
+    summary?: string;
+    resolution?: string;
 };
 
 export type Deal = {
@@ -917,6 +1031,252 @@ export type UpdateTagPayload = {
     color?: string;
 };
 
+export type BillingFrequency = 'one_time' | 'recurring';
+export type LineDiscountType = 'amount' | 'percent';
+
+/** A workspace-scoped catalog product/service. Money fields are server-authoritative. */
+export type Product = {
+    id: number;
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateProductPayload = {
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active?: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+};
+
+export type UpdateProductPayload = Partial<CreateProductPayload>;
+
+/**
+ * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
+ * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
+ * server-computed (BigDecimal) — the client never does money arithmetic.
+ */
+export type DealLineItem = {
+    id: number;
+    dealId: number;
+    productId?: number | null;
+    name: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position: number;
+    currency: string;
+    lineSubtotal: number;
+    lineTax: number;
+    lineTotal: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** Server-computed deal roll-up; recurring vs one-time kept separate to avoid double-counting. */
+export type DealLineItemTotals = {
+    currency: string;
+    subtotal: number;
+    tax: number;
+    oneTimeTotal: number;
+    recurringTotal: number;
+    grandTotal: number;
+};
+
+export type DealLineItemsResponse = {
+    items: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+export type DealLineItemPayload = {
+    productId?: number | null;
+    name?: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice?: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency?: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position?: number;
+};
+
+export type DocumentType = 'quote' | 'proposal' | 'order_form' | 'contract';
+
+/** A mark on a document body text run (bold, italic, link, …), as ProseMirror/Tiptap JSON. */
+export type DocumentBodyMark = {
+    type: string;
+    attrs?: Record<string, unknown>;
+};
+
+/**
+ * One node in a document template's block body (ProseMirror/Tiptap JSON). The block builder
+ * authors this tree; merge tokens live as inline {@code mergeToken} nodes and the line-items table
+ * as a {@code lineItems} placeholder, both resolved server-side at generation.
+ */
+export type DocumentBodyNode = {
+    type: string;
+    attrs?: Record<string, unknown>;
+    content?: DocumentBodyNode[];
+    marks?: DocumentBodyMark[];
+    text?: string;
+};
+
+/** A workspace-scoped commercial-document template. Sections may carry {{merge tokens}}. */
+export type DocumentTemplate = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    body?: string | null;
+    active: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateDocumentTemplatePayload = {
+    name: string;
+    type: DocumentType;
+    locale?: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    body?: string | null;
+    active?: boolean;
+};
+
+export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayload>;
+
+export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final' | 'superseded';
+
+/**
+ * Statuses a client may request through the status endpoint. The approval states are owned by the
+ * approval flow and are rejected server-side if sent here.
+ */
+export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
+
+export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+/** One approval request on a generated document, with its decision once made. */
+export type DocumentApproval = {
+    id: number;
+    documentId: number;
+    policyId?: number | null;
+    status: DocumentApprovalStatus;
+    requestedBy?: number | null;
+    requestComment?: string | null;
+    decidedBy?: number | null;
+    decisionComment?: string | null;
+    decidedAt?: string | null;
+    createdAt: string;
+};
+
+/** Declares when a generated document requires internal approval before finalization. */
+export type ApprovalPolicy = {
+    id: number;
+    name: string;
+    active: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateApprovalPolicyPayload = {
+    name: string;
+    active?: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+};
+
+/**
+ * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
+ * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ */
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
+
+/** A party rendered on a document (workspace, company, or owner). */
+export type DocumentParty = {
+    name: string;
+    address?: string | null;
+};
+
+/**
+ * The immutable, resolved snapshot stored on a generated document. Merge tokens are already
+ * substituted and the line items/totals frozen at generation — the client only renders this.
+ */
+export type DocumentContent = {
+    generatedAt: string;
+    workspace?: DocumentParty | null;
+    company?: DocumentParty | null;
+    owner?: DocumentParty | null;
+    deal: { name: string; currency: string };
+    sections: {
+        title?: string | null;
+        intro?: string | null;
+        terms?: string | null;
+        footer?: string | null;
+    };
+    body?: DocumentBodyNode | null;
+    lineItems: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+/** A generated, immutable, versioned commercial document on a deal. */
+export type DealDocument = {
+    id: number;
+    dealId: number;
+    templateId?: number | null;
+    type: DocumentType;
+    locale: string;
+    status: DocumentStatus;
+    version: number;
+    title?: string | null;
+    currency: string;
+    generatedAt: string;
+    content: DocumentContent;
+    requiresApproval: boolean;
+    latestApproval?: DocumentApproval | null;
+};
+
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';
 
 export type CustomFieldType =
@@ -999,12 +1359,330 @@ export type SegmentDefinition = {
     negate?: boolean;
 };
 
+/**
+ * The browser's flat working shape of a saved-view configuration. {@link visibleColumns},
+ * {@link columnOrder}, and {@link pageSize} are carried purely so they survive a round-trip through
+ * the persisted config DTO — capturing and applying them in the UI is deferred (issue #412).
+ */
 export type SavedViewConfig = {
     filters?: Record<string, string[]>;
     query?: string;
     sortKey?: string | null;
     sortDirection?: "asc" | "desc";
     segments?: SegmentDefinition;
+    visibleColumns?: string[] | null;
+    columnOrder?: string[] | null;
+    pageSize?: number | null;
+};
+
+/** Who can see a saved view: only its owner, or everyone in the workspace. */
+export type SavedViewVisibility = "private" | "workspace";
+
+export type CampaignStatus =
+    | "draft"
+    | "scheduled"
+    | "active"
+    | "paused"
+    | "completed"
+    | "archived";
+
+export type Campaign = {
+    id: number;
+    name: string;
+    objective: string | null;
+    type: string;
+    status: CampaignStatus;
+    ownerUserId: number | null;
+    budgetAmount: number | null;
+    budgetCurrency: string | null;
+    startAt: string | null;
+    endAt: string | null;
+    parentCampaignId: number | null;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignPayload = {
+    name: string;
+    objective?: string | null;
+    type: string;
+    status?: CampaignStatus | null;
+    ownerUserId?: number | null;
+    budgetAmount?: number | null;
+    budgetCurrency?: string | null;
+    startAt?: string | null;
+    endAt?: string | null;
+    parentCampaignId?: number | null;
+};
+
+export type CampaignAudienceRecordType = "person" | "company" | "deal";
+
+export type CampaignAudience = {
+    campaignId: number;
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+    mode: string;
+    updatedAt: string;
+};
+
+export type CampaignAudiencePayload = {
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+};
+
+export type RecordLabel = {
+    id: number;
+    label: string;
+};
+
+export type CampaignAudienceEstimate = {
+    estimatedIncluded: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    excludedTotal: number;
+    sampleLabels: RecordLabel[];
+};
+
+export type CampaignAudienceExclusionReason =
+    | "consent_revoked"
+    | "consent_missing"
+    | "suppressed"
+    | "restricted";
+
+export type CampaignAudienceMember = {
+    recordType: CampaignAudienceRecordType;
+    recordId: number;
+    status: "included" | "excluded";
+    exclusionReason: CampaignAudienceExclusionReason | null;
+};
+
+export type CampaignAudienceSnapshotSummary = {
+    version: number;
+    recordType: CampaignAudienceRecordType;
+    estimatedIncluded: number;
+    excludedTotal: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
+    campaignId: number;
+    definition: SegmentDefinition;
+    members: CampaignAudienceMember[];
+};
+
+export type CampaignChannel = "email" | "sms";
+
+export type CampaignMessageStatus = "draft" | "final";
+
+export type CampaignMessageLocale = "en" | "ja";
+
+/** One immutable, locale-scoped revision of a campaign message. */
+export type CampaignMessageRevision = {
+    version: number;
+    locale: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText: string | null;
+    createdAt: string;
+};
+
+/** A campaign message and its append-only revisions, newest first. */
+export type CampaignMessage = {
+    id: number;
+    campaignId: number;
+    channel: string;
+    name: string;
+    status: CampaignMessageStatus;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+    revisions: CampaignMessageRevision[];
+};
+
+export type CampaignMessagePayload = {
+    name: string;
+    channel: CampaignChannel;
+};
+
+/**
+ * Content for a new message revision. Which fields carry the content is channel-specific: an email
+ * revision sends {@code subject} and {@code bodyHtml}, an SMS revision sends only {@code bodyText}.
+ */
+export type CampaignMessageRevisionPayload = {
+    locale: CampaignMessageLocale;
+    subject?: string | null;
+    bodyHtml?: string | null;
+    bodyText?: string | null;
+};
+
+export type CampaignSendStatus =
+    | "draft"
+    | "queued"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+/** A campaign send bound to a frozen audience snapshot and a message revision. */
+export type CampaignSend = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    messageId: number;
+    messageVersion: number;
+    channel: string;
+    purpose: string;
+    providerId: string | null;
+    status: CampaignSendStatus;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    totalRecipients: number;
+    dispatchedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignSendPayload = {
+    snapshotVersion: number;
+    messageId: number;
+    messageVersion: number;
+    purpose?: string | null;
+    scheduledAt?: string | null;
+};
+
+/** Per-channel delivery tally within a campaign's engagement rollup. */
+export type CampaignChannelStat = {
+    channel: string;
+    deliveries: number;
+};
+
+/** Delivery-outcome rollup for a single send within a campaign's engagement view. */
+export type CampaignSendEngagement = {
+    sendId: number;
+    status: string;
+    channel: string;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+};
+
+/**
+ * Campaign-wide engagement rollup aggregated across every send. Rate fields are {@code null} when
+ * they cannot be measured (for example, an SMTP transport that returns no delivery receipts), which
+ * the UI surfaces as "Not measured" rather than a misleading zero.
+ */
+export type CampaignEngagement = {
+    campaignId: number;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    channels: CampaignChannelStat[];
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+    sends: CampaignSendEngagement[];
+};
+
+export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
+
+/** A campaign audience export bound to a frozen snapshot and an external connector. */
+export type CampaignAudienceExport = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    connector: string;
+    externalListId: string | null;
+    status: CampaignExportStatus;
+    totalMembers: number;
+    pushedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignAudienceExportPayload = {
+    snapshotVersion: number;
+    connector: string;
+};
+
+/** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+export type DeliveryUnsubscribeInfo = {
+    channel: string;
+    address: string;
+    unsubscribed: boolean;
+};
+
+export type ContactChannelConsent = {
+    id: number;
+    personId: number;
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string | null;
+    evidenceRef: string | null;
+    capturedAt: string | null;
+    updatedAt: string;
+};
+
+export type ContactChannelConsentPayload = {
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string;
+    evidenceRef?: string | null;
+    capturedAt?: string | null;
+};
+
+export type SuppressionEntry = {
+    id: number;
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId: number | null;
+    reason: string;
+    note: string | null;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type SuppressionEntryPayload = {
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId?: number | null;
+    reason: string;
+    note?: string | null;
 };
 
 export type SegmentResult = {
@@ -1022,17 +1700,72 @@ export type SegmentFields = {
     tags: SegmentTag[];
 };
 
+export type SegmentFieldKind = "string" | "number" | "id" | "enum" | "tag" | "date";
+
+export type SegmentValueSource =
+    | "none"
+    | "tags"
+    | "industries"
+    | "owners"
+    | "stages"
+    | "pipelines"
+    | "companies";
+
+export type SegmentCatalogField = {
+    field: string;
+    kind: SegmentFieldKind;
+    valueSource: SegmentValueSource;
+    operators: string[];
+};
+
+export type SegmentCatalogPredicate = {
+    key: string;
+    recordTypes: string[];
+    acceptsDays: boolean;
+    defaultDays: number | null;
+    minDays: number | null;
+    maxDays: number | null;
+};
+
+export type SegmentCatalogLimits = {
+    maxConditions: number;
+    maxGroupConditions: number;
+    maxGroups: number;
+    maxDepth: number;
+};
+
+export type SegmentCatalog = {
+    recordType: string;
+    fields: SegmentCatalogField[];
+    predicates: SegmentCatalogPredicate[];
+    enumOptions: Record<string, string[]>;
+    limits: SegmentCatalogLimits;
+};
+
 export type SavedView = {
     id: number;
+    workspaceId: number;
     recordType: SavedViewRecordType;
     name: string;
+    visibility: SavedViewVisibility;
+    ownerUserId: number;
+    /** Whether the requesting user owns this view; drives owner-only menu actions. */
+    ownedByCurrentUser: boolean;
     config: SavedViewConfig;
     position: number;
+    pinned: boolean;
+    /** Sort order among the user's pinned views; null when not pinned. */
+    pinPosition: number | null;
+    /** Whether this view is the requesting user's default for its record type. */
+    default: boolean;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type SavedViewInput = {
     recordType: SavedViewRecordType;
     name: string;
+    visibility?: SavedViewVisibility;
     config: SavedViewConfig;
     position?: number;
 };
@@ -1201,6 +1934,8 @@ export type ReportGenerateInput = {
     end?: string | null;
 };
 
+export type ReportNarrativeMode = "cached" | "full";
+
 export type ReportDataPoint = {
     key: string;
     label: string;
@@ -1364,7 +2099,55 @@ export type UpdateTaskPayload = {
     dealId?: number;
 };
 
-export type NotificationState = 'active' | 'unread' | 'history' | 'all';
+export type NotificationState = 'active' | 'unread' | 'snoozed' | 'history' | 'all';
+
+/**
+ * Server-side snooze presets. Exactly one of a preset or an explicit `until`
+ * instant is sent per snooze request, always alongside the caller's IANA timezone.
+ */
+export type SnoozePreset = 'later_today' | 'tomorrow_morning' | 'next_week';
+
+/**
+ * Snooze request body: exactly one of a named preset or an explicit ISO-UTC
+ * `until` instant, plus the caller's IANA timezone.
+ */
+export type SnoozeRequest =
+    | { preset: SnoozePreset; timezone: string }
+    | { until: string; timezone: string };
+
+/**
+ * Day-of-week names used by the quiet-hours contract. The wire format is the
+ * uppercase English day name, independent of the display locale.
+ */
+export type QuietHoursDay =
+    | 'MONDAY'
+    | 'TUESDAY'
+    | 'WEDNESDAY'
+    | 'THURSDAY'
+    | 'FRIDAY'
+    | 'SATURDAY'
+    | 'SUNDAY';
+
+/**
+ * Editable quiet-hours configuration sent to the server as a full replacement.
+ */
+export type QuietHoursConfig = {
+    enabled: boolean;
+    timezone: string;
+    start: string;
+    end: string;
+    days: QuietHoursDay[];
+    bypassPolicy: string;
+};
+
+/**
+ * Quiet-hours state returned by the server: the editable config plus the
+ * server-computed `activeNow` flag and the next start/end transition instant.
+ */
+export type QuietHours = QuietHoursConfig & {
+    activeNow: boolean;
+    nextTransitionAt?: string | null;
+};
 
 export type Notification = {
     id: number;
@@ -1391,6 +2174,7 @@ export type Notification = {
     dismissedAt?: string | null;
     resolvedAt?: string | null;
     snoozedUntil?: string | null;
+    snoozeTimezone?: string | null;
     createdAt: string;
     updatedAt: string;
     stateVersion?: number;
@@ -1398,9 +2182,12 @@ export type Notification = {
 
 export type NotificationCounts = {
     unread: number;
+    snoozed: number;
     stateVersion: number;
     asOf: string;
     nextSnoozeExpiry?: string | null;
+    quietHoursActive: boolean;
+    nextQuietHoursTransition?: string | null;
 };
 
 export type NotificationMarkAllResult = NotificationCounts & {
@@ -1410,11 +2197,15 @@ export type NotificationMarkAllResult = NotificationCounts & {
 
 export type NotificationPage = Page<Notification> & {
     stateVersion: number;
+    asOf: string;
 };
 
 export type NotificationParams = {
-    state?: NotificationState;
-    category?: string;
+    status?: NotificationState;
+    type?: string | string[];
+    workspaceId?: number;
+    category?: string | string[];
+    severity?: string | string[];
     contextType?: string;
     contextId?: number;
     page?: number;
@@ -1457,7 +2248,14 @@ export type CreateAttachmentPayload = {
 export type FacetCount = {
     key: string;
     count: number;
-    label?: string;
+    label?: string | null;
+};
+
+export type NotificationFacets = {
+    categories: FacetCount[];
+    severities: FacetCount[];
+    workspaces: FacetCount[];
+    stateVersion: number;
 };
 
 export type AttachmentsPageParams = PageParams & {
@@ -1476,7 +2274,17 @@ export type AttachmentFacets = {
     totalSize: number;
 };
 
-export type DealFilterParams = {
+/**
+ * Canonical member-scope wire params shared by record, metric, and facet endpoints:
+ * `scope` selects Me / selected members / Unassigned (absent = all team), and
+ * `memberIds` carries the selection when {@code scope === 'members'}.
+ */
+export type MemberScopeParams = {
+    scope?: 'me' | 'members' | 'unassigned';
+    memberIds?: number[];
+};
+
+export type DealFilterParams = MemberScopeParams & {
     q?: string;
     status?: Array<'open' | 'closed' | 'won' | 'lost'>;
     risk?: Array<'high' | 'medium' | 'low' | 'none'>;
@@ -1512,6 +2320,7 @@ export type DealFacets = {
     companies: FacetCount[];
     currencies: FacetCount[];
     risk: FacetCount[];
+    owners: FacetCount[];
 };
 
 export type CompanyEngagement = {
@@ -1787,6 +2596,18 @@ export type RulePreview = {
     sample: RuleRecordLabel[];
 };
 
+/** Current lifecycle states emitted by the legacy rule execution engine. */
+export type RuleExecutionStatus = "running" | "matched" | "partial" | "skipped" | "failed";
+
+/** A bounded recent execution returned by the rule audit-log endpoint. */
+export type RuleExecution = {
+    id: number;
+    triggerEntityType: string | null;
+    triggerEntityId: number | null;
+    status: RuleExecutionStatus;
+    executedAt: string;
+};
+
 export type Rule = {
     id: number;
     name: string;
@@ -1933,12 +2754,88 @@ export type MailTestResult = {
     error: string | null;
 };
 
+export type DeliveryEmailProvider = "smtp" | "http_esp";
+
+export type DeliverySmsProvider = "sms_http";
+
+export type DeliveryProvider = DeliveryEmailProvider | DeliverySmsProvider;
+
+export type DeliveryProviderConfig = {
+    channel: string;
+    provider: DeliveryProvider;
+    endpoint: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    webhookConfigured: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type DeliveryProviderConfigPayload = {
+    channel: string;
+    provider: string;
+    endpoint?: string | null;
+    fromAddress?: string | null;
+    fromName?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
+export type DeliveryWebhookToken = {
+    token: string;
+    secret: string;
+    signatureHeader: string;
+};
+
+export type ConnectorConfig = {
+    connector: string;
+    endpoint: string | null;
+    externalListId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type ConnectorConfigPayload = {
+    connector: string;
+    endpoint?: string | null;
+    externalListId?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
 export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
+    connectedAccounts: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
     businessCardImport: boolean;
+};
+
+export type ConnectedAccountProvider = 'google' | 'microsoft';
+
+export type ProviderConnectionStatus = 'connected' | 'paused' | 'error' | 'revoked';
+
+/** A user's OAuth connection to an external mail/calendar provider (masked, no token material). */
+export type ProviderConnection = {
+    provider: ConnectedAccountProvider;
+    status: ProviderConnectionStatus;
+    providerAccountEmail?: string | null;
+    grantedScopes?: string | null;
+    hasCredential: boolean;
+    lastSyncAt?: string | null;
+    errorCode?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type BusinessCardAvailability = {
+    scanning: boolean;
+    importing: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";

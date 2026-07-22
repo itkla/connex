@@ -13,6 +13,13 @@
     "deal": "取引",
     "company": "会社"
   },
+  "MemberScope": {
+    "label": "担当者",
+    "ariaLabel": "担当者で絞り込む",
+    "me": "自分",
+    "unassigned": "未割り当て",
+    "clear": "クリア"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "機能",
@@ -79,8 +86,11 @@
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",
     "brand": "CONNEX",
+    "sectionPinnedViews": "固定したビュー",
+    "sectionRecent": "最近",
     "sectionOverview": "概要",
     "sectionRecords": "レコード",
+    "sectionMarketing": "マーケティング",
     "sectionActivity": "アクティビティ",
     "sectionLibrary": "ライブラリ",
     "sectionWorkspace": "ワークスペース",
@@ -95,12 +105,14 @@
     "navContacts": "コンタクト",
     "navDeals": "案件",
     "navPipelines": "パイプライン",
+    "navCampaigns": "キャンペーン",
     "navActivities": "アクティビティ",
     "navTasks": "タスク",
     "navNotes": "メモ",
     "navTags": "タグ",
     "navFiles": "ファイル",
     "navUsers": "ユーザー",
+    "navWorkflows": "ワークフロー",
     "navAuditLog": "監査ログ",
     "navSettings": "設定",
     "navOrganization": "組織",
@@ -117,11 +129,49 @@
     "languageEnglish": "英語",
     "languageJapanese": "日本語",
     "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
-    "profilePictureAlt": "{name}さんのプロフィール画像"
+    "profilePictureAlt": "{name}さんのプロフィール画像",
+    "navProducts": "商品",
+    "navDocuments": "ドキュメント"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",
-    "showSidebar": "サイドバーを表示"
+    "showSidebar": "サイドバーを表示",
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "expandSidebar": "サイドバーを展開"
+  },
+  "MobileNav": {
+    "barLabel": "メインナビゲーション",
+    "more": "その他",
+    "search": "検索",
+    "tasksBadge": "{count}件の要対応タスク"
+  },
+  "ConfirmDiscard": {
+    "title": "変更を破棄しますか？",
+    "description": "保存されていない変更があります。ここで閉じると失われます。",
+    "discard": "変更を破棄",
+    "keepEditing": "編集を続ける"
+  },
+  "DraftResume": {
+    "activityMessage": "未完了のアクティビティがあります。再開しますか？",
+    "activityMessageNamed": "未完了のアクティビティ：「{label}」を再開しますか？",
+    "resume": "再開",
+    "discard": "破棄"
+  },
+  "RecordDensity": {
+    "ariaLabel": "行の高さ",
+    "comfortable": "ゆったり",
+    "compact": "コンパクト"
+  },
+  "RecordColumns": {
+    "ariaLabel": "列を選択",
+    "label": "列",
+    "title": "表示する列",
+    "reset": "列をリセット",
+    "sorted": "並べ替え中"
+  },
+  "DuplicateWarning": {
+    "heading": "既に登録されている可能性があります:",
+    "more": "他{count}件"
   },
   "CommonSearchBar": {
     "placeholder": "何でも検索",

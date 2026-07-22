@@ -4,6 +4,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 
 import java.util.List;
@@ -32,7 +33,8 @@ public interface ActivityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("days") int days,
         @Param("buckets") int buckets,
-        @Param("spanDays") double spanDays
+        @Param("spanDays") double spanDays,
+        @Param("memberScope") MemberScope memberScope
     );
     List<TeamLeaderboardEntryDto> teamLeaderboard(
         @Param("workspaceId") int workspaceId,

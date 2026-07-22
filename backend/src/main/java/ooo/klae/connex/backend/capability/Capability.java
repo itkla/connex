@@ -13,6 +13,12 @@ public enum Capability {
     /** Microsoft social login. */
     SOCIAL_LOGIN_MICROSOFT,
 
+    /** Per-user Google connected accounts (mail/calendar OAuth). */
+    CONNECTED_ACCOUNTS_GOOGLE,
+
+    /** Per-user Microsoft connected accounts (mail/calendar OAuth). */
+    CONNECTED_ACCOUNTS_MICROSOFT,
+
     /** Instance-managed mail transport. */
     MANAGED_MAIL,
 
@@ -20,5 +26,8 @@ public enum Capability {
     BUSINESS_CARD_SCANNING,
 
     /** Reviewed business-card import with durable private card retention. */
-    BUSINESS_CARD_IMPORT
+    BUSINESS_CARD_IMPORT,
+
+    /** Native email campaign delivery on an extensible channel/provider SPI. */
+    CAMPAIGN_DELIVERY
 }

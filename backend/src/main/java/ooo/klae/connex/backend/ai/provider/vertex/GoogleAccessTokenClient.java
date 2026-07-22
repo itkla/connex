@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
@@ -18,18 +17,26 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
+import org.apache.hc.core5.http.ContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import tools.jackson.databind.JsonNode;
@@ -38,8 +45,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Exchanges Google service-account JWT assertions for short-lived OAuth access tokens. Token
- * requests always use Google's fixed token endpoint, never follow redirects, re-vet egress
- * immediately before sending, bound response bytes, and cache tokens by a credential digest.
+ * requests always use Google's fixed token endpoint through bounded, validated, pinned DNS and
+ * cache tokens by a credential digest.
  */
 @Component
 public class GoogleAccessTokenClient {
@@ -56,31 +63,35 @@ public class GoogleAccessTokenClient {
     private static final int BUFFER_BYTES = 8192;
 
     private final RestClient restClient;
+    private final FixedAiProviderClient providerClient;
     private final int maxResponseBytes;
+    private final long requestTimeoutMillis;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final ConcurrentHashMap<String, CachedAccessToken> cache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CompletableFuture<CachedAccessToken>> refreshes =
+            new ConcurrentHashMap<>();
 
     @Autowired
-    public GoogleAccessTokenClient(AiProperties aiProperties, ObjectMapper objectMapper, Clock clock) {
+    public GoogleAccessTokenClient(
+            AiProperties aiProperties,
+            FixedAiProviderClient providerClient,
+            ObjectMapper objectMapper,
+            Clock clock) {
         Objects.requireNonNull(aiProperties, "aiProperties");
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(duration(aiProperties.getConnectTimeoutMs(), "connect timeout"))
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(duration(aiProperties.getRequestTimeoutMs(), "request timeout"));
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory)
-                .build();
+        this.restClient = null;
+        this.providerClient = Objects.requireNonNull(providerClient, "providerClient");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
+        this.requestTimeoutMillis = positiveLong(aiProperties.getRequestTimeoutMs(), "request timeout");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     GoogleAccessTokenClient(RestClient restClient, int maxResponseBytes, ObjectMapper objectMapper, Clock clock) {
         this.restClient = Objects.requireNonNull(restClient, "restClient");
+        this.providerClient = null;
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
+        this.requestTimeoutMillis = Duration.ofSeconds(60).toMillis();
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -91,29 +102,88 @@ public class GoogleAccessTokenClient {
      * @return OAuth access token
      */
     public String accessToken(AiCredentials credentials) {
+        return accessToken(credentials, AiRequestDeadline.afterMillis(requestTimeoutMillis));
+    }
+
+    String accessToken(AiCredentials credentials, AiRequestDeadline deadline) {
         if (credentials == null) {
             throw new AiProviderException("Vertex credentials are required");
         }
+        requireDeadline(deadline);
         ServiceAccount serviceAccount = parseServiceAccount(credentials.require("serviceAccountJson"));
         String cacheKey = credentialDigest(serviceAccount);
-        CachedAccessToken resolved = cache.compute(cacheKey, (key, cached) -> {
-            Instant now = Instant.now(clock);
-            if (cached != null && now.isBefore(cached.expiresAt().minus(REFRESH_SKEW))) {
-                return cached;
-            }
-            return exchange(serviceAccount, now);
-        });
-        evictIfOversized(cacheKey, resolved);
+        requireDeadline(deadline);
+        CachedAccessToken cached = cache.get(cacheKey);
+        Instant now = Instant.now(clock);
+        if (isFresh(cached, now)) {
+            return cached.value();
+        }
+        CompletableFuture<CachedAccessToken> refresh = new CompletableFuture<>();
+        CompletableFuture<CachedAccessToken> current = refreshes.putIfAbsent(cacheKey, refresh);
+        if (current != null) {
+            CachedAccessToken resolved = awaitRefresh(current, deadline);
+            requireDeadline(deadline);
+            return resolved.value();
+        }
+        CachedAccessToken resolved;
+        try {
+            CachedAccessToken latest = cache.get(cacheKey);
+            Instant refreshTime = Instant.now(clock);
+            CachedAccessToken refreshed = isFresh(latest, refreshTime)
+                    ? latest
+                    : exchange(serviceAccount, refreshTime, deadline);
+            requireDeadline(deadline);
+            cache.put(cacheKey, refreshed);
+            refresh.complete(refreshed);
+            resolved = refreshed;
+        } catch (RuntimeException exception) {
+            refresh.completeExceptionally(exception);
+            throw exception;
+        } finally {
+            refreshes.remove(cacheKey, refresh);
+        }
+        requireDeadline(deadline);
+        evictIfOversized(cacheKey);
+        requireDeadline(deadline);
         return resolved.value();
     }
 
-    private CachedAccessToken exchange(ServiceAccount serviceAccount, Instant issuedAt) {
+    private CachedAccessToken awaitRefresh(
+            CompletableFuture<CachedAccessToken> refresh,
+            AiRequestDeadline deadline) {
+        long remainingNanos = deadline.remainingNanos();
+        if (remainingNanos <= 0) {
+            throw deadlineExceeded();
+        }
+        try {
+            return refresh.get(remainingNanos, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException exception) {
+            throw deadlineExceeded();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AiProviderException("Vertex invocation was interrupted");
+        } catch (ExecutionException exception) {
+            if (exception.getCause() instanceof AiProviderException providerException) {
+                throw providerException;
+            }
+            throw new AiProviderException("Google OAuth token exchange failed during transport");
+        }
+    }
+
+    private static boolean isFresh(CachedAccessToken cached, Instant now) {
+        return cached != null && now.isBefore(cached.expiresAt().minus(REFRESH_SKEW));
+    }
+
+    private CachedAccessToken exchange(
+            ServiceAccount serviceAccount,
+            Instant issuedAt,
+            AiRequestDeadline deadline) {
         String assertion = buildAssertion(serviceAccount, issuedAt);
         String formBody = "grant_type=" + formEncode(JWT_BEARER_GRANT)
                 + "&assertion=" + formEncode(assertion);
         TokenResponse response;
         try {
-            response = sendOnce(formBody.getBytes(StandardCharsets.UTF_8));
+            response = sendOnce(formBody.getBytes(StandardCharsets.UTF_8), deadline);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -127,7 +197,20 @@ public class GoogleAccessTokenClient {
         return parseTokenResponse(response.body());
     }
 
-    private TokenResponse sendOnce(byte[] body) {
+    private TokenResponse sendOnce(byte[] body, AiRequestDeadline deadline) {
+        if (providerClient != null) {
+            FixedAiProviderClient.Response response = providerClient.post(
+                    TOKEN_ENDPOINT,
+                    Set.of(TOKEN_HOST),
+                    Map.of(
+                            "Content-Type", ContentType.APPLICATION_FORM_URLENCODED.getMimeType(),
+                            "Accept", ContentType.APPLICATION_JSON.getMimeType()),
+                    ContentType.APPLICATION_FORM_URLENCODED,
+                    body,
+                    deadline,
+                    "Google OAuth token exchange");
+            return new TokenResponse(response.statusCode(), response.body());
+        }
         RestClient.RequestBodySpec spec = restClient.post()
                 .uri(TOKEN_ENDPOINT)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
@@ -245,15 +328,17 @@ public class GoogleAccessTokenClient {
         return output.toByteArray();
     }
 
-    private void evictIfOversized(String cacheKey, CachedAccessToken resolved) {
-        if (cache.size() <= MAX_CACHE_ENTRIES) {
-            return;
-        }
-        synchronized (cache) {
-            if (cache.size() > MAX_CACHE_ENTRIES) {
-                CachedAccessToken current = cache.get(cacheKey);
-                cache.clear();
-                cache.put(cacheKey, current == null ? resolved : current);
+    private void evictIfOversized(String retainedCacheKey) {
+        int entriesToRemove = Math.max(0, cache.size() - MAX_CACHE_ENTRIES);
+        int inspected = 0;
+        for (Map.Entry<String, CachedAccessToken> entry : cache.entrySet()) {
+            if (entriesToRemove == 0 || inspected >= MAX_CACHE_ENTRIES) {
+                return;
+            }
+            inspected++;
+            if (!entry.getKey().equals(retainedCacheKey)
+                    && cache.remove(entry.getKey(), entry.getValue())) {
+                entriesToRemove--;
             }
         }
     }
@@ -278,18 +363,28 @@ public class GoogleAccessTokenClient {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    private static Duration duration(long millis, String name) {
-        if (millis <= 0) {
-            throw new IllegalStateException("AI " + name + " must be positive");
-        }
-        return Duration.ofMillis(millis);
-    }
-
     private static int positiveInt(int value, String name) {
         if (value <= 0) {
             throw new IllegalStateException("AI " + name + " must be positive");
         }
         return value;
+    }
+
+    private static long positiveLong(long value, String name) {
+        if (value <= 0) {
+            throw new IllegalStateException("AI " + name + " must be positive");
+        }
+        return value;
+    }
+
+    private static void requireDeadline(AiRequestDeadline deadline) {
+        if (deadline == null || deadline.isExpired()) {
+            throw deadlineExceeded();
+        }
+    }
+
+    private static AiProviderException deadlineExceeded() {
+        return new AiProviderException("Vertex invocation exceeded its deadline");
     }
 
     private static AiProviderException invalidServiceAccount() {

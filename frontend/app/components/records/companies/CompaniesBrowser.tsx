@@ -15,16 +15,24 @@ import {
     Squares2X2Icon,
     TableCellsIcon,
     TagIcon,
+    UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
@@ -35,10 +43,11 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
@@ -83,6 +92,8 @@ function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): Co
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
 const NO_ITEMS: Company[] = [];
+/** Impossible company id (ids are positive) used to force an empty scoped export when a segment matches nothing. */
+const NO_MATCH_COMPANY_ID = 0;
 const EMPTY_COMPANY_DRAFT: CreateCompanyPayload = {
     name: '',
     website: '',
@@ -101,10 +112,11 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
     };
 }
 
-export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView[] }) {
+export default function CompaniesBrowser({ savedViews, defaultView }: { savedViews: SavedView[]; defaultView: SavedView | null }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
 
@@ -130,14 +142,17 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
-    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean }>(() => {
+    const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] }>(() => {
         const industryFilter = filterState.industry ?? [];
         const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
-        const params: { industry?: string[]; noIndustry?: boolean } = {};
+        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
         if (industries.length) params.industry = industries;
         if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
+        if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
+        if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         return params;
-    }, [filterState]);
+    }, [filterState, ownerScope]);
 
     const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
         if (!hasSegments) {
@@ -176,7 +191,8 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         applySort: applyServerSort,
         revision,
         reload,
-    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams);
+        patchItem,
+    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams, { urlSync: true });
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
     const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
@@ -279,6 +295,20 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
     }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
+
+    const exportCompanies = useCallback(async (signal: AbortSignal, workspaceId: number) => {
+        const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
+        const params = { ...filterParams, q: query.trim() || undefined };
+        if (!hasSegments) {
+            await exportCompaniesCsv(params, init);
+            return;
+        }
+        const matched = await getCompanySegmentIds({ ...params, definition: evaluable }, init);
+        await exportCompaniesCsv(
+            { ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] },
+            init,
+        );
+    }, [filterParams, query, hasSegments, evaluable]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -519,6 +549,23 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
 
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const segmentOptions = useMemo<RuleBuilderOptions>(() => ({
+        stages: [],
+        owners: activeMembers.map((member) => ({ id: member.id, name: member.displayName })),
+        companies: [],
+    }), [activeMembers]);
+    const ownerCounts = useMemo(
+        () => new Map(companyFacets?.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [companyFacets],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        setFilterState({ ...filterState, owner: values });
+    }, [filterState, setFilterState]);
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const applyBulkTag = useCallback((tagId: number) => {
         return bulkTag.mode === 'add'
@@ -535,6 +582,19 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         }
     };
 
+    const inlineEdit = useInlineEdit<Company>(patchItem);
+    const saveCompany = useCallback(
+        (full: Company) =>
+            updateCompany(full.id, {
+                name: full.name,
+                website: full.website,
+                industry: full.industry,
+                phone: full.phone,
+                address: full.address,
+            }).then(() => {}),
+        [],
+    );
+
     const columns: ColumnDef<Company>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
@@ -545,27 +605,34 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
         },
         {
+            key: 'owner',
+            label: t('columnOwner'),
+            sortable: false,
+            render: (c) => (c.ownerId != null ? memberById.get(c.ownerId)?.displayName ?? '' : ''),
+        },
+        {
             key: 'website',
             label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
-            copyable: { label: t('columnWebsite'), getValue: (c) => c.website },
+            editable: { getValue: (c) => c.website, save: (c, v) => inlineEdit.commit(c, 'website', v, saveCompany), inputType: 'url' },
         },
         {
             key: 'industry',
             label: t('columnIndustry'),
             getSortValue: (c) => c.industry ?? null,
+            editable: { getValue: (c) => c.industry, save: (c, v) => inlineEdit.commit(c, 'industry', v, saveCompany) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: t('columnPhone'), getValue: (c) => c.phone },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveCompany), inputType: 'tel' },
         },
         {
             key: 'address',
             label: t('columnAddress'),
             getSortValue: (c) => c.address ?? null,
-            copyable: { label: t('columnAddress'), getValue: (c) => c.address },
+            editable: { getValue: (c) => c.address, save: (c, v) => inlineEdit.commit(c, 'address', v, saveCompany) },
         },
         {
             key: 'createdAt',
@@ -579,7 +646,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
@@ -595,14 +662,36 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
     );
+    const resolveOwnerName = useCallback(
+        (id: string) => memberById.get(Number(id))?.displayName ?? id,
+        [memberById],
+    );
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
         ...definition.conditions.flatMap((condition, index) =>
             condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
                 ? [{
                     id: `segment:${index}`,
-                    label: segmentConditionLabel(condition, tSeg, resolveTagName),
+                    label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
                     onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
                 }]
                 : [],
@@ -638,6 +727,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         <TagIcon />
                         {t('removeTag')}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
@@ -662,6 +755,19 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         [setFilterState, applyQuery, applySort],
     );
 
+    const { density, setDensity } = useRecordDensity();
+    const mergedColumns = useMemo(
+        () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
+        [columns, customColumns],
+    );
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
+    const peek = useRecordPeekController('company', companies, displayMode === 'table');
+
+    const recordRef = useCallback(
+        (company: Company): ActiveRecordRef => ({ type: 'company', id: company.id, label: company.name }),
+        [],
+    );
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
@@ -675,7 +781,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
                                 onImported={refresh}
-                                exportIds={companies.map((c) => c.id)}
+                                onExport={exportCompanies}
                             />
                         </div>
                     </div>
@@ -687,6 +793,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        defaultView={defaultView}
                     />
                 </Rise>
 
@@ -709,7 +816,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
+                                <SegmentBuilder definition={definition} fields={segmentFields} options={segmentOptions} onChange={setDefinition} />
                                 {displayMode === 'grid' && (
                                     <RecordsSortMenu
                                         columns={columns}
@@ -727,9 +834,24 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
                                     ]}
                                 />
+                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {displayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={filterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Company>
                             facets={facets}
                             filterState={filterState}
@@ -773,11 +895,12 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                     <RecordsRenderView<Company>
                         data={companies}
                         loading={loading}
-                        columns={[...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))]}
+                        columns={visibleColumns}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <CompanyCard
                                 company={item}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 metrics={metricsByCompanyId.get(item.id)}
                                 metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
                                 onFirstExpand={() => ensureMetricsLoaded(item.id)}
@@ -787,7 +910,11 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={(item) => `/records/companies/${item.id}`}
+                        onRowClick={(item) => peek.openPeek(item.id)}
+                        activeId={peek.activeId}
+                        recordRef={recordRef}
                         displayMode={displayMode}
+                        density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}
@@ -799,6 +926,8 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditCompanySheet
                     open={editSheetOpen}
@@ -851,6 +980,20 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         failure: (failed) => t('toastTagFailed', { failed }),
                     }}
                     onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedCompanyIds.length}
+                    members={activeMembers}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignCompanyOwner(selectedCompanyIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
             </div>

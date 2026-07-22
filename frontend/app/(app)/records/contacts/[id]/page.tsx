@@ -2,6 +2,7 @@ import { getAttachmentsFromCookie, getContactById, getContactConnections, getCon
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
+import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import { type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -44,7 +45,12 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
-        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
+        getContextNotifications("person", id, init).catch(() => ({
+            items: [],
+            total: 0,
+            stateVersion: 0,
+            asOf: "1970-01-01T00:00:00Z",
+        })),
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
@@ -76,6 +82,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
         await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
     ).filter((u): u is User => u !== null);
 
+    const owner = contact.ownerId != null
+        ? interactionUsers.find((u) => u.id === contact.ownerId)
+            ?? await getUserById(contact.ownerId, init).catch(() => null)
+        : null;
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
@@ -92,6 +103,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
+                    <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />
@@ -100,6 +112,16 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                                         {contact.name}
                                     </h1>
+                                    {contact.suspendedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("processingSuspended")}
+                                        </span>
+                                    ) : null}
+                                    {contact.provisionCeasedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("provisionCeased")}
+                                        </span>
+                                    ) : null}
                                     <TagEditor
                                         contactId={contact.id}
                                         currentTags={contact.tags ?? []}
@@ -191,6 +213,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                                 <InfoRow label={t("title")} value={contact.title ?? ''} />
                                 <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
+                                <InfoRow
+                                    label={t("owner")}
+                                    value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
+                                />
                                 <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                                 <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                                 <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />

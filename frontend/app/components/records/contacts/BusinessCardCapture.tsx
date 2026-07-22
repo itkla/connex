@@ -158,6 +158,8 @@ function warningMessageKey(warning: string) {
         return 'cardWarningLowConfidence';
     }
     switch (normalizedWarning) {
+        case 'ai_extraction_requires_review':
+            return 'cardWarningAiProvider';
         case 'partial_result':
             return 'cardWarningPartial';
         case 'unsupported_orientation':

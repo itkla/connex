@@ -1,11 +1,14 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
     ResponsiveDialog,
@@ -29,6 +32,7 @@ import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-s
 import { cn } from '@/lib/utils';
 
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, Note } from '@/app/lib/types';
 
@@ -43,6 +47,7 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
     defaultContent?: string;
+    requestInit?: RequestInit;
 };
 
 export default function NoteDialog({
@@ -55,13 +60,16 @@ export default function NoteDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultContent = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityNotesDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const [prevOpen, setPrevOpen] = useState(open);
@@ -69,30 +77,36 @@ export default function NoteDialog({
     if (open !== prevOpen) {
         setPrevOpen(open);
         if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
     }
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <NoteDialogForm
-                    key={openCount}
-                    note={note}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultContent={defaultContent}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onCancel={() => onOpenChange(false)}
-                    onClose={() => onOpenChange(false)}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <NoteDialogForm
+                        key={openCount}
+                        note={note}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultContent={defaultContent}
+                        requestInit={requestInit}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -104,7 +118,10 @@ type FormProps = {
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultContent: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (value: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the save succeeds (after the success beat), to dismiss the surface. */
@@ -124,7 +141,9 @@ export function NoteDialogForm({
     defaultPerson,
     defaultDeal,
     defaultContent,
+    requestInit,
     onSubmittingChange,
+    onDirtyChange,
     onCancel,
     onClose,
 }: FormProps) {
@@ -143,6 +162,21 @@ export function NoteDialogForm({
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
+    const [initial] = useState(() => ({
+        content,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (content !== initial.content ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
+
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
         const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
@@ -157,27 +191,37 @@ export function NoteDialogForm({
         onSubmittingChange(true);
         try {
             if (isEdit && note) {
-                await updateNote(note.id, {
-                    content: trimmed,
-                    title: note.title ?? null,
-                    author: note.author,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await updateNote(
+                    note.id,
+                    {
+                        content: trimmed,
+                        title: note.title ?? null,
+                        author: note.author,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastUpdated'));
             } else {
-                await createNote({
-                    content: trimmed,
-                    author: currentUserId,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await createNote(
+                    {
+                        content: trimmed,
+                        author: currentUserId,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -193,8 +237,10 @@ export function NoteDialogForm({
                 isEdit ? t('toastFailedSave') : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
@@ -211,7 +257,16 @@ export function NoteDialogForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && content.trim()) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
                         <div

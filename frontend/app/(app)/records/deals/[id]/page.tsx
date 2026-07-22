@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
+import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import type { ReactNode } from 'react';
 import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
@@ -17,6 +18,9 @@ import {
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
+    getDealLineItemsFromCookie,
+    getDealDocumentsFromCookie,
+    getEffectivePermissionsFromCookie,
     getDealCollaborators,
     getDealPeople,
     getDealRisk,
@@ -67,6 +71,8 @@ import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
 import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
+import DealLineItems from '@/app/components/records/deals/DealLineItems';
+import DealDocuments from '@/app/components/records/deals/DealDocuments';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
@@ -97,7 +103,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
-            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
+            getContextNotifications("deal", id, init).catch(() => ({
+                items: [],
+                total: 0,
+                stateVersion: 0,
+                asOf: "1970-01-01T00:00:00Z",
+            })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
@@ -108,6 +119,14 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     if (!currentUser) redirect('/auth/login');
 
     const peopleRefs = peopleRaw as DealPersonRef[];
+
+    const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
+        .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
+
+    const [documents, effectivePermissions] = await Promise.all([
+        getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
+        getEffectivePermissionsFromCookie(cookie),
+    ]);
 
     const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null
@@ -173,6 +192,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </div>
 
                     <CrumbLabel value={deal.name} />
+                    <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex flex-col gap-2 py-8">
                             <div className="flex flex-row flex-wrap items-center gap-3">
@@ -350,8 +370,21 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </section>
                 </Rise>
 
+                <Rise delay={0.21}>
+                    <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                </Rise>
+
+                <Rise delay={0.24}>
+                    <DealDocuments
+                        dealId={deal.id}
+                        initial={documents}
+                        canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                        currentUserId={currentUser.id}
+                    />
+                </Rise>
+
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                    <Rise delay={0.24}>
+                    <Rise delay={0.27}>
                         <aside>
                             <SectionHeader title={t('details')} />
                             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">

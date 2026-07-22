@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -125,7 +126,8 @@ class AiRelationshipContextTest {
         employment.setStartedAt("2020-01-01");
         employment.setEndedAt(null);
         when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of(employment));
-        when(connectionService.getConnections(PERSON_ID)).thenReturn(List.of(
+        when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
+            .thenReturn(List.of(
                 connection("Jane Roe", "colleague", 8, "Trusted former teammate"),
                 connection("Sam Poe", "knows", 3, "Mentioned a medical diagnosis")));
 
@@ -143,6 +145,7 @@ class AiRelationshipContextTest {
         assertFalse(out.contains("Globex Corp"));
         assertFalse(out.contains("Jane Roe"));
         assertFalse(out.contains("medical diagnosis"));
+        verify(connectionService).getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS);
     }
 
     @Test
@@ -154,13 +157,16 @@ class AiRelationshipContextTest {
             connections.add(connection("Person " + i, "knows", i, "note " + i));
         }
         when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of());
-        when(connectionService.getConnections(PERSON_ID)).thenReturn(connections);
+        when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
+            .thenReturn(connections);
 
         StringBuilder prompt = new StringBuilder();
         context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
 
         assertEquals(AiRelationshipContext.MAX_CONNECTIONS,
                 countOccurrences(prompt.toString(), "Connection:"));
+        assertTrue(prompt.toString().contains("note 8"));
+        assertFalse(prompt.toString().contains("note 3"));
     }
 
     @Test
@@ -171,9 +177,12 @@ class AiRelationshipContextTest {
         suspended.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
         PersonConnectionDto ceased = connection("Ceased Person", "knows", 8, "Ceased note");
         ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
+        PersonConnectionDto noBreakSpace = connection("\u00A0", "knows", 8, "No-break-space note");
+        PersonConnectionDto fileSeparator = connection("\u001C", "knows", 8, "File-separator note");
         PersonConnectionDto allowed = connection("Allowed Person", "knows", 7, "Allowed note");
         when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of());
-        when(connectionService.getConnections(PERSON_ID)).thenReturn(List.of(suspended, ceased, allowed));
+        when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
+            .thenReturn(List.of(suspended, ceased, noBreakSpace, fileSeparator, allowed));
 
         StringBuilder prompt = new StringBuilder();
         context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
@@ -183,6 +192,8 @@ class AiRelationshipContextTest {
         assertFalse(out.contains("Suspended note"));
         assertFalse(out.contains("Ceased Person"));
         assertFalse(out.contains("Ceased note"));
+        assertFalse(out.contains("No-break-space note"));
+        assertFalse(out.contains("File-separator note"));
         assertTrue(out.contains("Allowed note"));
         assertEquals(1, countOccurrences(out, "Connection:"));
     }
