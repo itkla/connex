@@ -95,7 +95,7 @@ export default function NotificationBell() {
 
     async function completeFromInbox(item: Notification) {
         const taskId = item.sourceId;
-        if (item.sourceType !== "task" || taskId == null) return;
+        if (item.type !== "task.due" || item.sourceType !== "task" || taskId == null) return;
         setCompleting((current) => new Set(current).add(item.id));
         try {
             const completed = await executeInNotificationWorkspace(item, async () => {
@@ -224,7 +224,9 @@ export default function NotificationBell() {
                             const content = notificationContent(item, t, locale);
                             const Icon = notificationIcon(item);
                             const style = notificationSeverityStyle(item.severity);
-                            const isTask = item.sourceType === "task" && item.sourceId != null;
+                            const isTaskReminder = item.type === "task.due"
+                                && item.sourceType === "task"
+                                && item.sourceId != null;
                             return (
                                 <div
                                     key={item.id}
@@ -260,7 +262,7 @@ export default function NotificationBell() {
                                             </p>
                                         </div>
                                     </DropdownMenu.Item>
-                                    {isTask ? (
+                                    {isTaskReminder ? (
                                         <div className="flex shrink-0 items-center self-center pr-1">
                                             <Checkbox
                                                 checked={completing.has(item.id)}

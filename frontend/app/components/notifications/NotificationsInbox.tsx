@@ -103,6 +103,7 @@ export default function NotificationsInbox() {
     const retryingLoadRef = useRef(false);
     const retryingFacetsRef = useRef(false);
     const pendingRowsRef = useRef<Set<number>>(new Set());
+    const optimisticTotalRef = useRef(0);
 
     function focusPrimaryFilter() {
         requestAnimationFrame(() => {
@@ -141,6 +142,7 @@ export default function NotificationsInbox() {
                 setLoadFailure(null);
                 setListRetrying(false);
                 setItems(result.items);
+                optimisticTotalRef.current = result.total;
                 setTotal(result.total);
                 setPageAsOf(result.asOf);
                 if (restoreFocus) {
@@ -276,8 +278,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== updated.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(updated.id);
             }
             await refreshUnread();
         } catch {
@@ -294,8 +295,7 @@ export default function NotificationsInbox() {
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            setTotal((value) => Math.max(0, value - 1));
+            removeNotification(item.id);
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
@@ -304,23 +304,36 @@ export default function NotificationsInbox() {
         }
     }
 
-    function removeCompletedNotification(itemId: number) {
+    function removeNotification(itemId: number, restoreFocus = false) {
         const rowButtons = Array.from(
             inboxSectionRef.current?.querySelectorAll<HTMLButtonElement>("[data-notification-row]") ?? [],
         );
         const itemIndex = rowButtons.findIndex((button) => button.dataset.notificationRow === String(itemId));
         if (itemIndex < 0) return;
-        const focusTarget = rowButtons[itemIndex + 1] ?? rowButtons[itemIndex - 1] ?? null;
+        const focusTarget = [
+            ...rowButtons.slice(itemIndex + 1),
+            ...rowButtons.slice(0, itemIndex).reverse(),
+        ].find((button) => {
+            const rowId = Number(button.dataset.notificationRow);
+            return !button.disabled && !pendingRowsRef.current.has(rowId);
+        }) ?? null;
+        const nextTotal = Math.max(0, optimisticTotalRef.current - 1);
+        optimisticTotalRef.current = nextTotal;
         setItems((current) => current.filter((entry) => entry.id !== itemId));
-        setTotal((value) => Math.max(0, value - 1));
-        if (page > 1 && rowButtons.length === 1) {
+        setTotal(nextTotal);
+        const nextPageCount = Math.max(1, Math.ceil(nextTotal / PAGE_SIZE));
+        if (page > nextPageCount) {
             beginQueryChange();
             retryingLoadRef.current = true;
-            setPage((current) => Math.max(1, current - 1));
+            setPage(nextPageCount);
             return;
         }
+        if (!restoreFocus) return;
         requestAnimationFrame(() => {
-            if (focusTarget?.isConnected) focusTarget.focus();
+            const targetId = Number(focusTarget?.dataset.notificationRow);
+            if (focusTarget?.isConnected
+                    && !focusTarget.disabled
+                    && !pendingRowsRef.current.has(targetId)) focusTarget.focus();
             else inboxSectionRef.current?.focus();
         });
     }
@@ -338,7 +351,7 @@ export default function NotificationsInbox() {
         try {
             const completed = await executeInNotificationWorkspace(item, async () => {
                 await completeTask(taskId);
-                removeCompletedNotification(item.id);
+                removeNotification(item.id, true);
                 await refreshUnread();
             }, "/notifications");
             if (!completed) toastError(t("completeError"));
@@ -388,8 +401,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== item.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(item.id);
             }
             await refreshUnread();
         } catch (error) {
@@ -417,8 +429,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== item.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(item.id);
             }
             await refreshUnread();
         } catch (error) {
@@ -455,8 +466,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== updated.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(updated.id);
             }
             await refreshUnread();
         } catch {
