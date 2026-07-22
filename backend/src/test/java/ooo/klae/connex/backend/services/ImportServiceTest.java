@@ -13,8 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -23,11 +21,13 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ColumnMapping;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
@@ -52,6 +52,15 @@ class ImportServiceTest extends AbstractServiceTest {
 
     private static ImportRequest req(List<ColumnMapping> mapping, List<Map<String, String>> rows, String onDuplicate) {
         return new ImportRequest(rows, mapping, onDuplicate, null);
+    }
+
+    private User memberWithPermissions(String... permissions) {
+        WorkspaceRole role = roleService.createRole(
+            workspace.getId(), currentUser.getId(), "Import Preview " + unique(), List.of(permissions));
+        User member = newUser();
+        workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), member.getId(), role.getId());
+        authenticateAs(member, workspace.getId());
+        return member;
     }
 
     @Test
@@ -320,13 +329,218 @@ class ImportServiceTest extends AbstractServiceTest {
         List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"));
         importService.commitPersons(req(mapping, List.of(Map.of("Name", "Fred", "Email", "fred@x.test")), "fill_empty"));
 
-        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "CreatorOnly", List.of("PERSON_CREATE"));
-        User member = newUser();
-        workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), member.getId(), role.getId());
-        SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken(member, null, member.getAuthorities()));
+        memberWithPermissions("PERSON_CREATE");
+        ImportRequest duplicate = req(
+            mapping, List.of(Map.of("Name", "Fred Updated", "Email", "fred@x.test")), "fill_empty");
 
-        assertThrows(ForbiddenException.class, () -> importService.commitPersons(
-            req(mapping, List.of(Map.of("Name", "Fred Updated", "Email", "fred@x.test")), "fill_empty")));
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(duplicate));
+        assertThrows(ForbiddenException.class, () -> importService.commitPersons(duplicate));
+    }
+
+    @Test
+    void companyAndDealPreviews_requireUpdatePermissionForMatchedRows() {
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+
+        memberWithPermissions("COMPANY_CREATE", "DEAL_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewCompanies(req(
+            List.of(map("Company", "name"), map("Web", "website")),
+            List.of(Map.of("Company", company.getName(), "Web", company.getWebsite())),
+            "fill_empty")));
+        assertThrows(ForbiddenException.class, () -> importService.previewDeals(req(
+            List.of(map("Deal", "name"), map("Company", "company")),
+            List.of(Map.of("Deal", deal.getName(), "Company", company.getName())),
+            "fill_empty")));
+    }
+
+    @Test
+    void personPreview_requiresCompanyCreateForMissingActiveWorkspaceCompany() {
+        String companyName = "Missing Company " + unique();
+        memberWithPermissions("PERSON_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Company", "company")),
+            List.of(Map.of("Name", "New Person", "Company", companyName)),
+            "fill_empty")));
+        assertFalse(companyMapper.getCompaniesForDedup(workspace.getId()).stream()
+            .anyMatch(company -> companyName.equals(company.getName())));
+    }
+
+    @Test
+    void personPreview_requiresTagManageForMissingActiveWorkspaceTag() {
+        String tagName = "missing_" + unique();
+        memberWithPermissions("PERSON_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Tags", "tags")),
+            List.of(Map.of("Name", "New Person", "Tags", tagName)),
+            "fill_empty")));
+        assertNull(tagMapper.getTagByName(workspace.getId(), tagName));
+    }
+
+    @Test
+    void personPreview_requiresCustomFieldManageForMissingActiveWorkspaceDefinition() {
+        String fieldKey = "budget_" + unique();
+        ColumnMapping budget = new ColumnMapping("Budget", null, true, "number", fieldKey);
+        memberWithPermissions("PERSON_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), budget),
+            List.of(Map.of("Name", "New Person", "Budget", "5000")),
+            "fill_empty")));
+        assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
+    }
+
+    @Test
+    void personPreview_allowsExistingActiveWorkspaceDependenciesWithoutManagePermissions() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        String fieldKey = "budget_" + unique();
+        ColumnMapping budget = new ColumnMapping("Budget", null, true, "number", fieldKey);
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email"), budget),
+            List.of(Map.of("Name", "Seed Person", "Email", unique() + "@x.test", "Budget", "1")),
+            "fill_empty"));
+
+        memberWithPermissions("PERSON_CREATE");
+        ImportRequest request = req(
+            List.of(
+                map("Name", "name"),
+                map("Email", "email"),
+                map("Company", "company"),
+                map("Tags", "tags"),
+                budget),
+            List.of(Map.ofEntries(
+                Map.entry("Name", "Dependency User"),
+                Map.entry("Email", unique() + "@x.test"),
+                Map.entry("Company", company.getName()),
+                Map.entry("Tags", tag.getName()),
+                Map.entry("Budget", "2"))),
+            "fill_empty");
+        ImportPreviewResult preview = importService.previewPersons(request);
+        ImportResult result = importService.commitPersons(request);
+
+        assertEquals(1, preview.getToCreate());
+        assertEquals(1, result.getCreated());
+    }
+
+    @Test
+    void personPreviewAndCommit_allowAuthorizedDependencyCreation() {
+        String companyName = "Authorized Company " + unique();
+        String tagName = "authorized_" + unique();
+        String fieldKey = "authorized_" + unique();
+        ColumnMapping custom = new ColumnMapping("Custom", null, true, "text", fieldKey);
+        ImportRequest request = req(
+            List.of(
+                map("Name", "name"),
+                map("Company", "company"),
+                map("Tags", "tags"),
+                custom),
+            List.of(Map.of(
+                "Name", "Authorized Person",
+                "Company", companyName,
+                "Tags", tagName,
+                "Custom", "value")),
+            "fill_empty");
+        memberWithPermissions("PERSON_CREATE", "COMPANY_CREATE", "TAG_MANAGE", "CUSTOM_FIELD_MANAGE");
+
+        ImportPreviewResult preview = importService.previewPersons(request);
+        ImportResult result = importService.commitPersons(request);
+
+        assertEquals(1, preview.getToCreate());
+        assertEquals(1, result.getCreated());
+        assertTrue(companyMapper.getCompaniesForDedup(workspace.getId()).stream()
+            .anyMatch(company -> companyName.equals(company.getName())));
+        assertNotNull(tagMapper.getTagByName(workspace.getId(), tagName));
+        assertNotNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
+    }
+
+    @Test
+    void skippedAndInvalidRows_doNotRequireDependencyPermissionsOrCreateDependencies() {
+        String email = unique() + "@x.test";
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Existing Person", "Email", email)),
+            "fill_empty"));
+        String companyName = "Skipped Company " + unique();
+        String tagName = "skipped_" + unique();
+        String fieldKey = "skipped_" + unique();
+        ColumnMapping custom = new ColumnMapping("Custom", null, true, "text", fieldKey);
+        List<ColumnMapping> mapping = List.of(
+            map("Name", "name"),
+            map("Email", "email"),
+            map("Company", "company"),
+            map("Tags", "tags"),
+            custom);
+        memberWithPermissions("PERSON_CREATE");
+
+        ImportRequest skipped = req(mapping, List.of(Map.of(
+            "Name", "Existing Person",
+            "Email", email,
+            "Company", companyName,
+            "Tags", tagName,
+            "Custom", "value")), "skip");
+        ImportPreviewResult skippedPreview = importService.previewPersons(skipped);
+        ImportResult skippedResult = importService.commitPersons(skipped);
+        ImportPreviewResult invalidPreview = importService.previewPersons(req(mapping, List.of(Map.of(
+            "Name", "",
+            "Email", unique() + "@x.test",
+            "Company", companyName,
+            "Tags", tagName,
+            "Custom", "value")), "fill_empty"));
+
+        assertEquals(1, skippedPreview.getToSkip());
+        assertEquals(1, skippedResult.getSkipped());
+        assertEquals(1, invalidPreview.getInvalid());
+        assertFalse(companyMapper.getCompaniesForDedup(workspace.getId()).stream()
+            .anyMatch(company -> companyName.equals(company.getName())));
+        assertNull(tagMapper.getTagByName(workspace.getId(), tagName));
+        assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
+    }
+
+    @Test
+    void foreignWorkspaceDependencies_doNotSatisfyPreviewPermissionPreflight() {
+        String companyName = "Foreign Company " + unique();
+        String tagName = "foreign_" + unique();
+        String fieldKey = "foreign_" + unique();
+        Workspace foreign = new Workspace();
+        foreign.setName("Foreign " + unique());
+        foreign.setSlug("foreign-" + unique());
+        foreign.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(foreign);
+        Company company = new Company();
+        company.setWorkspaceId(foreign.getId());
+        company.setName(companyName);
+        companyMapper.insert(company);
+        Tag tag = new Tag();
+        tag.setWorkspaceId(foreign.getId());
+        tag.setName(tagName);
+        tag.setColor("#abcdef");
+        tagMapper.insert(tag);
+        CustomFieldDefinition definition = new CustomFieldDefinition();
+        definition.setWorkspaceId(foreign.getId());
+        definition.setEntityType("person");
+        definition.setFieldKey(fieldKey);
+        definition.setLabel(fieldKey);
+        definition.setFieldType("text");
+        customFieldDefinitionMapper.insert(definition);
+        memberWithPermissions("PERSON_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Company", "company")),
+            List.of(Map.of("Name", "New Person", "Company", companyName)),
+            "fill_empty")));
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Tags", "tags")),
+            List.of(Map.of("Name", "New Person", "Tags", tagName)),
+            "fill_empty")));
+        ColumnMapping custom = new ColumnMapping("Custom", null, true, "text", fieldKey);
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), custom),
+            List.of(Map.of("Name", "New Person", "Custom", "value")),
+            "fill_empty")));
     }
 }
