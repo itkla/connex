@@ -154,7 +154,7 @@ class ScoringServiceTest {
         when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
         when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
-        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(activities);
+        when(activityMapper.getActivitiesByDealCompanyIds(WS, List.of(10))).thenReturn(activities);
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         ScoringService service = new ScoringService(
@@ -255,7 +255,8 @@ class ScoringServiceTest {
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
         when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
         when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
-        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(List.of(activity));
+        when(activityMapper.getActivitiesByDealCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
@@ -265,12 +266,76 @@ class ScoringServiceTest {
 
         assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         assertEquals(1, scores.getFirst().getTouchCount());
+        verify(activityMapper).getActivitiesByPersonIds(WS, List.of(1));
+        verify(activityMapper).getActivitiesByDealCompanyIds(WS, List.of(10));
         verify(companyMapper, never()).getAllCompanies(anyInt());
         verify(personMapper, never()).getAllPersons(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
         verify(companyMapper, never()).exists(anyInt(), anyInt());
         verify(personMapper, never()).getPersonsByCompanyId(anyInt(), anyInt(), any());
         verify(dealMapper, never()).getDealsByCompanyId(anyInt(), anyInt());
+    }
+
+    @Test
+    void scoreCompaniesSubsetChunksAuthorizedPersonActivityLoads() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Company company = company(10);
+        List<Person> persons = IntStream.rangeClosed(1, 1_001)
+            .mapToObj(id -> person(id, 10))
+            .toList();
+        List<Integer> firstChunk = IntStream.rangeClosed(1, 1_000).boxed().toList();
+        List<Integer> secondChunk = List.of(1_001);
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(persons);
+        when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(activityMapper.getActivitiesByPersonIds(WS, firstChunk)).thenReturn(List.of());
+        when(activityMapper.getActivitiesByPersonIds(WS, secondChunk)).thenReturn(List.of());
+        when(activityMapper.getActivitiesByDealCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RelationshipTemperatureDto score = service.scoreCompanies(WS, Set.of(10)).getFirst();
+
+        assertEquals(0, score.getTouchCount());
+        verify(activityMapper).getActivitiesByPersonIds(WS, firstChunk);
+        verify(activityMapper).getActivitiesByPersonIds(WS, secondChunk);
+    }
+
+    @Test
+    void scoreCompaniesSubsetKeepsDealOnlyActivitiesWhenNoPersonsAreAuthorized() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Company company = company(10);
+        Deal deal = new Deal();
+        deal.setId(20);
+        deal.setCompanyId(10);
+        Activity activity = activity(null, "meeting", "2026-06-29 12:00:00");
+        activity.setId(30);
+        activity.setDeal(deal);
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
+        when(activityMapper.getActivitiesByDealCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
+        when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RelationshipTemperatureDto score = service.scoreCompanies(WS, Set.of(10)).getFirst();
+
+        assertEquals(1, score.getTouchCount());
+        verify(activityMapper, never()).getActivitiesByPersonIds(anyInt(), any());
     }
 
     @Test
@@ -350,7 +415,8 @@ class ScoringServiceTest {
         when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(contact));
         when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of());
-        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        when(activityMapper.getActivitiesByDealCompanyIds(WS, List.of(10))).thenReturn(List.of());
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of(privateNote));
         when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         ScoringService service = new ScoringService(
