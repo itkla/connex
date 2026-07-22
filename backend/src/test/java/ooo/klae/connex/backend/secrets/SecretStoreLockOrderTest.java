@@ -95,6 +95,57 @@ class SecretStoreLockOrderTest {
                 SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value(), "Secret use failed", "IllegalStateException");
     }
 
+    @Test
+    void successfulUseDefersDurableAuditUntilAfterRollbackReleasesScopeLocks() {
+        StoredSecret secret = secret(1, "organization", 7);
+        secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(secretValueMapper.findById(1)).thenReturn(secret);
+        when(crypto.decrypt(anyString(), anyString(), anyString(), anyString())).thenReturn("plaintext");
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            secretStore.get(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            verifyNoInteractions(auditService);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(auditService).recordIndependentScoped(
+                "secret_store.secret.use", "organization", 7, null, 7,
+                SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value(), "Secret used",
+                java.util.Map.of("secretId", 1L, "purpose", SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value(),
+                        "keyId", "old-v1", "rewrapped", false));
+    }
+
+    @Test
+    void failedBatchRewrapDefersIndependentAuditUntilScopeLocksAreReleased() {
+        StoredSecret secret = secret(1, "organization", 7);
+        when(crypto.activeKeyId()).thenReturn("new-v2");
+        when(secretValueMapper.listRewrapCandidates("new-v2", 10)).thenReturn(List.of(secret));
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(crypto.decrypt(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("decrypt failed"));
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(IllegalStateException.class, () -> secretStore.rewrapBatchToActiveKey(10));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            verifyNoInteractions(auditService);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(auditService).recordFailureScoped(
+                "secret_store.secret.rewrap_failed", "organization", 7, null, 7,
+                "test", "Secret rewrap failed", "IllegalStateException");
+    }
+
     private static StoredSecret secret(long id, String scopeType, int scopeId) {
         StoredSecret secret = new StoredSecret();
         secret.setId(id);

@@ -203,9 +203,8 @@ class SecretStoreTest {
                 workspaceId, reference));
         StoredSecret rewrapped = secretValueMapper.findById(SecretReference.parse(reference).id());
         assertEquals("new-v2", rewrapped.getKeyId());
-        verify(auditService).recordScoped(
-                eq("secret_store.secret.use"), eq("workspace"), eq(workspaceId), eq(workspaceId), isNull(),
-                eq("workspace.smtp.password"), eq("Secret used"), any());
+        verify(auditService, never()).recordIndependentScoped(
+                eq("secret_store.secret.use"), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordScoped(
                 eq("secret_store.secret.rewrap"), any(), any(), any(), any(), any(), any(), any());
     }
@@ -282,7 +281,7 @@ class SecretStoreTest {
     }
 
     @Test
-    void successfulUseAuditIsTransactionalAndScoped() {
+    void successfulUseAuditIsDeferredWithinTransaction() {
         int workspaceId = workspaceId();
         AuditService auditService = mock(AuditService.class);
         SecretStore auditedStore = store("audit-v1", base64Key((byte) 10),
@@ -291,9 +290,8 @@ class SecretStoreTest {
 
         assertEquals("smtp-password", auditedStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
 
-        verify(auditService).recordScoped(eq("secret_store.secret.use"), eq("workspace"),
-                eq(workspaceId), eq(workspaceId), isNull(), eq("workspace.smtp.password"),
-                eq("Secret used"), any());
+        verify(auditService, never()).recordIndependentScoped(
+                eq("secret_store.secret.use"), any(), any(), any(), any(), any(), any(), any());
     }
 
     private int workspaceId() {

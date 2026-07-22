@@ -236,24 +236,28 @@ public class SecretStore {
     }
 
     private void auditUse(StoredSecret secret, boolean rewrapped) {
-        auditService.recordScoped("secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
+        deferIndependentAudit(() -> auditService.recordIndependentScoped(
+                "secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret used",
-                auditMetadata(secret, rewrapped));
+                auditMetadata(secret, rewrapped)));
     }
 
     private void auditUseFailure(StoredSecret secret, RuntimeException exception) {
-        Runnable recordFailure = () -> auditService.recordFailureScoped(
+        deferIndependentAudit(() -> auditService.recordFailureScoped(
                 "secret_store.secret.use_failed", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret use failed",
-                exception.getClass().getSimpleName());
+                exception.getClass().getSimpleName()));
+    }
+
+    private void deferIndependentAudit(Runnable recordAudit) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            recordFailure.run();
+            recordAudit.run();
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                recordFailure.run();
+                recordAudit.run();
             }
         });
     }
@@ -266,9 +270,10 @@ public class SecretStore {
     }
 
     private void auditRewrapFailure(StoredSecret secret, RuntimeException exception) {
-        auditService.recordFailureScoped("secret_store.secret.rewrap_failed", scopeEntityType(secret),
-                scopeEntityId(secret), workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(),
-                "Secret rewrap failed", exception.getClass().getSimpleName());
+        deferIndependentAudit(() -> auditService.recordFailureScoped(
+                "secret_store.secret.rewrap_failed", scopeEntityType(secret), scopeEntityId(secret),
+                workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret rewrap failed",
+                exception.getClass().getSimpleName()));
     }
 
     private static Map<String, Object> auditMetadata(StoredSecret secret, boolean rewrapped) {
