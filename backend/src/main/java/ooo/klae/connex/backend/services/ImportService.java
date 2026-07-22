@@ -160,8 +160,9 @@ public class ImportService {
             if (SKIP.equals(row.status)) { skipped++; continue; }
             if (MATCH.equals(row.status)) {
                 if (SKIP.equals(action)) { skipped++; continue; }
-                applyPersonUpdate(workspaceId, row, action, columnToDef, tagByName, companyByName);
-                updated++;
+                if (applyPersonUpdate(workspaceId, row, action, columnToDef, tagByName, companyByName)) {
+                    updated++;
+                }
                 continue;
             }
             Person bean = new Person();
@@ -221,7 +222,7 @@ public class ImportService {
             if (INVALID.equals(row.status)) continue;
             Integer linked = links.get(row.rowIndex);
             if (linked != null) {
-                Person existing = personMapper.getPersonById(workspaceId, linked);
+                Person existing = getOwnedPerson(workspaceId, linked);
                 if (existing == null) { fail(row, "Linked contact #" + linked + " not found"); continue; }
                 markMatch(row, existing.getId(), existing.getName());
                 continue;
@@ -234,10 +235,13 @@ public class ImportService {
         return plan;
     }
 
-    private void applyPersonUpdate(int workspaceId, PlanRow row, String action,
+    private boolean applyPersonUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName, Map<String, Integer> companyByName) {
-        Person existing = personMapper.getPersonById(workspaceId, row.matchedId);
-        if (existing == null) return;
+        Person existing = personMapper.getOwnedPersonByIdForUpdate(workspaceId, row.matchedId);
+        if (existing == null) {
+            fail(row, "Matched contact #" + row.matchedId + " not found");
+            return false;
+        }
         Integer beforeCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
@@ -256,6 +260,12 @@ public class ImportService {
         }
         attachTags(workspaceId, "person", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("person", existing.getId(), row.custom, columnToDef, action, true);
+        return true;
+    }
+
+    private Person getOwnedPerson(int workspaceId, int personId) {
+        if (!personMapper.existsOwned(workspaceId, personId)) return null;
+        return personMapper.getPersonById(workspaceId, personId);
     }
 
     // ===================================================================================
@@ -300,8 +310,9 @@ public class ImportService {
             if (SKIP.equals(row.status)) { skipped++; continue; }
             if (MATCH.equals(row.status)) {
                 if (SKIP.equals(action)) { skipped++; continue; }
-                applyCompanyUpdate(workspaceId, row, action, columnToDef, tagByName);
-                updated++;
+                if (applyCompanyUpdate(workspaceId, row, action, columnToDef, tagByName)) {
+                    updated++;
+                }
                 continue;
             }
             Company bean = new Company();
@@ -349,7 +360,7 @@ public class ImportService {
             if (INVALID.equals(row.status)) continue;
             Integer linked = links.get(row.rowIndex);
             if (linked != null) {
-                Company existing = companyMapper.getCompanyById(workspaceId, linked);
+                Company existing = getOwnedCompany(workspaceId, linked);
                 if (existing == null) { fail(row, "Linked company #" + linked + " not found"); continue; }
                 markMatch(row, existing.getId(), existing.getName());
                 continue;
@@ -366,10 +377,13 @@ public class ImportService {
         return plan;
     }
 
-    private void applyCompanyUpdate(int workspaceId, PlanRow row, String action,
+    private boolean applyCompanyUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName) {
-        Company existing = companyMapper.getCompanyById(workspaceId, row.matchedId);
-        if (existing == null) return;
+        Company existing = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, row.matchedId);
+        if (existing == null) {
+            fail(row, "Matched company #" + row.matchedId + " not found");
+            return false;
+        }
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setWebsite(merge(action, existing.getWebsite(), row.std.get("website")));
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
@@ -378,6 +392,12 @@ public class ImportService {
         companyMapper.update(existing);
         attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
+        return true;
+    }
+
+    private Company getOwnedCompany(int workspaceId, int companyId) {
+        if (!companyMapper.existsOwned(workspaceId, companyId)) return null;
+        return companyMapper.getCompanyById(workspaceId, companyId);
     }
 
     // ===================================================================================

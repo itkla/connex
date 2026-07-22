@@ -79,6 +79,7 @@ public interface CompanyMapper {
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Company getOwnedCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);
     /** id + name + website for every company in the workspace; for import dedup (normalized in the service). */
     List<Company> getCompaniesForDedup(int workspaceId);
