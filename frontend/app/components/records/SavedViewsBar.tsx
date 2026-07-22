@@ -50,7 +50,11 @@ import {
     unpinSavedView,
     updateSavedView,
 } from "@/app/lib/api";
-import { isSegmentDefinition } from "@/app/components/records/SegmentBuilder";
+import {
+    evaluableSegmentDefinition,
+    hasSegmentConditions,
+    normalizeSegmentDefinition,
+} from "@/app/lib/segmentDefinition";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { publishSavedViewMutation } from "@/app/lib/saved-view-events";
 import { parseSavedViewToken, savedViewRecordPath, savedViewToken } from "@/app/lib/savedViewLink";
@@ -68,9 +72,10 @@ function canonical(config: SavedViewConfig | null | undefined): string {
         const values = filters[key];
         if (values && values.length > 0) sorted[key] = [...values].sort();
     }
-    const seg = config?.segments;
-    const segments = isSegmentDefinition(seg) && seg.conditions.length > 0
-        ? JSON.stringify(seg)
+    const normalizedSegments = normalizeSegmentDefinition(config?.segments);
+    const evaluableSegments = normalizedSegments ? evaluableSegmentDefinition(normalizedSegments) : null;
+    const segments = evaluableSegments && hasSegmentConditions(evaluableSegments)
+        ? JSON.stringify(evaluableSegments)
         : "";
     return JSON.stringify({
         filters: sorted,
@@ -85,7 +90,9 @@ function canonical(config: SavedViewConfig | null | undefined): string {
 function isEmpty(config: SavedViewConfig | null | undefined): boolean {
     const filters = config?.filters ?? {};
     const hasFilters = Object.values(filters).some((values) => values && values.length > 0);
-    return !hasFilters && !(config?.query ?? "").trim() && !config?.sortKey && (config?.segments?.conditions?.length ?? 0) === 0;
+    const segments = normalizeSegmentDefinition(config?.segments);
+    const hasSegments = segments ? hasSegmentConditions(evaluableSegmentDefinition(segments)) : false;
+    return !hasFilters && !(config?.query ?? "").trim() && !config?.sortKey && !hasSegments;
 }
 
 /** Merges a view into a list, replacing any existing entry with the same id. */
