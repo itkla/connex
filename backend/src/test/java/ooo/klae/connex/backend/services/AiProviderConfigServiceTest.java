@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -39,6 +41,7 @@ import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,6 +53,7 @@ class AiProviderConfigServiceTest {
 
     @Mock private AiProperties aiProperties;
     @Mock private AiProviderConfigMapper aiProviderConfigMapper;
+    @Mock private OrganizationMapper organizationMapper;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private OrgMemberService orgMemberService;
     @Mock private AiProviderSecretCipher aiProviderSecretCipher;
@@ -62,12 +66,14 @@ class AiProviderConfigServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, workspaceMapper,
+        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, workspaceMapper,
                 orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
                 sessionSecurityService,
                 new ObjectMapper());
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
+        lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
+        lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
         lenient().doAnswer(invocation -> {
@@ -337,6 +343,18 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void save_locksOrganizationBeforeReadingAndWritingConfig() {
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any())).thenReturn("secret:v1:77");
+
+        service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
+
+        InOrder mutations = inOrder(organizationMapper, aiProviderConfigMapper);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).upsert(any(AiProviderConfig.class));
+    }
+
+    @Test
     void revoke_deletesRowCredentialAndAudits() {
         stored = readyConfig();
 
@@ -347,6 +365,29 @@ class AiProviderConfigServiceTest {
         verify(aiProviderSecretCipher).deleteCredentialReference(ORG_ID, "secret:v1:88");
         verify(auditService).record("org.ai_provider.revoke", "organization", ORG_ID, null,
                 "Revoked AI provider configuration", null);
+    }
+
+    @Test
+    void revoke_locksOrganizationBeforeReadingAndDeletingConfig() {
+        stored = readyConfig();
+
+        service.revoke(WORKSPACE_ID, ACTOR_ID);
+
+        InOrder mutations = inOrder(organizationMapper, aiProviderConfigMapper);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).deleteByOrg(ORG_ID);
+    }
+
+    @Test
+    void save_missingOrganizationFailsBeforeConfigRead() {
+        when(organizationMapper.lockById(ORG_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
     }
 
     @Test

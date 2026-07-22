@@ -34,6 +34,13 @@
     WHERE org_id = #{orgId}
   </select>
 
+  <select id="findByOrgForUpdate" resultMap="AiProviderConfigResult">
+    SELECT <include refid="columns"/>
+    FROM ai_provider_config
+    WHERE org_id = #{orgId}
+    FOR UPDATE
+  </select>
+
   <insert id="upsert">
     INSERT INTO ai_provider_config
       (org_id, provider, region, endpoint, api_version, deployment, project_id,
