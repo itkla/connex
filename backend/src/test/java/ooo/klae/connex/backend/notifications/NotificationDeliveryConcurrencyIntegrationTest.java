@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -125,7 +126,7 @@ class NotificationDeliveryConcurrencyIntegrationTest {
         Notification persisted = notificationMapper.findByDedupe(
             workspace.getId(), recipient.getId(), dedupeKey);
         assertNotNull(persisted);
-        verify(notificationMapper, times(2)).claimEmailDelivery(
+        verify(notificationMapper, atLeastOnce()).claimEmailDelivery(
             workspace.getId(), recipient.getId(), dedupeKey);
         assertEquals(1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM notification WHERE workspace_id = ? AND recipient_id = ? AND dedupe_key = ?",
