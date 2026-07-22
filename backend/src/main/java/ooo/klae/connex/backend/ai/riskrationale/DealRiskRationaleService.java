@@ -102,8 +102,13 @@ public class DealRiskRationaleService {
             String narrative = truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS);
             List<String> actions = actions(content.actions());
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                    contentHash, new DealRiskRationaleContent(narrative, actions), parsed.demaskWarnings(), generatedAt);
+            boolean safeToServe = aiOutputCacheStore.saveForPersons(
+                    workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
+                    contentHash, new DealRiskRationaleContent(narrative, actions),
+                    parsed.demaskWarnings(), generatedAt, assembly.contributorPersonIds());
+            if (!safeToServe) {
+                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+            }
             return DealRationaleDto.of(dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
         } catch (ForbiddenException exception) {
             return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);

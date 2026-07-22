@@ -8,15 +8,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.AiOutputCache;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,6 +45,7 @@ public class AiOutputCacheStore {
     static final String HASH_VERSION = "v2-structured-json-fail-closed";
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
+    private final PersonMapper personMapper;
     private final ObjectMapper objectMapper;
 
     /**
@@ -86,12 +91,72 @@ public class AiOutputCacheStore {
      */
     public void save(int workspaceId, String feature, int subjectAId, int subjectBId, String contentHash,
             Object content, int warnings, String generatedAt) {
-        String payload;
-        try {
-            payload = objectMapper.writeValueAsString(content);
-        } catch (JacksonException exception) {
+        Optional<String> payload = serialize(content);
+        if (payload.isEmpty()) {
             return;
         }
+        aiOutputCacheMapper.upsert(entry(
+                workspaceId, feature, subjectAId, subjectBId, contentHash,
+                payload.get(), warnings, generatedAt));
+    }
+
+    /**
+     * Upserts generated content only while every directly contributing contact remains visible and
+     * unrestricted. Exact contact rows are locked in ascending id order so restriction changes and
+     * cache admission serialize without range-lock ordering ambiguity. Serialization failure skips
+     * persistence only after contributor admission succeeds.
+     * @param workspaceId active workspace
+     * @param feature feature key
+     * @param subjectAId primary subject id
+     * @param subjectBId secondary subject id, or {@link #NO_SUBJECT}
+     * @param contentHash validity fingerprint
+     * @param content demasked structured content, serialized to JSON for storage
+     * @param warnings demasking warning count
+     * @param generatedAt ISO generation instant
+     * @param contributorPersonIds exact directly contributing contact ids
+     * @return true when the generated content remains safe to serve, whether or not serialization
+     *         allowed persistence; false when contributor admission fails
+     */
+    @Transactional
+    public boolean saveForPersons(int workspaceId, String feature, int subjectAId, int subjectBId,
+            String contentHash, Object content, int warnings, String generatedAt,
+            List<Integer> contributorPersonIds) {
+        Optional<String> payload = serialize(content);
+        if (contributorPersonIds == null) {
+            return false;
+        }
+        TreeSet<Integer> sortedPersonIds = new TreeSet<>();
+        for (Integer personId : contributorPersonIds) {
+            if (personId == null || personId <= 0) {
+                return false;
+            }
+            sortedPersonIds.add(personId);
+        }
+        for (int personId : sortedPersonIds) {
+            Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, personId);
+            if (person == null || person.getSuspendedAt() != null || person.getProvisionCeasedAt() != null) {
+                return false;
+            }
+        }
+        if (payload.isEmpty()) {
+            return true;
+        }
+        aiOutputCacheMapper.upsert(entry(
+                workspaceId, feature, subjectAId, subjectBId, contentHash,
+                payload.get(), warnings, generatedAt));
+        return true;
+    }
+
+    private Optional<String> serialize(Object content) {
+        try {
+            return Optional.ofNullable(objectMapper.writeValueAsString(content));
+        } catch (JacksonException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private static AiOutputCache entry(int workspaceId, String feature, int subjectAId, int subjectBId,
+            String contentHash, String payload, int warnings, String generatedAt) {
         AiOutputCache entry = new AiOutputCache();
         entry.setWorkspaceId(workspaceId);
         entry.setFeature(feature);
@@ -101,7 +166,7 @@ public class AiOutputCacheStore {
         entry.setPayload(payload);
         entry.setWarnings(warnings);
         entry.setGeneratedAt(generatedAt);
-        aiOutputCacheMapper.upsert(entry);
+        return entry;
     }
 
     /**

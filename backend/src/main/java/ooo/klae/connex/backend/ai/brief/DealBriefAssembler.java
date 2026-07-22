@@ -92,17 +92,21 @@ public class DealBriefAssembler {
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, personIds));
         DealRiskDto risk = dealRiskService.assessDeal(workspaceId, dealId);
+        List<Activity> promptActivities = first(
+                allowedActivities(activities, allowedPersonIds), MAX_ACTIVITIES);
+        List<Note> promptNotes = first(allowedNotes(notes, allowedPersonIds), MAX_NOTES);
+        List<Task> promptTasks = promptTasks(allowedTasks(tasks, allowedPersonIds));
 
         String userPrompt = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
-                allowedActivities(activities, allowedPersonIds),
-                allowedNotes(notes, allowedPersonIds),
-                allowedTasks(tasks, allowedPersonIds),
+                promptActivities, promptNotes, promptTasks,
                 companyToken, context);
         MaskedPrompt prompt = PromptAssembly.builder()
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
-        return new BriefAssembly(context, prompt);
+        return new BriefAssembly(
+                context, prompt,
+                contributorPersonIds(stakeholders, promptActivities, promptNotes, promptTasks));
     }
 
     private String userPrompt(
@@ -240,6 +244,49 @@ public class DealBriefAssembler {
         return tasks.stream()
             .filter(task -> task != null && allowedPersonLink(task.getPerson(), allowedPersonIds))
             .toList();
+    }
+
+    private static List<Task> promptTasks(List<Task> tasks) {
+        return tasks.stream()
+            .filter(task -> !task.isCompleted() && !isBlank(task.getDescription()))
+            .limit(MAX_TASKS)
+            .toList();
+    }
+
+    private static List<Integer> contributorPersonIds(
+            List<MaskedStakeholder> stakeholders,
+            List<Activity> activities,
+            List<Note> notes,
+            List<Task> tasks) {
+        Set<Integer> contributorIds = new LinkedHashSet<>();
+        for (MaskedStakeholder stakeholder : stakeholders) {
+            if (stakeholder.personId() > 0) {
+                contributorIds.add(stakeholder.personId());
+            }
+        }
+        for (Activity activity : activities) {
+            if (hasNonBlankSource(activity.getSubject(), activity.getNotes())) {
+                addPersonId(contributorIds, activity.getPerson());
+            }
+        }
+        for (Note note : notes) {
+            if (hasNonBlankSource(note.getTitle(), note.getContent())) {
+                addPersonId(contributorIds, note.getPerson());
+            }
+        }
+        for (Task task : tasks) {
+            addPersonId(contributorIds, task.getPerson());
+        }
+        return contributorIds.stream().sorted().toList();
+    }
+
+    private static boolean hasNonBlankSource(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Map<Integer, RelationshipTemperatureDto> warmthByPerson(

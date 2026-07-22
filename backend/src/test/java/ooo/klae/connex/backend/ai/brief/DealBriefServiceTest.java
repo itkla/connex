@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,9 @@ class DealBriefServiceTest {
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(true);
         LocaleContextHolder.setLocale(Locale.ENGLISH);
     }
 
@@ -121,8 +125,27 @@ class DealBriefServiceTest {
         verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class));
         assertEquals(FEATURE, invocation.getValue().feature());
         assertEquals(DealBriefService.MAX_TOKENS, invocation.getValue().maxTokens());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
-                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(2), eq(NOW.toString()));
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(2),
+                eq(NOW.toString()), eq(List.of(73)));
+    }
+
+    @Test
+    void generate_contributorRestrictedBeforeCacheAdmissionReturnsProviderError() {
+        BriefAssembly assembly = assembly();
+        arrangeMiss(assembly);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(new DealBriefContent.Section("Status", "Fresh."))),
+                        0, 20, 10, "end_turn"));
+        when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(false);
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("provider_error", result.getReason());
     }
 
     @Test
@@ -144,7 +167,8 @@ class DealBriefServiceTest {
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         assertEquals(3, result.getWarnings());
         verify(aiInvocationService, never()).completeStructured(any(), any());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -186,8 +210,9 @@ class DealBriefServiceTest {
         assertEquals("Fresh.", result.getSections().get(0).body());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
-                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0), eq(NOW.toString()));
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0),
+                eq(NOW.toString()), eq(List.of(73)));
     }
 
     @Test
@@ -206,8 +231,9 @@ class DealBriefServiceTest {
         assertEquals("Fresh take.", result.getSections().get(0).body());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
-                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0), eq(NOW.toString()));
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0),
+                eq(NOW.toString()), eq(List.of(73)));
     }
 
     @Test
@@ -220,7 +246,8 @@ class DealBriefServiceTest {
 
         assertFalse(result.isAvailable());
         assertEquals("provider_error", result.getReason());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -246,7 +273,8 @@ class DealBriefServiceTest {
 
         assertFalse(result.isAvailable());
         assertEquals("provider_error", result.getReason());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -261,7 +289,8 @@ class DealBriefServiceTest {
 
         assertFalse(result.isAvailable());
         assertEquals("provider_error", result.getReason());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     private void arrangeMiss(BriefAssembly assembly) {
@@ -288,6 +317,6 @@ class DealBriefServiceTest {
                 .system("Use only the supplied context.")
                 .userTurn("Stakeholder: " + person)
                 .build();
-        return new BriefAssembly(context, prompt);
+        return new BriefAssembly(context, prompt, List.of(73));
     }
 }

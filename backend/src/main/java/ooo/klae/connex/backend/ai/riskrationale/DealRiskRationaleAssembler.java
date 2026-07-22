@@ -86,7 +86,8 @@ public class DealRiskRationaleAssembler {
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
-        return new RationaleAssembly(context, prompt, !factors.isEmpty());
+        return new RationaleAssembly(
+                context, prompt, !factors.isEmpty(), stakeholderTokens.keySet().stream().sorted().toList());
     }
 
     private String userPrompt(

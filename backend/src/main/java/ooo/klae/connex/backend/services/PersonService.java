@@ -303,7 +303,10 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requireOwnedPerson(workspaceId, id);
+        Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        if (before == null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
         personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = suspended || provisionCeased

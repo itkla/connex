@@ -10,6 +10,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
@@ -31,6 +32,39 @@ class ShareMapperTest extends AbstractMapperTest {
 
     @Autowired private ShareMapper shareMapper;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void visiblePersonLockPreservesSameOrgShareCeilingAndRestrictionFields() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
+        Person person = newPerson(newCompany());
+        Person unshared = new Person();
+        unshared.setWorkspaceId(sibling.getId());
+        unshared.setName("Unshared contact");
+        unshared.setEmail("unshared-" + person.getId() + "@example.com");
+        personMapper.insert(unshared);
+        int grantedBy = newUser().getId();
+        assertEquals(1, shareMapper.sharePerson(
+            person.getId(), workspace.getId(), sibling.getId(), grantedBy, false));
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, true);
+        jdbcTemplate.update(
+            "INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
+            person.getId(), foreign.getId(), grantedBy, false);
+
+        Person owned = personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), person.getId());
+        Person shared = personMapper.getVisiblePersonByIdForUpdate(sibling.getId(), person.getId());
+
+        assertNotNull(owned);
+        assertNotNull(owned.getSuspendedAt());
+        assertNotNull(owned.getProvisionCeasedAt());
+        assertNotNull(shared);
+        assertNotNull(shared.getSuspendedAt());
+        assertNotNull(shared.getProvisionCeasedAt());
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), unshared.getId()));
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(foreign.getId(), person.getId()));
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), Integer.MAX_VALUE));
+    }
 
     @Test
     void shareCompany_sameOrganization_grantsVisibility() {

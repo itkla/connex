@@ -150,6 +150,45 @@ class PersonServiceTest extends AbstractServiceTest {
         assertTrue(changes.contains("purgedAiOutputs"));
     }
 
+    @Test
+    void suspendingPurgesBriefsForCurrentStructuredDealLinksWithoutOverPurgingRisk() {
+        Company company = newCompany();
+        Person subject = newPerson(company);
+        Person other = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal activityDeal = newDeal(pipeline, stage, company);
+        Deal noteDeal = newDeal(pipeline, stage, company);
+        Deal taskDeal = newDeal(pipeline, stage, company);
+        Deal unrelatedDeal = newDeal(pipeline, stage, company);
+        newActivity(currentUser, subject, activityDeal);
+        newNote(currentUser, subject, noteDeal);
+        newTask(currentUser, subject, taskDeal);
+        newActivity(currentUser, other, unrelatedDeal);
+        for (Deal deal : new Deal[] {activityDeal, noteDeal, taskDeal}) {
+            seedCache(workspace.getId(), "deal.brief:en", deal.getId(), 0);
+            seedCache(workspace.getId(), "deal.risk_rationale:en", deal.getId(), 0);
+        }
+        seedCache(workspace.getId(), "deal.brief:en", unrelatedDeal.getId(), 0);
+
+        personService.updateProcessingRestrictions(subject.getId(), true, false);
+
+        assertNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.brief:en", activityDeal.getId(), 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.brief:en", noteDeal.getId(), 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.brief:en", taskDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.risk_rationale:en", activityDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.risk_rationale:en", noteDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.risk_rationale:en", taskDeal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+            workspace.getId(), "deal.brief:en", unrelatedDeal.getId(), 0));
+    }
+
     private void seedCache(int workspaceId, String feature, int subjectAId, int subjectBId) {
         ooo.klae.connex.backend.beans.AiOutputCache row = new ooo.klae.connex.backend.beans.AiOutputCache();
         row.setWorkspaceId(workspaceId);

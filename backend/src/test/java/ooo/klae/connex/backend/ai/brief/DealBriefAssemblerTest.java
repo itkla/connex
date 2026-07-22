@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.brief;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -131,6 +132,7 @@ class DealBriefAssemblerTest {
         BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
         String serialized = serialized(assembly.prompt());
 
+        assertEquals(List.of(PERSON_ID), assembly.contributorPersonIds());
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains(MaskingEngine.OMITTED_BY_POLICY));
@@ -220,12 +222,104 @@ class DealBriefAssemblerTest {
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
         when(personMapper.getByIds(WORKSPACE_ID, List.of(74))).thenReturn(List.of(ceased));
 
-        String serialized = serialized(assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt());
+        BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+        String serialized = serialized(assembly.prompt());
 
+        assertEquals(List.of(), assembly.contributorPersonIds());
         assertFalse(serialized.contains("Ceased Contact"));
         assertFalse(serialized.contains("Activity for"));
         assertFalse(serialized.contains("Note for"));
         assertFalse(serialized.contains("Task for"));
+    }
+
+    @Test
+    void assemble_carriesProcessablePersonLinkedOnlyThroughDealRecords() {
+        Person linked = new Person();
+        linked.setId(74);
+        linked.setName("Linked Contact");
+        Activity activity = new Activity();
+        activity.setPerson(linked);
+        activity.setSubject("Linked activity");
+        Note note = new Note();
+        note.setPerson(linked);
+        note.setTitle("Linked note");
+        Task task = new Task();
+        task.setPerson(linked);
+        task.setDescription("Linked task");
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
+        when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(List.of(note));
+        when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
+
+        BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+
+        assertEquals(List.of(74), assembly.contributorPersonIds());
+    }
+
+    @Test
+    void assemble_carriesOnlyPeopleWhoseRecordsActuallyEnterThePrompt() {
+        Person stakeholder = person(10, "Stakeholder");
+        Person blankStakeholder = person(11, "   ");
+        Person restricted = person(99, "Restricted candidate");
+        restricted.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
+        List<Activity> activities = List.of(
+                activity(restricted, "Restricted activity"),
+                activity(person(20, "Activity one person"), "Activity one"),
+                activity(person(21, "Blank activity person"), "   "),
+                activity(person(22, "Activity three person"), "Activity three"),
+                activity(person(23, "Activity four person"), "Activity four"),
+                activity(person(24, "Activity five person"), "Activity five"),
+                activity(person(25, "Activity six person"), "Activity six"));
+        List<Note> notes = List.of(
+                note(person(30, "Note one person"), "Note one"),
+                note(person(31, "Blank note person"), "   "),
+                note(person(32, "Note three person"), "Note three"),
+                note(person(33, "Note four person"), "Note four"),
+                note(person(34, "Note five person"), "Note five"),
+                note(person(35, "Note six person"), "Note six"));
+        List<Task> tasks = List.of(
+                task(restricted, "Restricted task", false),
+                task(person(40, "Completed task person"), "Completed task", true),
+                task(person(41, "Blank task person"), "   ", false),
+                task(person(42, "Task one person"), "Task one", false),
+                task(person(43, "Task two person"), "Task two", false),
+                task(person(44, "Task three person"), "Task three", false),
+                task(person(45, "Task four person"), "Task four", false),
+                task(person(46, "Task five person"), "Task five", false),
+                task(person(47, "Task six person"), "Task six", false));
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                new DealPerson(stakeholder, "Champion"),
+                new DealPerson(blankStakeholder, "Unknown"),
+                new DealPerson(restricted, "Restricted")));
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(activities);
+        when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(notes);
+        when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(tasks);
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(1);
+            List<Person> visible = new ArrayList<>();
+            for (Object value : ids) {
+                if (value instanceof Integer id) {
+                    visible.add(id == restricted.getId() ? restricted : person(id, "Visible " + id));
+                }
+            }
+            return visible;
+        });
+
+        BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+        String prompt = serialized(assembly.prompt());
+
+        assertEquals(
+                List.of(10, 20, 22, 23, 24, 30, 32, 33, 34, 42, 43, 44, 45, 46),
+                assembly.contributorPersonIds());
+        assertTrue(prompt.contains("Activity five"));
+        assertFalse(prompt.contains("Activity six"));
+        assertTrue(prompt.contains("Note five"));
+        assertFalse(prompt.contains("Note six"));
+        assertTrue(prompt.contains("Task five"));
+        assertFalse(prompt.contains("Task six"));
+        assertFalse(prompt.contains("Restricted activity"));
+        assertFalse(prompt.contains("Restricted task"));
     }
 
     private static Deal deal() {
@@ -245,6 +339,35 @@ class DealBriefAssemblerTest {
         person.setPhone("+1 415 555 0199");
         person.setTitle("VP Procurement, 1 Market Street");
         return person;
+    }
+
+    private static Person person(int id, String name) {
+        Person person = new Person();
+        person.setId(id);
+        person.setName(name);
+        return person;
+    }
+
+    private static Activity activity(Person person, String subject) {
+        Activity activity = new Activity();
+        activity.setPerson(person);
+        activity.setSubject(subject);
+        return activity;
+    }
+
+    private static Note note(Person person, String title) {
+        Note note = new Note();
+        note.setPerson(person);
+        note.setTitle(title);
+        return note;
+    }
+
+    private static Task task(Person person, String description, boolean completed) {
+        Task task = new Task();
+        task.setPerson(person);
+        task.setDescription(description);
+        task.setCompleted(completed);
+        return task;
     }
 
     private static String serialized(MaskedPrompt prompt) {
