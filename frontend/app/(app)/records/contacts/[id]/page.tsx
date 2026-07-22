@@ -45,7 +45,12 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
-        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
+        getContextNotifications("person", id, init).catch(() => ({
+            items: [],
+            total: 0,
+            stateVersion: 0,
+            asOf: "1970-01-01T00:00:00Z",
+        })),
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),

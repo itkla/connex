@@ -40,6 +40,15 @@ import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
 
 type RegistrationToken = symbol;
 
+type ScopedOverlay = {
+    controller: AbortController;
+    generation: number;
+    identity: string;
+    request: OverlayRequest;
+    userId: number | null;
+    workspaceId: number | null;
+};
+
 const EMPTY_ACTIONS: readonly AppAction[] = [];
 const EMPTY_PENDING: ReadonlySet<ActionId> = new Set();
 
@@ -117,7 +126,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const pathname = usePathname() ?? "";
     const locale = useLocale();
     const t = useTranslations("Actions");
-    const { activeWorkspace } = useWorkspace();
+    const { activeWorkspace, switching } = useWorkspace();
+    const activeUserId = user?.id ?? null;
+    const activeWorkspaceId = activeWorkspace?.id ?? null;
+    const activeIdentity = `${activeUserId ?? "anon"}:${switching ? "switching" : (activeWorkspaceId ?? "none")}`;
 
     const registrationsRef = useRef<Map<RegistrationToken, readonly AppAction[]>>(new Map());
     const registryMapRef = useRef<Map<ActionId, AppAction>>(new Map());
@@ -128,8 +140,33 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const recordOwnerRef = useRef<RegistrationToken | null>(null);
     const selectionOwnerRef = useRef<RegistrationToken | null>(null);
 
-    const [overlay, setOverlay] = useState<OverlayRequest | null>(null);
+    const [overlay, setOverlay] = useState<ScopedOverlay | null>(null);
+    const [overlayIdentity, setOverlayIdentity] = useState(activeIdentity);
+    const nextOverlayGenerationRef = useRef(0);
+    const liveOverlayRef = useRef<{
+        controller: AbortController;
+        generation: number;
+        identity: string;
+    } | null>(null);
     const lastInvokerRef = useRef<HTMLElement | null>(null);
+
+    if (overlayIdentity !== activeIdentity) {
+        setOverlayIdentity(activeIdentity);
+        setOverlay(null);
+    }
+
+    useLayoutEffect(() => {
+        if (liveOverlayRef.current?.identity === activeIdentity) return;
+        liveOverlayRef.current?.controller.abort();
+        liveOverlayRef.current = null;
+        lastInvokerRef.current = null;
+    }, [activeIdentity]);
+
+    useLayoutEffect(() => () => {
+        liveOverlayRef.current?.controller.abort();
+        liveOverlayRef.current = null;
+        lastInvokerRef.current = null;
+    }, []);
 
     const pendingRef = useRef<Set<ActionId>>(new Set());
     const [pendingIds, setPendingIds] = useState<ReadonlySet<ActionId>>(EMPTY_PENDING);
@@ -178,17 +215,36 @@ export function ActionProvider({ user, children }: { user: User | null; children
 
     const openOverlay = useCallback((request: OverlayRequest) => {
         const active = document.activeElement;
+        const controller = new AbortController();
+        const generation = nextOverlayGenerationRef.current + 1;
+        nextOverlayGenerationRef.current = generation;
+        liveOverlayRef.current?.controller.abort();
         lastInvokerRef.current = active instanceof HTMLElement ? active : null;
-        setOverlay(request);
-    }, []);
-    const closeOverlay = useCallback(() => {
-        setOverlay(null);
+        liveOverlayRef.current = { controller, generation, identity: activeIdentity };
+        setOverlay({
+            controller,
+            generation,
+            identity: activeIdentity,
+            request,
+            userId: activeUserId,
+            workspaceId: activeWorkspaceId,
+        });
+    }, [activeIdentity, activeUserId, activeWorkspaceId]);
+    const closeOverlayGeneration = useCallback((generation: number) => {
+        if (liveOverlayRef.current?.generation !== generation) return;
+        liveOverlayRef.current.controller.abort();
+        liveOverlayRef.current = null;
+        setOverlay((current) => (current?.generation === generation ? null : current));
         const invoker = lastInvokerRef.current;
         lastInvokerRef.current = null;
         if (invoker && invoker.isConnected) {
             requestAnimationFrame(() => invoker.focus());
         }
     }, []);
+    const closeOverlay = useCallback(() => {
+        const generation = liveOverlayRef.current?.generation;
+        if (generation !== undefined) closeOverlayGeneration(generation);
+    }, [closeOverlayGeneration]);
 
     const context = useMemo<ActionContext>(
         () => ({
@@ -276,12 +332,31 @@ export function ActionProvider({ user, children }: { user: User | null; children
         () => ({ register, unregister, setRecord, clearRecord, setSelection, clearSelection }),
         [register, unregister, setRecord, clearRecord, setSelection, clearSelection],
     );
+    const visibleOverlay =
+        !switching &&
+        overlay?.identity === activeIdentity &&
+        overlay.userId === activeUserId &&
+        overlay.workspaceId === activeWorkspaceId
+            ? overlay
+            : null;
+    const visibleOverlayGeneration = visibleOverlay?.generation ?? null;
+    const closeVisibleOverlay = useCallback(() => {
+        if (visibleOverlayGeneration !== null) closeOverlayGeneration(visibleOverlayGeneration);
+    }, [closeOverlayGeneration, visibleOverlayGeneration]);
 
     return (
         <ActionsContext.Provider value={value}>
             <ActionContributorContext.Provider value={contributorValue}>
                 {children}
-                <ActionOverlayHost overlay={overlay} user={user} onClose={closeOverlay} />
+                <ActionOverlayHost
+                    key={activeIdentity}
+                    overlay={visibleOverlay?.request ?? null}
+                    overlayGeneration={visibleOverlayGeneration}
+                    originWorkspaceId={visibleOverlay?.workspaceId ?? null}
+                    requestSignal={visibleOverlay?.controller.signal ?? null}
+                    user={user}
+                    onClose={closeVisibleOverlay}
+                />
             </ActionContributorContext.Provider>
         </ActionsContext.Provider>
     );

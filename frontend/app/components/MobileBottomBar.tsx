@@ -15,8 +15,9 @@ import {
 
 import { cn } from '@/lib/utils';
 import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/app/lib/motion';
-import { getTaskSummary } from '@/app/lib/api';
+import { ApiError, getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 const GLASS_FILTER_ID = 'connex-liquid-glass';
 
@@ -140,7 +141,7 @@ function BarLink({
         >
             <Link
                 href={href}
-                aria-label={label}
+                aria-label={badge != null && badge > 0 && badgeLabel ? `${label}, ${badgeLabel}` : label}
                 aria-current={active ? 'page' : undefined}
                 className={cn(slotBase, active ? 'text-brand-dark dark:text-brand' : 'hover:text-foreground')}
             >
@@ -157,9 +158,83 @@ function BarLink({
                     )}
                 </span>
                 <span className={labelBase}>{caption}</span>
-                {badge != null && badge > 0 && badgeLabel && <span className="sr-only">{badgeLabel}</span>}
             </Link>
         </motion.div>
+    );
+}
+
+function TaskBarLink({
+    workspaceId,
+    enabled,
+    pathname,
+    label,
+    active,
+    reduce,
+    formatBadgeLabel,
+}: {
+    workspaceId: number | null;
+    enabled: boolean;
+    pathname: string;
+    label: string;
+    active: boolean;
+    reduce: boolean;
+    formatBadgeLabel: (count: number) => string;
+}) {
+    const [attention, setAttention] = useState<{ workspaceId: number; count: number } | null>(null);
+    const requestScope = enabled ? workspaceId : null;
+    const [attentionScope, setAttentionScope] = useState(requestScope);
+
+    if (attentionScope !== requestScope) {
+        setAttentionScope(requestScope);
+        setAttention(null);
+    }
+
+    useEffect(() => {
+        if (!enabled || workspaceId === null) return;
+
+        const controller = new AbortController();
+        const requestedWorkspaceId = workspaceId;
+        getTaskSummary(
+            {},
+            {
+                signal: controller.signal,
+                headers: { 'X-Workspace-Id': String(requestedWorkspaceId) },
+            },
+        )
+            .then((summary) => {
+                if (!controller.signal.aborted) {
+                    setAttention({
+                        workspaceId: requestedWorkspaceId,
+                        count: summary.overdue + summary.dueSoon,
+                    });
+                }
+            })
+            .catch((error: unknown) => {
+                if (
+                    !controller.signal.aborted &&
+                    error instanceof ApiError &&
+                    (error.status === 401 || error.status === 403)
+                ) {
+                    setAttention({ workspaceId: requestedWorkspaceId, count: 0 });
+                }
+            });
+        return () => controller.abort();
+    }, [enabled, pathname, workspaceId]);
+
+    const badge =
+        attentionScope === requestScope && enabled && attention?.workspaceId === workspaceId ? attention.count : 0;
+
+    return (
+        <BarLink
+            href="/activity/tasks"
+            label={label}
+            caption={label}
+            Icon={CheckCircleIcon}
+            active={active}
+            reduce={reduce}
+            badge={badge}
+            badgeLabel={formatBadgeLabel(badge)}
+        />
     );
 }
 
@@ -208,6 +283,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const pathname = usePathname();
     const reduce = useReducedMotion() ?? false;
     const isMobile = useIsMobile();
+    const { activeWorkspaceId, switching } = useWorkspace();
     const tNav = useTranslations('CommonSidebar');
     const tActions = useTranslations('Actions');
     const t = useTranslations('MobileNav');
@@ -229,20 +305,6 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
-
-    const [attention, setAttention] = useState(0);
-    useEffect(() => {
-        if (!isMobile) return;
-        let active = true;
-        getTaskSummary()
-            .then((summary) => {
-                if (active) setAttention(summary.overdue + summary.dueSoon);
-            })
-            .catch(() => {});
-        return () => {
-            active = false;
-        };
-    }, [pathname, isMobile]);
 
     const onDashboard = pathname === '/dashboard';
     const onTasks = pathname === '/activity/tasks' || pathname.startsWith('/activity/tasks/');
@@ -366,15 +428,14 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     </span>
                 </motion.button>
 
-                <BarLink
-                    href="/activity/tasks"
+                <TaskBarLink
+                    workspaceId={activeWorkspaceId}
+                    enabled={isMobile && !switching}
+                    pathname={pathname}
                     label={tNav('navTasks')}
-                    caption={tNav('navTasks')}
-                    Icon={CheckCircleIcon}
                     active={onTasks}
                     reduce={reduce}
-                    badge={attention}
-                    badgeLabel={t('tasksBadge', { count: attention })}
+                    formatBadgeLabel={(count) => t('tasksBadge', { count })}
                 />
                 <BarButton
                     label={t('more')}

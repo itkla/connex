@@ -77,6 +77,7 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    requestInit?: RequestInit;
 };
 
 function nowLocalValue(): string {
@@ -111,6 +112,7 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
     const { activeWorkspaceId } = useWorkspace();
@@ -157,6 +159,7 @@ export default function ActivityDialog({
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
                         defaultNotes={defaultNotes}
+                        requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -190,6 +193,7 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -218,6 +222,7 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requestInit,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -299,27 +304,36 @@ export function ActivityDialogForm({
         onSubmittingChange(true);
         try {
             if (!activityCreatedRef.current) {
-                await createActivity({
-                    type,
-                    subject: subject.trim(),
-                    notes: notes.trim() || undefined,
-                    createdById: currentUserId,
-                    timestamp: when ? toMysqlDateTime(when) : undefined,
-                    personId: selectedPerson?.id ?? undefined,
-                    dealId: selectedDeal?.id ?? undefined,
-                });
+                await createActivity(
+                    {
+                        type,
+                        subject: subject.trim(),
+                        notes: notes.trim() || undefined,
+                        createdById: currentUserId,
+                        timestamp: when ? toMysqlDateTime(when) : undefined,
+                        personId: selectedPerson?.id ?? undefined,
+                        dealId: selectedDeal?.id ?? undefined,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 activityCreatedRef.current = true;
             }
             if (followUpEnabled) {
                 try {
-                    await createTask({
-                        description: (followUpDescription.trim() || subject.trim()),
-                        dueDate: followUpDueDate || undefined,
-                        assignedToId: currentUserId,
-                        personId: selectedPerson?.id ?? undefined,
-                        dealId: selectedDeal?.id ?? undefined,
-                    });
+                    await createTask(
+                        {
+                            description: (followUpDescription.trim() || subject.trim()),
+                            dueDate: followUpDueDate || undefined,
+                            assignedToId: currentUserId,
+                            personId: selectedPerson?.id ?? undefined,
+                            dealId: selectedDeal?.id ?? undefined,
+                        },
+                        requestInit,
+                    );
+                    if (requestInit?.signal?.aborted) return;
                 } catch (taskErr) {
+                    if (requestInit?.signal?.aborted) return;
                     setFollowUpFailed(true);
                     const message = taskErr instanceof ApiError ? taskErr.message : t('toastFollowUpFailed');
                     toastError(message);
@@ -333,6 +347,7 @@ export function ActivityDialogForm({
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -346,8 +361,10 @@ export function ActivityDialogForm({
                 err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 

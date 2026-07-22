@@ -64,7 +64,7 @@ class NotificationControllerTest {
             9,
             2,
             50
-        )).thenReturn(new NotificationPageDto(List.of(), 0, 0));
+        )).thenReturn(new NotificationPageDto(List.of(), 0, 0, "2026-06-25T00:00:00Z"));
 
         mockMvc.perform(get("/api/notifications")
                 .param("status", "snoozed")
@@ -76,7 +76,8 @@ class NotificationControllerTest {
                 .param("contextId", "9")
                 .param("page", "2")
                 .param("size", "50"))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.asOf").value("2026-06-25T00:00:00Z"));
 
         verify(notificationService).getPage(
             "snoozed", null, List.of("task.due", "deal.close"), List.of("task", "deal"),

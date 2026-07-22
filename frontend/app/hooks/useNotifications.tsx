@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import {
     emitNotificationStateChanged,
@@ -84,7 +85,9 @@ export function NotificationProvider({
                 const generation = mutationGenerationRef.current;
                 requestRef.current = controller;
                 try {
+                    const requestStartedAt = performance.now();
                     const counts = await getNotificationCounts({ signal: controller.signal });
+                    const roundTripMs = performance.now() - requestStartedAt;
                     if (generation === mutationGenerationRef.current) {
                         if (counts.stateVersion < observedStateVersionRef.current && staleRetryAvailable) {
                             staleRetryAvailable = false;
@@ -104,11 +107,12 @@ export function NotificationProvider({
                                 snoozeExpiryTimerRef.current = null;
                             }
                             if (counts.nextSnoozeExpiry) {
-                                const normalized = counts.nextSnoozeExpiry.includes("T")
-                                    ? counts.nextSnoozeExpiry
-                                    : `${counts.nextSnoozeExpiry.replace(" ", "T")}Z`;
-                                const delay = Date.parse(normalized) - Date.now();
-                                if (Number.isFinite(delay)) {
+                                const delay = notificationSnoozeDelayMs(
+                                    counts.nextSnoozeExpiry,
+                                    counts.asOf,
+                                    roundTripMs,
+                                );
+                                if (delay != null) {
                                     snoozeExpiryTimerRef.current = window.setTimeout(
                                         () => {
                                             snoozeExpiryDueRef.current = true;
