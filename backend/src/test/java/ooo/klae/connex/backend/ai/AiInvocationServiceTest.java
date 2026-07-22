@@ -80,7 +80,7 @@ class AiInvocationServiceTest {
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
-        lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID)).thenReturn(resolved);
+        lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
     }
@@ -98,7 +98,7 @@ class AiInvocationServiceTest {
         assertEquals("unresolved", metadata.get("provider"));
         assertEquals(1, metadata.get("messageCount"));
         assertNoContent(metadata);
-        verify(aiProviderConfigService, never()).resolveForOrg(ORG_ID);
+        verify(aiProviderConfigService, never()).resolveForOrg(ORG_ID, ACTOR_ID);
         verify(aiProvider, never()).complete(any());
     }
 
@@ -230,7 +230,7 @@ class AiInvocationServiceTest {
         resolved = new ResolvedAiProvider("openai_compatible", null, "llama3.3:70b",
                 "https://provider.example.test/v1", null, null, null, false, false,
                 AiCredentials.of(Map.of()));
-        when(aiProviderConfigService.resolveForOrg(ORG_ID)).thenReturn(resolved);
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
 
         AiProviderException exception = assertThrows(AiProviderException.class,
                 () -> service.complete(invocation));

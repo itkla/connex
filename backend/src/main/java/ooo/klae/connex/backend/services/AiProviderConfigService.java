@@ -202,9 +202,15 @@ public class AiProviderConfigService implements AiProviderReadiness {
     /**
      * Resolves the configured organization provider and decrypts credentials for provider use.
      * @param orgId the organization
+     * @param actorId the authenticated user resolving the provider
      * @return resolved provider configuration with decrypted credentials
      */
-    public ResolvedAiProvider resolveForOrg(int orgId) {
+    @Transactional
+    public ResolvedAiProvider resolveForOrg(int orgId, int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null
+                || organizationMapper.lockByIdForShare(orgId) == null) {
+            throw new ForbiddenException("AI provider is not available for this organization");
+        }
         AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
         if (!isReady(config)) {
             throw new ForbiddenException("AI provider is not available for this organization");

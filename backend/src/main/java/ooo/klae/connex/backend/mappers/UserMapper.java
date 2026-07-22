@@ -16,6 +16,7 @@ public interface UserMapper {
     List<User> getAllUsers();
     User getUserById(int id);
     Integer lockById(int id);
+    Integer lockByIdForShare(int id);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */

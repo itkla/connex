@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.Base64;
@@ -28,8 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.SecretUnavailableException;
-import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.SecretValueMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
@@ -38,6 +40,7 @@ import ooo.klae.connex.backend.services.AuditService;
 class SecretStoreTest {
 
     @Autowired private SecretValueMapper secretValueMapper;
+    @Autowired private UserMapper userMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -191,13 +194,20 @@ class SecretStoreTest {
         SecretStore oldStore = store("old-v1", oldKey, Map.of(), Set.of(), true);
         String reference = oldStore.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "old-key-secret");
 
-        SecretStore rotatedStore = store("new-v2", newKey, Map.of("old-v1", oldKey), Set.of(), true);
+        AuditService auditService = mock(AuditService.class);
+        SecretStore rotatedStore = store(
+                "new-v2", newKey, Map.of("old-v1", oldKey), Set.of(), true, auditService);
 
         assertTrue(rotatedStore.hasKey("old-v1"));
         assertEquals("old-key-secret", rotatedStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD,
                 workspaceId, reference));
         StoredSecret rewrapped = secretValueMapper.findById(SecretReference.parse(reference).id());
         assertEquals("new-v2", rewrapped.getKeyId());
+        verify(auditService).recordIndependentScoped(
+                eq("secret_store.secret.use"), eq("workspace"), eq(workspaceId), eq(workspaceId), isNull(),
+                eq("workspace.smtp.password"), eq("Secret used"), any());
+        verify(auditService, never()).recordScoped(
+                eq("secret_store.secret.rewrap"), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -321,8 +331,8 @@ class SecretStoreTest {
         properties.setKeys(keys);
         properties.setDisabledKeyIds(disabledKeyIds);
         properties.setLazyRewrapEnabled(lazyRewrapEnabled);
-        return new SecretStore(secretValueMapper, new SecretStoreCrypto(properties),
-                properties, auditService);
+        return new SecretStore(secretValueMapper, userMapper, workspaceMapper, organizationMapper,
+                new SecretStoreCrypto(properties), properties, auditService);
     }
 
     private static String base64Key(byte fill) {

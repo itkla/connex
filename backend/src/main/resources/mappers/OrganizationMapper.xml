@@ -14,4 +14,8 @@
   <select id="lockById" resultType="java.lang.Integer">
     SELECT id FROM organization WHERE id = #{id} FOR UPDATE
   </select>
+
+  <select id="lockByIdForShare" resultType="java.lang.Integer">
+    SELECT id FROM organization WHERE id = #{id} FOR SHARE
+  </select>
 </mapper>

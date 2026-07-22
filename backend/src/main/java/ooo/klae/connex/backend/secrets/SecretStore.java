@@ -2,13 +2,19 @@ package ooo.klae.connex.backend.secrets;
 
 import java.util.Map;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.SecretUnavailableException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
 /**
@@ -20,6 +26,9 @@ import ooo.klae.connex.backend.services.AuditService;
 @RequiredArgsConstructor
 public class SecretStore {
     private final SecretValueMapper secretValueMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
     private final SecretStoreCrypto crypto;
     private final SecretStoreProperties properties;
     private final AuditService auditService;
@@ -55,6 +64,7 @@ public class SecretStore {
 
     @Transactional
     public String get(SecretPurpose purpose, int scopeId, String reference) {
+        lockScopeParentsForShare(purpose.scopeType(), scopeId);
         StoredSecret secret = find(purpose, scopeId, reference);
         try {
             requireSupportedAlgorithms(secret);
@@ -75,10 +85,12 @@ public class SecretStore {
         int count = 0;
         for (StoredSecret secret : secretValueMapper.listRewrapCandidates(crypto.activeKeyId(), safeLimit)) {
             try {
+                lockScopeParentsForShare(secret.getScopeType(), secret.getScopeId());
                 requireSupportedAlgorithms(secret);
                 String plaintext = crypto.decrypt(secret.getKeyId(), secret.getEncryptedDataKey(),
                         secret.getCiphertext(), aad(secret));
                 if (rewrapToActiveKey(secret, plaintext)) {
+                    auditRewrap(secret, crypto.activeKeyId());
                     count++;
                 }
             } catch (RuntimeException e) {
@@ -144,11 +156,46 @@ public class SecretStore {
         rewrapped.setCiphertext(encrypted.ciphertext());
         int updated = secretValueMapper.updateRewrapped(rewrapped, current.getKeyId(),
                 current.getEncryptedDataKey(), current.getCiphertext());
-        if (updated == 1) {
-            auditRewrap(current, rewrapped.getKeyId());
-            return true;
+        return updated == 1;
+    }
+
+    private void lockScopeParentsForShare(String scopeType, int scopeId) {
+        Integer actorId = currentActorId();
+        if ("user".equals(scopeType)) {
+            int firstUserId = actorId == null ? scopeId : Math.min(actorId, scopeId);
+            int secondUserId = actorId == null ? scopeId : Math.max(actorId, scopeId);
+            lockUserForShare(firstUserId);
+            if (secondUserId != firstUserId) {
+                lockUserForShare(secondUserId);
+            }
+            return;
         }
-        return false;
+        if (actorId != null) {
+            lockUserForShare(actorId);
+        }
+        if ("workspace".equals(scopeType)) {
+            if (workspaceMapper.lockWorkspaceForShare(scopeId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
+        } else if ("organization".equals(scopeType)
+                && organizationMapper.lockByIdForShare(scopeId) == null) {
+            throw new ResourceNotFoundException("Secret scope not found");
+        }
+    }
+
+    private void lockUserForShare(int userId) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            throw new ResourceNotFoundException("Secret scope user not found");
+        }
+    }
+
+    private static Integer currentActorId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user) {
+            return user.getId();
+        }
+        return null;
     }
 
     private void auditUse(StoredSecret secret, boolean rewrapped) {

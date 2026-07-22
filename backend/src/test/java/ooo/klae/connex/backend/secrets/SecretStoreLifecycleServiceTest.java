@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.SecretStoreDiagnosticsDto;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.services.AuditService;
 class SecretStoreLifecycleServiceTest {
 
     @Autowired private SecretValueMapper secretValueMapper;
+    @Autowired private UserMapper userMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -151,8 +153,8 @@ class SecretStoreLifecycleServiceTest {
 
     private SecretStore store(String keyId, String masterKey, Map<String, String> keys, Set<String> disabledKeyIds) {
         SecretStoreProperties properties = properties(keyId, masterKey, keys, disabledKeyIds);
-        return new SecretStore(secretValueMapper, new SecretStoreCrypto(properties),
-                properties, mock(AuditService.class));
+        return new SecretStore(secretValueMapper, userMapper, workspaceMapper, organizationMapper,
+                new SecretStoreCrypto(properties), properties, mock(AuditService.class));
     }
 
     private SecretStoreLifecycleService lifecycle(String keyId, String masterKey,

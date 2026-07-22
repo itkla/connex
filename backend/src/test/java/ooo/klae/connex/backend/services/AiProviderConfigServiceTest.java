@@ -77,6 +77,8 @@ class AiProviderConfigServiceTest {
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
         lenient().when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
+        lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        lenient().when(organizationMapper.lockByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
@@ -596,7 +598,7 @@ class AiProviderConfigServiceTest {
                         }
                         """);
 
-        ResolvedAiProvider resolved = service.resolveForOrg(ORG_ID);
+        ResolvedAiProvider resolved = service.resolveForOrg(ORG_ID, ACTOR_ID);
 
         assertEquals("bedrock", resolved.provider());
         assertEquals("ap-northeast-1", resolved.region());
@@ -612,6 +614,23 @@ class AiProviderConfigServiceTest {
         assertEquals("SESSION_TOKEN", resolved.credentials().get("sessionToken"));
         assertFalse(resolved.toString().contains("SECRET_ACCESS_KEY"));
         assertFalse(resolved.toString().contains("SESSION_TOKEN"));
+
+        InOrder resolution = inOrder(userMapper, organizationMapper, aiProviderConfigMapper, aiProviderSecretCipher);
+        resolution.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        resolution.verify(organizationMapper).lockByIdForShare(ORG_ID);
+        resolution.verify(aiProviderConfigMapper).findByOrg(ORG_ID);
+        resolution.verify(aiProviderSecretCipher).decryptCredential(ORG_ID, "secret:v1:88");
+    }
+
+    @Test
+    void resolveForOrg_missingActorFailsBeforeOrganizationAndConfigReads() {
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
+
+        verify(organizationMapper, never()).lockByIdForShare(ORG_ID);
+        verify(aiProviderConfigMapper, never()).findByOrg(ORG_ID);
+        verify(aiProviderSecretCipher, never()).decryptCredential(eq(ORG_ID), any());
     }
 
     @Test
@@ -619,7 +638,7 @@ class AiProviderConfigServiceTest {
         stored = readyConfig();
         stored.setEnabled(false);
 
-        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID));
+        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
         verify(aiProviderSecretCipher, never()).decryptCredential(eq(ORG_ID), any());
     }
 
@@ -629,7 +648,9 @@ class AiProviderConfigServiceTest {
         when(aiProviderSecretCipher.decryptCredential(ORG_ID, "secret:v1:88"))
                 .thenReturn("{\"accessKeyId\":\"AKIA_TEST\",\"secretAccessKey\":\"SUPER_SECRET\"");
 
-        AiProviderException exception = assertThrows(AiProviderException.class, () -> service.resolveForOrg(ORG_ID));
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
 
         assertFalse(exception.getMessage().contains("SUPER_SECRET"));
         assertFalse(String.valueOf(exception).contains("SUPER_SECRET"));
