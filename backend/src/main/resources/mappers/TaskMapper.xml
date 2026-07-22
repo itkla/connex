@@ -214,9 +214,20 @@
     WHERE workspace_id = #{workspaceId} AND status = #{status}
   </select>
 
-  <update id="setPosition">
-    UPDATE task SET position = #{position}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  <update id="setPositions">
+    UPDATE task
+    SET position = CASE id
+      <foreach collection="positions" item="entry">
+        WHEN #{entry.id} THEN #{entry.position}
+      </foreach>
+      ELSE position
+    END
+    WHERE workspace_id = #{workspaceId}
+      AND status = #{status}
+      AND id IN
+      <foreach collection="positions" item="entry" open="(" separator="," close=")">
+        #{entry.id}
+      </foreach>
   </update>
 
   <update id="moveTask">

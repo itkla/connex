@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.DealAgingDto;
@@ -122,6 +123,7 @@ public class DealService {
     private static final int KPI_SERIES_BUCKETS = 12;
     private static final int MAX_RISK_CANDIDATES = 1000;
     private static final int MAX_BOARD_DEALS = 2000;
+    private static final int POSITION_BATCH_SIZE = 500;
     private static final int MAX_REVENUE_MONTHS = 1200;
     private static final String LINE_ITEM_VALUE_CONFLICT =
         "Cannot manually edit the deal value while line items exist; update or remove the line items first";
@@ -1332,9 +1334,11 @@ public class DealService {
         if (stageChanged && oldStageId != null) {
             List<Integer> source = dealMapper.getDealIdsInStageOrdered(workspaceId, oldStageId);
             source.removeIf(existing -> existing == dealId);
-            for (int i = 0; i < source.size(); i++) {
-                dealMapper.setPosition(workspaceId, source.get(i), i);
-            }
+            setPositionBatches(
+                workspaceId,
+                oldStageId,
+                BoardPositionBatches.fromOrderedIds(source, POSITION_BATCH_SIZE)
+            );
         }
 
         Deal deal = mutableCopy(before);
@@ -1346,10 +1350,11 @@ public class DealService {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon());
         }
-        for (int i = 0; i < target.size(); i++) {
-            int id = target.get(i);
-            if (id != dealId) dealMapper.setPosition(workspaceId, id, i);
-        }
+        setPositionBatches(
+            workspaceId,
+            stageId,
+            BoardPositionBatches.fromOrderedIdsExcluding(target, dealId, POSITION_BATCH_SIZE)
+        );
 
         auditService.record("deal.update", "deal", dealId, deal.getName(),
             publishStageChanged ? "Moved deal " + deal.getName() + " to " + stage.getName()
@@ -1358,6 +1363,13 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", dealId);
         ruleTriggers.publish(workspaceId, "deal", dealId, publishStageChanged ? "deal.stage_changed" : "deal.updated");
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
+    }
+
+    private void setPositionBatches(
+            int workspaceId, int stageId, List<List<BoardPositionUpdate>> batches) {
+        for (List<BoardPositionUpdate> positions : batches) {
+            dealMapper.setPositions(workspaceId, stageId, positions);
+        }
     }
 
     @Transactional
