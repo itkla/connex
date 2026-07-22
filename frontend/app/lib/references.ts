@@ -60,3 +60,31 @@ export function parseNoteContent(content: string, references: NoteReference[] = 
 export function noteContentToPlainText(content: string): string {
     return content.replace(/\[([^\]]+)\]\((?:user|person|deal|company|note|file|task|activity):\d+\)/g, (_full, label: string) => `@${label}`);
 }
+
+/**
+ * Reduces note Markdown to the text users see, for draft labels and meaningful-content checks.
+ * Canonical member references retain their `@` cue while record references use their visible label.
+ */
+export function noteContentToVisibleText(content: string): string {
+    return content
+        .replace(
+            /\[([^\]]+)\]\((user|person|deal|company|note|file|task|activity):\d+\)/g,
+            (_full, label: string, type: NoteReferenceType) => (type === "user" ? `@${label}` : label),
+        )
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+        .split("\n")
+        .map((line) => {
+            if (/^\s*(?:`{3,}|~{3,})/.test(line)) return "";
+            if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) return "";
+            if (/^\s*>\s*\[!(?:info|success|warn|danger|toggle)\]\s*$/.test(line)) return "";
+            return line
+                .replace(/^\s{0,3}(?:#{1,6}(?:\s+|$)|>\s*)/, "")
+                .replace(/^\s*(?:[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)/, "")
+                .replace(/\*\*|__|~~|`/g, "")
+                .replace(/(^|\s)[*_](?=\S)/g, "$1")
+                .replace(/[*_](?=\s|$|[.,!?;:])/g, "");
+        })
+        .join("\n")
+        .trim();
+}

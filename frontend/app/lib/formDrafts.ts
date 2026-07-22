@@ -1,5 +1,7 @@
 const DRAFT_PREFIX = 'connex:draft:';
 let draftStoreGeneration = 0;
+const draftKeyGenerations = new Map<string, number>();
+const draftChangeListeners = new Set<(key: string | null) => void>();
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -9,7 +11,7 @@ export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
  * version no longer matches its form type is dropped on read (the version lives in the envelope, not the
  * key, so a newer reader still sees and sweeps older drafts).
  */
-export const DRAFT_VERSIONS: Record<string, number> = { activity: 1 };
+export const DRAFT_VERSIONS: Record<string, number> = { activity: 1, note: 1, task: 1 };
 
 /** The parts that uniquely scope a draft to a user, workspace, form type, and entity context. */
 export type DraftKeyParts = {
@@ -40,6 +42,29 @@ export type StoredDraft<T> = {
 /** Returns the current in-memory draft-store generation used to invalidate pending writes after logout. */
 export function getDraftStoreGeneration(): number {
     return draftStoreGeneration;
+}
+
+/** Returns the current write generation for one draft key. */
+export function getDraftKeyGeneration(key: string): number {
+    return draftKeyGenerations.get(key) ?? 0;
+}
+
+/** Advances one draft key so pending writes captured by another composer become stale. */
+export function advanceDraftKeyGeneration(key: string): number {
+    const next = getDraftKeyGeneration(key) + 1;
+    draftKeyGenerations.set(key, next);
+    notifyDraftChange(key);
+    return next;
+}
+
+/** Subscribes to draft-key ownership and storage changes; `null` invalidates the whole store. */
+export function subscribeDraftChanges(listener: (key: string | null) => void): () => void {
+    draftChangeListeners.add(listener);
+    return () => draftChangeListeners.delete(listener);
+}
+
+function notifyDraftChange(key: string | null): void {
+    for (const listener of draftChangeListeners) listener(key);
 }
 
 /** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
@@ -105,6 +130,7 @@ export function writeDraft<T>(key: string, params: { version: number; scope: str
     };
     try {
         store.setItem(key, JSON.stringify(envelope));
+        notifyDraftChange(key);
     } catch {
         /* quota exceeded or private mode — drafts are best-effort */
     }
@@ -112,13 +138,23 @@ export function writeDraft<T>(key: string, params: { version: number; scope: str
 
 /** Removes a single draft. */
 export function clearDraft(key: string): void {
+    advanceDraftKeyGeneration(key);
     const store = safeSession();
-    if (!store) return;
-    try {
-        store.removeItem(key);
-    } catch {
-        /* ignore */
+    if (store) {
+        try {
+            store.removeItem(key);
+        } catch {
+            /* ignore */
+        }
     }
+    notifyDraftChange(key);
+}
+
+/** Removes a draft only while `expectedGeneration` still owns the key. */
+export function clearDraftIfGeneration(key: string, expectedGeneration: number): boolean {
+    if (getDraftKeyGeneration(key) !== expectedGeneration) return false;
+    clearDraft(key);
+    return true;
 }
 
 function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshnessMs: number): boolean {
@@ -212,9 +248,11 @@ export function listFreshDrafts(opts: {
     return out;
 }
 
-/** Removes every draft in the store. Call on logout so note/activity drafts never survive a re-login. */
+/** Removes every composer draft in the store so none survive a logout and re-login. */
 export function clearAllDrafts(): void {
     draftStoreGeneration += 1;
+    draftKeyGenerations.clear();
+    notifyDraftChange(null);
     const store = safeSession();
     if (!store) return;
     let keys: string[] = [];

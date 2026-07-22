@@ -154,6 +154,14 @@
   "DraftResume": {
     "activityMessage": "You have an unfinished activity — resume it?",
     "activityMessageNamed": "Unfinished activity: “{label}” — resume it?",
+    "noteMessageNamed": "Unfinished note: “{label}” — resume it?",
+    "taskMessageNamed": "Unfinished task: “{label}” — resume it?",
+    "resumeActivity": "Resume activity",
+    "discardActivity": "Discard activity",
+    "resumeNote": "Resume note",
+    "discardNote": "Discard note",
+    "resumeTask": "Resume task",
+    "discardTask": "Discard task",
     "resume": "Resume",
     "discard": "Discard"
   },
