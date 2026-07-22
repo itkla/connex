@@ -228,15 +228,13 @@ export const EMPTY_DEFINITION: SegmentDefinition = { match: "all", conditions: [
  * Builds the natural-language label for a condition: e.g. "Industry is Fintech", "Has an open deal",
  * "Tag is not Priority". {@code resolveTagName} maps a tag id to its name. Used by the removable
  * condition chips outside the builder; operator-only comparisons (is set / is empty) render without a
- * value. {@code resolveFieldValue} maps other catalog-backed values such as stages and localized enum
- * tokens. Derives the operator token from the condition's op + negate, independent of the catalog.
+ * value. Derives the operator token from the condition's op + negate, independent of the catalog.
  */
 export function segmentConditionLabel(
     condition: SegmentCondition,
     t: (key: string, values?: Record<string, string | number>) => string,
     resolveTagName: (id: string) => string,
     resolveOwnerName?: (id: string) => string,
-    resolveFieldValue?: (field: string, value: string) => string,
 ): string {
     if (condition.type === "predicate") {
         const key = condition.key ?? "";
@@ -255,9 +253,7 @@ export function segmentConditionLabel(
         ? resolveTagName(condition.value ?? "")
         : condition.field === "owner" && resolveOwnerName
             ? resolveOwnerName(condition.value ?? "")
-            : resolveFieldValue
-                ? resolveFieldValue(condition.field ?? "", condition.value ?? "")
-                : (condition.value ?? "");
+            : (condition.value ?? "");
     return t("chipField", { field, op, value });
 }
 

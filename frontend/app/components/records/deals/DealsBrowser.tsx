@@ -100,6 +100,7 @@ import {
     type DealStageDistribution,
     type DealsPageParams,
     type SegmentDefinition,
+    type SegmentCondition,
     type SegmentFields,
     type RuleBuilderOptions,
     type Pipeline,
@@ -220,6 +221,22 @@ function normalizeDealFilters(filters: FilterState): FilterState {
         if (values?.length) normalized[key] = Array.from(new Set(values));
     }
     return normalized;
+}
+
+function dealSegmentChipCondition(
+    condition: SegmentCondition,
+    stageById: ReadonlyMap<number, Stage>,
+    localizeStatus: (status: 'open' | 'won' | 'lost') => string,
+): SegmentCondition {
+    if (condition.type !== 'field' || condition.value == null) return condition;
+    if (condition.field === 'stage') {
+        return { ...condition, value: stageById.get(Number(condition.value))?.name ?? condition.value };
+    }
+    if (condition.field === 'status'
+        && (condition.value === 'open' || condition.value === 'won' || condition.value === 'lost')) {
+        return { ...condition, value: localizeStatus(condition.value) };
+    }
+    return condition;
 }
 
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; timezone: string; currentUserId: number }) {
@@ -527,7 +544,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setMatchedSignature(requestSignature);
         } catch (error: unknown) {
             if (requestId !== selectAllRequestRef.current) return;
-            if (hasSegments && !(error instanceof ApiError && error.status === 400)) {
+            const selectionLimit = error instanceof ApiError
+                && error.status === 400
+                && (error.message.startsWith('Too many matching deals')
+                    || error.message.startsWith('Risk filter matches too many deals'));
+            if (selectionLimit) {
+                toastError(serverFilters.risk?.length ? t('riskFilterTooBroad') : t('selectAllTooBroad'));
+            } else if (hasSegments) {
                 reportSegmentFailure();
             } else {
                 toastError(error instanceof Error ? error.message : t('toastSelectAllFailed'));
@@ -535,7 +558,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportSegmentFailure, setSelectedIds, t]);
+    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
     const exportDeals = useCallback(
         (signal: AbortSignal, workspaceId: number) => {
             const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
@@ -1129,24 +1152,23 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => changeQuery('') }] : []),
         ...ownerChips,
         ...facetChips(facets, activeFilterState, changeFilters),
-        ...segmentConditionEntries(definition).map(({ condition, groupPath, conditionIndex }) => ({
-            id: `segment:${[...groupPath, conditionIndex].join(':')}`,
-            label: segmentConditionLabel(
+        ...segmentConditionEntries(definition).map(({ condition, groupPath, conditionIndex }) => {
+            const displayCondition = dealSegmentChipCondition(
                 condition,
-                tSeg,
-                (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
-                (id) => memberById.get(Number(id))?.displayName ?? id,
-                (field, value) => {
-                    if (field === 'stage') return stageById.get(Number(value))?.name ?? value;
-                    if (field === 'status'
-                        && (value === 'open' || value === 'won' || value === 'lost')) {
-                        return tSeg(`status.${value}`);
-                    }
-                    return value;
-                },
-            ),
-            onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
-        })),
+                stageById,
+                (status) => tSeg(`status.${status}`),
+            );
+            return {
+                id: `segment:${[...groupPath, conditionIndex].join(':')}`,
+                label: segmentConditionLabel(
+                    displayCondition,
+                    tSeg,
+                    (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
+                    (id) => memberById.get(Number(id))?.displayName ?? id,
+                ),
+                onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
+            };
+        }),
     ];
 
     const selectionActions = (
