@@ -195,12 +195,53 @@ class SegmentMapperTest extends AbstractMapperTest {
         assertTrue(segmentMapper.companyExistence(existenceParams("has_attachment")).contains(company.getId()));
     }
 
+    @Test
+    void personCompanyFieldOnlyMatchesCurrentlyVisibleCompanies() {
+        User actor = newUser();
+        Company ownedCompany = newCompany();
+        Person ownedCompanyPerson = newPerson(ownedCompany);
+        Workspace sibling = newSiblingWorkspace();
+        Company sharedCompany = newCompany(sibling);
+        Person sharedCompanyPerson = newPerson(sharedCompany);
+        workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
+        assertTrue(shareMapper.shareCompany(
+            sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+
+        assertTrue(personMatchesCompany(ownedCompany.getId()).contains(ownedCompanyPerson.getId()));
+        assertTrue(personMatchesCompany(sharedCompany.getId()).contains(sharedCompanyPerson.getId()));
+        assertTrue(personMatchesCompanyIncludingRestricted(sharedCompany.getId())
+            .contains(sharedCompanyPerson.getId()));
+
+        assertTrue(shareMapper.unshareCompany(
+            sharedCompany.getId(), sibling.getId(), workspace.getId()) > 0);
+
+        assertFalse(personMatchesCompany(sharedCompany.getId()).contains(sharedCompanyPerson.getId()));
+        assertFalse(personMatchesCompanyIncludingRestricted(sharedCompany.getId())
+            .contains(sharedCompanyPerson.getId()));
+    }
+
     private Map<String, Object> existenceParams(String predicate) {
         return Map.of(
             "workspaceId", workspace.getId(),
             "predicate", predicate,
             "days", 30,
             "includeRestrictedPeople", false);
+    }
+
+    private List<Integer> personMatchesCompany(int companyId) {
+        return segmentMapper.personIdsMatching(companyParams(companyId));
+    }
+
+    private List<Integer> personMatchesCompanyIncludingRestricted(int companyId) {
+        return segmentMapper.personIdsMatchingIncludingRestricted(companyParams(companyId));
+    }
+
+    private Map<String, Object> companyParams(int companyId) {
+        return Map.of(
+            "workspaceId", workspace.getId(),
+            "field", "company",
+            "op", "is",
+            "id", companyId);
     }
 
     private Workspace newSiblingWorkspace() {
@@ -210,6 +251,14 @@ class SegmentMapperTest extends AbstractMapperTest {
         sibling.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
         workspaceMapper.insert(sibling);
         return sibling;
+    }
+
+    private Company newCompany(Workspace target) {
+        Company company = new Company();
+        company.setName("Company " + unique());
+        company.setWorkspaceId(target.getId());
+        companyMapper.insert(company);
+        return company;
     }
 
     private static Note newNote(int workspaceId, User author, Person person, Deal deal) {

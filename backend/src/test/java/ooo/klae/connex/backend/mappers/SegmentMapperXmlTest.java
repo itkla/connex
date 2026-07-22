@@ -43,17 +43,46 @@ class SegmentMapperXmlTest {
             "WHERE att.workspace_id = ? AND att.entity_type = 'deal' AND att.entity_id = d.id"));
     }
 
+    @Test
+    void personCompanyFieldRequiresCurrentCompanyVisibility() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("field", "company");
+        parameters.put("op", "is");
+        parameters.put("id", 17);
+
+        String normalSql = sql(configuration, "personIdsMatching", parameters);
+        String restrictedSql = sql(configuration, "personIdsMatchingIncludingRestricted", parameters);
+
+        assertCompanyVisibility(normalSql);
+        assertCompanyVisibility(restrictedSql);
+    }
+
     private static String sql(Configuration configuration, String statement, String predicate) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);
         parameters.put("predicate", predicate);
         parameters.put("days", 30);
         parameters.put("includeRestrictedPeople", false);
+        return sql(configuration, statement, parameters);
+    }
+
+    private static String sql(
+            Configuration configuration, String statement, Map<String, Object> parameters) {
         return configuration.getMappedStatement(SegmentMapper.class.getName() + "." + statement)
             .getBoundSql(parameters)
             .getSql()
             .replaceAll("\\s+", " ")
             .trim();
+    }
+
+    private static void assertCompanyVisibility(String sql) {
+        assertTrue(sql.contains("AND company_id = ?"));
+        assertTrue(sql.contains("visible_company.id = person.company_id"));
+        assertTrue(sql.contains("visible_company.workspace_id = ?"));
+        assertTrue(sql.contains("visible_share.workspace_id = ?"));
+        assertTrue(sql.contains("owner_workspace.org_id = viewer_workspace.org_id"));
     }
 
     private static Configuration configuration() throws Exception {
