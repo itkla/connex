@@ -8,6 +8,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -234,15 +236,26 @@ public class SecretStore {
     }
 
     private void auditUse(StoredSecret secret, boolean rewrapped) {
-        auditService.recordIndependentScoped("secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
+        auditService.recordScoped("secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret used",
                 auditMetadata(secret, rewrapped));
     }
 
     private void auditUseFailure(StoredSecret secret, RuntimeException exception) {
-        auditService.recordFailureScoped("secret_store.secret.use_failed", scopeEntityType(secret),
-                scopeEntityId(secret), workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(),
-                "Secret use failed", exception.getClass().getSimpleName());
+        Runnable recordFailure = () -> auditService.recordFailureScoped(
+                "secret_store.secret.use_failed", scopeEntityType(secret), scopeEntityId(secret),
+                workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret use failed",
+                exception.getClass().getSimpleName());
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            recordFailure.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                recordFailure.run();
+            }
+        });
     }
 
     private void auditRewrap(StoredSecret previous, String newKeyId) {

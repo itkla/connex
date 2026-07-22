@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.secrets;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -13,6 +15,8 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
@@ -63,6 +67,32 @@ class SecretStoreLockOrderTest {
         order.verify(organizationMapper).lockByIdForShare(3);
         order.verify(organizationMapper).lockByIdForShare(7);
         order.verify(crypto).decrypt(anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void failedUseDefersIndependentAuditUntilScopeLocksAreReleased() {
+        StoredSecret secret = secret(1, "organization", 7);
+        secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(secretValueMapper.findById(1)).thenReturn(secret);
+        when(crypto.decrypt(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("decrypt failed"));
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(IllegalStateException.class, () -> secretStore.get(
+                    SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1"));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            verifyNoInteractions(auditService);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(auditService).recordFailureScoped(
+                "secret_store.secret.use_failed", "organization", 7, null, 7,
+                SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value(), "Secret use failed", "IllegalStateException");
     }
 
     private static StoredSecret secret(long id, String scopeType, int scopeId) {
