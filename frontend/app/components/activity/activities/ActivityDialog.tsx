@@ -77,6 +77,7 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    initialDraftGeneration?: number;
     requestInit?: RequestInit;
 };
 
@@ -112,6 +113,7 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    initialDraftGeneration,
     requestInit,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
@@ -127,6 +129,7 @@ export default function ActivityDialog({
             scope: 'global',
         },
         version: DRAFT_VERSIONS.activity,
+        initialKeyGeneration: initialDraftGeneration,
     });
 
     const handleOpenChange = (next: boolean) => {
@@ -159,6 +162,7 @@ export default function ActivityDialog({
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
                         defaultNotes={defaultNotes}
+                        ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
@@ -193,13 +197,14 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
     /** Persists the current draft snapshot; called while the form holds unsaved edits. */
     onPersistDraft?: (data: ActivityDraftData) => void;
-    /** Clears the persisted draft; called once the create succeeds. */
+    /** Clears the activity draft after confirmed creation, explicit discard, or deletion of owned content. */
     onClearDraft?: () => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
@@ -222,6 +227,7 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    ownsInitialDraft = false,
     requestInit,
     onSubmittingChange,
     onDirtyChange,
@@ -246,6 +252,8 @@ export function ActivityDialogForm({
     const [followUpDueDate, setFollowUpDueDate] = useState('');
     const [followUpFailed, setFollowUpFailed] = useState(false);
     const activityCreatedRef = useRef(false);
+    const ownsDraftRef = useRef(ownsInitialDraft);
+    const hasChangedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const enableFollowUp = () => {
@@ -277,7 +285,18 @@ export function ActivityDialogForm({
     }, [dirty, onDirtyChange]);
 
     useEffect(() => {
-        if (!dirty || (!subject.trim() && !notes.trim())) return;
+        const meaningful = subject.trim().length > 0 || notes.trim().length > 0;
+        if (dirty) hasChangedRef.current = true;
+        if (!hasChangedRef.current || succeeded) return;
+        if (meaningful) {
+            ownsDraftRef.current = true;
+        } else if (!ownsDraftRef.current) {
+            return;
+        }
+        if (!meaningful) {
+            onClearDraft?.();
+            return;
+        }
         onPersistDraft?.({
             type,
             subject,
@@ -285,11 +304,7 @@ export function ActivityDialogForm({
             personId: selectedPerson?.id ?? null,
             dealId: selectedDeal?.id ?? null,
         });
-    }, [dirty, type, subject, notes, selectedPerson, selectedDeal, onPersistDraft]);
-
-    useEffect(() => {
-        if (succeeded || followUpFailed) onClearDraft?.();
-    }, [succeeded, followUpFailed, onClearDraft]);
+    }, [dirty, notes, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, subject, succeeded, type]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -318,6 +333,7 @@ export function ActivityDialogForm({
                 );
                 if (requestInit?.signal?.aborted) return;
                 activityCreatedRef.current = true;
+                onClearDraft?.();
             }
             if (followUpEnabled) {
                 try {

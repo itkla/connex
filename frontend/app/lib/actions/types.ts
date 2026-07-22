@@ -84,14 +84,18 @@ export type TaskDraft = {
     personId?: number | null;
     dealId?: number | null;
 };
-export type NoteDraft = { content?: string };
+export type NoteDraft = {
+    content?: string;
+    personId?: number | null;
+    dealId?: number | null;
+};
 export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraft?: boolean }
-    | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft }
-    | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
+    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraftGeneration?: number }
+    | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft; restoredDraftGeneration?: number }
+    | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft; restoredDraftGeneration?: number }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
     | { kind: "create-deal"; defaults?: CreateDefaults }

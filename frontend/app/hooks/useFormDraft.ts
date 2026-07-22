@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
     advanceDraftKeyGeneration,
-    clearDraft,
+    clearDraftIfGeneration,
     draftKey,
     getDraftKeyGeneration,
     getDraftStoreGeneration,
@@ -18,6 +18,7 @@ export const DRAFT_DEBOUNCE_MS = 400;
 type UseFormDraftOptions = {
     keyParts: DraftKeyParts;
     version: number;
+    initialKeyGeneration?: number;
 };
 
 type PendingDraft<T> = {
@@ -34,7 +35,7 @@ type PendingDraft<T> = {
 export type FormDraftControls<T> = {
     /** Schedules a debounced write of the current snapshot; call while the form holds unsaved edits. */
     persist: (snapshot: T) => void;
-    /** Removes the draft and cancels any pending write; call on successful submit or explicit discard. */
+    /** Removes this composer's owned draft and cancels its pending write without clearing a newer owner. */
     clear: () => void;
 };
 
@@ -45,7 +46,7 @@ export type FormDraftControls<T> = {
  * submit or confirmed discard can unmount the wrapper. The hook itself never decides *when* to persist or
  * clear, so a pristine open/close leaves any existing draft untouched for the resume banner to surface.
  */
-export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): FormDraftControls<T> {
+export function useFormDraft<T>({ keyParts, version, initialKeyGeneration }: UseFormDraftOptions): FormDraftControls<T> {
     const { userId, workspaceId, formType, scope } = keyParts;
     const [origin] = useState(() => ({
         key: draftKey({ userId, workspaceId, formType, scope }),
@@ -56,6 +57,7 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
 
     const timerRef = useRef<number | null>(null);
     const pendingRef = useRef<PendingDraft<T> | null>(null);
+    const ownedKeyGenerationRef = useRef<number | null>(initialKeyGeneration ?? null);
 
     const cancel = useCallback(() => {
         if (timerRef.current !== null) {
@@ -84,9 +86,11 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
 
     const persist = useCallback(
         (snapshot: T) => {
+            const keyGeneration = advanceDraftKeyGeneration(origin.key);
+            ownedKeyGenerationRef.current = keyGeneration;
             pendingRef.current = {
                 generation: getDraftStoreGeneration(),
-                keyGeneration: advanceDraftKeyGeneration(origin.key),
+                keyGeneration,
                 key: origin.key,
                 version: origin.version,
                 scope: origin.scope,
@@ -112,7 +116,9 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
 
     const clear = useCallback(() => {
         cancel();
-        clearDraft(origin.key);
+        const ownedKeyGeneration = ownedKeyGenerationRef.current;
+        ownedKeyGenerationRef.current = null;
+        if (ownedKeyGeneration !== null) clearDraftIfGeneration(origin.key, ownedKeyGeneration);
     }, [cancel, origin]);
 
     useEffect(() => {
