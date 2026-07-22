@@ -5,9 +5,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -125,7 +128,7 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
-        validateReferences(task, workspaceId);
+        lockAndValidateReferences(task, workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         taskMapper.insert(task);
@@ -146,12 +149,18 @@ public class TaskService {
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndValidateReferences(task, workspaceId);
         Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        if (before.isCompleted() != task.isCompleted()) {
+            User currentUser = authService.getCurrentUser();
+            if (before.getAssignedTo() == null || before.getAssignedTo().getId() != currentUser.getId()) {
+                throw new ForbiddenException("Only the task assignee may change this task's completion");
+            }
+        }
         User actor = currentActorOrNull();
         task.setId(id);
         task.setWorkspaceId(workspaceId);
-        validateReferences(task, workspaceId);
         String beforeStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         String resolved = task.isCompleted() ? STATUS_DONE
             : (STATUS_DONE.equals(beforeStatus) ? STATUS_TODO : beforeStatus);
@@ -237,7 +246,17 @@ public class TaskService {
         if (status == null || !VALID_STATUSES.contains(status)) {
             throw new BadRequestException("Invalid task status: " + status);
         }
-        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
+        Set<Integer> taskIds = new TreeSet<>(taskMapper.listWorkspaceTaskIds(workspaceId));
+        taskIds.add(id);
+        List<Task> lockedTasks = new ArrayList<>(taskIds.size());
+        Task before = null;
+        for (int taskId : taskIds) {
+            Task locked = taskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+            if (locked != null) {
+                lockedTasks.add(locked);
+                if (taskId == id) before = locked;
+            }
+        }
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         String oldStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         boolean toDone = STATUS_DONE.equals(status);
@@ -250,13 +269,13 @@ public class TaskService {
         }
         boolean statusChanged = !status.equals(oldStatus);
 
-        List<Integer> target = taskMapper.getTaskIdsInStatusOrdered(workspaceId, status);
+        List<Integer> target = taskIdsInStatus(lockedTasks, status);
         target.removeIf(existing -> existing == id);
         int index = Math.max(0, Math.min(position, target.size()));
         target.add(index, id);
 
         if (statusChanged) {
-            List<Integer> source = taskMapper.getTaskIdsInStatusOrdered(workspaceId, oldStatus);
+            List<Integer> source = taskIdsInStatus(lockedTasks, oldStatus);
             source.removeIf(existing -> existing == id);
             setPositionBatches(
                 workspaceId,
@@ -293,6 +312,16 @@ public class TaskService {
         }
     }
 
+    private List<Integer> taskIdsInStatus(List<Task> tasks, String status) {
+        return new ArrayList<>(
+            tasks.stream()
+                .filter(task -> status.equals(task.getStatus() != null ? task.getStatus() : STATUS_TODO))
+                .sorted(Comparator.comparingInt(Task::getPosition).thenComparingInt(Task::getId))
+                .map(Task::getId)
+                .toList()
+        );
+    }
+
     /**
      * Changes only a task's due date, leaving description, assignee, status, position and links
      * untouched. Unlike {@link #update(int, Task)} this cannot clobber other fields from a stale
@@ -324,11 +353,19 @@ public class TaskService {
         return hydrate(workspaceId, after);
     }
 
-    private void validateReferences(Task task, int workspaceId) {
+    private void lockAndValidateReferences(Task task, int workspaceId) {
+        workspaceService.lockAndRequireMember(workspaceId, requireAssigneeId(task));
+        validateLinkedRecords(task, workspaceId);
+    }
+
+    private int requireAssigneeId(Task task) {
         if (task.getAssignedTo() == null || task.getAssignedTo().getId() == 0) {
             throw new BadRequestException("Task assignee is required");
         }
-        workspaceService.requireMember(workspaceId, task.getAssignedTo().getId());
+        return task.getAssignedTo().getId();
+    }
+
+    private void validateLinkedRecords(Task task, int workspaceId) {
         if (task.getDeal() != null && !dealMapper.exists(workspaceId, task.getDeal().getId())) {
             throw new BadRequestException("Task deal must belong to the current workspace");
         }

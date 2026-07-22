@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -10,6 +12,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -57,19 +60,75 @@ class TaskMutationInvariantTest {
     }
 
     @Test
+    void updateLocksTargetMembershipBeforeTask() {
+        int workspaceId = 17;
+        int taskId = 29;
+        Task before = task(taskId, "Before");
+        Task update = task(0, "After");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, taskId)).thenReturn(before);
+        when(taskMapper.update(update)).thenReturn(0);
+
+        assertThrows(ResourceNotFoundException.class, () -> taskService.update(taskId, update));
+
+        InOrder order = inOrder(workspaceService, taskMapper);
+        order.verify(workspaceService).lockAndRequireMember(workspaceId, 41);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, taskId);
+    }
+
+    @Test
+    void updateRejectsCompletionTransitionByNonAssignee() {
+        int workspaceId = 17;
+        int taskId = 29;
+        Task before = task(taskId, "Before");
+        Task update = task(0, "After");
+        update.setCompleted(true);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, taskId)).thenReturn(before);
+        when(authService.getCurrentUser()).thenReturn(user(43));
+
+        assertThrows(ForbiddenException.class, () -> taskService.update(taskId, update));
+
+        verify(taskMapper, never()).update(update);
+        verifyNoInteractions(referenceService, auditService, notificationChanges, ruleTriggers);
+    }
+
+    @Test
     void moveSkipsSuccessSideEffectsWhenWriteLoses() {
         int workspaceId = 17;
         int taskId = 29;
         Task before = task(taskId, "Move once");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.listWorkspaceTaskIds(workspaceId)).thenReturn(List.of(taskId));
         when(taskMapper.getTaskByIdForUpdate(workspaceId, taskId)).thenReturn(before);
-        when(taskMapper.getTaskIdsInStatusOrdered(workspaceId, "todo"))
-            .thenReturn(new ArrayList<>());
         when(taskMapper.moveTask(workspaceId, taskId, "todo", false, 0)).thenReturn(0);
 
         assertThrows(ResourceNotFoundException.class, () -> taskService.move(taskId, "todo", 0));
 
         verifyNoInteractions(referenceService, auditService, notificationChanges, ruleTriggers);
+    }
+
+    @Test
+    void moveLocksDiscoveredTasksByAscendingExactId() {
+        int workspaceId = 17;
+        int taskId = 29;
+        Task first = task(7, "First");
+        Task second = task(19, "Second");
+        Task root = task(taskId, "Root");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.listWorkspaceTaskIds(workspaceId)).thenReturn(List.of(29, 7, 19));
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, 7)).thenReturn(first);
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, 19)).thenReturn(second);
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, 29)).thenReturn(root);
+        when(taskMapper.moveTask(workspaceId, taskId, "todo", false, 0)).thenReturn(0);
+
+        assertThrows(ResourceNotFoundException.class, () -> taskService.move(taskId, "todo", 0));
+
+        InOrder order = inOrder(taskMapper);
+        order.verify(taskMapper).listWorkspaceTaskIds(workspaceId);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, 7);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, 19);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, 29);
     }
 
     @Test
