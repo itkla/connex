@@ -203,8 +203,9 @@ export default function TasksBrowser({
     const [rovingTaskId, setRovingTaskId] = useState<number | null>(null);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState<Set<number>>(new Set());
+    const searchInputRef = useRef<HTMLInputElement>(null);
     const rowRefs = useRef(new Map<number, HTMLButtonElement>());
-    const pendingFocusRef = useRef<number | null>(null);
+    const pendingFocusRef = useRef<number | 'search' | null>(null);
     const timers = useRef<number[]>([]);
     const deleteControllerRef = useRef<AbortController | null>(null);
     const toggleControllersRef = useRef(new Map<number, AbortController>());
@@ -428,9 +429,14 @@ export default function TasksBrowser({
             : visibleTasks[0]?.id ?? null;
 
     useEffect(() => {
-        const pendingFocusId = pendingFocusRef.current;
-        if (pendingFocusId == null) return;
-        const row = rowRefs.current.get(pendingFocusId);
+        const pendingFocus = pendingFocusRef.current;
+        if (pendingFocus == null) return;
+        if (pendingFocus === 'search') {
+            pendingFocusRef.current = null;
+            searchInputRef.current?.focus();
+            return;
+        }
+        const row = rowRefs.current.get(pendingFocus);
         if (!row) return;
         pendingFocusRef.current = null;
         row.focus();
@@ -631,7 +637,7 @@ export default function TasksBrowser({
                 signal: controller.signal,
             });
             if (controller.signal.aborted || !scopeCurrent()) return;
-            pendingFocusRef.current = focusTarget?.id ?? null;
+            pendingFocusRef.current = focusTarget?.id ?? 'search';
             setRovingTaskId(focusTarget?.id ?? null);
             setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
             setDeletingTask(null);
@@ -797,6 +803,7 @@ export default function TasksBrowser({
                                 className="py-0"
                                 search={
                                     <SearchField
+                                        inputRef={searchInputRef}
                                         value={query}
                                         onChange={setQuery}
                                         onClear={() => setQuery('')}
@@ -856,6 +863,7 @@ export default function TasksBrowser({
                                     className="py-0"
                                     search={
                                         <SearchField
+                                            inputRef={searchInputRef}
                                             value={query}
                                             onChange={setQuery}
                                             onClear={() => setQuery('')}
