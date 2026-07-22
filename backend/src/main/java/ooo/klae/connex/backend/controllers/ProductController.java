@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.ProductDto;
 import ooo.klae.connex.backend.services.ProductService;
+import ooo.klae.connex.backend.util.LikePattern;
 
 /** REST controller for the workspace-scoped product/service catalog. */
 @RestController
@@ -25,8 +27,9 @@ public class ProductController {
     private final ProductService productService;
 
     @GetMapping
-    public List<ProductDto> getAll() {
-        return productService.getAll().stream().map(ProductDto::from).toList();
+    public List<ProductDto> getAll(@RequestParam(required = false) String q) {
+        String query = q == null || q.isBlank() ? null : LikePattern.containing(q.trim());
+        return productService.getAll(query).stream().map(ProductDto::from).toList();
     }
 
     @GetMapping("/{id}")

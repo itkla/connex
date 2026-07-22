@@ -28,9 +28,9 @@ public class ProductService {
         "sku", "name", "description", "active", "unit", "unitPrice", "currency",
         "taxRate", "billingFrequency", "effectiveStart", "effectiveEnd");
 
-    /** All products in the active workspace, ordered by name. */
-    public List<Product> getAll() {
-        return productMapper.getAll(workspaceService.getCurrentWorkspaceId());
+    /** Products matching the current catalog search in the active workspace, ordered by name. */
+    public List<Product> getAll(String query) {
+        return productMapper.getFiltered(workspaceService.getCurrentWorkspaceId(), query);
     }
 
     /** A single product in the active workspace, or 404. */

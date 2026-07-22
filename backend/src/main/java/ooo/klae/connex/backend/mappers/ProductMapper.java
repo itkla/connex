@@ -11,7 +11,7 @@ import ooo.klae.connex.backend.beans.Product;
  * Every statement is scoped to a workspace.
  */
 public interface ProductMapper {
-    List<Product> getAll(int workspaceId);
+    List<Product> getFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query);
     Product getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Product product);

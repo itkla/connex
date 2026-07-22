@@ -56,6 +56,12 @@ export type BulkOperationResult = {
 
 export type ImportEntity = 'persons' | 'companies' | 'deals';
 
+export type ExportEntity = ImportEntity | 'products';
+
+export type ProductSearchParams = {
+    q?: string;
+};
+
 export type ImportDuplicateAction = 'fill_empty' | 'skip' | 'overwrite';
 
 export type ImportColumnMapping = {

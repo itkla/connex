@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -16,11 +17,12 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { ImportEntity } from '@/app/lib/types';
+import type { ExportEntity, ImportEntity } from '@/app/lib/types';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActionContext, AppAction } from '@/app/lib/actions/types';
-import ImportDialog from './ImportDialog';
+
+const ImportDialog = dynamic(() => import('./ImportDialog'));
 
 type CurrentViewExportActionConfig = {
     id: string;
@@ -52,36 +54,40 @@ const CURRENT_VIEW_EXPORT_ACTIONS = {
         keywordsKey: 'keywords.utility.exportCurrentDeals',
         order: 80,
     },
-} satisfies Record<ImportEntity, CurrentViewExportActionConfig>;
+    products: {
+        id: 'utility.export-current-products',
+        labelKey: 'utility.exportCurrentProducts',
+        descriptionKey: 'description.utility.exportCurrentProducts',
+        keywordsKey: 'keywords.utility.exportCurrentProducts',
+        order: 90,
+    },
+} satisfies Record<ExportEntity, CurrentViewExportActionConfig>;
 
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === 'AbortError';
 }
 
 /**
- * Records list header actions rendered as a split button: the primary "New" action on the left, joined
- * to a dropdown holding Import and Export. Export delegates to {@code onExport}, which each browser
- * implements against its own live filter/scope/segment state so the exported set equals the visible
- * filtered+scoped list. Import opens the {@link ImportDialog} wizard and calls {@code onImported} after
- * a successful commit.
+ * Records list header actions rendered as a split button: the primary "New" action on the left,
+ * joined to a dropdown holding Export and, for supported record types, Import. Export delegates to
+ * {@code onExport}, which each browser implements against its own live filter and scope state so the
+ * exported set equals the full current view. Import opens the {@link ImportDialog} wizard and calls
+ * {@code onImported} after a successful commit.
  */
-export type RecordsActionsProps = {
-    entity: ImportEntity;
+type RecordsActionsCommonProps = {
     onNew: () => void;
     newLabel: string;
     newAriaLabel: string;
-    onImported: () => void;
     onExport: (signal: AbortSignal, workspaceId: number) => Promise<void>;
 };
 
-export default function RecordsActions({
-    entity,
-    onNew,
-    newLabel,
-    newAriaLabel,
-    onImported,
-    onExport,
-}: RecordsActionsProps) {
+export type RecordsActionsProps = RecordsActionsCommonProps & (
+    | { entity: ImportEntity; onImported: () => void }
+    | { entity: 'products'; onImported?: never }
+);
+
+export default function RecordsActions(props: RecordsActionsProps) {
+    const { entity, onNew, newLabel, newAriaLabel, onExport } = props;
     const t = useTranslations('importExport');
     const pathname = usePathname() ?? '';
     const { activeWorkspaceId, switching } = useWorkspace();
@@ -177,10 +183,12 @@ export default function RecordsActions({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-60">
-                        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setImportOpen(true); }}>
-                            <ArrowUpTrayIcon className="size-4" />
-                            {t('openImport')}
-                        </DropdownMenuItem>
+                        {props.entity !== 'products' && (
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setImportOpen(true); }}>
+                                <ArrowUpTrayIcon className="size-4" />
+                                {t('openImport')}
+                            </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem disabled={exportPending} aria-busy={exportPending} onSelect={runExport}>
                             <ArrowDownTrayIcon className="size-4" />
                             {t('exportCurrentView')}
@@ -188,7 +196,14 @@ export default function RecordsActions({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </ButtonGroup>
-            <ImportDialog entity={entity} open={importOpen} onOpenChange={setImportOpen} onImported={onImported} />
+            {props.entity !== 'products' && (
+                <ImportDialog
+                    entity={props.entity}
+                    open={importOpen}
+                    onOpenChange={setImportOpen}
+                    onImported={props.onImported}
+                />
+            )}
         </>
     );
 }
