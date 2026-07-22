@@ -8,6 +8,8 @@ import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
@@ -35,7 +37,17 @@ import { cn } from '@/lib/utils';
 import { ApiError, createTask, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import type { Contact, Deal, User } from '@/app/lib/types';
+
+/** The serializable task-composer fields persisted and restored as one workspace-scoped draft. */
+export type TaskDraftData = {
+    description: string;
+    dueDate: string;
+    assigneeId: number | null;
+    personId: number | null;
+    dealId: number | null;
+};
 
 type Props = {
     open: boolean;
@@ -44,32 +56,57 @@ type Props = {
     deals: Deal[];
     users: User[];
     currentUserId: number;
+    defaultAssignee?: User | null;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
     /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
 };
 
-export default function TaskDialog({
+export default function TaskDialog(props: Props) {
+    const { activeWorkspaceId } = useWorkspace();
+    return (
+        <ScopedTaskDialog
+            key={`${props.currentUserId}:${activeWorkspaceId ?? 'none'}`}
+            {...props}
+            activeWorkspaceId={activeWorkspaceId}
+        />
+    );
+}
+
+function ScopedTaskDialog({
     open,
     onOpenChange,
     persons,
     deals,
     users,
     currentUserId,
+    defaultAssignee = null,
     defaultPerson = null,
     defaultDeal = null,
     defaultDueDate = '',
     defaultDescription = '',
+    ownsInitialDraft = false,
     requestInit,
-}: Props) {
+    activeWorkspaceId,
+}: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
     const [isDirty, setIsDirty] = useState(false);
     const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
+    const draft = useFormDraft<TaskDraftData>({
+        keyParts: {
+            userId: currentUserId,
+            workspaceId: activeWorkspaceId,
+            formType: 'task',
+            scope: 'global',
+        },
+        version: DRAFT_VERSIONS.task,
+    });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
@@ -96,21 +133,32 @@ export default function TaskDialog({
                         deals={deals}
                         users={users}
                         currentUserId={currentUserId}
+                        defaultAssignee={defaultAssignee}
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
+                        ownsInitialDraft={ownsInitialDraft}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
                         onDirtyChange={setIsDirty}
+                        onPersistDraft={draft.persist}
+                        onClearDraft={draft.clear}
                         onCancel={guard.requestClose}
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
             </ResponsiveDialog>
-            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={() => {
+                    draft.clear();
+                    guard.confirm.onDiscard();
+                }}
+            />
         </>
     );
 }
@@ -120,14 +168,20 @@ type TaskDialogFormProps = {
     deals: Deal[];
     users: User[];
     currentUserId: number;
+    defaultAssignee?: User | null;
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultDueDate: string;
     defaultDescription: string;
+    ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
+    /** Persists the current task snapshot after this form owns a meaningful edit. */
+    onPersistDraft?: (data: TaskDraftData) => void;
+    /** Clears the task draft after confirmed creation, explicit discard, or deletion of owned content. */
+    onClearDraft?: () => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -144,13 +198,17 @@ export function TaskDialogForm({
     deals,
     users,
     currentUserId,
+    defaultAssignee = null,
     defaultPerson,
     defaultDeal,
     defaultDueDate,
     defaultDescription,
+    ownsInitialDraft = false,
     requestInit,
     onSubmittingChange,
     onDirtyChange,
+    onPersistDraft,
+    onClearDraft,
     onCancel,
     onClose,
 }: TaskDialogFormProps) {
@@ -159,11 +217,15 @@ export function TaskDialogForm({
 
     const [description, setDescription] = useState(() => defaultDescription);
     const [dueDate, setDueDate] = useState(() => defaultDueDate);
-    const [assignee, setAssignee] = useState<User | null>(() => users.find((u) => u.id === currentUserId) ?? null);
+    const [assignee, setAssignee] = useState<User | null>(() =>
+        defaultAssignee ?? users.find((u) => u.id === currentUserId) ?? null,
+    );
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const ownsDraftRef = useRef(ownsInitialDraft);
+    const hasChangedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [initial] = useState(() => ({
@@ -176,7 +238,7 @@ export function TaskDialogForm({
     const dirty =
         !submitting &&
         !succeeded &&
-        (description.trim() !== initial.description.trim() ||
+        (description !== initial.description ||
             dueDate !== initial.dueDate ||
             (assignee?.id ?? null) !== initial.assigneeId ||
             (selectedPerson?.id ?? null) !== initial.personId ||
@@ -184,6 +246,39 @@ export function TaskDialogForm({
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
+
+    useEffect(() => {
+        const meaningful = description.trim().length > 0;
+        if (dirty) hasChangedRef.current = true;
+        if (!hasChangedRef.current || succeeded) return;
+        if (meaningful) {
+            ownsDraftRef.current = true;
+        } else if (!ownsDraftRef.current) {
+            return;
+        }
+        if (!meaningful) {
+            onClearDraft?.();
+            return;
+        }
+        onPersistDraft?.({
+            description,
+            dueDate,
+            assigneeId: assignee?.id ?? currentUserId,
+            personId: selectedPerson?.id ?? null,
+            dealId: selectedDeal?.id ?? null,
+        });
+    }, [
+        assignee,
+        currentUserId,
+        description,
+        dirty,
+        dueDate,
+        onClearDraft,
+        onPersistDraft,
+        selectedDeal,
+        selectedPerson,
+        succeeded,
+    ]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -209,6 +304,7 @@ export function TaskDialogForm({
                 requestInit,
             );
             if (requestInit?.signal?.aborted) return;
+            onClearDraft?.();
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
             router.refresh();

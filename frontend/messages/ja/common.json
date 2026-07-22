@@ -154,6 +154,11 @@
   "DraftResume": {
     "activityMessage": "未完了のアクティビティがあります。再開しますか？",
     "activityMessageNamed": "未完了のアクティビティ：「{label}」を再開しますか？",
+    "taskMessageNamed": "未完了のタスク：「{label}」を再開しますか？",
+    "resumeActivity": "アクティビティを再開",
+    "discardActivity": "アクティビティを破棄",
+    "resumeTask": "タスクを再開",
+    "discardTask": "タスクを破棄",
     "resume": "再開",
     "discard": "破棄"
   },
