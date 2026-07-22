@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.sql.Connection;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -31,7 +32,9 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 
@@ -122,7 +125,7 @@ public class TaskService {
         return hydrate(workspaceId, task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -130,6 +133,7 @@ public class TaskService {
         task.setWorkspaceId(workspaceId);
         lockAssignee(task, workspaceId);
         validateLinkedRecords(task, workspaceId);
+        lockTaskBoard(workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         taskMapper.insert(task);
@@ -146,13 +150,13 @@ public class TaskService {
         return hydrate(workspaceId, task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAssignee(task, workspaceId);
-        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
+        Task before = requireLockedTask(lockedTasks, id);
         if (before.isCompleted() != task.isCompleted()) {
             User currentUser = authService.getCurrentUser();
             if (before.getAssignedTo() == null || before.getAssignedTo().getId() != currentUser.getId()) {
@@ -174,6 +178,9 @@ public class TaskService {
         if (taskMapper.update(task) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }
+        if (!resolved.equals(beforeStatus)) {
+            compactStatusColumn(workspaceId, beforeStatus, lockedTasks, id);
+        }
         auditService.record("task.update", "task", id, task.getDescription(),
             "Updated task " + task.getDescription(),
             auditService.diff(before, task, AUDIT_FIELDS));
@@ -189,15 +196,21 @@ public class TaskService {
         return hydrate(workspaceId, task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
+        Task before = requireLockedTask(lockedTasks, id);
         if (taskMapper.delete(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }
+        compactStatusColumn(
+            workspaceId,
+            before.getStatus() != null ? before.getStatus() : STATUS_TODO,
+            lockedTasks,
+            id
+        );
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_TASK, id);
         auditService.record("task.delete", "task", id, before.getDescription(),
             "Deleted task " + before.getDescription(),
@@ -205,13 +218,13 @@ public class TaskService {
         notificationChanges.publish(workspaceId, "task", id);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();
-        Task task = taskMapper.getTaskByIdForUpdate(workspaceId, id);
-        if (task == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
+        Task task = requireLockedTask(lockedTasks, id);
         if (task.getAssignedTo() == null || task.getAssignedTo().getId() != currentUser.getId()) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
@@ -222,6 +235,12 @@ public class TaskService {
         if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
+        compactStatusColumn(
+            workspaceId,
+            task.getStatus() != null ? task.getStatus() : STATUS_TODO,
+            lockedTasks,
+            id
+        );
         Task completed = taskMapper.getTaskById(workspaceId, id);
         auditService.record("task.complete", "task", id, task.getDescription(),
             "Completed task " + task.getDescription(),
@@ -241,25 +260,15 @@ public class TaskService {
      * @param position the desired 0-based index within the target column (clamped to the column size)
      * @return the moved task
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task move(int id, String status, int position) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (status == null || !VALID_STATUSES.contains(status)) {
             throw new BadRequestException("Invalid task status: " + status);
         }
-        Set<Integer> taskIds = new TreeSet<>(taskMapper.listWorkspaceTaskIds(workspaceId));
-        taskIds.add(id);
-        List<Task> lockedTasks = new ArrayList<>(taskIds.size());
-        Task before = null;
-        for (int taskId : taskIds) {
-            Task locked = taskMapper.getTaskByIdForUpdate(workspaceId, taskId);
-            if (locked != null) {
-                lockedTasks.add(locked);
-                if (taskId == id) before = locked;
-            }
-        }
-        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
+        Task before = requireLockedTask(lockedTasks, id);
         String oldStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         boolean toDone = STATUS_DONE.equals(status);
         boolean fromDone = STATUS_DONE.equals(oldStatus);
@@ -312,6 +321,47 @@ public class TaskService {
         for (List<BoardPositionUpdate> positions : batches) {
             taskMapper.setPositions(workspaceId, status, positions);
         }
+    }
+
+    private List<Task> lockTaskBoardTasks(int workspaceId, int requestedTaskId) {
+        lockTaskBoard(workspaceId);
+        Set<Integer> taskIds = new TreeSet<>(taskMapper.listWorkspaceTaskIds(workspaceId));
+        taskIds.add(requestedTaskId);
+        List<Task> lockedTasks = new ArrayList<>(taskIds.size());
+        for (int taskId : taskIds) {
+            Task locked = taskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+            if (locked != null) {
+                lockedTasks.add(locked);
+            }
+        }
+        return lockedTasks;
+    }
+
+    private void lockTaskBoard(int workspaceId) {
+        Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && (isolation == null || isolation != Connection.TRANSACTION_READ_COMMITTED)) {
+            throw new IllegalStateException("Task board mutations require READ_COMMITTED isolation");
+        }
+        taskMapper.lockTaskBoard(workspaceId);
+    }
+
+    private Task requireLockedTask(List<Task> lockedTasks, int taskId) {
+        return lockedTasks.stream()
+            .filter(task -> task.getId() == taskId)
+            .findFirst()
+            .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
+    }
+
+    private void compactStatusColumn(
+            int workspaceId, String status, List<Task> lockedTasks, int excludedTaskId) {
+        List<Integer> remaining = taskIdsInStatus(lockedTasks, status);
+        remaining.removeIf(existing -> existing == excludedTaskId);
+        setPositionBatches(
+            workspaceId,
+            status,
+            BoardPositionBatches.fromOrderedIds(remaining, POSITION_BATCH_SIZE)
+        );
     }
 
     private List<Integer> taskIdsInStatus(List<Task> tasks, String status) {

@@ -95,6 +95,82 @@ class TaskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void complete_compactsSourceAndAppendsToDone() {
+        Task first = newTask(currentUser, null, null);
+        Task completing = newTask(currentUser, null, null);
+        Task last = newTask(currentUser, null, null);
+
+        taskService.complete(completing.getId());
+
+        assertEquals(
+            List.of(first.getId(), last.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo")
+        );
+        assertEquals(0, taskService.getTaskById(first.getId()).getPosition());
+        assertEquals(1, taskService.getTaskById(last.getId()).getPosition());
+        assertEquals(0, taskService.getTaskById(completing.getId()).getPosition());
+    }
+
+    @Test
+    void update_completionTransitionCompactsSourceAndAppendsToDone() {
+        Task first = newTask(currentUser, null, null);
+        Task completing = newTask(currentUser, null, null);
+        Task last = newTask(currentUser, null, null);
+        Task update = updateDraft(completing, "Complete through update");
+        update.setCompleted(true);
+
+        taskService.update(completing.getId(), update);
+
+        assertEquals(
+            List.of(first.getId(), last.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo")
+        );
+        assertEquals(1, taskService.getTaskById(last.getId()).getPosition());
+        assertEquals(0, taskService.getTaskById(completing.getId()).getPosition());
+    }
+
+    @Test
+    void update_reopenTransitionCompactsDoneAndAppendsToTodo() {
+        Task todo = newTask(currentUser, null, null);
+        Task reopening = newTask(currentUser, null, null);
+        Task doneSurvivor = newTask(currentUser, null, null);
+        taskService.move(reopening.getId(), "done", 0);
+        taskService.move(doneSurvivor.getId(), "done", 1);
+        Task persisted = taskService.getTaskById(reopening.getId());
+        Task update = updateDraft(persisted, "Reopen through update");
+        update.setCompleted(false);
+
+        taskService.update(reopening.getId(), update);
+
+        assertEquals(
+            List.of(todo.getId(), reopening.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo")
+        );
+        assertEquals(
+            List.of(doneSurvivor.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "done")
+        );
+        assertEquals(0, taskService.getTaskById(doneSurvivor.getId()).getPosition());
+        assertEquals(1, taskService.getTaskById(reopening.getId()).getPosition());
+    }
+
+    @Test
+    void delete_compactsSourceColumn() {
+        Task first = newTask(currentUser, null, null);
+        Task deleting = newTask(currentUser, null, null);
+        Task last = newTask(currentUser, null, null);
+
+        taskService.delete(deleting.getId());
+
+        assertEquals(
+            List.of(first.getId(), last.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo")
+        );
+        assertEquals(0, taskService.getTaskById(first.getId()).getPosition());
+        assertEquals(1, taskService.getTaskById(last.getId()).getPosition());
+    }
+
+    @Test
     void move_toDone_byNonAssignee_throwsForbidden() {
         User assignee = newUser();
         Task task = newTask(assignee, null, null);

@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.services;
 
+import java.sql.Connection;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,6 +18,7 @@ import org.mockito.InjectMocks;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -45,6 +49,26 @@ class TaskMutationInvariantTest {
     @InjectMocks TaskService taskService;
 
     @Test
+    void createLocksMembershipThenBoardBeforeAllocatingPosition() {
+        int workspaceId = 17;
+        Task task = task(0, "Create in order");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(referenceService.hydrateTasks(eq(workspaceId), anyList()))
+            .thenAnswer(invocation -> invocation.getArgument(1));
+        when(referenceService.syncReferences(
+                workspaceId, ReferenceService.SOURCE_TASK, 0, task.getDescription()))
+            .thenReturn(List.of());
+
+        taskService.create(task);
+
+        InOrder order = inOrder(workspaceService, taskMapper);
+        order.verify(workspaceService).lockAndRequireMember(workspaceId, 41);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
+        order.verify(taskMapper).nextTaskPosition(workspaceId, "todo");
+        order.verify(taskMapper).insert(task);
+    }
+
+    @Test
     void updateSkipsSuccessSideEffectsWhenWriteLoses() {
         int workspaceId = 17;
         int taskId = 29;
@@ -73,6 +97,8 @@ class TaskMutationInvariantTest {
 
         InOrder order = inOrder(workspaceService, taskMapper);
         order.verify(workspaceService).lockAndRequireMember(workspaceId, 41);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
+        order.verify(taskMapper).listWorkspaceTaskIds(workspaceId);
         order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, taskId);
     }
 
@@ -109,6 +135,25 @@ class TaskMutationInvariantTest {
     }
 
     @Test
+    void deleteLocksBoardBeforeExactTaskRows() {
+        int workspaceId = 17;
+        int taskId = 29;
+        Task before = task(taskId, "Delete in order");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.listWorkspaceTaskIds(workspaceId)).thenReturn(List.of(taskId));
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, taskId)).thenReturn(before);
+        when(taskMapper.delete(workspaceId, taskId)).thenReturn(1);
+
+        taskService.delete(taskId);
+
+        InOrder order = inOrder(taskMapper);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
+        order.verify(taskMapper).listWorkspaceTaskIds(workspaceId);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, taskId);
+        order.verify(taskMapper).delete(workspaceId, taskId);
+    }
+
+    @Test
     void moveLocksDiscoveredTasksByAscendingExactId() {
         int workspaceId = 17;
         int taskId = 29;
@@ -125,6 +170,7 @@ class TaskMutationInvariantTest {
         assertThrows(ResourceNotFoundException.class, () -> taskService.move(taskId, "todo", 0));
 
         InOrder order = inOrder(taskMapper);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
         order.verify(taskMapper).listWorkspaceTaskIds(workspaceId);
         order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, 7);
         order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, 19);
@@ -160,8 +206,47 @@ class TaskMutationInvariantTest {
 
         assertThrows(ForbiddenException.class, () -> taskService.complete(taskId));
 
-        verify(taskMapper).getTaskByIdForUpdate(workspaceId, taskId);
+        InOrder order = inOrder(taskMapper);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
+        order.verify(taskMapper).listWorkspaceTaskIds(workspaceId);
+        order.verify(taskMapper).getTaskByIdForUpdate(workspaceId, taskId);
         verifyNoInteractions(auditService, notificationChanges, ruleTriggers);
+    }
+
+    @Test
+    void rescheduleDoesNotAcquireBoardRoot() {
+        int workspaceId = 17;
+        int taskId = 29;
+        Task before = task(taskId, "Reschedule only");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(taskMapper.getTaskByIdForUpdate(workspaceId, taskId)).thenReturn(before);
+        when(taskMapper.updateDueDate(workspaceId, taskId, "2026-08-01")).thenReturn(0);
+
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> taskService.reschedule(taskId, "2026-08-01"));
+
+        verify(taskMapper, never()).lockTaskBoard(workspaceId);
+    }
+
+    @Test
+    void boardMutationRejectsJoinedTransactionWithWrongIsolation() {
+        int workspaceId = 17;
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+            Connection.TRANSACTION_REPEATABLE_READ);
+
+        try {
+            assertThrows(
+                IllegalStateException.class,
+                () -> taskService.move(29, "todo", 0));
+        } finally {
+            TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        verifyNoInteractions(taskMapper);
     }
 
     private static Task task(int id, String description) {

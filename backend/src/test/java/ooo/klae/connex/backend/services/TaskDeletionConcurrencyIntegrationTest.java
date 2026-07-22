@@ -120,6 +120,7 @@ class TaskDeletionConcurrencyIntegrationTest {
             );
         }
         if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM task_board_lock WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
@@ -161,18 +162,18 @@ class TaskDeletionConcurrencyIntegrationTest {
     }
 
     @Test
-    void lockingReadMakesConcurrentDeleteHitDatabaseLockTimeout() throws Exception {
+    void boardRootMakesConcurrentDeleteHitDatabaseLockTimeout() throws Exception {
         int workspaceId = workspace.getId();
         int taskId = task.getId();
         int orgId = organization.getId();
         CountDownLatch firstLocked = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondReadStarted = new CountDownLatch(1);
-        AtomicInteger lockReads = new AtomicInteger();
+        AtomicInteger lockAttempts = new AtomicInteger();
         TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
         doAnswer(invocation -> {
-            int lockRead = lockReads.incrementAndGet();
-            if (lockRead == 2) {
+            int lockAttempt = lockAttempts.incrementAndGet();
+            if (lockAttempt == 2) {
                 secondReadStarted.countDown();
                 Integer previousTimeout = jdbcTemplate.queryForObject(
                     "SELECT @@SESSION.innodb_lock_wait_timeout",
@@ -180,7 +181,8 @@ class TaskDeletionConcurrencyIntegrationTest {
                 );
                 jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = 1");
                 try {
-                    return realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+                    realTaskMapper.lockTaskBoard(workspaceId);
+                    return null;
                 } finally {
                     if (previousTimeout != null) {
                         jdbcTemplate.execute(
@@ -188,13 +190,13 @@ class TaskDeletionConcurrencyIntegrationTest {
                     }
                 }
             }
-            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
-            if (lockRead == 1) {
+            realTaskMapper.lockTaskBoard(workspaceId);
+            if (lockAttempt == 1) {
                 firstLocked.countDown();
                 assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), eq(taskId));
+            return null;
+        }).when(taskMapperSpy).lockTaskBoard(workspaceId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -220,18 +222,18 @@ class TaskDeletionConcurrencyIntegrationTest {
     }
 
     @Test
-    void lockingDeleteMakesConcurrentUpdateHitDatabaseLockTimeout() throws Exception {
+    void boardLockedDeleteMakesConcurrentUpdateHitDatabaseLockTimeout() throws Exception {
         int workspaceId = workspace.getId();
         int taskId = task.getId();
         int orgId = organization.getId();
         CountDownLatch firstLocked = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondReadStarted = new CountDownLatch(1);
-        AtomicInteger lockReads = new AtomicInteger();
+        AtomicInteger lockAttempts = new AtomicInteger();
         TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
         doAnswer(invocation -> {
-            int lockRead = lockReads.incrementAndGet();
-            if (lockRead == 2) {
+            int lockAttempt = lockAttempts.incrementAndGet();
+            if (lockAttempt == 2) {
                 secondReadStarted.countDown();
                 Integer previousTimeout = jdbcTemplate.queryForObject(
                     "SELECT @@SESSION.innodb_lock_wait_timeout",
@@ -239,7 +241,8 @@ class TaskDeletionConcurrencyIntegrationTest {
                 );
                 jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = 1");
                 try {
-                    return realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
+                    realTaskMapper.lockTaskBoard(workspaceId);
+                    return null;
                 } finally {
                     if (previousTimeout != null) {
                         jdbcTemplate.execute(
@@ -247,13 +250,13 @@ class TaskDeletionConcurrencyIntegrationTest {
                     }
                 }
             }
-            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
-            if (lockRead == 1) {
+            realTaskMapper.lockTaskBoard(workspaceId);
+            if (lockAttempt == 1) {
                 firstLocked.countDown();
                 assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), eq(taskId));
+            return null;
+        }).when(taskMapperSpy).lockTaskBoard(workspaceId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -286,18 +289,18 @@ class TaskDeletionConcurrencyIntegrationTest {
         CountDownLatch deleteLocked = new CountDownLatch(1);
         CountDownLatch releaseDelete = new CountDownLatch(1);
         CountDownLatch updateReadStarted = new CountDownLatch(1);
-        AtomicInteger lockReads = new AtomicInteger();
+        AtomicInteger lockAttempts = new AtomicInteger();
         TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
         doAnswer(invocation -> {
-            int lockRead = lockReads.incrementAndGet();
-            if (lockRead == 2) updateReadStarted.countDown();
-            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
-            if (lockRead == 1) {
+            int lockAttempt = lockAttempts.incrementAndGet();
+            if (lockAttempt == 2) updateReadStarted.countDown();
+            realTaskMapper.lockTaskBoard(workspaceId);
+            if (lockAttempt == 1) {
                 deleteLocked.countDown();
                 assertTrue(releaseDelete.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), eq(taskId));
+            return null;
+        }).when(taskMapperSpy).lockTaskBoard(workspaceId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
