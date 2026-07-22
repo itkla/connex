@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.DealAgingDto;
@@ -59,13 +60,16 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -86,6 +90,7 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
 @RequiredArgsConstructor
 public class DealService {
     private final DealMapper dealMapper;
+    private final DealLineItemMapper dealLineItemMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
@@ -118,7 +123,10 @@ public class DealService {
     private static final int KPI_SERIES_BUCKETS = 12;
     private static final int MAX_RISK_CANDIDATES = 1000;
     private static final int MAX_BOARD_DEALS = 2000;
+    private static final int POSITION_BATCH_SIZE = 500;
     private static final int MAX_REVENUE_MONTHS = 1200;
+    private static final String LINE_ITEM_VALUE_CONFLICT =
+        "Cannot manually edit the deal value while line items exist; update or remove the line items first";
 
     private static final Set<String> ALL_RISK_LEVELS = Set.of("high", "medium", "low", "none");
 
@@ -168,6 +176,22 @@ public class DealService {
 
     private Deal hydrateReferences(int workspaceId, Deal deal) {
         return referenceService.hydrateDeals(workspaceId, List.of(deal)).get(0);
+    }
+
+    private Deal requireDeal(int workspaceId, int id) {
+        Deal deal = dealMapper.getDealById(workspaceId, id);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + id);
+        }
+        return deal;
+    }
+
+    private Deal requireDealForUpdate(int workspaceId, int id) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, id);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + id);
+        }
+        return deal;
     }
 
     private static Deal mutableCopy(Deal source) {
@@ -296,21 +320,41 @@ public class DealService {
      */
     public PageResponse<Deal> queryDealsPage(String query, String sort, String dir, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, int limit, int offset) {
+            boolean noCompany, List<String> statuses, List<String> risks,
+            MemberScope memberScope, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks);
+            noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new PageResponse<>(List.of(), 0);
         }
         List<Deal> items = dealMapper.getDealsPageFiltered(
             workspaceId, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, limit, offset);
+            noCompany, statuses, riskIds, memberScope, limit, offset);
         long total = dealMapper.countDealsFiltered(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds);
+            noCompany, statuses, riskIds, memberScope);
         return new PageResponse<>(items, total);
+    }
+
+    /**
+     * Returns the full filtered+scoped deal set for CSV export, applying the same server filter
+     * (including risk resolution and member scope) as the list page but without pagination.
+     */
+    public List<Deal> queryDealsForExport(String query, String currency, List<Integer> pipelineIds,
+            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<String> statuses, List<String> risks, MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> riskIds = resolveRiskCandidates(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, risks, memberScope);
+        if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
+            return List.of();
+        }
+        return dealMapper.getDealsFiltered(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, riskIds, memberScope);
     }
 
     /**
@@ -318,17 +362,17 @@ public class DealService {
      */
     public DealMetricsDto queryDealMetrics(String query, String currency, List<Integer> pipelineIds,
             List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
-            List<String> statuses, List<String> risks) {
+            List<String> statuses, List<String> risks, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks);
+            noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new DealMetricsDto(List.of(), 0);
         }
         List<DealCurrencyMetricsDto> byCurrency = dealMapper.dealMetricsFiltered(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds);
+            noCompany, statuses, riskIds, memberScope);
         long totalCount = byCurrency.stream()
             .mapToLong(metrics -> metrics.openCount() + metrics.closedCount())
             .sum();
@@ -337,13 +381,14 @@ public class DealService {
 
     private List<Integer> resolveRiskCandidates(int workspaceId, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks) {
+            boolean noCompany, List<String> statuses, List<String> risks,
+            MemberScope memberScope) {
         if (risks == null || risks.isEmpty() || risks.containsAll(ALL_RISK_LEVELS)) {
             return null;
         }
         List<Integer> baseIds = dealMapper.getFilteredDealIds(
             workspaceId, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, null, MAX_RISK_CANDIDATES + 1);
+            noCompany, statuses, null, memberScope, MAX_RISK_CANDIDATES + 1);
         if (baseIds.size() > MAX_RISK_CANDIDATES) {
             throw new BadRequestException(
                 "Risk filter matches too many deals; narrow the other filters before loading records");
@@ -366,6 +411,10 @@ public class DealService {
         return matches.stream().sorted().toList();
     }
 
+    /**
+     * Assembles the workspace-wide filter facet vocabulary. Facet counts deliberately ignore
+     * the active member scope so filter options never vanish while a scope is applied.
+     */
     public DealFacets getDealFacets() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<FacetCount> status = dealMapper.countsByStatus(workspaceId);
@@ -374,14 +423,13 @@ public class DealService {
             dealMapper.countsByStage(workspaceId),
             dealMapper.countsByPipeline(workspaceId),
             dealMapper.countsByCompany(workspaceId),
+            dealMapper.countsByOwner(workspaceId),
             dealMapper.countsByCurrency(workspaceId),
             List.of()
         );
     }
 
-    /**
-     * Returns a complete pipeline board when its absolute ordering can be represented safely.
-     */
+    /** Returns the full pipeline board with global positions when reordering is bounded. */
     public List<Deal> getDealBoard(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = dealMapper.countDealsByPipelineId(workspaceId, pipelineId);
@@ -389,22 +437,22 @@ public class DealService {
             throw new BadRequestException(
                 "This pipeline is too large for Kanban reordering; use the paginated table view");
         }
-        return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
+        return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
-        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency);
+        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency, memberScope);
         List<DealRevenueMonthBoundary> boundaries = revenueMonthBoundaries(range, zone);
         List<DealMonthDecimalTotalDto> timezoneBucketed = boundaries.isEmpty()
             ? List.of()
-            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries);
+            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries, memberScope);
         return new DealRevenueSeriesDto(
             revenueClosedByMonth(
-                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency),
+                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency, memberScope),
                 timezoneBucketed),
-            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency))
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope))
         );
     }
 
@@ -458,21 +506,21 @@ public class DealService {
         return List.copyOf(boundaries);
     }
 
-    public List<DealStageDistributionDto> getStageDistribution(String currency) {
-        return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency);
+    public List<DealStageDistributionDto> getStageDistribution(String currency, MemberScope memberScope) {
+        return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency, memberScope);
     }
 
-    public DealKpisDto getDealKpis(String currency, int days) {
+    public DealKpisDto getDealKpis(String currency, int days, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspaceId, currency, days);
-        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspaceId, currency, days, days * 2);
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspaceId, currency, days, memberScope);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspaceId, currency, days, days * 2, memberScope);
         double span = days / (double) KPI_SERIES_BUCKETS;
 
         List<Double> wonSeries = emptyKpiSeries();
         List<Double> winRateSeries = emptyKpiSeries();
         List<Double> avgCycleSeries = emptyKpiSeries();
         for (DealKpiClosedBucketDto bucket :
-                dealMapper.dealKpiClosedSeries(workspaceId, currency, days, span)) {
+                dealMapper.dealKpiClosedSeries(workspaceId, currency, days, span, memberScope)) {
             int index = bucket.bucketIndex();
             wonSeries.set(index, bucket.wonValue());
             long closedCount = bucket.wonCount() + bucket.lostCount();
@@ -482,7 +530,7 @@ public class DealService {
 
         List<Double> newPipelineSeries = emptyKpiSeries();
         for (DealBucketValueDto bucket :
-                dealMapper.dealKpiNewPipelineSeries(workspaceId, currency, days, span)) {
+                dealMapper.dealKpiNewPipelineSeries(workspaceId, currency, days, span, memberScope)) {
             newPipelineSeries.set(bucket.bucketIndex(), bucket.value());
         }
 
@@ -507,20 +555,20 @@ public class DealService {
         );
     }
 
-    public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days) {
-        return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days);
+    public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days, MemberScope memberScope) {
+        return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days, memberScope);
     }
 
-    public List<DealAgingDto> getDealAging(String currency) {
-        return dealMapper.dealAging(workspaceService.getCurrentWorkspaceId(), currency);
+    public List<DealAgingDto> getDealAging(String currency, MemberScope memberScope) {
+        return dealMapper.dealAging(workspaceService.getCurrentWorkspaceId(), currency, memberScope);
     }
 
-    public DealTopDto getTopDeals(String currency) {
+    public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency).stream()
+        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency, memberScope).stream()
             .map(deal -> toDealSummary(workspaceId, deal))
             .toList();
-        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency).stream()
+        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency, memberScope).stream()
             .map(deal -> toDealSummary(workspaceId, deal))
             .toList();
         return new DealTopDto(topOpen, topWon);
@@ -683,8 +731,8 @@ public class DealService {
         }
         dealMapper.insert(deal);
         if (deal.getStageId() != null) {
-            dealStageHistoryService.recordTransition(
-                workspaceId, deal.getId(), deal.getStageId(), null, deal.getWon());
+            dealStageHistoryService.recordInitial(
+                workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
         }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
@@ -705,8 +753,19 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        Deal before = requireDealForUpdate(workspaceId, id);
+        boolean currencyChanged = deal.getCurrency() != null
+            && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
+        boolean valueChanged = BigDecimal.valueOf(before.getValue())
+            .compareTo(BigDecimal.valueOf(deal.getValue())) != 0;
+        if ((currencyChanged || valueChanged)
+                && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
+            if (currencyChanged) {
+                throw new BadRequestException(
+                    "Cannot change the deal currency while it has line items; remove the line items first");
+            }
+            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+        }
         Boolean previousOutcome = before.getWon();
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
@@ -730,11 +789,64 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
-        if (Double.compare(before.getValue(), deal.getValue()) != 0) {
+        if (valueChanged) {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    /**
+     * Changes only a deal's name without rewriting any other deal field.
+     * @param id the deal to rename
+     * @param name the replacement name
+     * @return the refreshed deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateName(int id, String name) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = requireDealForUpdate(workspaceId, id);
+        if (Objects.equals(before.getName(), name)) {
+            return hydrateReferences(workspaceId, before);
+        }
+        dealMapper.updateName(workspaceId, id, name);
+        Deal after = requireDeal(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Renamed deal " + before.getName() + " to " + after.getName(),
+            auditService.singleChange("name", before.getName(), after.getName()));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        return hydrateReferences(workspaceId, after);
+    }
+
+    /**
+     * Changes only a deal's manually projected value when the deal has no line items.
+     * @param id the deal whose value should change
+     * @param value the replacement value
+     * @return the refreshed deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateValue(int id, BigDecimal value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = requireDealForUpdate(workspaceId, id);
+        boolean valueChanged = BigDecimal.valueOf(before.getValue()).compareTo(value) != 0;
+        if (!valueChanged) {
+            return hydrateReferences(workspaceId, before);
+        }
+        if (dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
+            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+        }
+        dealMapper.updateValue(workspaceId, id, value);
+        Deal after = requireDeal(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Updated deal value for " + after.getName(),
+            auditService.singleChange("value", before.getValue(), after.getValue()));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        return hydrateReferences(workspaceId, after);
     }
 
     private void requireVisibleRelations(int workspaceId, Deal deal) {
@@ -1222,9 +1334,11 @@ public class DealService {
         if (stageChanged && oldStageId != null) {
             List<Integer> source = dealMapper.getDealIdsInStageOrdered(workspaceId, oldStageId);
             source.removeIf(existing -> existing == dealId);
-            for (int i = 0; i < source.size(); i++) {
-                dealMapper.setPosition(workspaceId, source.get(i), i);
-            }
+            setPositionBatches(
+                workspaceId,
+                oldStageId,
+                BoardPositionBatches.fromOrderedIds(source, POSITION_BATCH_SIZE)
+            );
         }
 
         Deal deal = mutableCopy(before);
@@ -1236,10 +1350,11 @@ public class DealService {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon());
         }
-        for (int i = 0; i < target.size(); i++) {
-            int id = target.get(i);
-            if (id != dealId) dealMapper.setPosition(workspaceId, id, i);
-        }
+        setPositionBatches(
+            workspaceId,
+            stageId,
+            BoardPositionBatches.fromOrderedIdsExcluding(target, dealId, POSITION_BATCH_SIZE)
+        );
 
         auditService.record("deal.update", "deal", dealId, deal.getName(),
             publishStageChanged ? "Moved deal " + deal.getName() + " to " + stage.getName()
@@ -1250,13 +1365,20 @@ public class DealService {
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
+    private void setPositionBatches(
+            int workspaceId, int stageId, List<List<BoardPositionUpdate>> batches) {
+        for (List<BoardPositionUpdate> positions : batches) {
+            dealMapper.setPositions(workspaceId, stageId, positions);
+        }
+    }
+
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);

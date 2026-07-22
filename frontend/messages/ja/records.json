@@ -40,7 +40,12 @@
       "stage": "ステージ",
       "owner": "担当者",
       "status": "ステータス",
-      "close_date": "完了予定日"
+      "close_date": "完了予定日",
+      "website": "ウェブサイト",
+      "phone": "電話番号",
+      "created": "作成日",
+      "updated": "更新日",
+      "actual_value": "実績金額"
     },
     "op": {
       "is": "である",
@@ -101,7 +106,99 @@
     "pickStatus": "ステータスを選択",
     "pickOwner": "担当者を選択",
     "pickCompany": "会社を選択",
-    "pickStage": "ステージを選択"
+    "pickStage": "ステージを選択",
+    "catalogFailed": "セグメントビルダーを読み込めませんでした。",
+    "loading": "読み込み中…",
+    "has_open_task": {
+      "label": "未完了タスクあり",
+      "labelNot": "未完了タスクなし",
+      "description": "少なくとも1件のタスクが未完了です。"
+    },
+    "overdue_task": {
+      "label": "期限切れタスクあり",
+      "labelNot": "期限切れタスクなし",
+      "description": "未完了タスクが期限を過ぎています。"
+    },
+    "recent_meeting": {
+      "label": "最近ミーティングあり",
+      "labelNot": "最近ミーティングなし",
+      "description": "過去30日以内にミーティングが記録されています。"
+    },
+    "has_note": {
+      "label": "メモあり",
+      "labelNot": "メモなし",
+      "description": "ワークスペースに表示されるメモが少なくとも1件あります。"
+    },
+    "has_attachment": {
+      "label": "添付ファイルあり",
+      "labelNot": "添付ファイルなし",
+      "description": "少なくとも1件のファイルが添付されています。"
+    },
+    "warmth_hot": {
+      "label": "ホット",
+      "labelNot": "ホットでない",
+      "description": "関係の温度がホットです。"
+    },
+    "warmth_warm": {
+      "label": "ウォーム",
+      "labelNot": "ウォームでない",
+      "description": "関係の温度がウォームです。"
+    },
+    "warmth_cool": {
+      "label": "クール",
+      "labelNot": "クールでない",
+      "description": "関係の温度がクールです。"
+    },
+    "warmth_cold": {
+      "label": "コールド",
+      "labelNot": "コールドでない",
+      "description": "関係の温度がコールドです。"
+    },
+    "warmth_rising": {
+      "label": "上昇中",
+      "labelNot": "上昇していない",
+      "description": "関係の温度が上昇傾向です。"
+    },
+    "going_cold": {
+      "label": "まもなく冷却",
+      "labelNot": "まもなく冷却しない",
+      "description": "指定期間内にコールドになると予測されます。"
+    },
+    "at_risk": {
+      "label": "リスクあり",
+      "labelNot": "リスクなし",
+      "description": "取引リスクが高または中です。"
+    },
+    "risk_high": {
+      "label": "高リスク",
+      "labelNot": "高リスクでない",
+      "description": "取引リスクレベルが高です。"
+    },
+    "risk_close_overdue": {
+      "label": "完了予定日超過",
+      "labelNot": "完了予定日未超過",
+      "description": "完了予定日が過ぎています。"
+    },
+    "risk_closing_soon": {
+      "label": "まもなく完了だが停滞",
+      "labelNot": "該当なし",
+      "description": "まもなく完了予定ですが最近の活動がありません。"
+    },
+    "risk_stalled": {
+      "label": "停滞中",
+      "labelNot": "停滞していない",
+      "description": "取引に最近の活動がありません。"
+    },
+    "risk_stakeholder_cold": {
+      "label": "関係者が冷却",
+      "labelNot": "冷却した関係者なし",
+      "description": "主要な関係者の関係が冷え込んでいます。"
+    },
+    "risk_no_stakeholders": {
+      "label": "関係者なし",
+      "labelNot": "関係者あり",
+      "description": "取引に紐づく連絡先がありません。"
+    }
   },
   "SavedViews": {
     "all": "すべて",
@@ -122,7 +219,29 @@
     "nameDescription": "このビューに名前を付けて、後で切り替えられるようにします。",
     "nameLabel": "名前",
     "namePlaceholder": "例: 有望な見込み客",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "shared": "共有",
+    "pin": "サイドバーに固定",
+    "unpin": "サイドバーの固定を解除",
+    "pinned": "サイドバーに固定しました",
+    "unpinned": "固定を解除しました",
+    "setDefault": "デフォルトに設定",
+    "clearDefault": "デフォルトを解除",
+    "defaultSet": "デフォルトのビューに設定しました",
+    "defaultCleared": "デフォルトのビューを解除しました",
+    "makePrivate": "非公開にする",
+    "shareWorkspace": "ワークスペースで共有",
+    "madeShared": "ワークスペースで共有しました",
+    "madePrivate": "ビューを非公開にしました",
+    "copyLink": "リンクをコピー",
+    "copyLinkFailed": "リンクをコピーできませんでした。",
+    "linkCopied": "リンクをクリップボードにコピーしました",
+    "viewUnavailable": "そのビューは利用できなくなりました。",
+    "actionFailed": "問題が発生しました。もう一度お試しください。",
+    "switchWorkspaceTitle": "ワークスペースを切り替えますか？",
+    "switchWorkspacePrompt": "このビューは別のワークスペースに属しています。切り替えてビューを開きますか？",
+    "switchWorkspaceConfirm": "切り替える",
+    "switchWorkspaceCancel": "このまま"
   },
   "RecordCustomFields": {
     "heading": "カスタムフィールド",
@@ -157,11 +276,16 @@
     "revokeFailed": "共有を取り消せませんでした。",
     "loadFailed": "共有を読み込めませんでした。"
   },
+  "RecordInlineEdit": {
+    "doubleClickToEdit": "ダブルクリックして編集",
+    "saveFailed": "変更を保存できませんでした"
+  },
   "RecordsRenderView": {
     "selectAllAria": "すべての {entityLabel} を選択",
     "selectItemAria": "{name} を選択",
     "copiedToast": "{label} をコピーしました",
     "copyFailedToast": "{label} のコピーに失敗しました",
+    "editFieldAria": "{name} の{field}を編集",
     "selectedLabel": "選択中",
     "clearSelection": "選択を解除",
     "rowActionsAria": "{name} の操作",
@@ -234,15 +358,15 @@
     "toastFailed": "レコードを更新できませんでした"
   },
   "RecordsBulkOwnerDialog": {
-    "title": "{count}件の取引に担当者を割り当て",
-    "description": "選択したすべての取引の担当者を設定します。",
+    "title": "{count, plural, one {#件のレコード} other {#件のレコード}}に担当者を割り当て",
+    "description": "選択したすべてのレコードの担当者を設定します。",
     "ownerLabel": "担当者",
     "unassignedPlaceholder": "未割り当て",
     "noMembersFound": "メンバーが見つかりません",
     "unassignHint": "担当者を解除するには空欄のままにします。",
     "cancel": "キャンセル",
     "apply": "割り当て",
-    "toastFailed": "取引を更新できませんでした"
+    "toastFailed": "レコードを更新できませんでした"
   },
   "RecordsBulkStageDialog": {
     "title": "{count}件の取引をステージへ移動",
@@ -255,5 +379,43 @@
     "apply": "移動",
     "close": "閉じる",
     "toastFailed": "取引を移動できませんでした"
+  },
+  "RecordPeek": {
+    "type_company": "会社",
+    "type_person": "連絡先",
+    "type_deal": "取引",
+    "loading": "読み込み中…",
+    "previous": "前のレコード",
+    "next": "次のレコード",
+    "goToNext": "次のレコードへ",
+    "error_notFound": "このレコードは存在しません。",
+    "error_forbidden": "このレコードへのアクセス権がありません。",
+    "error_failed": "このレコードを読み込めませんでした。",
+    "openFull": "レコードを開く",
+    "addNote": "ノートを追加",
+    "createTask": "タスクを作成",
+    "copyLink": "リンクをコピー",
+    "email": "メール",
+    "phone": "電話",
+    "company": "会社",
+    "openDeals": "進行中の取引",
+    "industry": "業種",
+    "website": "ウェブサイト",
+    "people": "担当者",
+    "openTasks": "未完了タスク",
+    "projectedRevenue": "予測売上",
+    "stage": "ステージ",
+    "value": "金額",
+    "owner": "担当者",
+    "openTasksTitle": "未完了タスク",
+    "noOpenTasks": "未完了のタスクはありません",
+    "latestActivityTitle": "最近のアクティビティ",
+    "noActivity": "最近のアクティビティはありません"
+  },
+  "RecordActionMenu": {
+    "menuAria": "{name}のアクション",
+    "peek": "プレビュー",
+    "quickEdit": "クイック編集",
+    "delete": "削除"
   }
 }

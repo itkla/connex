@@ -50,6 +50,20 @@
     )
   </select>
 
+  <select id="lockActiveMembership" resultType="int">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'active'
+    FOR UPDATE
+  </select>
+
+  <select id="lockAuthorizationMembership" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR UPDATE
+  </select>
+
   <select id="isMemberIncludingPending" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -57,6 +71,17 @@
       WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
         AND status IN ('active', 'pending')
     )
+  </select>
+
+  <select id="countActiveMembers" resultType="int">
+    SELECT COUNT(*)
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'active'
+      AND user_id IN
+      <foreach collection="memberIds" item="memberId" open="(" separator="," close=")">
+        #{memberId}
+      </foreach>
   </select>
 
   <select id="getMembers" resultType="User">
@@ -112,6 +137,10 @@
 
   <select id="lockWorkspace" resultType="java.lang.Integer">
     SELECT id FROM workspace WHERE id = #{workspaceId} FOR UPDATE
+  </select>
+
+  <select id="lockWorkspaceForShare" resultType="java.lang.Integer">
+    SELECT id FROM workspace WHERE id = #{workspaceId} FOR SHARE
   </select>
 
   <select id="lockOwnerIds" resultType="int">

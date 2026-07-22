@@ -20,9 +20,9 @@ export type RadioOption = { value: string; label: string; count?: number };
 
 export function pillClass(active: boolean): string {
     return cn(
-        "group inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-medium ring-1 outline-none transition active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40",
+        "group inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full px-3 text-xs font-medium ring-1 outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
         active
-            ? "bg-brand-light/70 text-brand-dark ring-brand-dark/20"
+            ? "bg-brand-light/70 text-foreground ring-brand-dark/20"
             : "bg-muted text-foreground ring-border hover:bg-accent hover:text-accent-foreground",
     );
 }
@@ -67,10 +67,10 @@ export function MultiSelectFilter({
                             {selected.size}
                         </span>
                     )}
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
+                    <ChevronDownIcon className="size-3.5 text-muted-foreground group-data-[state=open]:rotate-180" />
                 </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-60">
+            <DropdownMenuContent align="start" className="w-60 data-open:animate-none data-closed:animate-none">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <div className={cn(scroll && "max-h-72 overflow-y-auto")}>
@@ -116,32 +116,34 @@ export function RadioFilter({
     ariaLabel,
     value,
     onValueChange,
+    onOpenChange,
     options,
 }: {
     label: string;
     ariaLabel: string;
     value: string;
     onValueChange: (v: string) => void;
+    onOpenChange?: (open: boolean) => void;
     options: RadioOption[];
 }) {
     const active = value !== options[0]?.value;
     const selectedLabel = options.find((o) => o.value === value)?.label ?? label;
     return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={onOpenChange}>
             <DropdownMenuTrigger asChild>
                 <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
-                    <span>{active ? selectedLabel : label}</span>
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
+                    <span className="max-w-40 truncate">{active ? selectedLabel : label}</span>
+                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground group-data-[state=open]:rotate-180" />
                 </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuContent align="start" className="w-56 data-open:animate-none data-closed:animate-none">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
                     {options.map((opt) => (
                         <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                            <span className="flex flex-1 items-center justify-between gap-2">
-                                <span>{opt.label}</span>
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                <span className="truncate">{opt.label}</span>
                                 {typeof opt.count === "number" && (
                                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{opt.count}</span>
                                 )}

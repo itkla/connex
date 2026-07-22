@@ -14,10 +14,14 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
+import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPreferenceDto;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
+import ooo.klae.connex.backend.dto.NotificationQuietHoursDto;
+import ooo.klae.connex.backend.dto.NotificationQuietHoursRequest;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.services.NotificationPreferenceService;
+import ooo.klae.connex.backend.services.NotificationQuietHoursService;
 import ooo.klae.connex.backend.services.NotificationService;
 
 /**
@@ -28,19 +32,28 @@ import ooo.klae.connex.backend.services.NotificationService;
 public class NotificationController {
     private final NotificationService notificationService;
     private final NotificationPreferenceService preferenceService;
+    private final NotificationQuietHoursService quietHoursService;
 
     @GetMapping("/api/notifications")
     public NotificationPageDto getNotifications(
-        @RequestParam(defaultValue = "active") String state,
-        @RequestParam(required = false) String category,
-        @RequestParam(required = false) String contextType,
-        @RequestParam(required = false) Integer contextId,
-        @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int size
+        @RequestParam(name = "status", required = false) String status,
+        @RequestParam(name = "state", required = false) String state,
+        @RequestParam(name = "type", required = false) List<String> types,
+        @RequestParam(name = "category", required = false) List<String> categories,
+        @RequestParam(name = "severity", required = false) List<String> severities,
+        @RequestParam(name = "workspaceId", required = false) Integer workspaceId,
+        @RequestParam(name = "contextType", required = false) String contextType,
+        @RequestParam(name = "contextId", required = false) Integer contextId,
+        @RequestParam(name = "page", defaultValue = "1") int page,
+        @RequestParam(name = "size", defaultValue = "25") int size
     ) {
         return notificationService.getPage(
+            status,
             state,
-            category,
+            types,
+            categories,
+            severities,
+            workspaceId,
             contextType,
             contextId,
             page,
@@ -51,6 +64,11 @@ public class NotificationController {
     @GetMapping("/api/notifications/counts")
     public NotificationCountsDto getCounts() {
         return notificationService.getUnreadCounts();
+    }
+
+    @GetMapping("/api/notifications/facets")
+    public NotificationFacets getFacets() {
+        return notificationService.getFacets();
     }
 
     @PostMapping("/api/notifications/{id}/read")
@@ -75,7 +93,12 @@ public class NotificationController {
 
     @PostMapping("/api/notifications/{id}/snooze")
     public NotificationDto snooze(@PathVariable int id, @Valid @RequestBody SnoozeRequest request) {
-        return notificationService.snooze(id, request.getHours());
+        return notificationService.snooze(id, request);
+    }
+
+    @PostMapping("/api/notifications/{id}/unsnooze")
+    public NotificationDto unsnooze(@PathVariable int id) {
+        return notificationService.unsnooze(id);
     }
 
     @PostMapping("/api/notifications/read-all")
@@ -93,5 +116,17 @@ public class NotificationController {
         @RequestBody List<@Valid NotificationPreferenceDto> preferences
     ) {
         return preferenceService.updateCurrentPreferences(preferences);
+    }
+
+    @GetMapping("/api/notification-preferences/quiet-hours")
+    public NotificationQuietHoursDto getQuietHours() {
+        return quietHoursService.getCurrent();
+    }
+
+    @PutMapping("/api/notification-preferences/quiet-hours")
+    public NotificationQuietHoursDto updateQuietHours(
+        @Valid @RequestBody NotificationQuietHoursRequest request
+    ) {
+        return quietHoursService.updateCurrent(request);
     }
 }

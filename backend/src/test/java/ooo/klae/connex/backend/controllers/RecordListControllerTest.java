@@ -19,9 +19,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
 import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.BandCounts;
+import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
+import ooo.klae.connex.backend.dto.CompanyOwnerDto;
 import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.DealAgingDto;
@@ -32,7 +37,10 @@ import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.dto.ScoringIdsRequest;
@@ -46,6 +54,7 @@ import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.EmploymentService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
@@ -64,6 +73,7 @@ class RecordListControllerTest {
     @Mock private DealBriefService dealBriefService;
     @Mock private DealRiskRationaleService dealRiskRationaleService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private MemberScopeResolver memberScopeResolver;
     @Mock private NoteService noteService;
     @Mock private TaskService taskService;
     @Mock private ActivityService activityService;
@@ -71,8 +81,7 @@ class RecordListControllerTest {
 
     @Test
     void personsWithoutFilterRequirePageEndpoint() {
-        PersonController controller = new PersonController(
-            personService, employmentService, connectionService, bulkOperationService);
+        PersonController controller = personController();
 
         assertThrows(BadRequestException.class, () -> controller.getPersons(null, null, null));
 
@@ -81,41 +90,73 @@ class RecordListControllerTest {
 
     @Test
     void personsPageClampsSize() {
-        PersonController controller = new PersonController(
-            personService, employmentService, connectionService, bulkOperationService);
-        when(personService.getPersonsPage(null, null, null, null, null, false, 100, 0)).thenReturn(List.of());
-        when(personService.countPersons(null, null, null, false)).thenReturn(0L);
+        PersonController controller = personController();
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
+        when(personService.getPersonsPage(
+            null, null, null, null, null, false, memberScope, 100, 0)).thenReturn(List.of());
+        when(personService.countPersons(null, null, null, false, memberScope)).thenReturn(0L);
 
-        var response = controller.getPersonsPage(0, 500, null, null, null, null, null, false);
+        var response = controller.getPersonsPage(
+            0, 500, null, null, null, null, null, false, null, null);
 
         assertEquals(0, response.total());
-        verify(personService).getPersonsPage(null, null, null, null, null, false, 100, 0);
+        verify(personService).getPersonsPage(
+            null, null, null, null, null, false, memberScope, 100, 0);
+        verify(personService).countPersons(null, null, null, false, memberScope);
     }
 
     @Test
     void personsPageRejectsWarmthSort() {
-        PersonController controller = new PersonController(
-            personService, employmentService, connectionService, bulkOperationService);
+        PersonController controller = personController();
 
         assertThrows(BadRequestException.class, () -> controller.getPersonsPage(
-            1, 25, null, "warmth", "desc", null, null, false));
+            1, 25, null, "warmth", "desc", null, null, false, null, null));
 
-        verify(personService, never()).getPersonsPage(null, "warmth", "desc", null, null, false, 25, 0);
+        verify(personService, never()).getPersonsPage(
+            null, "warmth", "desc", null, null, false, null, 25, 0);
+    }
+
+    @Test
+    void personsPageResolvesAndForwardsMemberScopeToPageAndCount() {
+        PersonController controller = personController();
+        MemberScope memberScope = MemberScope.fromRequest("members", List.of(3, 5), 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
+        when(personService.getPersonsPage(
+            "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
+            memberScope, 25, 25)).thenReturn(List.of());
+        when(personService.countPersons(
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope)).thenReturn(4L);
+
+        var response = controller.getPersonsPage(
+            2, 25, "Target", "name", "desc", List.of("Acme"), List.of("Director"), true,
+            "members", List.of(3, 5));
+
+        assertEquals(4, response.total());
+        verify(personService).getPersonsPage(
+            "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
+            memberScope, 25, 25);
+        verify(personService).countPersons(
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope);
     }
 
     @Test
     void personIdsWithoutFilterRequireFilter() {
-        PersonController controller = new PersonController(
-            personService, employmentService, connectionService, bulkOperationService);
+        PersonController controller = personController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
-        assertThrows(BadRequestException.class, () -> controller.getPersonIds(null, null, null, false));
+        assertThrows(BadRequestException.class,
+            () -> controller.getPersonIds(null, null, null, false, null, null));
 
-        verify(personService, never()).getMatchingPersonIds(null, null, null, false);
+        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam());
     }
 
     @Test
     void companiesWithoutFilterRequirePageEndpoint() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
 
         assertThrows(BadRequestException.class, () -> controller.getAllCompanies(null));
 
@@ -124,21 +165,27 @@ class RecordListControllerTest {
 
     @Test
     void companiesPageClampsSize() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
-        when(companyService.getCompaniesPage(null, null, null, null, false, null, 100, 0))
+        CompanyController controller = companyController();
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
+        when(companyService.getCompaniesPage(
+            null, null, null, null, false, null, memberScope, 100, 0))
             .thenReturn(List.of());
-        when(companyService.countCompanies(null, null, false, null)).thenReturn(0L);
+        when(companyService.countCompanies(null, null, false, null, memberScope)).thenReturn(0L);
 
-        var response = controller.getCompaniesPage(0, 500, null, null, null, null, false, null);
+        var response = controller.getCompaniesPage(
+            0, 500, null, null, null, null, false, null, null, null);
 
         assertEquals(0, response.total());
-        verify(companyService).getCompaniesPage(null, null, null, null, false, null, 100, 0);
-        verify(companyService).countCompanies(null, null, false, null);
+        verify(companyService).getCompaniesPage(
+            null, null, null, null, false, null, memberScope, 100, 0);
+        verify(companyService).countCompanies(null, null, false, null, memberScope);
     }
 
     @Test
     void companyEngagementDelegatesTheVisibleCompanyId() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         CompanyEngagementDto engagement = new CompanyEngagementDto(
             List.of(), 0, List.of(), 0, 0, 0, "USD", 0, 0, 0, 0, 0, List.of());
         when(companyService.getCompanyEngagement(17)).thenReturn(engagement);
@@ -150,7 +197,7 @@ class RecordListControllerTest {
 
     @Test
     void companyTimelineClampsItsProjectionLimit() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         CompanyService.CompanyTimelineData timeline = new CompanyService.CompanyTimelineData(
             List.of(), List.of(), List.of());
         when(companyService.getCompanyTimeline(17, 100)).thenReturn(timeline);
@@ -165,7 +212,7 @@ class RecordListControllerTest {
 
     @Test
     void companyRelationListsClampTheirProjectionLimits() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         when(companyService.getPersonsByCompanyId(17, 100)).thenReturn(List.of());
         when(companyService.getDealsByCompanyId(17, 100)).thenReturn(List.of());
 
@@ -178,47 +225,58 @@ class RecordListControllerTest {
 
     @Test
     void companiesPageNormalizesQueryAndForwardsFilters() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         List<String> industries = List.of("Technology", "Finance");
         List<Integer> ids = List.of(3, 5);
         String query = "%50\\%\\_Company%";
+        MemberScope memberScope = MemberScope.fromRequest("members", List.of(3, 5), 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
         when(companyService.getCompaniesPage(
-            query, "industry", "desc", industries, true, ids, 25, 25)).thenReturn(List.of());
-        when(companyService.countCompanies(query, industries, true, ids)).thenReturn(7L);
+            query, "industry", "desc", industries, true, ids, memberScope, 25, 25))
+            .thenReturn(List.of());
+        when(companyService.countCompanies(query, industries, true, ids, memberScope)).thenReturn(7L);
 
         var response = controller.getCompaniesPage(
-            2, 25, "50%_Company", "industry", "desc", industries, true, ids);
+            2, 25, "50%_Company", "industry", "desc", industries, true, ids,
+            "members", List.of(3, 5));
 
         assertEquals(7, response.total());
         verify(companyService).getCompaniesPage(
-            query, "industry", "desc", industries, true, ids, 25, 25);
-        verify(companyService).countCompanies(query, industries, true, ids);
+            query, "industry", "desc", industries, true, ids, memberScope, 25, 25);
+        verify(companyService).countCompanies(query, industries, true, ids, memberScope);
     }
 
     @Test
     void companyIdsWithoutFilterRequireFilter() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getCompanyIds(" ", List.of(), false, List.of()));
+            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null));
 
-        verify(companyService, never()).getMatchingCompanyIds(null, List.of(), false, List.of());
+        verify(companyService, never()).getMatchingCompanyIds(
+            null, List.of(), false, List.of(), MemberScope.allTeam());
     }
 
     @Test
     void companyIdsAcceptIdsAsTheOnlyFilter() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         List<Integer> ids = List.of(3, 5);
-        when(companyService.getMatchingCompanyIds(null, null, false, ids)).thenReturn(ids);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
+        when(companyService.getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam()))
+            .thenReturn(ids);
 
-        assertSame(ids, controller.getCompanyIds(null, null, false, ids));
+        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null));
 
-        verify(companyService).getMatchingCompanyIds(null, null, false, ids);
+        verify(companyService).getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam());
     }
 
     @Test
     void companySegmentPageNormalizesQueryAndKeepsEvaluatedIdsOffTheRequestUrl() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         CompanySegmentQueryRequest request = new CompanySegmentQueryRequest();
         SegmentDefinition definition = new SegmentDefinition();
         request.setDefinition(definition);
@@ -242,7 +300,7 @@ class RecordListControllerTest {
 
     @Test
     void companySegmentIdsDelegateTheDefinitionAndCompanyFilters() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         CompanySegmentQueryRequest request = new CompanySegmentQueryRequest();
         SegmentDefinition definition = new SegmentDefinition();
         List<Integer> ids = List.of(3, 5);
@@ -260,22 +318,84 @@ class RecordListControllerTest {
 
     @Test
     void companyFacetsAreAssembledFromServiceValues() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyController controller = companyController();
         List<String> industries = List.of("Finance", "Technology");
+        List<FacetCount> owners = List.of(new FacetCount("7", 3, null));
         when(companyService.distinctIndustries()).thenReturn(industries);
         when(companyService.hasCompanyWithoutIndustry()).thenReturn(true);
+        when(companyService.countsByOwner()).thenReturn(owners);
 
         var facets = controller.getCompanyFacets();
 
         assertSame(industries, facets.industries());
         assertTrue(facets.hasNoIndustry());
+        assertSame(owners, facets.owners());
+    }
+
+    @Test
+    void personFacetsAreAssembledFromServiceValues() {
+        PersonController controller = personController();
+        List<String> companies = List.of("Acme");
+        List<String> titles = List.of("Director");
+        List<FacetCount> owners = List.of(new FacetCount("7", 2, null));
+        when(personService.distinctCompanies()).thenReturn(companies);
+        when(personService.distinctTitles()).thenReturn(titles);
+        when(personService.hasPersonWithoutCompany()).thenReturn(true);
+        when(personService.countsByOwner()).thenReturn(owners);
+
+        var facets = controller.getPersonFacets();
+
+        assertSame(companies, facets.companies());
+        assertSame(titles, facets.titles());
+        assertTrue(facets.hasNoCompany());
+        assertSame(owners, facets.owners());
+    }
+
+    @Test
+    void companyOwnerEndpointsDelegateSingleAndBulkAssignments() {
+        CompanyController controller = companyController();
+        Company company = new Company();
+        company.setId(17);
+        company.setName("Acme");
+        company.setOwnerId(9);
+        CompanyOwnerDto owner = new CompanyOwnerDto();
+        owner.setOwnerId(9);
+        when(companyService.updateOwner(17, 9)).thenReturn(company);
+        BulkOwnerRequest bulk = new BulkOwnerRequest();
+        bulk.setIds(List.of(17, 19));
+        bulk.setOwnerId(9);
+        BulkOperationResult result = new BulkOperationResult(2, 0, List.of());
+        when(bulkOperationService.assignOwnerToCompanies(List.of(17, 19), 9)).thenReturn(result);
+
+        assertEquals(9, controller.updateOwner(17, owner).getOwnerId());
+        assertSame(result, controller.bulkAssignOwner(bulk));
+    }
+
+    @Test
+    void personOwnerEndpointsDelegateSingleAndBulkAssignments() {
+        PersonController controller = personController();
+        Person person = new Person();
+        person.setId(23);
+        person.setName("Ada");
+        person.setOwnerId(11);
+        PersonOwnerDto owner = new PersonOwnerDto();
+        owner.setOwnerId(11);
+        when(personService.updateOwner(23, 11)).thenReturn(person);
+        BulkOwnerRequest bulk = new BulkOwnerRequest();
+        bulk.setIds(List.of(23, 29));
+        bulk.setOwnerId(11);
+        BulkOperationResult result = new BulkOperationResult(2, 0, List.of());
+        when(bulkOperationService.assignOwnerToPersons(List.of(23, 29), 11)).thenReturn(result);
+
+        assertEquals(11, controller.updateOwner(23, owner).getOwnerId());
+        assertSame(result, controller.bulkAssignOwner(bulk));
     }
 
     @Test
     void dealsWithoutFilterRequirePageEndpoint() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDeals(null, null, null, null, null));
 
@@ -286,60 +406,73 @@ class RecordListControllerTest {
     void dealsPageClampsSize() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(dealService.queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null, 100, 0))
+            null, null, null, null, null, null, null, false, null, null,
+            memberScope, 100, 0))
             .thenReturn(new PageResponse<>(List.of(), 37));
 
         var response = controller.getDealsPage(
-            0, 500, null, null, null, null, null, null, null, false, null, null);
+            0, 500, null, null, null, null, null, null, null, false, null, null,
+            null, null);
 
         assertEquals(37, response.total());
         verify(dealService).queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null, 100, 0);
+            null, null, null, null, null, null, null, false, null, null,
+            memberScope, 100, 0);
     }
 
     @Test
     void dealsPageRejectsInvalidStatusAndDirection() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, "sideways", null, null, null, null, false, null, null));
+            1, 25, null, null, "sideways", null, null, null, null, false, null, null,
+            null, null));
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, null, null, null, null, null, false, List.of("stale"), null));
+            1, 25, null, null, null, null, null, null, null, false, List.of("stale"), null,
+            null, null));
 
         verify(dealService, never()).queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null, 25, 0);
+            null, null, null, null, null, null, null, false, null, null,
+            null, 25, 0);
     }
 
     @Test
     void dealsPageExpandsClosedAndBoundsFilterLists() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(dealService.queryDealsPage(
             null, null, null, null, List.of(2, 3), null, null, true,
-            List.of("open", "won", "lost"), List.of("high", "none"), 25, 0))
+            List.of("open", "won", "lost"), List.of("high", "none"), memberScope, 25, 0))
             .thenReturn(new PageResponse<>(List.of(), 0));
 
         controller.getDealsPage(
             1, 25, null, null, null, null, List.of(2, 3, 2), null, null, true,
-            List.of("open", "closed"), List.of("high", "none"));
+            List.of("open", "closed"), List.of("high", "none"), null, null);
 
         verify(dealService).queryDealsPage(
             null, null, null, null, List.of(2, 3), null, null, true,
-            List.of("open", "won", "lost"), List.of("high", "none"), 25, 0);
+            List.of("open", "won", "lost"), List.of("high", "none"), memberScope, 25, 0);
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, null, null, List.of(0), null, null, false, null, null));
+            1, 25, null, null, null, null, List.of(0), null, null, false, null, null,
+            null, null));
     }
 
     @Test
     void dealBoardRequiresPositivePipelineAndDelegates() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
         when(dealService.getDealBoard(4)).thenReturn(List.of());
 
         assertTrue(controller.getDealBoard(4).isEmpty());
@@ -352,7 +485,7 @@ class RecordListControllerTest {
     void dealPrimaryContactsNormalizeAndDelegateTheBoundedIdBatch() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
         List<DealPrimaryContactDto> contacts = List.of(
             new DealPrimaryContactDto(4, 9, "Primary", null));
         when(dealService.getPrimaryContacts(List.of(4, 2))).thenReturn(contacts);
@@ -371,38 +504,44 @@ class RecordListControllerTest {
     void dealChartEndpointsNormalizeAndForwardCurrency() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY", "America/New_York")).thenReturn(series);
-        when(dealService.getRevenueTimeseries("JPY", "+09:00")).thenReturn(series);
-        when(dealService.getStageDistribution("JPY")).thenReturn(distribution);
+        when(dealService.getRevenueTimeseries("JPY", "America/New_York", allTeam)).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "+09:00", allTeam)).thenReturn(series);
+        when(dealService.getStageDistribution("JPY", allTeam)).thenReturn(distribution);
 
-        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null));
-        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00"));
-        assertSame(distribution, controller.getStageDistribution("JPY"));
+        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null, null, null));
+        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00", null, null));
+        assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
-        controller.getRevenueTimeseries("  ", null, null);
-        controller.getStageDistribution("");
+        controller.getRevenueTimeseries("  ", null, null, null, null);
+        controller.getStageDistribution("", null, null);
 
         assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00"));
+            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00", null, null));
         assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null));
+            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null, null, null));
 
-        verify(dealService).getRevenueTimeseries("JPY", "America/New_York");
-        verify(dealService).getRevenueTimeseries("JPY", "+09:00");
-        verify(dealService).getStageDistribution("JPY");
-        verify(dealService).getRevenueTimeseries(null, null);
-        verify(dealService).getStageDistribution(null);
+        verify(dealService).getRevenueTimeseries("JPY", "America/New_York", allTeam);
+        verify(dealService).getRevenueTimeseries("JPY", "+09:00", allTeam);
+        verify(dealService).getStageDistribution("JPY", allTeam);
+        verify(dealService).getRevenueTimeseries(null, null, allTeam);
+        verify(dealService).getStageDistribution(null, allTeam);
     }
 
     @Test
     void dealAnalyticsEndpointsNormalizeAndForwardParameters() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         DealKpisDto kpis = new DealKpisDto(
             0.0, null, 0.0, null, 0, 0, 0.0, 0.0, null, null, 0.0, null,
             List.of(), List.of(), List.of(), List.of());
@@ -410,43 +549,43 @@ class RecordListControllerTest {
             new DealPipelineValueDto(1, 2.0, 3.0, 4));
         List<DealAgingDto> aging = List.of(new DealAgingDto(1, 2, 3, 4, 5));
         DealTopDto top = new DealTopDto(List.of(), List.of());
-        when(dealService.getDealKpis("JPY", 30)).thenReturn(kpis);
-        when(dealService.getDealPipelineValue("JPY", 365)).thenReturn(pipelineValues);
-        when(dealService.getDealAging(null)).thenReturn(aging);
-        when(dealService.getTopDeals(null)).thenReturn(top);
+        when(dealService.getDealKpis("JPY", 30, allTeam)).thenReturn(kpis);
+        when(dealService.getDealPipelineValue("JPY", 365, allTeam)).thenReturn(pipelineValues);
+        when(dealService.getDealAging(null, allTeam)).thenReturn(aging);
+        when(dealService.getTopDeals(null, allTeam)).thenReturn(top);
 
-        assertSame(kpis, controller.getDealKpis("JPY", "30d"));
-        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m"));
-        assertSame(aging, controller.getDealAging("  "));
-        assertSame(top, controller.getTopDeals(""));
+        assertSame(kpis, controller.getDealKpis("JPY", "30d", null, null));
+        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m", null, null));
+        assertSame(aging, controller.getDealAging("  ", null, null));
+        assertSame(top, controller.getTopDeals("", null, null));
 
-        controller.getDealKpis(" ", null);
+        controller.getDealKpis(" ", null, null, null);
 
-        verify(dealService).getDealKpis("JPY", 30);
-        verify(dealService).getDealPipelineValue("JPY", 365);
-        verify(dealService).getDealAging(null);
-        verify(dealService).getTopDeals(null);
-        verify(dealService).getDealKpis(null, 90);
+        verify(dealService).getDealKpis("JPY", 30, allTeam);
+        verify(dealService).getDealPipelineValue("JPY", 365, allTeam);
+        verify(dealService).getDealAging(null, allTeam);
+        verify(dealService).getTopDeals(null, allTeam);
+        verify(dealService).getDealKpis(null, 90, allTeam);
     }
 
     @Test
     void dealAnalyticsEndpointsRejectInvalidRange() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
 
-        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d"));
-        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all"));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all", null, null));
 
-        verify(dealService, never()).getDealKpis(any(), anyInt());
-        verify(dealService, never()).getDealPipelineValue(any(), anyInt());
+        verify(dealService, never()).getDealKpis(any(), anyInt(), any());
+        verify(dealService, never()).getDealPipelineValue(any(), anyInt(), any());
     }
 
     @Test
     void dealClosingSoonCountValidatesAndDelegatesDays() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
         CountDto count = new CountDto(4);
         when(dealService.getClosingSoonCount(7)).thenReturn(count);
 
@@ -461,7 +600,7 @@ class RecordListControllerTest {
     void dealClosingSoonListValidatesAndDelegatesBounds() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
         when(dealService.getClosingSoonDeals(7, 6)).thenReturn(List.of());
 
         assertEquals(List.of(), controller.getClosingSoonDeals(7, 6));
@@ -477,16 +616,19 @@ class RecordListControllerTest {
     void interactiveDealRiskRequiresIdsAndAnalyticsUsesBoundedProjection() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService);
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
         DealRiskAnalyticsDto analytics = new DealRiskAnalyticsDto(List.of(), false);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(dealRiskService.analytics(7)).thenReturn(analytics);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        when(dealRiskService.analytics(7, allTeam)).thenReturn(analytics);
 
         assertThrows(BadRequestException.class, () -> controller.getDealRisks(null));
-        assertSame(analytics, controller.getDealRiskAnalytics());
+        assertSame(analytics, controller.getDealRiskAnalytics(null, null));
 
         verify(dealRiskService, never()).assessWorkspace(anyInt());
-        verify(dealRiskService).analytics(7);
+        verify(dealRiskService).analytics(7, allTeam);
     }
 
     @Test
@@ -512,7 +654,7 @@ class RecordListControllerTest {
 
     @Test
     void tasksWithoutFilterRequirePageEndpoint() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getTasks(null, null, null));
 
@@ -521,7 +663,7 @@ class RecordListControllerTest {
 
     @Test
     void tasksPageClampsSize() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
         when(taskService.getTasksPage(100, 0)).thenReturn(List.of());
         when(taskService.countTasks()).thenReturn(0L);
 
@@ -533,16 +675,19 @@ class RecordListControllerTest {
 
     @Test
     void taskSummaryDelegatesToService() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         TaskSummaryDto summary = new TaskSummaryDto(1, 2, 3, 4, 5);
-        when(taskService.getTaskSummary()).thenReturn(summary);
+        when(taskService.getTaskSummary(allTeam)).thenReturn(summary);
 
-        assertSame(summary, controller.getTaskSummary());
+        assertSame(summary, controller.getTaskSummary(null, null));
     }
 
     @Test
     void upcomingTasksAreBoundedBeforeDelegation() {
-        TaskController controller = new TaskController(taskService);
+        TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
         when(taskService.getUpcomingOpenTasks(4)).thenReturn(List.of());
 
         assertTrue(controller.getUpcomingTasks(4).isEmpty());
@@ -552,7 +697,8 @@ class RecordListControllerTest {
 
     @Test
     void activitiesWithoutFilterOrPaginationRequirePageEndpoint() {
-        ActivityController controller = new ActivityController(activityService);
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getActivities(null, null, null, null, null));
 
@@ -561,7 +707,8 @@ class RecordListControllerTest {
 
     @Test
     void activitiesPageClampsSize() {
-        ActivityController controller = new ActivityController(activityService);
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
         when(activityService.getActivitiesPage(null, null, null, 100, 0)).thenReturn(List.of());
         when(activityService.countActivities(null, null, null)).thenReturn(0L);
 
@@ -573,19 +720,23 @@ class RecordListControllerTest {
 
     @Test
     void activityAnalyticsRangesAndDaysAreValidatedBeforeDelegation() {
-        ActivityController controller = new ActivityController(activityService);
-        when(activityService.getActivityVolume(30)).thenReturn(List.of());
+        ActivityController controller = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        when(activityService.getActivityVolume(30, allTeam)).thenReturn(List.of());
         when(activityService.getTeamLeaderboard(365)).thenReturn(List.of());
         when(activityService.getUpcomingCount(7)).thenReturn(new CountDto(2));
 
-        assertTrue(controller.getActivityVolume("30d").isEmpty());
+        assertTrue(controller.getActivityVolume("30d", null, null).isEmpty());
         assertTrue(controller.getTeamLeaderboard("12m").isEmpty());
         assertEquals(2, controller.getUpcomingCount(7).count());
-        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d"));
+        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d", null, null));
         assertThrows(BadRequestException.class, () -> controller.getTeamLeaderboard("all"));
         assertThrows(BadRequestException.class, () -> controller.getUpcomingCount(0));
 
-        verify(activityService).getActivityVolume(30);
+        verify(activityService).getActivityVolume(30, allTeam);
         verify(activityService).getTeamLeaderboard(365);
         verify(activityService).getUpcomingCount(7);
     }
@@ -671,5 +822,16 @@ class RecordListControllerTest {
 
         assertSame(summary, controller.summary());
         verify(scoringService).summarize(7);
+    }
+
+    private PersonController personController() {
+        return new PersonController(
+            personService, employmentService, connectionService, bulkOperationService,
+            workspaceService, memberScopeResolver);
+    }
+
+    private CompanyController companyController() {
+        return new CompanyController(
+            companyService, bulkOperationService, workspaceService, memberScopeResolver);
     }
 }

@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
+import ooo.klae.connex.backend.dto.DealNameUpdateRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
@@ -46,6 +47,8 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.DealValueUpdateRequest;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -55,14 +58,15 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -79,10 +83,7 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/deals")
 @RequiredArgsConstructor
 public class DealController {
-    private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
-    private static final Set<String> DEAL_RISKS = Set.of("high", "medium", "low", "none");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
-    private static final int MAX_FILTER_VALUES = 100;
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
@@ -91,6 +92,7 @@ public class DealController {
     private final DealBriefService dealBriefService;
     private final DealRiskRationaleService dealRiskRationaleService;
     private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
 
     /**
      * GET endpoint to retrieve deals, with filtering by pipelineId, stageId, companyId, personId, or tagId.
@@ -135,18 +137,21 @@ public class DealController {
         @RequestParam(required = false) List<Integer> companyId,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
-        @RequestParam(required = false) List<String> risk
+        @RequestParam(required = false) List<String> risk,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         String direction = validateOptionalValue(dir, SORT_DIRECTIONS, "dir");
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         PageResponse<Deal> result = dealService.queryDealsPage(
             query, sort, direction, currency,
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
-            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
-            bounds.size(), bounds.offset());
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
+            memberScope, bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
 
@@ -162,7 +167,9 @@ public class DealController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
         @RequestParam(required = false) List<String> risk,
-        @RequestParam(required = false) String q
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         return dealService.queryDealMetrics(
@@ -170,20 +177,30 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
-            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"));
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
+            resolveMemberScope(scope, memberIds));
     }
 
-    /** Returns every deal in one bounded pipeline board so drag positions remain absolute. */
+    /**
+     * Returns every deal in one bounded pipeline board, always unscoped: board rows carry the
+     * global {@code position} values that reordering clients anchor move ordinals against, so
+     * member scoping is applied client-side over the full board rather than here — a scoped
+     * subset would let a reorder silently move hidden deals.
+     */
     @GetMapping("/board")
     public List<DealDto> getDealBoard(@RequestParam int pipelineId) {
         if (pipelineId < 1) {
             throw new BadRequestException("pipelineId must be a positive integer");
         }
-        return dealService.getDealBoard(pipelineId).stream().map(DealDto::from).toList();
+        return dealService.getDealBoard(pipelineId).stream()
+            .map(DealDto::from)
+            .toList();
     }
 
     /**
-     * GET endpoint for workspace-wide deal filter facets.
+     * GET endpoint for the workspace-wide deal filter facet vocabulary. Facet counts are
+     * deliberately never member-scoped (matching every other filter): options must not vanish
+     * while a scope is active, so the owner picker keeps stable all-team counts.
      */
     @GetMapping("/facets")
     public DealFacets getDealFacets() {
@@ -205,10 +222,13 @@ public class DealController {
     public DealRevenueSeriesDto getRevenueTimeseries(
         @RequestParam(required = false) String currency,
         @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(required = false) String tzOffset,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getRevenueTimeseries(normalizedCurrency, resolveTimezone(timezone, tzOffset));
+        return dealService.getRevenueTimeseries(
+            normalizedCurrency, resolveTimezone(timezone, tzOffset), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -216,10 +236,12 @@ public class DealController {
      */
     @GetMapping("/stage-distribution")
     public List<DealStageDistributionDto> getStageDistribution(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getStageDistribution(normalizedCurrency);
+        return dealService.getStageDistribution(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -228,10 +250,13 @@ public class DealController {
     @GetMapping("/kpis")
     public DealKpisDto getDealKpis(
         @RequestParam(required = false) String currency,
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealKpis(normalizedCurrency, analyticsRangeDays(range));
+        return dealService.getDealKpis(
+            normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -240,10 +265,13 @@ public class DealController {
     @GetMapping("/pipeline-value")
     public List<DealPipelineValueDto> getDealPipelineValue(
         @RequestParam(required = false) String currency,
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealPipelineValue(normalizedCurrency, analyticsRangeDays(range));
+        return dealService.getDealPipelineValue(
+            normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -251,10 +279,12 @@ public class DealController {
      */
     @GetMapping("/aging")
     public List<DealAgingDto> getDealAging(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getDealAging(normalizedCurrency);
+        return dealService.getDealAging(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -262,10 +292,12 @@ public class DealController {
      */
     @GetMapping("/top")
     public DealTopDto getTopDeals(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getTopDeals(normalizedCurrency);
+        return dealService.getTopDeals(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -299,64 +331,37 @@ public class DealController {
     }
 
     private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        if (!allowed.contains(value)) {
-            throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
-        }
-        return value;
+        return DealFilterNormalizer.validateOptionalValue(value, allowed, parameter);
     }
 
     private static List<Integer> normalizeIds(List<Integer> values, String parameter) {
-        if (values == null || values.isEmpty()) {
-            return null;
+        return DealFilterNormalizer.normalizeIds(values, parameter);
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
+    }
+
+    /**
+     * Resolves a member scope for per-member analytics, restricting any
+     * non-workspace-wide scope to workspace managers (admin or owner). Members
+     * retain the all-team view; only managers may narrow analytics to an
+     * individual member.
+     */
+    private MemberScope analyticsMemberScope(String scope, List<Integer> memberIds) {
+        MemberScope resolved = resolveMemberScope(scope, memberIds);
+        if (resolved.mode() != MemberScope.Mode.ALL_TEAM) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         }
-        if (values.size() > MAX_FILTER_VALUES) {
-            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
-        }
-        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
-        for (Integer value : values) {
-            if (value == null || value < 1) {
-                throw new BadRequestException(parameter + " values must be positive integers");
-            }
-            normalized.add(value);
-        }
-        return List.copyOf(normalized);
+        return resolved;
     }
 
     private static List<String> normalizeStatuses(List<String> values) {
-        List<String> normalized = normalizeValues(values, DEAL_STATUSES, "status");
-        if (normalized == null) {
-            return null;
-        }
-        LinkedHashSet<String> expanded = new LinkedHashSet<>();
-        for (String value : normalized) {
-            if ("closed".equals(value)) {
-                expanded.add("won");
-                expanded.add("lost");
-            } else {
-                expanded.add(value);
-            }
-        }
-        return List.copyOf(expanded);
+        return DealFilterNormalizer.normalizeStatuses(values);
     }
 
     private static List<String> normalizeValues(List<String> values, Set<String> allowed, String parameter) {
-        if (values == null || values.isEmpty()) {
-            return null;
-        }
-        if (values.size() > MAX_FILTER_VALUES) {
-            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
-        }
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        for (String value : values) {
-            if (value == null || value.isBlank()) {
-                throw new BadRequestException(parameter + " values must not be blank");
-            }
-            normalized.add(validateOptionalValue(value, allowed, parameter));
-        }
-        return List.copyOf(normalized);
+        return DealFilterNormalizer.normalizeValues(values, allowed, parameter);
     }
 
     private static int validatePositiveDays(int days) {
@@ -412,8 +417,12 @@ public class DealController {
 
     /** Compact bounded risk totals for analytics. */
     @GetMapping("/risk/analytics")
-    public DealRiskAnalyticsDto getDealRiskAnalytics() {
-        return dealRiskService.analytics(workspaceService.getCurrentWorkspaceId());
+    public DealRiskAnalyticsDto getDealRiskAnalytics(
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
+    ) {
+        return dealRiskService.analytics(
+            workspaceService.getCurrentWorkspaceId(), analyticsMemberScope(scope, memberIds));
     }
 
     /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
@@ -473,6 +482,34 @@ public class DealController {
     @PutMapping("/{id}")
     public DealDto updateDeal(@PathVariable int id, @Valid @RequestBody DealDto dto) {
         return DealDto.from(dealService.update(id, dto.toBean()));
+    }
+
+    /**
+     * Changes only a deal's name.
+     * @param id the deal to rename
+     * @param request the replacement name
+     * @return the updated deal
+     */
+    @PutMapping("/{id}/name")
+    public DealDto updateDealName(
+        @PathVariable int id,
+        @Valid @RequestBody DealNameUpdateRequest request
+    ) {
+        return DealDto.from(dealService.updateName(id, request.getName()));
+    }
+
+    /**
+     * Changes only a deal's manually projected value.
+     * @param id the deal whose value should change
+     * @param request the replacement value
+     * @return the updated deal
+     */
+    @PutMapping("/{id}/value")
+    public DealDto updateDealValue(
+        @PathVariable int id,
+        @Valid @RequestBody DealValueUpdateRequest request
+    ) {
+        return DealDto.from(dealService.updateValue(id, request.getValue()));
     }
 
     /**

@@ -1,0 +1,21 @@
+{
+    "Unsubscribe": {
+        "title": "Unsubscribe",
+        "description": "Confirm that you no longer want to receive these messages.",
+        "channelLabel": "Channel",
+        "addressLabel": "Address",
+        "channels": {
+            "email": "Email"
+        },
+        "confirm": "Unsubscribe",
+        "confirming": "Unsubscribing…",
+        "alreadyTitle": "You're unsubscribed",
+        "alreadyBody": "This address is already removed. No further messages will be sent.",
+        "doneTitle": "You're unsubscribed",
+        "doneBody": "We've removed this address. You won't receive further messages.",
+        "invalidTitle": "Link unavailable",
+        "invalidBody": "This unsubscribe link is invalid or has expired. If you keep receiving messages, contact the sender.",
+        "error": "Something went wrong. Please try again.",
+        "footer": "Sent with Connex"
+    }
+}

@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 
 import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -227,6 +228,7 @@ export default function NewTaskDialog({
                                 onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>

@@ -16,6 +16,8 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -67,6 +69,7 @@ public class TaskService {
     private static final String MENTION_SEVERITY = "info";
     private static final String IN_APP = "in_app";
     private static final int SNIPPET_LENGTH = 140;
+    private static final int POSITION_BATCH_SIZE = 500;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public List<Task> getAllTasks() {
@@ -83,8 +86,9 @@ public class TaskService {
         return taskMapper.countTasks(workspaceService.getCurrentWorkspaceId());
     }
 
-    public TaskSummaryDto getTaskSummary() {
-        return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId(), userCalendarService.today());
+    public TaskSummaryDto getTaskSummary(MemberScope memberScope) {
+        return taskMapper.taskSummary(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), memberScope);
     }
 
     public List<Task> getUpcomingOpenTasks(int limit) {
@@ -250,16 +254,19 @@ public class TaskService {
         if (statusChanged) {
             List<Integer> source = taskMapper.getTaskIdsInStatusOrdered(workspaceId, oldStatus);
             source.removeIf(existing -> existing == id);
-            for (int i = 0; i < source.size(); i++) {
-                taskMapper.setPosition(workspaceId, source.get(i), i);
-            }
+            setPositionBatches(
+                workspaceId,
+                oldStatus,
+                BoardPositionBatches.fromOrderedIds(source, POSITION_BATCH_SIZE)
+            );
         }
 
         taskMapper.moveTask(workspaceId, id, status, toDone, index);
-        for (int i = 0; i < target.size(); i++) {
-            int tid = target.get(i);
-            if (tid != id) taskMapper.setPosition(workspaceId, tid, i);
-        }
+        setPositionBatches(
+            workspaceId,
+            status,
+            BoardPositionBatches.fromOrderedIdsExcluding(target, id, POSITION_BATCH_SIZE)
+        );
 
         Task moved = taskMapper.getTaskById(workspaceId, id);
         auditService.record("task.update", "task", id, before.getDescription(),
@@ -271,6 +278,13 @@ public class TaskService {
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         return hydrate(workspaceId, moved);
+    }
+
+    private void setPositionBatches(
+            int workspaceId, String status, List<List<BoardPositionUpdate>> batches) {
+        for (List<BoardPositionUpdate> positions : batches) {
+            taskMapper.setPositions(workspaceId, status, positions);
+        }
     }
 
     /**

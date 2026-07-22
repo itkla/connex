@@ -132,6 +132,24 @@ public class AuditService {
     }
 
     /**
+     * Records a successful audit event in its own transaction with explicit scope and propagates
+     * persistence failures.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param changes sanitized metadata
+     */
+    public void recordStrictIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
+                null, true, true, workspaceId, orgId);
+    }
+
+    /**
      * Records a single failed audit event. Never throws.
      * @param action
      * @param entityType

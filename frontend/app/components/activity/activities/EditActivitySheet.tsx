@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
@@ -218,6 +219,7 @@ export default function EditActivitySheet({
                                 id="activity-notes"
                                 value={draft.notes}
                                 onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
+                                commands={ENTITY_COMMANDS}
                                 className={`${inputClass} min-h-24`}
                             />
                         </div>

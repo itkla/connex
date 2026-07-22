@@ -22,6 +22,7 @@ import lombok.NoArgsConstructor;
 public class Person {
     private int id;
     private int workspaceId; // owning workspace
+    private Integer ownerId;
     private String name;
     private String email;
     private String phone;

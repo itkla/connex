@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -20,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
@@ -37,6 +39,22 @@ class BusinessCardControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(new BusinessCardController(businessCardService)).build();
+    }
+
+    @Test
+    void availabilityIsWorkspaceResolvedAndNotCacheable() throws Exception {
+        when(businessCardService.availability())
+                .thenReturn(new BusinessCardAvailabilityResponse(true, true));
+
+        mockMvc.perform(get("/api/business-cards/availability"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.scanning").value(true))
+                .andExpect(jsonPath("$.importing").value(true))
+                .andExpect(jsonPath("$.provider").doesNotExist())
+                .andExpect(jsonPath("$.model").doesNotExist());
+
+        verify(businessCardService).availability();
     }
 
     @Test

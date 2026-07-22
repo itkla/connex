@@ -243,6 +243,44 @@ class ReportNetworkServiceTest {
     }
 
     @Test
+    void reverseIntroAuthoritativeTotalExceedsTheCappedGroupedSum() {
+        List<IntroSuggestionDto> suggestions = new ArrayList<>();
+        for (int i = 1; i <= 25; i++) {
+            suggestions.add(suggestion(i * 2 - 1, "A" + i, i * 2, "B" + i, 60));
+        }
+        List<ReportAggregateRow> total = ReportNetworkService.aggregateReverseIntro(
+                widget("reverse_intro_weighted_opportunities", "none"), suggestions);
+        List<ReportAggregateRow> pairs = ReportNetworkService.aggregateReverseIntro(
+                widget("reverse_intro_weighted_opportunities", "pair"), suggestions);
+
+        assertEquals(1, total.size());
+        assertEquals(20, pairs.size());
+        BigDecimal groupedSum = pairs.stream()
+                .map(ReportAggregateRow::value).reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertTrue(groupedSum.compareTo(total.getFirst().value()) < 0,
+                "the top-20 display cap must not become the authoritative reverse-intro KPI total");
+    }
+
+    @Test
+    void reachableAccountAuthoritativeTotalExceedsTheCappedConnectorSum() {
+        List<ReportNetworkService.WarmIntroOpportunity> opportunities = new ArrayList<>();
+        for (int i = 1; i <= 11; i++) {
+            opportunities.add(opportunity(i, "Account " + i, "USD", "100", "0.8", 100 + i, "Connector " + i));
+        }
+        List<ReportAggregateRow> none = ReportNetworkService.aggregateWarmIntro(
+                widget("warm_intro_reachable_account_count", "none"), opportunities);
+        List<ReportAggregateRow> connector = ReportNetworkService.aggregateWarmIntro(
+                widget("warm_intro_reachable_account_count", "connector"), opportunities);
+
+        assertDecimal("11", none.getFirst().value());
+        assertEquals(10, connector.size());
+        BigDecimal groupedSum = connector.stream()
+                .map(ReportAggregateRow::value).reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertTrue(groupedSum.compareTo(none.getFirst().value()) < 0,
+                "the top-10 connector display cap must not become the authoritative reachable-account KPI");
+    }
+
+    @Test
     void reverseIntroRankingPreservesMutualConnectionTieBreak() {
         IntroSuggestionDto lowerMutual = suggestion(1, "Alice", 2, "Bob", 80);
         lowerMutual.setMutualConnections(1);

@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.IntroEmploymentRow;
 import ooo.klae.connex.backend.beans.Introduction;
+import ooo.klae.connex.backend.beans.WarmPathDismissal;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 
 /**
@@ -66,4 +67,35 @@ public interface IntroductionMapper {
      * ON DELETE RESTRICT (#440 increment 3).
      */
     int countIntroducedAnywhere(@Param("userId") int userId);
+
+    /**
+     * Every workspace-owned contact eligible for the warm-path feed — like
+     * {@link #findCandidatePersons} but without the engagement gate, so never-contacted imports
+     * can surface as reach targets.
+     */
+    List<IntroCandidatePerson> findWarmPathCandidates(@Param("workspaceId") int workspaceId);
+
+    /** Dismissed/accepted warm paths; a {@code null} bridge covers every path to the target. */
+    List<WarmPathDismissal> findWarmPathDismissals(@Param("workspaceId") int workspaceId);
+
+    /** Records a per-bridge warm-path dismissal; re-dismissing an existing pair refreshes it. */
+    int recordWarmPathDismissal(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetPersonId") int targetPersonId,
+        @Param("bridgePersonId") int bridgePersonId,
+        @Param("status") String status,
+        @Param("userId") int userId);
+
+    /** Records a whole-target dismissal, replacing any per-bridge rows for the target. */
+    int recordWarmPathTargetDismissal(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetPersonId") int targetPersonId,
+        @Param("status") String status,
+        @Param("userId") int userId);
+
+    /** Removes a target's non-accepted dismissal rows before a whole-target dismissal is
+     *  recorded; accepted rows are audit lineage and survive. */
+    int deleteWarmPathDismissals(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetPersonId") int targetPersonId);
 }

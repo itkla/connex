@@ -6,6 +6,37 @@ export const RESERVED_CHORDS: ReadonlySet<string> = new Set(["/", "escape"]);
 
 const MODIFIER_ORDER = ["mod", "ctrl", "alt", "shift"] as const;
 
+const APPLE_MODIFIER_LABELS: Record<string, string> = {
+    mod: "⌘",
+    ctrl: "⌃",
+    alt: "⌥",
+    shift: "⇧",
+};
+
+const OTHER_MODIFIER_LABELS: Record<string, string> = {
+    mod: "Ctrl",
+    ctrl: "Ctrl",
+    alt: "Alt",
+    shift: "Shift",
+};
+
+const KEY_LABELS: Record<string, string> = {
+    arrowdown: "↓",
+    arrowleft: "←",
+    arrowright: "→",
+    arrowup: "↑",
+    backspace: "Backspace",
+    delete: "Delete",
+    end: "End",
+    enter: "Enter",
+    escape: "Esc",
+    home: "Home",
+    pagedown: "Page Down",
+    pageup: "Page Up",
+    space: "Space",
+    tab: "Tab",
+};
+
 const MODIFIER_ALIASES: Record<string, string> = {
     mod: "mod",
     cmd: "mod",
@@ -48,4 +79,35 @@ export function normalizeShortcut(chord: string): string {
 
     const ordered = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier));
     return key ? [...ordered, key].join("+") : ordered.join("+");
+}
+
+/** The keyboard-label family appropriate for the current operating system. */
+export type ShortcutPlatform = "apple" | "other";
+
+/**
+ * Resolves whether shortcut hints should use Apple modifier glyphs from the browser platform token.
+ * Unknown or privacy-reduced values deliberately fall back to the broadly understood Ctrl labels.
+ */
+export function resolveShortcutPlatform(platform: string): ShortcutPlatform {
+    return /^(?:Mac|iPhone|iPad|iPod)/i.test(platform) ? "apple" : "other";
+}
+
+/**
+ * Formats platform-neutral shortcut metadata for display after normalizing modifier aliases and order.
+ * Apple hints use compact glyphs; other platforms use explicit modifier names separated by plus signs.
+ */
+export function formatShortcut(chord: string, platform: ShortcutPlatform): string {
+    const normalized = normalizeShortcut(chord);
+    if (!normalized) return "";
+
+    const modifierLabels = platform === "apple" ? APPLE_MODIFIER_LABELS : OTHER_MODIFIER_LABELS;
+    const labels = normalized.split("+").map((token) => {
+        const modifier = modifierLabels[token];
+        if (modifier) return modifier;
+        const key = KEY_LABELS[token];
+        if (key) return key;
+        return token.toUpperCase();
+    });
+    const distinctLabels = labels.filter((label, index) => index === 0 || label !== labels[index - 1]);
+    return distinctLabels.join(platform === "apple" ? "" : "+");
 }

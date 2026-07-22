@@ -5,6 +5,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,6 +150,55 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void assignOwnerToCompaniesUpdatesOwnedRowsAndReportsForeignAndStaleIds() {
+        Company local = newCompany();
+        Workspace other = newOtherWorkspace();
+        Company foreign = companyInWorkspace(other);
+        User owner = newUser();
+
+        BulkOperationResult result = bulkOperationService.assignOwnerToCompanies(
+            List.of(local.getId(), foreign.getId(), 999_999), owner.getId());
+
+        assertEquals(1, result.getSucceeded());
+        assertEquals(2, result.getFailed());
+        assertEquals(owner.getId(),
+            companyMapper.getCompanyById(workspace.getId(), local.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(other.getId(), foreign.getId()).getOwnerId());
+    }
+
+    @Test
+    void assignOwnerToPersonsUpdatesOwnedRowsAndReportsForeignAndStaleIds() {
+        Person local = newPerson(newCompany());
+        Workspace other = newOtherWorkspace();
+        Person foreign = personInWorkspace(other);
+        User owner = newUser();
+
+        BulkOperationResult result = bulkOperationService.assignOwnerToPersons(
+            List.of(local.getId(), foreign.getId(), 999_999), owner.getId());
+
+        assertEquals(1, result.getSucceeded());
+        assertEquals(2, result.getFailed());
+        assertEquals(owner.getId(),
+            personMapper.getPersonById(workspace.getId(), local.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(other.getId(), foreign.getId()).getOwnerId());
+    }
+
+    @Test
+    void recordOwnerBulkAssignmentsRejectNonMembersBeforeChangingAnyRows() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        User outsider = newUser();
+        workspaceMapper.removeMember(workspace.getId(), outsider.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> bulkOperationService.assignOwnerToCompanies(List.of(company.getId()), outsider.getId()));
+        assertThrows(ForbiddenException.class,
+            () -> bulkOperationService.assignOwnerToPersons(List.of(person.getId()), outsider.getId()));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+    }
+
+    @Test
     void changeStageForDeals_movesEveryDealWithinItsPipeline() {
         Pipeline pipeline = newPipeline();
         Stage from = newStage(pipeline, 0);
@@ -214,5 +264,13 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         person.setWorkspaceId(target.getId());
         personMapper.insert(person);
         return person;
+    }
+
+    private Company companyInWorkspace(Workspace target) {
+        Company company = new Company();
+        company.setName("Foreign " + unique());
+        company.setWorkspaceId(target.getId());
+        companyMapper.insert(company);
+        return company;
     }
 }
