@@ -510,17 +510,34 @@ class DealServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Deal d1 = newDeal(pipeline, from, company);
         Deal d2 = newDeal(pipeline, from, company);
-        Deal d3 = newDeal(pipeline, to, company);
+        Deal d3 = newDeal(pipeline, from, company);
+        Deal d4 = newDeal(pipeline, to, company);
+        Deal d5 = newDeal(pipeline, to, company);
 
-        dealService.move(d1.getId(), to.getId(), 0);
+        dealService.move(d1.getId(), to.getId(), 1);
 
         List<Deal> target = dealService.getDealsByStageId(to.getId());
-        assertEquals(List.of(d1.getId(), d3.getId()), target.stream().map(Deal::getId).toList());
-        assertEquals(List.of(0, 1), target.stream().map(Deal::getPosition).toList());
+        assertEquals(List.of(d4.getId(), d1.getId(), d5.getId()),
+            target.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
 
         List<Deal> source = dealService.getDealsByStageId(from.getId());
-        assertEquals(List.of(d2.getId()), source.stream().map(Deal::getId).toList());
-        assertEquals(0, source.get(0).getPosition());
+        assertEquals(List.of(d2.getId(), d3.getId()), source.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1), source.stream().map(Deal::getPosition).toList());
+    }
+
+    @Test
+    void move_onlySourceDealIntoEmptyStageSkipsEmptySourceBatch() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Deal deal = newDeal(pipeline, from, newCompany());
+
+        Deal moved = dealService.move(deal.getId(), to.getId(), 0);
+
+        assertEquals(to.getId(), moved.getStageId());
+        assertEquals(0, moved.getPosition());
+        assertTrue(dealService.getDealsByStageId(from.getId()).isEmpty());
     }
 
     @Test

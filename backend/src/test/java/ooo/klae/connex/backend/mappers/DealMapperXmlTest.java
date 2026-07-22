@@ -13,6 +13,7 @@ import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 
 /** Verifies every deal member-scope SQL branch resolves to the canonical owner predicate. */
@@ -55,6 +56,16 @@ class DealMapperXmlTest {
         assertTrue(sql.endsWith("FOR UPDATE"));
     }
 
+    @Test
+    void batchPositionUpdateKeepsWorkspaceAndStagePredicates() throws Exception {
+        String sql = sql(configuration(), "setPositions", MemberScope.allTeam());
+
+        assertTrue(sql.startsWith("UPDATE deal SET position = CASE id"));
+        assertTrue(sql.contains("WHEN ? THEN ? WHEN ? THEN ? ELSE position END"));
+        assertTrue(sql.contains("WHERE workspace_id = ? AND stage_id = ?"));
+        assertTrue(sql.endsWith("AND id IN ( ? , ? )"));
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -75,6 +86,11 @@ class DealMapperXmlTest {
         parameters.put("workspaceId", 11);
         parameters.put("id", 17);
         parameters.put("pipelineId", 13);
+        parameters.put("stageId", 19);
+        parameters.put("positions", List.of(
+            new BoardPositionUpdate(23, 0),
+            new BoardPositionUpdate(29, 1)
+        ));
         parameters.put("memberScope", scope);
         parameters.put("noCompany", false);
         parameters.put("limit", 25);

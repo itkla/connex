@@ -177,6 +177,41 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void setPositionsUpdatesOnlyExpectedWorkspaceStage() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Stage otherStage = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal first = newDeal(pipeline, stage, company);
+        Deal second = newDeal(pipeline, stage, company);
+        Deal unlisted = newDeal(pipeline, stage, company);
+        Deal wrongStage = newDeal(pipeline, otherStage, company);
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        Deal foreign = newDealIn(foreignWorkspace, foreignPipeline, foreignStage);
+        int unlistedPosition = dealMapper.getDealById(workspace.getId(), unlisted.getId()).getPosition();
+        int wrongStagePosition = dealMapper.getDealById(workspace.getId(), wrongStage.getId()).getPosition();
+        int foreignPosition = dealMapper.getDealById(foreignWorkspace.getId(), foreign.getId()).getPosition();
+
+        dealMapper.setPositions(workspace.getId(), stage.getId(), List.of(
+            new BoardPositionUpdate(first.getId(), 7),
+            new BoardPositionUpdate(second.getId(), 2),
+            new BoardPositionUpdate(wrongStage.getId(), 1),
+            new BoardPositionUpdate(foreign.getId(), 0)
+        ));
+
+        assertEquals(7, dealMapper.getDealById(workspace.getId(), first.getId()).getPosition());
+        assertEquals(2, dealMapper.getDealById(workspace.getId(), second.getId()).getPosition());
+        assertEquals(unlistedPosition,
+            dealMapper.getDealById(workspace.getId(), unlisted.getId()).getPosition());
+        assertEquals(wrongStagePosition,
+            dealMapper.getDealById(workspace.getId(), wrongStage.getId()).getPosition());
+        assertEquals(foreignPosition,
+            dealMapper.getDealById(foreignWorkspace.getId(), foreign.getId()).getPosition());
+    }
+
+    @Test
     void filteredRelatedNameSearchDoesNotExposeForeignCompanyReferences() {
         Workspace target = newWorkspace();
         Pipeline targetPipeline = newPipelineIn(target);
