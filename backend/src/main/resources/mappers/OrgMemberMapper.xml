@@ -7,6 +7,10 @@
     SELECT org_role FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId}
   </select>
 
+  <select id="getRoleForUpdate" resultType="string">
+    SELECT org_role FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId} FOR UPDATE
+  </select>
+
   <select id="isMember" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId})
   </select>

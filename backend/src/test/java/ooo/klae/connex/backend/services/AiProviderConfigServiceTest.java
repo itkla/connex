@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -348,8 +349,9 @@ class AiProviderConfigServiceTest {
 
         service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
 
-        InOrder mutations = inOrder(organizationMapper, aiProviderConfigMapper);
+        InOrder mutations = inOrder(organizationMapper, orgMemberService, aiProviderConfigMapper);
         mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).upsert(any(AiProviderConfig.class));
     }
@@ -373,8 +375,9 @@ class AiProviderConfigServiceTest {
 
         service.revoke(WORKSPACE_ID, ACTOR_ID);
 
-        InOrder mutations = inOrder(organizationMapper, aiProviderConfigMapper);
+        InOrder mutations = inOrder(organizationMapper, orgMemberService, aiProviderConfigMapper);
         mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).deleteByOrg(ORG_ID);
     }
@@ -388,6 +391,33 @@ class AiProviderConfigServiceTest {
 
         verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
         verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_currentAuthorizationFailurePreventsConfigRead() {
+        doThrow(new ForbiddenException("Requires an organization administrator role"))
+                .when(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void revoke_currentAuthorizationFailurePreventsConfigAndSecretWrites() {
+        stored = readyConfig();
+        doThrow(new ForbiddenException("Requires an organization administrator role"))
+                .when(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.revoke(WORKSPACE_ID, ACTOR_ID));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).deleteByOrg(ORG_ID);
+        verify(aiProviderSecretCipher, never()).deleteCredentialReference(anyInt(), any());
+        verify(auditService, never()).record(any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test

@@ -66,6 +66,13 @@ public class OrgMemberService {
         }
     }
 
+    /** Requires and locks a current organization administrator membership inside a transaction. */
+    public void requireOrgAdminForUpdate(int orgId, int userId) {
+        if (OrgRole.of(orgMemberMapper.getRoleForUpdate(orgId, userId)) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+    }
+
     /** Requires the user to hold org {@code owner} in the organization. */
     public void requireOrgOwner(int orgId, int userId) {
         if (OrgRole.of(orgMemberMapper.getRole(orgId, userId)) != OrgRole.OWNER) {

@@ -126,7 +126,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
         }
 
         String provider = resolveProvider(request.getProvider());
-        AiProviderConfig existing = lockCurrentConfig(orgId);
+        AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
         boolean sameProvider = existing != null && provider.equals(existing.getProvider());
         AiProviderConfig config = new AiProviderConfig();
         config.setOrgId(orgId);
@@ -176,7 +176,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     public void revoke(int workspaceId, int actorId) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        AiProviderConfig existing = lockCurrentConfig(orgId);
+        AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
         aiProviderConfigMapper.deleteByOrg(orgId);
         if (existing != null && !isBlank(existing.getCredentialRef())) {
             aiProviderSecretCipher.deleteCredentialReference(orgId, existing.getCredentialRef());
@@ -409,10 +409,11 @@ public class AiProviderConfigService implements AiProviderReadiness {
         return orgId;
     }
 
-    private AiProviderConfig lockCurrentConfig(int orgId) {
+    private AiProviderConfig lockCurrentConfig(int orgId, int actorId) {
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
         return aiProviderConfigMapper.findByOrgForUpdate(orgId);
     }
 

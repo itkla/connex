@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -49,13 +50,13 @@ class AiProviderConfigConcurrencyIntegrationTest {
 
     @Autowired private AiProviderConfigService service;
     @Autowired private AiProviderConfigMapper aiProviderConfigMapper;
-    @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private AiProviderSecretCipher aiProviderSecretCipher;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @MockitoSpyBean private OrganizationMapper organizationMapper;
+    @MockitoSpyBean private OrgMemberMapper orgMemberMapper;
     @MockitoBean private AuditService auditService;
     @MockitoBean private SessionSecurityService sessionSecurityService;
 
@@ -165,6 +166,86 @@ class AiProviderConfigConcurrencyIntegrationTest {
 
         assertNull(aiProviderConfigMapper.findByOrg(organization.getId()));
         assertEquals(0, credentialCount());
+    }
+
+    @Test
+    void membershipRemovalAfterInitialAuthorizationPreventsRevoke() throws Exception {
+        CountDownLatch organizationLockAttempted = new CountDownLatch(1);
+        CountDownLatch releaseOrganizationLock = new CountDownLatch(1);
+        OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
+        doAnswer(invocation -> {
+            organizationLockAttempted.countDown();
+            if (!releaseOrganizationLock.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("AI config mutation did not resume");
+            }
+            return realOrganizationMapper.lockById(organization.getId());
+        }).when(organizationMapper).lockById(organization.getId());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<ForbiddenException> revoke = executor.submit(() -> assertThrows(
+                    ForbiddenException.class,
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId())));
+            assertTrue(organizationLockAttempted.await(10, TimeUnit.SECONDS));
+
+            assertEquals(1, orgMemberMapper.removeMember(organization.getId(), actor.getId()));
+            releaseOrganizationLock.countDown();
+
+            assertEquals(
+                    "Requires an organization administrator role",
+                    revoke.get(20, TimeUnit.SECONDS).getMessage());
+        } finally {
+            releaseOrganizationLock.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNotNull(aiProviderConfigMapper.findByOrg(organization.getId()));
+        assertEquals(1, credentialCount());
+    }
+
+    @Test
+    void membershipRemovalWaitsForAuthorizedRevoke() throws Exception {
+        CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
+        CountDownLatch releaseRevoke = new CountDownLatch(1);
+        CountDownLatch removalAttempted = new CountDownLatch(1);
+        OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
+        doAnswer(invocation -> {
+            String role = realOrgMemberMapper.getRoleForUpdate(organization.getId(), actor.getId());
+            currentAuthorizationLocked.countDown();
+            if (!releaseRevoke.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Authorized AI config mutation did not resume");
+            }
+            return role;
+        }).when(orgMemberMapper).getRoleForUpdate(organization.getId(), actor.getId());
+        doAnswer(invocation -> {
+            removalAttempted.countDown();
+            return realOrgMemberMapper.removeMember(organization.getId(), actor.getId());
+        }).when(orgMemberMapper).removeMember(organization.getId(), actor.getId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> revoke = executor.submit(
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId()));
+            assertTrue(currentAuthorizationLocked.await(10, TimeUnit.SECONDS));
+
+            Future<Integer> removal = executor.submit(
+                    () -> orgMemberMapper.removeMember(organization.getId(), actor.getId()));
+            assertTrue(removalAttempted.await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> removal.get(500, TimeUnit.MILLISECONDS));
+            releaseRevoke.countDown();
+
+            revoke.get(20, TimeUnit.SECONDS);
+            assertEquals(1, removal.get(20, TimeUnit.SECONDS));
+        } finally {
+            releaseRevoke.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNull(aiProviderConfigMapper.findByOrg(organization.getId()));
+        assertEquals(0, credentialCount());
+        assertNull(orgMemberMapper.getRole(organization.getId(), actor.getId()));
     }
 
     private LockBarrier holdFirstOrganizationLock() {
