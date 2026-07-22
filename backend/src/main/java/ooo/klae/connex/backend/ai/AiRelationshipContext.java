@@ -177,7 +177,8 @@ public class AiRelationshipContext {
     private void appendConnectionLines(List<String> lines, int personId, MaskingContext context) {
         try {
             List<PersonConnectionDto> connections = new ArrayList<>();
-            for (PersonConnectionDto connection : safeList(connectionService.getConnections(personId))) {
+            for (PersonConnectionDto connection : safeList(
+                    connectionService.getTopConnections(personId, MAX_CONNECTIONS))) {
                 if (connection != null && !isBlank(connection.getPersonName())
                         && connection.getSuspendedAt() == null
                         && connection.getProvisionCeasedAt() == null) {
