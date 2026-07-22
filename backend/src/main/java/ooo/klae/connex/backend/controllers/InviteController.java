@@ -29,6 +29,7 @@ public class InviteController {
     private final InviteService inviteService;
     private final AuthService authService;
     private final WorkspaceService workspaceService;
+    private final WorkspaceCookie workspaceCookie;
 
     @GetMapping("/{token}")
     public InvitePreviewDto preview(@PathVariable String token) {
@@ -40,7 +41,7 @@ public class InviteController {
         User user = authService.getCurrentUser();
         WorkspaceMembershipDto membership = inviteService.acceptInvite(token, user);
         workspaceService.rememberActive(user.getId(), membership.getId());
-        WorkspaceCookie.set(response, membership.getId());
+        workspaceCookie.set(response, membership.getId());
         return membership;
     }
 }

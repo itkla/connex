@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.RowError;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -62,6 +63,7 @@ public class ImportService {
     private final CompanyMapper companyMapper;
     private final CompanyService companyService;
     private final DealMapper dealMapper;
+    private final DealLineItemMapper dealLineItemMapper;
     private final TagMapper tagMapper;
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
@@ -76,8 +78,8 @@ public class ImportService {
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
 
-    private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company", "imageUrl");
-    private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address", "logoUrl");
+    private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company");
+    private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address");
     private static final Set<String> DEAL_FIELDS =
         Set.of("name", "value", "currency", "pipeline", "stage", "company", "expectedCloseDate", "people");
     private static final Set<String> AUTO_CUSTOM_TYPES = Set.of("text", "textarea", "number", "date", "boolean", "url");
@@ -135,6 +137,7 @@ public class ImportService {
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportResult commitPersons(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzePersons(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
@@ -159,11 +162,11 @@ public class ImportService {
             }
             Person bean = new Person();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));
             bean.setTitle(row.std.get("title"));
-            bean.setImageUrl(row.std.get("imageUrl"));
             Integer companyId = companyByName.get(normName(row.companyName));
             if (companyId != null) {
                 Company stub = new Company();
@@ -236,7 +239,6 @@ public class ImportService {
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setTitle(merge(action, existing.getTitle(), row.std.get("title")));
-        existing.setImageUrl(merge(action, existing.getImageUrl(), row.std.get("imageUrl")));
         Integer companyId = companyByName.get(normName(row.companyName));
         if (companyId != null && (OVERWRITE.equals(action) || existing.getCompany() == null)) {
             Company stub = new Company();
@@ -272,6 +274,7 @@ public class ImportService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportResult commitCompanies(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzeCompanies(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
@@ -295,12 +298,12 @@ public class ImportService {
             }
             Company bean = new Company();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setWebsite(row.std.get("website"));
             bean.setIndustry(row.std.get("industry"));
             bean.setPhone(row.std.get("phone"));
             bean.setAddress(row.std.get("address"));
-            bean.setLogoUrl(row.std.get("logoUrl"));
             beans.add(bean);
             toCreate.add(row);
         }
@@ -364,7 +367,6 @@ public class ImportService {
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
-        existing.setLogoUrl(merge(action, existing.getLogoUrl(), row.std.get("logoUrl")));
         companyMapper.update(existing);
         attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
@@ -439,7 +441,8 @@ public class ImportService {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
                 if (bean.getStageId() != null) {
-                    dealStageHistoryService.record(workspaceId, bean.getId(), bean.getStageId());
+                    dealStageHistoryService.recordInitial(
+                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon());
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
@@ -486,14 +489,16 @@ public class ImportService {
     private void applyDealUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName, Map<String, Integer> companyByName,
             Map<String, Integer> personByEmail, Map<Integer, String> stageOutcome) {
-        Deal existing = dealMapper.getDealById(workspaceId, row.matchedId);
+        Deal existing = dealMapper.getDealByIdForUpdate(workspaceId, row.matchedId);
         if (existing == null) return;
         Integer beforeStageId = existing.getStageId();
+        Boolean beforeOutcome = existing.getWon();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
         String value = row.std.get("value");
-        if (value != null && (OVERWRITE.equals(action) || existing.getValue() == 0d)) {
+        boolean shouldUpdateValue = value != null && (OVERWRITE.equals(action) || existing.getValue() == 0d);
+        if (shouldUpdateValue && dealLineItemMapper.countByDealIdForUpdate(workspaceId, existing.getId()) == 0) {
             existing.setValue(parseValue(value));
         }
         Integer companyId = companyByName.get(normName(row.companyName));
@@ -508,7 +513,8 @@ public class ImportService {
         dealMapper.update(existing);
         Integer afterStageId = existing.getStageId();
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
-            dealStageHistoryService.record(workspaceId, existing.getId(), afterStageId);
+            dealStageHistoryService.recordTransition(
+                workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());
         }
         attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
         linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);

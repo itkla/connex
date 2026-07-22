@@ -9,7 +9,6 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Base64;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +30,7 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  * up by that org and a registration is built either from stored IdP metadata XML or from the
  * explicit entityId/SSO-URL/certificate fields. Only enabled SAML connections resolve —
  * anything else (missing, disabled, OIDC, malformed certificate/metadata) returns null so the
- * SAML machinery treats the id as unknown rather than surfacing a 500. Built registrations are
- * cached by registration id and evicted when an organization's connection changes.
+ * SAML machinery treats the id as unknown rather than surfacing a 500.
  *
  * <p>The AuthnRequest uses the {@link Saml2MessageBinding#REDIRECT} binding so the SP-initiated
  * request is a redirect, not a POST auto-submit form — the latter would be blocked by the strict
@@ -40,11 +38,10 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  *
  * <p><strong>Deployment note:</strong> the SAML assertion-consumer endpoint receives a cross-site
  * top-level POST from the IdP, so the session cookie must be sent on that navigation. The default
- * session cookie is {@code SameSite=Lax} (kept as-is for OIDC/password/dev over plain HTTP); a
- * deployment that actually enables SAML must set {@code server.servlet.session.cookie.same-site: none}
- * together with {@code CONNEX_SESSION_COOKIE_SECURE=true} and end-to-end HTTPS, otherwise the stashed
- * AuthnRequest cannot be matched on the round-trip. This is a per-environment deploy setting, not a
- * global code change.
+     * session cookie is {@code SameSite=Lax} (kept as-is for OIDC/password/dev over plain HTTP); a
+     * deployment that actually enables SAML must set {@code CONNEX_SESSION_COOKIE_SAME_SITE=none} together
+     * with {@code CONNEX_SESSION_COOKIE_SECURE=true} and end-to-end HTTPS, otherwise the stashed AuthnRequest
+     * cannot be matched on the round-trip. This is a per-environment deploy setting, not a global code change.
  */
 @Component
 @RequiredArgsConstructor
@@ -61,17 +58,11 @@ public class DbRelyingPartyRegistrationRepository implements RelyingPartyRegistr
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoSecretCipher ssoSecretCipher;
 
-    private final ConcurrentHashMap<String, RelyingPartyRegistration> cache = new ConcurrentHashMap<>();
-
     @Override
     public RelyingPartyRegistration findByRegistrationId(String registrationId) {
         Integer orgId = parseOrgId(registrationId);
         if (orgId == null) {
             return null;
-        }
-        RelyingPartyRegistration cached = cache.get(registrationId);
-        if (cached != null) {
-            return cached;
         }
         SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
         if (connection == null || !connection.isEnabled() || !"saml".equals(connection.getProtocol())) {
@@ -81,17 +72,14 @@ public class DbRelyingPartyRegistrationRepository implements RelyingPartyRegistr
         if (registration == null) {
             return null;
         }
-        cache.put(registrationId, registration);
         return registration;
     }
 
     /**
-     * Drops the cached registration for an organization so the next login rebuilds it from the
-     * current connection. Called when an organization's SSO config changes.
+     * Kept as a compatibility hook for callers that save SSO settings.
      * @param orgId the organization whose cached registration is stale
      */
     public void evict(int orgId) {
-        cache.remove(REGISTRATION_PREFIX + orgId);
     }
 
     private RelyingPartyRegistration build(String registrationId, SsoConnection connection) {
@@ -141,7 +129,8 @@ public class DbRelyingPartyRegistrationRepository implements RelyingPartyRegistr
             return null;
         }
         X509Certificate certificate = parseCertificate(connection.getSamlSpCertificate());
-        PrivateKey privateKey = parsePrivateKey(ssoSecretCipher.decrypt(connection.getSamlSpPrivateKeyEnc()));
+        PrivateKey privateKey = parsePrivateKey(ssoSecretCipher.decryptSamlSpPrivateKey(connection.getOrgId(),
+                connection.getSamlSpPrivateKeyEnc()));
         if (certificate == null || privateKey == null) {
             return null;
         }

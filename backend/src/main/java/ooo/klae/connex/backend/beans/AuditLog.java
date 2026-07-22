@@ -25,8 +25,14 @@ public class AuditLog {
     private String userAgent;
     private String sessionId;
     private String requestId;
+    private String chainScopeType;
+    private Integer chainScopeId;
+    private Long chainIndex;
+    private String prevHash;
+    private String rowHash;
     private String createdAt;
     private String currentActorLabel;
+    private boolean contentRedacted;
 
     public int getId() {
         return id;
@@ -166,6 +172,46 @@ public class AuditLog {
         this.requestId = requestId;
     }
 
+    public String getChainScopeType() {
+        return chainScopeType;
+    }
+
+    public void setChainScopeType(String chainScopeType) {
+        this.chainScopeType = chainScopeType;
+    }
+
+    public Integer getChainScopeId() {
+        return chainScopeId;
+    }
+
+    public void setChainScopeId(Integer chainScopeId) {
+        this.chainScopeId = chainScopeId;
+    }
+
+    public Long getChainIndex() {
+        return chainIndex;
+    }
+
+    public void setChainIndex(Long chainIndex) {
+        this.chainIndex = chainIndex;
+    }
+
+    public String getPrevHash() {
+        return prevHash;
+    }
+
+    public void setPrevHash(String prevHash) {
+        this.prevHash = prevHash;
+    }
+
+    public String getRowHash() {
+        return rowHash;
+    }
+
+    public void setRowHash(String rowHash) {
+        this.rowHash = rowHash;
+    }
+
     public String getCreatedAt() {
         return createdAt;
     }
@@ -180,5 +226,13 @@ public class AuditLog {
 
     public void setCurrentActorLabel(String currentActorLabel) {
         this.currentActorLabel = currentActorLabel;
+    }
+
+    public boolean isContentRedacted() {
+        return contentRedacted;
+    }
+
+    public void setContentRedacted(boolean contentRedacted) {
+        this.contentRedacted = contentRedacted;
     }
 }

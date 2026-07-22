@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.validation.ValidMysqlDateTime;
 // import ooo.klae.connex.backend.util.DateTimes;
 
 @Data
@@ -45,6 +46,7 @@ public class ActivityDto {
     private Integer createdById;
 
     @Size(max = 32)
+    @ValidMysqlDateTime
     private String timestamp;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)

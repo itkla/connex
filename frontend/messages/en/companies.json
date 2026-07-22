@@ -18,7 +18,9 @@
     "openTasksSubtitle": "{count} open",
     "dealsSubtitle": "{count} deals",
     "loading": "Loading...",
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "owner": "Owner",
+    "ownerUnassigned": "Unassigned"
   },
   "CompaniesBrowser": {
     "title": "Companies",
@@ -44,6 +46,7 @@
     "entityLabel": "company",
     "toastMetricsLoadFailed": "Failed to load company metrics",
     "toastCompanyCreated": "Company created",
+    "toastLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
     "toastCreateFailed": "Failed to create company",
     "toastNoChanges": "No changes to save",
     "toastNameRequired": "Name is required for \"{name}\"",
@@ -63,7 +66,18 @@
     "toastTagRemovedPartial": "Removed tag from {succeeded} of {total} companies",
     "toastTagFailed": "Couldn't update {failed} companies",
     "toastContactsPartial": "Added {succeeded} of {total} people",
-    "toastContactsAllFailed": "Company created, but couldn't add {count} people"
+    "toastContactsAllFailed": "Company created, but couldn't add {count} people",
+    "toastSelectAllFailed": "Couldn't select all matching companies",
+    "allMatchingSelected": "All {total} companies selected.",
+    "clearSelection": "Clear selection",
+    "pageSelected": "All {count} on this page selected.",
+    "selecting": "Selecting…",
+    "selectAllMatching": "Select all {total}",
+    "columnOwner": "Owner",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Updated owner on {count} companies",
+    "toastOwnerAssignedPartial": "Updated owner on {succeeded} of {total} companies",
+    "toastOwnerFailed": "Couldn't update {failed} companies"
   },
   "CompaniesActionsMenu": {
     "edit": "Edit",
@@ -81,7 +95,10 @@
     "toastContactCreated": "Contact created",
     "toastCreateContactFailed": "Failed to create contact",
     "toastDealCreated": "Deal created",
-    "toastCreateDealFailed": "Failed to create deal"
+    "toastCreateDealFailed": "Failed to create deal",
+    "assignOwner": "Assign owner",
+    "toastOwnerAssigned": "Owner updated",
+    "toastOwnerFailed": "Couldn't update the owner"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "Open company page",
@@ -97,10 +114,12 @@
     "projected": "Projected",
     "tooltipActivities": "Activities · {count}",
     "tooltipTasks": "Tasks · {count}",
-    "tooltipNotes": "Notes · {count}"
+    "tooltipNotes": "Notes · {count}",
+    "ownerLabel": "Owner: {name}"
   },
   "CompaniesContactsGrid": {
     "contacts": "Contacts",
+    "newContact": "New contact",
     "noContacts": "No contacts associated with this company.",
     "toastContactCreated": "Contact created",
     "toastCreateContactFailed": "Failed to create contact"
@@ -109,6 +128,7 @@
     "toastNoChanges": "No changes to save",
     "toastNameRequired": "Name is required",
     "toastCompanyUpdated": "Company updated",
+    "toastPartiallySaved": "Some company changes were saved, but another change failed. Review the current values and try again.",
     "toastSaveFailed": "Failed to save"
   },
   "CompaniesNewDialog": {
@@ -147,7 +167,9 @@
     "contactBack": "Back",
     "contactDone": "Done",
     "contactPhotoLabel": "Profile photo",
-    "contactPhotoHint": "Add a profile photo (optional)",
+    "contactPhotoHint": "Add a JPEG, PNG, or WebP profile photo (optional)",
+    "contactPhotoUnsupported": "Choose a JPEG, PNG, or WebP profile photo.",
+    "logoUnsupported": "Choose a JPEG, PNG, or WebP logo.",
     "contactAddedAnnounce": "{name} added",
     "contactUpdatedAnnounce": "{name} updated",
     "contactRemovedAnnounce": "{name} removed",
@@ -166,6 +188,7 @@
     "labelPhone": "Phone",
     "labelAddress": "Address",
     "changeLogo": "Change logo",
+    "unsupportedLogo": "Choose a JPEG, PNG, or WebP image.",
     "cancel": "Cancel",
     "save": "Save"
   }

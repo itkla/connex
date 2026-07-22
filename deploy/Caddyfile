@@ -1,0 +1,17 @@
+{
+	admin off
+}
+
+:80 {
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	handle /saml2/* {
+		reverse_proxy backend:8080
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

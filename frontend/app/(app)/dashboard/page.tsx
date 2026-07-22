@@ -10,28 +10,60 @@ import {
 } from '@heroicons/react/24/outline';
 
 import {
-    getActivitiesFromCookie,
+    getActivitiesPage,
+    getActivityVolumeFromCookie,
+    getAllStagesFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
-    getCompaniesFromCookie,
-    getCompanyTemperaturesFromCookie,
-    getContactsFromCookie,
-    getContactTemperaturesFromCookie,
+    getCompanyById,
+    getCompaniesPage,
+    getContactsPage,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
-    getDealRisksFromCookie,
-    getDealsFromCookie,
+    getDealClosingSoonFromCookie,
+    getDealClosingSoonCountFromCookie,
+    getDealKpisFromCookie,
+    getDealMetricsFromCookie,
+    getDealPipelineValueFromCookie,
+    getDealRevenueTimeseries,
+    getDealStageDistribution,
+    getDealsPage,
     getIntroSuggestionsFromCookie,
-    getNotesFromCookie,
+    getNotesPage,
     getNotifications,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
-    getStagesByPipelineId,
-    getTasksFromCookie,
+    getTaskSummaryFromCookie,
+    getTasksPage,
+    getUpcomingTasksFromCookie,
+    getTeamLeaderboardFromCookie,
+    getUpcomingActivityCountFromCookie,
     getUsers,
+    getRelationshipDashboardFromCookie,
 } from '@/app/lib/api';
-import type { Attachment, AttachmentFacets, DashboardWidgetType, Notification, Page, Stage, User } from '@/app/lib/types';
-import { pickDominantCurrency, startOfLocalDay, timeOf } from '@/app/lib/utils';
+import type {
+    ActivityVolumeBucket,
+    Attachment,
+    AttachmentFacets,
+    Company,
+    Contact,
+    Count,
+    DashboardWidgetType,
+    Deal,
+    DealKpis,
+    DealMetrics,
+    DealPipelineValue,
+    DealRevenueSeries,
+    DealStageDistribution,
+    NotificationPage,
+    Page,
+    RelationshipDashboard,
+    Task,
+    TaskSummary as TaskSummaryCounts,
+    TeamLeaderboardEntry,
+    User,
+    WarmthSummary,
+} from '@/app/lib/types';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
@@ -61,9 +93,80 @@ import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
 import type { RangeKey } from '@/app/components/overview/analytics/metrics';
 
+const EMPTY_DEAL_KPIS: DealKpis = {
+    wonRevenue: 0,
+    wonRevenuePrev: null,
+    newPipeline: 0,
+    newPipelinePrev: null,
+    wonCount: 0,
+    lostCount: 0,
+    wonValue: 0,
+    lostValue: 0,
+    wonCountPrev: null,
+    lostCountPrev: null,
+    avgCycleDays: 0,
+    avgCycleDaysPrev: null,
+    wonSeries: [],
+    newPipelineSeries: [],
+    winRateSeries: [],
+    avgCycleSeries: [],
+};
+
+const EMPTY_TASK_SUMMARY: TaskSummaryCounts = {
+    todo: 0,
+    inProgress: 0,
+    done: 0,
+    overdue: 0,
+    dueSoon: 0,
+};
+
+const EMPTY_ATTACHMENT_FACETS: AttachmentFacets = {
+    sources: [],
+    kinds: [],
+    tags: [],
+    orphaned: 0,
+    total: 0,
+    totalSize: 0,
+};
+
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
+
+const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
+    warmthSummary: EMPTY_WARMTH_SUMMARY,
+    coolingContacts: [],
+    coolingCompanies: [],
+    dealRisks: [],
+    dealRisksTruncated: false,
+};
+
 const DASHBOARD_RANGE: RangeKey = '90d';
 
-const DAY = 1000 * 60 * 60 * 24;
+/**
+ * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
+ * dashboard's aggregate widgets scope to the workspace's dominant currency rather than the
+ * currency that happens to dominate a bounded page slice. Falls back to {@code 'USD'}.
+ */
+function dominantCurrency(metrics: DealMetrics): string {
+    let best = 'USD';
+    let bestCount = -1;
+    for (const entry of metrics.byCurrency) {
+        const count = entry.openCount + entry.closedCount;
+        if (count > bestCount) {
+            bestCount = count;
+            best = entry.currency;
+        }
+    }
+    return best;
+}
+
+function present<T>(value: T | null): value is T {
+    return value != null;
+}
 
 export default async function Dashboard() {
     const t = await getTranslations('DashboardPage');
@@ -76,95 +179,87 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions, dealRisks, layoutResponse, companyTemps, notifications] =
+    const [contacts, deals, pipelines, stages, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
         await Promise.all([
-            getCompaniesFromCookie(cookie),
-            getContactsFromCookie(cookie),
-            getDealsFromCookie(cookie),
+            getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getPipelinesFromCookie(cookie),
-            getTasksFromCookie(cookie),
-            getActivitiesFromCookie(cookie),
-            getNotesFromCookie(cookie),
+            getAllStagesFromCookie(cookie),
+            getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
+            getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getNotesPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Attachment>,
             ),
-            getAttachmentFacets(init).catch(() => emptyFacets),
-            getContactTemperaturesFromCookie(cookie),
+            getAttachmentFacets(init).catch(() => EMPTY_ATTACHMENT_FACETS),
             getRecentMovesFromCookie(cookie),
             getIntroSuggestionsFromCookie(cookie, 4),
-            getDealRisksFromCookie(cookie),
+            getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
             getDashboardLayoutFromCookie(cookie),
-            getCompanyTemperaturesFromCookie(cookie),
-            getNotifications({ state: 'unread', page: 1, size: 6 }, init).catch(
-                () => ({ items: [], total: 0 }) as Page<Notification>,
-            ),
+            getNotifications({ status: 'unread', page: 1, size: 6 }, init)
+                .catch(() => ({ items: [], total: 0, stateVersion: 0, asOf: '1970-01-01T00:00:00Z' }) as NotificationPage),
+            getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
+            getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),
+            getContactsPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Contact>),
+            getActivityVolumeFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as ActivityVolumeBucket[]),
+            getTeamLeaderboardFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as TeamLeaderboardEntry[]),
+            getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
+            getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
+            getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
+            getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
         ]);
 
-    const stages = (
-        await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))
-    ).flat();
+    const relatedCompanyIds = new Set(
+        closingSoonDeals.flatMap((deal) => deal.company == null ? [] : [deal.company]),
+    );
+    const insightCompanies = [
+        ...relationshipDashboard.coolingCompanies.map((item) => item.company),
+        ...relationshipDashboard.dealRisks.flatMap((item) => item.company ? [item.company] : []),
+    ];
+    const loadedInsightCompanyIds = new Set(insightCompanies.map((company) => company.id));
+    const relatedCompanies = await Promise.all(
+        [...relatedCompanyIds].flatMap((companyId) =>
+            loadedInsightCompanyIds.has(companyId)
+                ? []
+                : [getCompanyById(companyId, init).catch(() => null)],
+        ),
+    ).then((items) => items.filter(present));
 
-    const companyById = new Map(companies.map((company) => [company.id, company]));
-    const dealById = new Map(deals.map((deal) => [deal.id, deal]));
-    const atRiskDeals: AtRiskItem[] = dealRisks
-        .map((risk) => ({ risk, deal: dealById.get(risk.dealId) }))
-        .filter((entry): entry is { risk: (typeof dealRisks)[number]; deal: (typeof deals)[number] } => entry.deal != null)
-        .slice(0, 6)
-        .map(({ risk, deal }) => ({
-            risk,
-            deal,
-            company: deal.company != null ? companyById.get(deal.company) : undefined,
-        }));
+    const companyById = new Map(
+        [...insightCompanies, ...relatedCompanies].map((company) => [company.id, company]),
+    );
+    const atRiskDeals: AtRiskItem[] = relationshipDashboard.dealRisks.map(({ risk, deal, company }) => ({
+        risk,
+        deal,
+        company: company ?? undefined,
+    }));
+    const coolingContacts: CoolingItem[] = relationshipDashboard.coolingContacts.map(
+        ({ contact, temperature }) => ({ contact, temp: temperature }),
+    );
+    const warmthSummary = relationshipDashboard.warmthSummary;
 
-    const tempByContactId = new Map(contactTemps.map((temp) => [temp.id, temp]));
-    const coolingContacts: CoolingItem[] = contacts
-        .map((contact) => ({ contact, temp: tempByContactId.get(contact.id) }))
-        .filter((item): item is CoolingItem => item.temp != null && item.temp.trend === 'cooling')
-        .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
-        .slice(0, 6);
+    const overdueTasks = taskSummary.overdue;
+    const dueSoon = taskSummary.dueSoon;
+    const closingSoon = closingSoonCount.count;
+    const upcomingActivities = upcomingActivityCount.count;
 
-    const now = new Date().getTime();
-    const todayStart = startOfLocalDay(now);
-    const overdueTasks = tasks.filter((task) => {
-        if (task.completed) return false;
-        const due = timeOf(task.dueDate);
-        return due > 0 && due < todayStart;
-    }).length;
-    const closingSoon = deals.filter((deal) => {
-        if (deal.closedAt) return false;
-        const close = timeOf(deal.expectedCloseDate);
-        return close >= todayStart && close - todayStart <= 7 * DAY;
-    }).length;
-    const dueSoon = tasks.filter((task) => {
-        if (task.completed) return false;
-        const due = timeOf(task.dueDate);
-        return due >= todayStart && due - todayStart <= 7 * DAY;
-    }).length;
-    const upcomingActivities = activities.filter((activity) => {
-        const ts = timeOf(activity.timestamp);
-        return ts > now && ts - now <= 7 * DAY;
-    }).length;
+    const currency = dominantCurrency(dealMetrics);
+    const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
+        getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
+        getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
+        getDealRevenueTimeseries(currency, user.timezone, {}, init).catch(
+            () => ({ closed: [], projected: [] }) as DealRevenueSeries,
+        ),
+        getDealStageDistribution(currency, {}, init).catch(() => [] as DealStageDistribution[]),
+    ]);
 
-    const currency = pickDominantCurrency(deals);
-    const currencyDeals = deals.filter((deal) => (deal.currency || 'USD') === currency);
+    const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(
+        ({ company, temperature }) => ({ company, temp: temperature }),
+    );
 
-    const tempByCompanyId = new Map(companyTemps.map((temp) => [temp.id, temp]));
-    const companyWarmthItems: CompanyWarmthItem[] = companies
-        .map((company) => ({ company, temp: tempByCompanyId.get(company.id) }))
-        .filter((item): item is CompanyWarmthItem => item.temp != null && item.temp.trend === 'cooling')
-        .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
-        .slice(0, 6);
-
-    const closingSoonItems: ClosingSoonItem[] = deals
-        .filter((deal) => {
-            if (deal.closedAt) return false;
-            const close = timeOf(deal.expectedCloseDate);
-            return close >= todayStart && close - todayStart <= 7 * DAY;
-        })
-        .sort((a, b) => timeOf(a.expectedCloseDate) - timeOf(b.expectedCloseDate))
-        .slice(0, 6)
+    const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
 
     const chartCard = (child: ReactNode) => (
@@ -174,15 +269,17 @@ export default async function Dashboard() {
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <OverviewCard index={0} label={t('companies')} value={companies.length} icon={BuildingOffice2Icon} href="/records/companies" description={t('companiesDescription')} />
-                <OverviewCard index={1} label={t('contacts')} value={contacts.length} icon={UsersIcon} href="/records/contacts" />
-                <OverviewCard index={2} label={t('deals')} value={deals.length} icon={BriefcaseIcon} href="/records/deals" description={t('dealsDescription')} />
+                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" description={t('companiesDescription')} />
+                <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" />
+                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" description={t('dealsDescription')} />
                 <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" />
             </div>
         ),
-        pipeline: <PipelineChart deals={deals} />,
-        tasks: <TaskSummary tasks={tasks} />,
-        atRiskDeals: <AtRiskDeals items={atRiskDeals} />,
+        pipeline: <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />,
+        tasks: <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />,
+        atRiskDeals: (
+            <AtRiskDeals items={atRiskDeals} truncated={relationshipDashboard.dealRisksTruncated} />
+        ),
         coolingRelationships: <CoolingRelationships items={coolingContacts} currentUserId={user.id} />,
         recentMoves: <RecentMoves moves={recentMoves} />,
         introOpportunities: <IntroOpportunities items={introSuggestions} />,
@@ -193,31 +290,40 @@ export default async function Dashboard() {
             </div>
         ),
         companyWarmth: <CompanyWarmth items={companyWarmthItems} />,
-        warmthDistribution: <WarmthDistribution temps={contactTemps} />,
+        warmthDistribution: <WarmthDistribution summary={warmthSummary} />,
         closingSoon: <ClosingSoonDeals items={closingSoonItems} />,
         recentNotes: (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <NoteList notes={notes} />
             </div>
         ),
-        notifications: <NotificationsCard items={notifications.items} />,
+        notifications: (
+            <NotificationsCard
+                key={`${notifications.stateVersion}:${notifications.items.map((item) => item.id).join(',')}`}
+                items={notifications.items}
+                recipientId={user.id}
+                initialStateVersion={notifications.stateVersion}
+            />
+        ),
         quickActions: (
             <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-6">
-                <QuickCreate currentUserId={user.id} />
+                <QuickCreate />
             </div>
         ),
-        analyticsKpis: <AnalyticsKpisWidget deals={currencyDeals} currency={currency} range={DASHBOARD_RANGE} />,
-        revenueTrend: chartCard(<RevenueTrend deals={currencyDeals} currency={currency} range={DASHBOARD_RANGE} />),
-        winRate: chartCard(<WinRateDonut deals={currencyDeals} range={DASHBOARD_RANGE} currency={currency} />),
+        analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,
+        revenueTrend: chartCard(
+            <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+        ),
+        winRate: chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />),
         pipelineValue: chartCard(
-            <PipelineValue deals={currencyDeals} pipelines={pipelines} range={DASHBOARD_RANGE} currency={currency} />,
+            <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
         ),
         stageFunnel: chartCard(
-            <StageFunnel deals={currencyDeals} pipelines={pipelines} stages={stages} currency={currency} />,
+            <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
         ),
-        activityVolume: chartCard(<ActivityVolume activities={activities} range={DASHBOARD_RANGE} />),
+        activityVolume: chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />),
         teamLeaderboard: chartCard(
-            <TeamLeaderboard users={users} activities={activities} tasks={tasks} notes={notes} range={DASHBOARD_RANGE} />,
+            <TeamLeaderboard users={users} standings={leaderboard} />,
         ),
     };
 
@@ -225,7 +331,7 @@ export default async function Dashboard() {
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
                 <Rise>
                     <Greeting
                         user={user}

@@ -37,8 +37,7 @@ export default function OnboardingPage() {
         }
         setSubmitting(true);
         try {
-            const workspace = await createWorkspace(trimmed);
-            document.cookie = `connex_workspace=${workspace.id};path=/;max-age=31536000;samesite=lax`;
+            await createWorkspace(trimmed);
             toastSuccess(t("created"));
             router.replace("/dashboard");
             router.refresh();
@@ -110,7 +109,7 @@ export default function OnboardingPage() {
                             <button
                                 type="submit"
                                 disabled={submitting}
-                                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-neutral-950 transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+                                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
                             >
                                 {submitting ? t("creating") : t("createButton")}
                                 {!submitting && <ArrowRightIcon className="size-4" />}

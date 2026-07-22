@@ -3,70 +3,107 @@
 import { BellIcon, CheckCircleIcon, CheckIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
 
 import {
+    ApiError,
     completeTask,
     dismissNotification,
     getNotifications,
     markAllNotificationsRead,
     markNotificationRead,
+    snoozeNotification,
 } from "@/app/lib/api";
-import { type Notification } from "@/app/lib/types";
+import { type Notification, type SnoozeRequest } from "@/app/lib/types";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
-import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationContent, notificationIcon, notificationSeverityStyle } from "@/app/components/notifications/notificationContent";
+import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import {
+    emitAllNotificationsRead,
+    emitNotificationStateChanged,
+    onNotificationStateChanged,
+} from "@/app/components/notifications/notificationEvents";
 
 export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
-    const { unread, adjustUnread, refreshUnread, setUnread } = useNotifications();
+    const { recipientId, unread, refreshUnread } = useNotifications();
+    const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(false);
+    const loadGenerationRef = useRef(0);
+    const openRef = useRef(false);
+    const loadedStateVersionRef = useRef(0);
+    const requiredStateVersionRef = useRef(0);
 
-    async function load(open: boolean) {
+    const load = useCallback(async (open: boolean) => {
         if (!open) return;
+        const generation = ++loadGenerationRef.current;
         setLoading(true);
         try {
-            const page = await getNotifications({ state: "unread", page: 1, size: 8 });
-            setItems(page.items);
+            const page = await getNotifications({ status: "unread", page: 1, size: 8 });
+            if (loadGenerationRef.current === generation) {
+                if (page.stateVersion < requiredStateVersionRef.current) return;
+                loadedStateVersionRef.current = page.stateVersion;
+                setItems(page.items);
+            }
         } catch {
-            toastError(t("loadError"));
+            if (loadGenerationRef.current === generation) toastError(t("loadError"));
         } finally {
-            setLoading(false);
+            if (loadGenerationRef.current === generation) setLoading(false);
         }
-    }
+    }, [t]);
 
-    function openItem(item: Notification) {
-        const url = safeNotificationUrl(item.actionUrl);
-        if (url) router.push(url);
+    useEffect(
+        () => onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
+            if (!openRef.current
+                || (!forceRefresh && stateVersion <= loadedStateVersionRef.current)) return;
+            requiredStateVersionRef.current = Math.max(requiredStateVersionRef.current, stateVersion);
+            void load(true);
+        }),
+        [load, recipientId],
+    );
+
+    async function openItem(item: Notification) {
+        try {
+            if (!await openNotification(item)) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     async function resolve(item: Notification) {
         try {
-            await markNotificationRead(item.id);
-            adjustUnread(-1);
+            const updated = await markNotificationRead(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
         } catch {
             toastError(t("actionError"));
         }
     }
 
     async function completeFromInbox(item: Notification) {
-        if (item.sourceType !== "task" || item.sourceId == null) return;
+        const taskId = item.sourceId;
+        if (item.sourceType !== "task" || taskId == null) return;
         setCompleting((current) => new Set(current).add(item.id));
         try {
-            await completeTask(item.sourceId);
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            await refreshUnread();
+            const completed = await executeInNotificationWorkspace(item, async () => {
+                await completeTask(taskId);
+                setItems((current) => current.filter((entry) => entry.id !== item.id));
+                await refreshUnread();
+            });
+            if (!completed) toastError(t("completeError"));
         } catch {
             toastError(t("completeError"));
         } finally {
@@ -80,26 +117,52 @@ export default function NotificationBell() {
 
     async function dismiss(item: Notification) {
         try {
-            await dismissNotification(item.id);
-            if (!item.readAt) adjustUnread(-1);
+            const updated = await dismissNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
         } catch {
             toastError(t("actionError"));
         }
     }
 
+    async function snooze(item: Notification, body: SnoozeRequest) {
+        try {
+            const updated = await snoozeNotification(item.id, body);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
+            setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409) {
+                toastError(t("snoozeConflict"));
+                void load(true);
+            } else if (error instanceof ApiError && error.status === 404) {
+                toastError(t("snoozeGone"));
+                void load(true);
+            } else {
+                toastError(t("actionError"));
+            }
+        }
+    }
+
     async function readAll() {
         try {
-            const counts = await markAllNotificationsRead();
-            setItems([]);
-            setUnread(counts.unread);
+            const result = await markAllNotificationsRead();
+            emitAllNotificationsRead(recipientId, result);
         } catch {
             toastError(t("actionError"));
         }
     }
 
     return (
-        <DropdownMenu.Root onOpenChange={(open) => void load(open)}>
+        <DropdownMenu.Root onOpenChange={(open) => {
+            openRef.current = open;
+            void load(open);
+        }}>
             <DropdownMenu.Trigger asChild>
                 <button
                     type="button"
@@ -168,7 +231,7 @@ export default function NotificationBell() {
                                     className="group relative flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-muted"
                                 >
                                     <DropdownMenu.Item
-                                        onSelect={() => openItem(item)}
+                                        onSelect={() => void openItem(item)}
                                         className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-md text-left outline-none data-[highlighted]:bg-muted"
                                     >
                                         <span
@@ -206,7 +269,7 @@ export default function NotificationBell() {
                                                     if (value === true) void completeFromInbox(item);
                                                 }}
                                                 aria-label={t("completeTask")}
-                                                className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                                                className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                                             />
                                         </div>
                                     ) : (
@@ -221,6 +284,7 @@ export default function NotificationBell() {
                                                     <CheckIcon className="size-4" />
                                                 </button>
                                             ) : null}
+                                            <SnoozeMenu onSnooze={(body) => void snooze(item, body)} />
                                             <button
                                                 type="button"
                                                 aria-label={t("dismiss")}

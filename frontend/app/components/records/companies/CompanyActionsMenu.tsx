@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -20,14 +20,37 @@ import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import EditCompanySheet from '@/app/components/records/companies/EditCompanySheet';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, updateContact, isFieldError } from '@/app/lib/api';
-import { CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
-import { uploadContactPicture } from '@/app/lib/utils';
+import { createContact, createDeal, deleteCompany, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+
+function emptyContactPayload(companyId: number): CreateContactPayload {
+    return {
+        name: '',
+        email: '',
+        phone: '',
+        title: '',
+        companyId,
+    };
+}
+
+function emptyDealPayload(companyId: number): CreateDealPayload {
+    return {
+        name: '',
+        value: 0,
+        actualValue: 0,
+        currency: 'USD',
+        pipeline: 0,
+        stage: 0,
+        company: companyId,
+        expectedCloseDate: undefined,
+    };
+}
 
 export default function CompanyActionsMenu({
     company,
@@ -41,36 +64,39 @@ export default function CompanyActionsMenu({
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
+    const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => {
+        if (!assignOwnerOpen || members.length > 0) return;
+        getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
+    }, [assignOwnerOpen, members.length]);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [newDealDialogOpen, setNewDealDialogOpen] = useState(false);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
-    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>({
-        name: '',
-        email: '',
-        phone: '',
-        title: '',
-        companyId: company.id,
-    });
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(
+        () => emptyContactPayload(company.id),
+    );
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreatingContact, setIsCreatingContact] = useState(false);
     const [contactCreationSucceeded, setContactCreationSucceeded] = useState(false);
     const [isCreatingDeal, setIsCreatingDeal] = useState(false);
     const [dealCreationSucceeded, setDealCreationSucceeded] = useState(false);
+    const contactCloseTimerRef = useRef<number | null>(null);
+    const contactCloseGenerationRef = useRef(0);
 
-    const emptyDealPayload = (): CreateDealPayload => ({
-        name: '',
-        value: 0,
-        actualValue: 0,
-        currency: 'USD',
-        pipeline: 0,
-        stage: 0,
-        company: company.id,
-        expectedCloseDate: undefined,
-    });
-    const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(emptyDealPayload);
+    const invalidatePendingContactClose = useCallback(() => {
+        contactCloseGenerationRef.current += 1;
+        if (contactCloseTimerRef.current == null) return;
+        window.clearTimeout(contactCloseTimerRef.current);
+        contactCloseTimerRef.current = null;
+    }, []);
+
+    const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
+        () => emptyDealPayload(company.id),
+    );
 
     useEffect(() => {
         getPipelines().then(async (ps) => {
@@ -82,25 +108,36 @@ export default function CompanyActionsMenu({
         }).catch(() => setPipelines([]));
     }, []);
 
+    useEffect(
+        () => () => invalidatePendingContactClose(),
+        [invalidatePendingContactClose],
+    );
+
     const showNewContactDialog = () => {
+        invalidatePendingContactClose();
         setNewContactDialogOpen(true);
     };
 
     const closeNewContactDialog = (open: boolean) => {
+        invalidatePendingContactClose();
         setNewContactDialogOpen(open);
-        if (!open) setContactCreationSucceeded(false);
+        if (!open) {
+            setNewContactPayload(emptyContactPayload(company.id));
+            setImageFile(null);
+            setContactCreationSucceeded(false);
+        }
     };
 
     const closeNewDealDialog = (open: boolean) => {
         setNewDealDialogOpen(open);
         if (!open) {
-            setNewDealPayload(emptyDealPayload());
+            setNewDealPayload(emptyDealPayload(company.id));
             setDealCreationSucceeded(false);
         }
     };
 
     const showNewDealDialog = () => {
-        setNewDealPayload(emptyDealPayload());
+        setNewDealPayload(emptyDealPayload(company.id));
         setNewDealDialogOpen(true);
     };
 
@@ -117,31 +154,54 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidatePendingContactClose();
+        const operationGeneration = contactCloseGenerationRef.current;
+        const isCurrent = () => contactCloseGenerationRef.current === operationGeneration;
         setContactCreationSucceeded(false);
         setIsCreatingContact(true);
         try {
-            // console.log('newContactPayload', newContactPayload);
-            const newContact = await createContact(newContactPayload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(newContactPayload);
+            if (!isCurrent()) return;
+            let avatarUploadFailed = false;
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch {
+                    avatarUploadFailed = true;
+                }
+                if (!isCurrent()) return;
             }
-            toastSuccess(t('toastContactCreated'));
-            setIsCreatingContact(false);
-            setContactCreationSucceeded(true);
-            setTimeout(() => {
-                closeNewContactDialog(false);
-                router.refresh();
-            }, 900);
+            if (isCurrent()) setIsCreatingContact(false);
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized || !isCurrent()) return;
+                    finalized = true;
+                    toastSuccess(t('toastContactCreated'));
+                    setContactCreationSucceeded(true);
+                    invalidatePendingContactClose();
+                    const closeGeneration = contactCloseGenerationRef.current;
+                    contactCloseTimerRef.current = window.setTimeout(() => {
+                        if (contactCloseGenerationRef.current !== closeGeneration) return;
+                        contactCloseTimerRef.current = null;
+                        closeNewContactDialog(false);
+                        router.refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
-            if (isFieldError(err)) {
+            if (!isCurrent()) return;
+            if (isFieldError(err) || businessCard) {
                 throw err;
             }
-            console.error(err);
             toastError(t('toastCreateContactFailed'));
         } finally {
-            setIsCreatingContact(false);
+            if (isCurrent()) setIsCreatingContact(false);
         }
     };
 
@@ -218,7 +278,6 @@ export default function CompanyActionsMenu({
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem onSelect={(e) => {
                             e.preventDefault();
-                            // router.push(`/records/contacts/new?companyId=${company.id}`);
                             showNewContactDialog();
                         }}>
                             <UserIcon className="size-4" />
@@ -231,10 +290,6 @@ export default function CompanyActionsMenu({
                             <BriefcaseIcon className="size-4" />
                             {t('newDeal')}
                         </DropdownMenuItem>
-                        {/* <DropdownMenuItem>
-                            <BoltIcon className="size-4" />
-                            {t('newPipeline')}
-                        </DropdownMenuItem> */}
                     </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -244,6 +299,17 @@ export default function CompanyActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        {owned && (
+                            <DropdownMenuItem
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    setAssignOwnerOpen(true);
+                                }}
+                            >
+                                <UserCircleIcon className="size-4" />
+                                <span>{t('assignOwner')}</span>
+                            </DropdownMenuItem>
+                        )}
                         {owned && (
                             <DropdownMenuItem
                                 onSelect={(e) => {
@@ -269,13 +335,29 @@ export default function CompanyActionsMenu({
                 </DropdownMenu>
             </ButtonGroup>
 
-            {/* hidden input to upload attachments */}
             <input
                 ref={attachmentInputRef}
                 type="file"
                 multiple
                 className="hidden"
                 onChange={onAttachmentFilesSelected}
+            />
+
+            <BulkAssignOwnerDialog
+                open={assignOwnerOpen}
+                onOpenChange={setAssignOwnerOpen}
+                count={1}
+                members={members}
+                messages={{
+                    success: () => t('toastOwnerAssigned'),
+                    partial: () => t('toastOwnerAssigned'),
+                    failure: () => t('toastOwnerFailed'),
+                }}
+                onApply={async (ownerId) => {
+                    await updateCompanyOwner(company.id, ownerId);
+                    return { succeeded: 1, failed: 0, errors: [] };
+                }}
+                onSuccess={() => router.refresh()}
             />
 
             <EditCompanySheet company={company} open={editOpen} onOpenChange={setEditOpen} />
@@ -306,7 +388,6 @@ export default function CompanyActionsMenu({
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
                 setImageFile={setImageFile}
-                companies={[company]}
                 selectedCompany={company}
                 isCreating={isCreatingContact}
                 isSuccess={contactCreationSucceeded}
@@ -318,7 +399,6 @@ export default function CompanyActionsMenu({
                 onOpenChange={closeNewDealDialog}
                 payload={newDealPayload}
                 setPayload={setNewDealPayload}
-                companies={[company]}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreatingDeal}

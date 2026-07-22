@@ -17,7 +17,7 @@ import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import Rise from "@/app/components/motion/Rise";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
-import { TYPE_META, normalizeType } from "@/app/components/activity/activities/activityTypes";
+import { TYPE_META, normalizeType } from "@/app/components/activity/activities/activityTypeMeta";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
@@ -49,15 +49,14 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         notFound();
     }
 
-    const [persons, deals, users] = await Promise.all([
+    const [persons, deals, users, t, tPage, locale] = await Promise.all([
         getContactsFromCookie(cookie),
         getDealsFromCookie(cookie),
         (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getTranslations("ActivityActivityDetail"),
+        getTranslations("ActivityPage"),
+        getLocale(),
     ]);
-
-    const t = await getTranslations("ActivityActivityDetail");
-    const tPage = await getTranslations("ActivityPage");
-    const locale = await getLocale();
 
     const person = activity.personId ? persons.find((p) => p.id === activity.personId) ?? null : null;
     const deal = activity.dealId ? deals.find((d) => d.id === activity.dealId) ?? null : null;

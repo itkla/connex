@@ -1,6 +1,7 @@
 // transplanted from /me 
 
-import { type DealRiskSeverity, type TemperatureBand, type UploadedFile } from '@/app/lib/types';
+import { type DealRiskSeverity, type TemperatureBand } from '@/app/lib/types';
+import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
 
 export function formatShortDate(value: string | undefined, locale: string) {
     if (!value) {
@@ -18,11 +19,27 @@ export function formatShortDate(value: string | undefined, locale: string) {
 }
 
 /**
+ * Whether a keyboard event target is a text-entry surface (input, textarea, select,
+ * contenteditable, or ARIA textbox), so global single-key shortcuts must not fire.
+ */
+export function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable ||
+        target.getAttribute('role') === 'textbox'
+    );
+}
+
+/**
  * Persists the user's locale preference.
  * @param locale - the locale code to persist (e.g. "en", "ja")
  */
-export function setLocaleCookie(locale: string) {
-    document.cookie = `NEXT_LOCALE=${locale};path=/;max-age=31536000;samesite=lax`;
+export function setLocaleCookie(locale: Locale) {
+    document.cookie = `${LOCALE_COOKIE}=${locale};path=/;max-age=31536000;samesite=lax`;
 }
 
 export function timeOf(value?: string) {
@@ -246,83 +263,6 @@ export function copyToClipboard(value: string, label: string) {
     } catch {
         console.error(`Failed to copy ${label.toLowerCase()}`);
         return false;
-    }
-}
-
-/**
- * uploads a contact picture to the public directory and returns the public url
- * @param contactId - the id of the contact to upload the picture for
- * @param file 
- * @returns the public url of the uploaded picture
- */
-export async function uploadContactPicture(contactId: number, file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('contactPicture', file);
-    const res = await fetch(`/api/contacts/profile-picture?contactId=${contactId}`, {
-        method: 'PUT',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload contact picture');
-    }
-    const data = (await res.json()) as { imageUrl: string };
-    return data.imageUrl;
-}
-
-/**
- * uploads a company logo to the public directory and returns the public url
- * @param companyId - the id of the company to upload the logo for
- * @param file 
- * @returns the public url of the uploaded logo
- */
-export async function uploadCompanyLogo(companyId: number, file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('companyLogo', file);
-    const res = await fetch(`/api/companies/logo?companyId=${companyId}`, {
-        method: 'PUT',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload company logo');
-    }
-    const data = (await res.json()) as { logoUrl: string };
-    return data.logoUrl;
-}
-
-/**
- * uploads a file for any entity to the public directory and returns its metadata.
- * mirrors the profile-picture flow: the binary is written to disk here, then the
- * caller records it against the backend via createAttachment().
- * @param entityType - the owning entity type (e.g. "company", "person", "deal", "user")
- * @param entityId - the owning entity id
- * @param file - the file to upload
- * @returns the stored file's public url and metadata
- */
-export async function uploadFile(entityType: string, entityId: number, file: File): Promise<UploadedFile> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('entityType', entityType);
-    formData.append('entityId', String(entityId));
-    const res = await fetch('/api/uploads', {
-        method: 'POST',
-        body: formData,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to upload file');
-    }
-    return (await res.json()) as UploadedFile;
-}
-
-/**
- * removes a previously uploaded file from disk. best-effort; failures are swallowed
- * so a missing file never blocks deleting the attachment record.
- * @param url - the public url returned by uploadFile()
- */
-export async function deleteUploadedFile(url: string): Promise<void> {
-    try {
-        await fetch(`/api/uploads?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
-    } catch {
-        // best-effort cleanup
     }
 }
 
@@ -585,4 +525,45 @@ export function riskContainerClasses(severity: DealRiskSeverity): string {
 /** Foreground colour class for a deal-risk icon/accent, keyed by severity. */
 export function riskTextClass(severity: DealRiskSeverity): string {
     return RISK_TEXT[severity] ?? RISK_TEXT.low;
+}
+
+export type CalendarYearMonth = { year: number; month: number };
+
+function fixedOffsetSeconds(timezone: string): number | null {
+    if (/^(?:Z|UTC|GMT|UT)$/i.test(timezone)) return 0;
+    const match = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/i.exec(timezone);
+    if (!match) return null;
+    const hours = Number(match[2]);
+    const minutes = Number(match[3] ?? '0');
+    const seconds = Number(match[4] ?? '0');
+    if (
+        hours > 18
+        || minutes > 59
+        || seconds > 59
+        || (hours === 18 && (minutes !== 0 || seconds !== 0))
+    ) return null;
+    const total = hours * 3600 + minutes * 60 + seconds;
+    return match[1] === '-' ? -total : total;
+}
+
+/** Resolves the calendar year and month for a timestamp in an IANA or legacy fixed-offset timezone. */
+export function yearMonthInTimezone(timestamp: number, timezone: string): CalendarYearMonth {
+    const offsetSeconds = fixedOffsetSeconds(timezone);
+    if (offsetSeconds != null) {
+        const shifted = new Date(timestamp + offsetSeconds * 1000);
+        return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
+    }
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: 'numeric',
+        }).formatToParts(new Date(timestamp));
+        const year = Number(parts.find((part) => part.type === 'year')?.value);
+        const month = Number(parts.find((part) => part.type === 'month')?.value);
+        if (Number.isInteger(year) && Number.isInteger(month)) return { year, month };
+    } catch {
+        return yearMonthInTimezone(timestamp, 'UTC');
+    }
+    return yearMonthInTimezone(timestamp, 'UTC');
 }

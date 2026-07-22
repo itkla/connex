@@ -1,66 +1,48 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 
-import { type Activity, type Note, type Task, type User } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
-import { RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { type TeamLeaderboardEntry, type User } from '@/app/lib/types';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 
 type Standing = { user: User; touches: number };
 
+/**
+ * Team activity leaderboard. Joins server-computed {@link TeamLeaderboardEntry} touch counts
+ * (already ordered by touches, descending) to {@code users} for names and avatars, dropping
+ * entries with no matching user, and renders the top five.
+ */
 export default function TeamLeaderboard({
     users,
-    activities,
-    tasks,
-    notes,
-    range,
+    standings,
 }: {
     users: User[];
-    activities: Activity[];
-    tasks: Task[];
-    notes: Note[];
-    range: RangeKey;
+    standings: TeamLeaderboardEntry[];
 }) {
     const t = useTranslations('AnalyticsTeam');
-    const [now] = useState(() => Date.now());
 
-    const standings = useMemo<Standing[]>(() => {
-        const start = now - RANGE_DAYS[range] * 86400000; // 1 day in milliseconds
-        const within = (value?: string) => {
-            const ts = parseMysqlDateTime(value);
-            return Number.isFinite(ts) && ts >= start && ts <= now;
-        };
-
-        const touches = new Map<number, number>();
-        const bump = (id: number | null | undefined) => {
-            if (id == null) return;
-            touches.set(id, (touches.get(id) ?? 0) + 1);
-        };
-
-        for (const a of activities) if (within(a.timestamp)) bump(a.createdById);
-        for (const task of tasks) if (task.completed && within(task.updatedAt)) bump(task.assignedToId);
-        for (const note of notes) if (within(note.createdAt)) bump(note.author);
-
-        return users
-            .map((user) => ({ user, touches: touches.get(user.id) ?? 0 }))
-            .filter((s) => s.touches > 0)
-            .sort((a, b) => b.touches - a.touches)
+    const rows = useMemo<Standing[]>(() => {
+        const userById = new Map(users.map((user) => [user.id, user]));
+        return standings
+            .map((entry) => {
+                const user = userById.get(entry.userId);
+                return user ? { user, touches: entry.touches } : null;
+            })
+            .filter((standing): standing is Standing => standing !== null)
             .slice(0, 5);
-    }, [users, activities, tasks, notes, range, now]);
+    }, [users, standings]);
 
-    if (standings.length === 0) {
+    if (rows.length === 0) {
         return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
-    const max = Math.max(...standings.map((s) => s.touches), 1);
+    const max = Math.max(...rows.map((s) => s.touches), 1);
 
     return (
         <ul className="flex flex-col gap-4">
-            {standings.map((s, i) => (
+            {rows.map((s, i) => (
                 <li key={s.user.id}>
                     <Link
                         href={`/users/${s.user.id}`}

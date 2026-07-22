@@ -1,6 +1,12 @@
 package ooo.klae.connex.backend.config;
 
+import static org.springframework.security.config.Customizer.withDefaults;
+
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.servlet.filter.OrderedFormContentFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -23,6 +29,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.core.session.SessionRegistry;
@@ -30,15 +37,26 @@ import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
 import org.springframework.session.security.SpringSessionBackedSessionRegistry;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 import jakarta.servlet.http.HttpServletResponse;
 
+import ooo.klae.connex.backend.businesscard.BusinessCardImportAdmissionFilter;
+import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
+import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 /**
  * Spring Security configuration.
@@ -51,9 +69,9 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
  * token — the SAML signature and {@code InResponseTo} are its defense. That same cross-site
  * top-level POST also means the session cookie must be {@code SameSite=None} for the stashed
  * AuthnRequest to be matched; the global cookie stays {@code SameSite=Lax} (for OIDC/password/dev
- * over plain HTTP), so a SAML-enabled deployment must additionally set
- * {@code server.servlet.session.cookie.same-site: none} with {@code CONNEX_SESSION_COOKIE_SECURE=true}
- * and end-to-end HTTPS. This is a per-environment deploy setting, not a global code change.
+     * over plain HTTP), so a SAML-enabled deployment must additionally set
+     * {@code CONNEX_SESSION_COOKIE_SAME_SITE=none} with {@code CONNEX_SESSION_COOKIE_SECURE=true} and
+     * end-to-end HTTPS. This is a per-environment deploy setting, not a global code change.
  *
  * Some code inspired by Springboot development tutorial videos
  */
@@ -61,10 +79,43 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+    private static final List<String> API_CORS_ALLOWED_HEADERS = List.of(
+        "Accept",
+        "Accept-Language",
+        "Content-Type",
+        "Idempotency-Key",
+        "Idempotency-Reservation",
+        "X-CSRF-TOKEN",
+        "X-XSRF-TOKEN",
+        "X-Workspace-Id"
+    );
+
+    private static final List<String> API_CORS_ALLOWED_METHODS = List.of(
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS"
+    );
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    UrlBasedCorsConfigurationSource corsConfigurationSource(
+            @Value("${connex.cors.allowed-origins}") String[] allowedOrigins) {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of(allowedOrigins));
+        configuration.setAllowedMethods(API_CORS_ALLOWED_METHODS);
+        configuration.setAllowedHeaders(API_CORS_ALLOWED_HEADERS);
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(PathPatternParser.defaultInstance);
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
     }
 
     @Bean
@@ -94,19 +145,36 @@ public class SecurityConfig {
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
+            SessionSecurityService sessionSecurityService,
+            BusinessCardRateLimiter businessCardRateLimiter,
+            CapabilityEntitlement capabilityEntitlement,
+            WorkspaceRequestResolver workspaceRequestResolver,
+            WorkspaceService workspaceService,
+            WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
+        http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
+        http.addFilterAfter(
+            new BusinessCardImportAdmissionFilter(
+                businessCardRateLimiter,
+                capabilityEntitlement,
+                workspaceRequestResolver,
+                workspaceService),
+            CsrfFilter.class);
+        http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
             // cache it. The auth handshake is exempt since there is no session to protect pre-login.
             http.csrf(csrf -> {
-                csrf.csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                     .ignoringRequestMatchers(
                         "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                         "/api/auth/forgot-password", "/api/auth/reset-password",
-                        "/api/auth/webauthn/authenticate/**");
+                        "/api/auth/webauthn/authenticate/**",
+                        "/api/delivery/unsubscribe/**",
+                        "/api/delivery/webhooks/**");
                 if (oauthEnabled) {
                     csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm");
                 }
@@ -119,7 +187,12 @@ public class SecurityConfig {
         }
         http
             .authorizeHttpRequests(auth -> {
-                auth.requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
+                auth.requestMatchers(HttpMethod.GET, "/api/version").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
+                    .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
+                    .requestMatchers("/api/delivery/webhooks/**").permitAll()
+                    .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers("/api/auth/**").permitAll();
                 if (oauthEnabled) {
@@ -152,7 +225,10 @@ public class SecurityConfig {
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")
-                .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
+                .logoutSuccessHandler((req, res, auth) -> {
+                    workspaceCookie.clear(res);
+                    res.setStatus(200);
+                })
             );
         if (oauthEnabled) {
             http
@@ -177,6 +253,15 @@ public class SecurityConfig {
             );
         }
         return http.build();
+    }
+
+    @Bean
+    FilterRegistrationBean<ApiRequestBodySizeFilter> apiRequestBodySizeFilterRegistration(
+            RequestBodySizeProperties requestBodySizeProperties) {
+        FilterRegistrationBean<ApiRequestBodySizeFilter> registration =
+            new FilterRegistrationBean<>(new ApiRequestBodySizeFilter(requestBodySizeProperties));
+        registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 1);
+        return registration;
     }
 
     /**

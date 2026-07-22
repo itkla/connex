@@ -23,13 +23,16 @@ public interface SegmentMapper {
     /** Ids of all people owned by the workspace, used as the negate universe for person conditions. */
     List<Integer> personIdsInWorkspace(int workspaceId);
 
+    /** Ids of all people owned by the workspace, including processing-restricted contacts. */
+    List<Integer> personIdsInWorkspaceIncludingRestricted(int workspaceId);
+
     /** Ids of all deals owned by the workspace, used as the negate universe for deal conditions. */
     List<Integer> dealIdsInWorkspace(int workspaceId);
 
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
     List<Integer> companyIdsWithOpenDeal(int workspaceId);
 
-    /** Ids of companies with no logged activity (via their people or deals) in the last {@code days} days. */
+    /** Ids of companies with no processable logged activity in the last {@code days} days. */
     List<Integer> companyIdsNoActivitySince(@Param("workspaceId") int workspaceId, @Param("days") int days);
 
     /**
@@ -49,8 +52,27 @@ public interface SegmentMapper {
     /** Ids of people matching one field condition; see {@link #companyIdsMatching}. */
     List<Integer> personIdsMatching(Map<String, Object> params);
 
+    /** Ids of people matching one field condition, including processing-restricted contacts. */
+    List<Integer> personIdsMatchingIncludingRestricted(Map<String, Object> params);
+
     /** Ids of deals matching one field condition; see {@link #companyIdsMatching}. */
     List<Integer> dealIdsMatching(Map<String, Object> params);
+
+    /**
+     * Ids of companies matching one existence {@code predicate} (whitelisted token in {@code params}).
+     * Company supports {@code has_attachment} only; other predicates yield no rows.
+     */
+    List<Integer> companyExistence(Map<String, Object> params);
+
+    /**
+     * Ids of people matching one existence {@code predicate} (whitelisted token): {@code has_open_task},
+     * {@code overdue_task}, {@code recent_meeting} ({@code days}-bound), {@code has_note}, or
+     * {@code has_attachment}. Excludes processing-restricted contacts unless {@code includeRestrictedPeople}.
+     */
+    List<Integer> personExistence(Map<String, Object> params);
+
+    /** Ids of deals matching one existence {@code predicate}; see {@link #personExistence}. */
+    List<Integer> dealExistence(Map<String, Object> params);
 
     /** Distinct non-blank industry values in the workspace, for the builder's value picker. */
     List<String> distinctIndustries(int workspaceId);

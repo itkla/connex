@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -15,33 +15,41 @@ import {
     Squares2X2Icon,
     TableCellsIcon,
     TagIcon,
+    UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { useRecordsSort } from '@/app/hooks/useRecordsSort';
-import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { type ColumnDef, type ColumnFilterFacet, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
-import { getContacts } from '@/app/lib/api';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
-import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -63,7 +71,36 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
     );
 }
 
+function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): CompanyMetrics {
+    const relatedUserIds = new Set(engagement.relatedUserIds);
+    return {
+        persons: engagement.persons,
+        personCount: engagement.personCount,
+        relatedUsers: users.filter((user) => relatedUserIds.has(user.id)),
+        relatedUserCount: engagement.relatedUserCount,
+        pastRevenue: engagement.pastRevenue,
+        projectedRevenue: engagement.projectedRevenue,
+        currency: engagement.currency,
+        numDeals: engagement.numDeals,
+        numTasks: engagement.numTasks,
+        numActivities: engagement.numActivities,
+        numNotes: engagement.numNotes,
+        weeklyEngagement: engagement.weeklyEngagement,
+    };
+}
+
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
+
+const NO_ITEMS: Company[] = [];
+/** Impossible company id (ids are positive) used to force an empty scoped export when a segment matches nothing. */
+const NO_MATCH_COMPANY_ID = 0;
+const EMPTY_COMPANY_DRAFT: CreateCompanyPayload = {
+    name: '',
+    website: '',
+    industry: '',
+    phone: '',
+    address: '',
+};
 
 function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayload {
     return {
@@ -75,44 +112,224 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
     };
 }
 
-export default function CompaniesBrowser({ companies, savedViews }: { companies: Company[]; savedViews: SavedView[] }) {
+export default function CompaniesBrowser({ savedViews, defaultView }: { savedViews: SavedView[]; defaultView: SavedView | null }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
+
     const {
         displayMode,
         setDisplayMode,
-        query,
-        setQuery,
         filterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
-        filteredItems: filteredCompanies,
-        selectedItems: selectedCompanies,
         deleteDialogOpen,
         setDeleteDialogOpen,
-    } = useRecordsBrowser<Company>({
+    } = useRecordsBrowser<Company>({ items: NO_ITEMS, storageKey: 'companies:view', searchFields });
+
+    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
+    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
+    const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
+    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
+    const hasSegments = hasSegmentConditions(evaluable);
+    const failedSegmentKeyRef = useRef<string | null>(null);
+    const [segmentErrorKey, setSegmentErrorKey] = useState<string | null>(null);
+    useEffect(() => {
+        getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
+    }, [tSeg]);
+
+    const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] }>(() => {
+        const industryFilter = filterState.industry ?? [];
+        const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
+        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
+        if (industries.length) params.industry = industries;
+        if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
+        if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
+        if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
+        return params;
+    }, [filterState, ownerScope]);
+
+    const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
+        if (!hasSegments) {
+            failedSegmentKeyRef.current = null;
+            return getCompaniesPage(params);
+        }
+        try {
+            const response = await getCompaniesSegmentPage({ ...params, definition: evaluable });
+            failedSegmentKeyRef.current = null;
+            setSegmentErrorKey((key) => key === segmentsKey ? null : key);
+            return response;
+        } catch (error) {
+            if (failedSegmentKeyRef.current !== segmentsKey) {
+                failedSegmentKeyRef.current = segmentsKey;
+                toastError(tSeg('evaluateFailed'));
+            }
+            setSegmentErrorKey(segmentsKey);
+            throw error;
+        }
+    }, [evaluable, hasSegments, segmentsKey, tSeg]);
+
+    const {
         items: companies,
-        storageKey: 'companies:view',
-        searchFields,
-    });
-    const { sortKey, sortDirection, onSortChange, applySort, sortState } = useRecordsSort();
+        total,
+        loading,
+        page,
+        setPage,
+        size,
+        setSize,
+        query,
+        setQuery,
+        applyQuery,
+        sortKey,
+        sortDirection,
+        onSortChange: changeServerSort,
+        applySort: applyServerSort,
+        revision,
+        reload,
+        patchItem,
+    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams, { urlSync: true });
+
+    const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
+    const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
+
+    const filterSignature = useMemo(
+        () => JSON.stringify([filterParams, query, hasSegments ? segmentsKey : null, segmentErrorKey === segmentsKey]),
+        [filterParams, query, hasSegments, segmentsKey, segmentErrorKey],
+    );
+    const filterSignatureRef = useRef(filterSignature);
+    useEffect(() => {
+        filterSignatureRef.current = filterSignature;
+    }, [filterSignature]);
+    const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
+    const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const selectAllRequestRef = useRef(0);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const clearSelection = useCallback(() => {
+        selectAllRequestRef.current += 1;
+        setSelectingAll(false);
+        setMatchedSignature(null);
+        setSelectedIds(new Set());
+    }, [setSelectedIds]);
+    const onSortChange = useCallback((key: string) => {
+        clearSelection();
+        changeServerSort(key);
+    }, [clearSelection, changeServerSort]);
+    const applySort = useCallback((key: string | null, direction: 'asc' | 'desc') => {
+        clearSelection();
+        applyServerSort(key, direction);
+    }, [clearSelection, applyServerSort]);
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        selectAllRequestRef.current += 1;
+        setMatchedSignature(null);
+        setSelectedIds(allMatchingActive ? new Set() : ids);
+    }, [allMatchingActive, setSelectedIds]);
+    const selectionScope = `${page}:${size}:${sortKey ?? ''}:${sortDirection}:${revision}:${filterSignature}`;
+    const previousSelectionScopeRef = useRef(selectionScope);
+    useEffect(() => {
+        const scopeChanged = previousSelectionScopeRef.current !== selectionScope;
+        previousSelectionScopeRef.current = selectionScope;
+        if (scopeChanged && !allMatchingActive) clearSelection();
+    }, [selectionScope, allMatchingActive, clearSelection]);
+
+    const [metricsByCompanyId, setMetricsByCompanyId] = useState<Map<number, CompanyMetrics>>(new Map());
+    const [metricsStatusByCompanyId, setMetricsStatusByCompanyId] =
+        useState<Map<number, LoadStatus>>(new Map());
+    const metricsRequestRef = useRef(new Map<number, number>());
+    const metricsGenerationRef = useRef(0);
+    const usersPromiseRef = useRef<Promise<User[]> | null>(null);
+    useEffect(() => () => {
+        metricsGenerationRef.current += 1;
+    }, []);
+
+    const resetMetrics = useCallback(() => {
+        metricsGenerationRef.current += 1;
+        metricsRequestRef.current.clear();
+        setMetricsByCompanyId(new Map());
+        setMetricsStatusByCompanyId(new Map());
+    }, []);
+
+    const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
+    const loadFacets = useCallback(() => {
+        getCompanyFacets().then(setCompanyFacets).catch(() => setCompanyFacets(null));
+    }, []);
+    useEffect(() => { loadFacets(); }, [loadFacets]);
+    const refresh = useCallback(() => {
+        clearSelection();
+        resetMetrics();
+        reload();
+        loadFacets();
+    }, [clearSelection, resetMetrics, reload, loadFacets]);
+
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'company') refresh();
+    }), [refresh]);
+
+    const selectAllMatching = useCallback(async () => {
+        const requestId = selectAllRequestRef.current + 1;
+        selectAllRequestRef.current = requestId;
+        const requestSignature = filterSignature;
+        setSelectingAll(true);
+        try {
+            const params = { ...filterParams, q: query || undefined };
+            const ids = hasSegments
+                ? await getCompanySegmentIds({ ...params, definition: evaluable })
+                : await getCompanyIds(params);
+            if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
+            setSelectedIds(new Set(ids));
+            setMatchedSignature(requestSignature);
+        } catch (err) {
+            if (requestId !== selectAllRequestRef.current) return;
+            if (hasSegments) {
+                if (failedSegmentKeyRef.current !== segmentsKey) toastError(tSeg('evaluateFailed'));
+                failedSegmentKeyRef.current = segmentsKey;
+                setSegmentErrorKey(segmentsKey);
+            } else {
+                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            }
+        } finally {
+            if (requestId === selectAllRequestRef.current) setSelectingAll(false);
+        }
+    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
+
+    const exportCompanies = useCallback(async (signal: AbortSignal, workspaceId: number) => {
+        const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
+        const params = { ...filterParams, q: query.trim() || undefined };
+        if (!hasSegments) {
+            await exportCompaniesCsv(params, init);
+            return;
+        }
+        const matched = await getCompanySegmentIds({ ...params, definition: evaluable }, init);
+        await exportCompaniesCsv(
+            { ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] },
+            init,
+        );
+    }, [filterParams, query, hasSegments, evaluable]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [drafts, setDrafts] = useState<Record<number, CompanyDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const emptyDraft: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
+    const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(EMPTY_COMPANY_DRAFT);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
+    const newCompanyCloseTimerRef = useRef<number | null>(null);
+    const newCompanyGenerationRef = useRef(0);
+    const invalidateNewCompanyClose = useCallback(() => {
+        newCompanyGenerationRef.current += 1;
+        if (newCompanyCloseTimerRef.current == null) return;
+        window.clearTimeout(newCompanyCloseTimerRef.current);
+        newCompanyCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewCompanyClose(), [invalidateNewCompanyClose]);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
@@ -130,79 +347,68 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         };
         const newContact = await createContact(payload);
         if (c.imageFile) {
-            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
-            if (imageUrl) await updateContact(newContact.id, { ...payload, imageUrl }).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
         }
         return newContact;
     };
 
-    const [allContacts, setAllContacts] = useState<Contact[]>([]);
-    const [allDeals, setAllDeals] = useState<Deal[]>([]);
-    const [allTasks, setAllTasks] = useState<Task[]>([]);
-    const [allActivities, setAllActivities] = useState<Activity[]>([]);
-    const [allNotes, setAllNotes] = useState<Note[]>([]);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
-    const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
-
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
-    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
-    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
-    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
-    const evaluable = useMemo<SegmentDefinition>(
-        () => ({
-            match: definition.match,
-            conditions: definition.conditions.filter((condition) => condition.type === 'predicate' || (condition.value ?? '').trim() !== ''),
-        }),
-        [definition],
-    );
-    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
     useEffect(() => {
-        getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
-    }, [tSeg]);
-    useEffect(() => {
-        if (evaluable.conditions.length === 0) return;
-        if (segmentResult?.key === segmentsKey) return;
-        let active = true;
-        const timer = setTimeout(() => {
-            evaluateSegments('company', evaluable)
-                .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
-                .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
-        }, 300);
-        return () => { active = false; clearTimeout(timer); };
-    }, [evaluable, segmentsKey, segmentResult, tSeg]);
-    useEffect(() => {
-        getCompanyTemperatures()
-            .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
-            .catch(() => setTempByCompanyId(new Map()));
-    }, []);
-
-    const ensureMetricsLoaded = useCallback(() => {
-        if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
-        setMetricsStatus('loading');
-        Promise.all([getContacts({}), getDeals(), getTasks(), getActivities(), getNotes(), getUsers()])
-            .then(([contacts, deals, tasks, activities, notes, users]) => {
-                setAllContacts(contacts);
-                setAllDeals(deals);
-                setAllTasks(tasks);
-                setAllActivities(activities);
-                setAllNotes(notes);
-                setAllUsers(users);
-                setMetricsStatus('ready');
+        let cancelled = false;
+        getCompanyTemperatures(companies.map((company) => company.id))
+            .then((temps) => {
+                if (!cancelled) setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp])));
             })
             .catch(() => {
-                setMetricsStatus('error');
+                if (!cancelled) setTempByCompanyId(new Map());
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [companies]);
+
+    const ensureMetricsLoaded = useCallback((companyId: number) => {
+        const status = metricsStatusByCompanyId.get(companyId);
+        if (status === 'loading' || status === 'ready') return;
+        const requestId = (metricsRequestRef.current.get(companyId) ?? 0) + 1;
+        const generation = metricsGenerationRef.current;
+        metricsRequestRef.current.set(companyId, requestId);
+        setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'loading'));
+        usersPromiseRef.current ??= getUsers();
+        Promise.all([getCompanyEngagement(companyId), usersPromiseRef.current])
+            .then(([engagement, users]) => {
+                if (generation !== metricsGenerationRef.current
+                    || metricsRequestRef.current.get(companyId) !== requestId) return;
+                setMetricsByCompanyId((current) =>
+                    new Map(current).set(companyId, metricsFromEngagement(engagement, users)));
+                setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'ready'));
+            })
+            .catch(() => {
+                if (generation !== metricsGenerationRef.current
+                    || metricsRequestRef.current.get(companyId) !== requestId) return;
+                usersPromiseRef.current = null;
+                setMetricsByCompanyId((current) => {
+                    const next = new Map(current);
+                    next.delete(companyId);
+                    return next;
+                });
+                setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'error'));
                 toastError(t('toastMetricsLoadFailed'));
             });
-    }, [metricsStatus, t]);
+    }, [metricsStatusByCompanyId, t]);
+
+    const openNewDialog = () => {
+        invalidateNewCompanyClose();
+        setNewPayload(EMPTY_COMPANY_DRAFT);
+        setLogoFile(null);
+        setPendingContacts([]);
+        setCreationSucceeded(false);
+        setNewDialogOpen(true);
+    };
 
     const closeNewDialog = (open: boolean) => {
+        invalidateNewCompanyClose();
         setNewDialogOpen(open);
-        if (!open) {
-            setNewPayload(emptyDraft);
-            setLogoFile(null);
-            setPendingContacts([]);
-            setCreationSucceeded(false);
-        }
     };
 
     const createNewCompany = async () => {
@@ -211,9 +417,13 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         try {
             const companyPayload = cleanCompanyPayload(newPayload);
             const created = await createCompany(companyPayload);
+            let logoUploadFailed = false;
             if (logoFile) {
-                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...companyPayload, logoUrl });
+                try {
+                    await uploadCompanyLogo(created.id, logoFile);
+                } catch {
+                    logoUploadFailed = true;
+                }
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
@@ -225,11 +435,16 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 }
             }
             toastSuccess(t('toastCompanyCreated'));
+            if (logoUploadFailed) toastError(t('toastLogoUploadFailed'));
             setIsCreating(false);
             setCreationSucceeded(true);
-            setTimeout(() => {
+            invalidateNewCompanyClose();
+            const closeGeneration = newCompanyGenerationRef.current;
+            newCompanyCloseTimerRef.current = window.setTimeout(() => {
+                if (newCompanyGenerationRef.current !== closeGeneration) return;
+                newCompanyCloseTimerRef.current = null;
                 closeNewDialog(false);
-                router.refresh();
+                refresh();
             }, 850);
         } catch (err) {
             if (isFieldError(err)) {
@@ -281,7 +496,6 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         industry: d.industry.trim() || undefined,
                         phone: d.phone.trim() || undefined,
                         address: d.address.trim() || undefined,
-                        logoUrl: c.logoUrl || undefined,
                     };
                     return updateCompany(c.id, payload);
                 }),
@@ -290,7 +504,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 changed.length === 1 ? t('toastCompanyUpdated') : t('toastCompaniesUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
-            router.refresh();
+            refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
         } finally {
@@ -299,17 +513,17 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     };
 
     const quickEditOne = useCallback((company: Company) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([company.id]));
         setDrafts({ [company.id]: toDraft(company) });
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
     const deleteOne = useCallback((company: Company) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([company.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
-
-    const selectedCompanyIds = useMemo(() => selectedCompanies.map((c) => c.id), [selectedCompanies]);
 
     const confirmDelete = async () => {
         if (selectedCompanyIds.length === 0) return;
@@ -324,7 +538,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             setDeleteDialogOpen(false);
             if (anySucceeded) {
                 setSelectedIds(new Set());
-                router.refresh();
+                refresh();
             }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
@@ -335,13 +549,30 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
 
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const segmentOptions = useMemo<RuleBuilderOptions>(() => ({
+        stages: [],
+        owners: activeMembers.map((member) => ({ id: member.id, name: member.displayName })),
+        companies: [],
+    }), [activeMembers]);
+    const ownerCounts = useMemo(
+        () => new Map(companyFacets?.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [companyFacets],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        setFilterState({ ...filterState, owner: values });
+    }, [filterState, setFilterState]);
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const applyBulkTag = useCallback((tagId: number) => {
         return bulkTag.mode === 'add'
             ? bulkAddTagToCompanies(selectedCompanyIds, tagId)
             : bulkRemoveTagFromCompanies(selectedCompanyIds, tagId);
     }, [bulkTag.mode, selectedCompanyIds]);
-    const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
+    const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); refresh(); }, [setSelectedIds, refresh]);
 
     const viewSelected = () => {
         if (selectedCompanies.length === 1) {
@@ -351,37 +582,57 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         }
     };
 
+    const inlineEdit = useInlineEdit<Company>(patchItem);
+    const saveCompany = useCallback(
+        (full: Company) =>
+            updateCompany(full.id, {
+                name: full.name,
+                website: full.website,
+                industry: full.industry,
+                phone: full.phone,
+                address: full.address,
+            }).then(() => {}),
+        [],
+    );
+
     const columns: ColumnDef<Company>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'warmth',
             label: t('columnWarmth'),
             getSortValue: (c) => tempByCompanyId.get(c.id)?.score ?? null,
+            sortable: false,
             render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
+        },
+        {
+            key: 'owner',
+            label: t('columnOwner'),
+            sortable: false,
+            render: (c) => (c.ownerId != null ? memberById.get(c.ownerId)?.displayName ?? '' : ''),
         },
         {
             key: 'website',
             label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
-            copyable: { label: t('columnWebsite'), getValue: (c) => c.website },
+            editable: { getValue: (c) => c.website, save: (c, v) => inlineEdit.commit(c, 'website', v, saveCompany), inputType: 'url' },
         },
         {
             key: 'industry',
             label: t('columnIndustry'),
             getSortValue: (c) => c.industry ?? null,
-            filter: { getValue: (c) => c.industry ?? null, emptyLabel: t('filterNoIndustry') },
+            editable: { getValue: (c) => c.industry, save: (c, v) => inlineEdit.commit(c, 'industry', v, saveCompany) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: t('columnPhone'), getValue: (c) => c.phone },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveCompany), inputType: 'tel' },
         },
         {
             key: 'address',
             label: t('columnAddress'),
             getSortValue: (c) => c.address ?? null,
-            copyable: { label: t('columnAddress'), getValue: (c) => c.address },
+            editable: { getValue: (c) => c.address, save: (c, v) => inlineEdit.commit(c, 'address', v, saveCompany) },
         },
         {
             key: 'createdAt',
@@ -395,123 +646,72 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany]);
 
-    const activeSegmentIds = evaluable.conditions.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
-    const segmentsLoading = evaluable.conditions.length > 0 && segmentResult?.key !== segmentsKey;
-    const visibleCompanies = useMemo(
-        () => {
-            const filtered = applyRecordFilters(filteredCompanies, columns, filterState);
-            return activeSegmentIds ? filtered.filter((company) => activeSegmentIds.has(company.id)) : filtered;
-        },
-        [filteredCompanies, columns, filterState, activeSegmentIds],
-    );
+    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
-    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', visibleCompanies);
-
-    const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || evaluable.conditions.length > 0;
+    const facets = useMemo<ColumnFilterFacet[]>(() => {
+        if (!companyFacets) return [];
+        const options = companyFacets.industries.map((name) => ({ key: name, label: name }));
+        if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
+        return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
+    }, [companyFacets, t]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || hasSegments;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
     );
+    const resolveOwnerName = useCallback(
+        (id: string) => memberById.get(Number(id))?.displayName ?? id,
+        [memberById],
+    );
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
-        ...definition.conditions
-            .map((condition, index) => ({ condition, index }))
-            .filter(({ condition }) => condition.type === 'predicate' || (condition.value ?? '').trim() !== '')
-            .map(({ condition, index }) => ({
-                id: `segment:${index}`,
-                label: segmentConditionLabel(condition, tSeg, resolveTagName),
-                onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
-            })),
+        ...definition.conditions.flatMap((condition, index) =>
+            condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
+                ? [{
+                    id: `segment:${index}`,
+                    label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
+                    onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
+                }]
+                : [],
+        ),
     ];
-
-    const [now] = useState(() => Date.now());
-    const metricsByCompanyId = useMemo(() => {
-        const map = new Map<number, CompanyMetrics>();
-        for (const company of companies) {
-            const persons = allContacts.filter((c) => c.companyId === company.id);
-            const deals = allDeals.filter((d) => d.company === company.id);
-            const personIds = new Set(persons.map((c) => c.id));
-            const dealIds = new Set(deals.map((d) => d.id));
-            const tasks = allTasks.filter((t) =>
-                (t.personId != null && personIds.has(t.personId)) ||
-                (t.dealId != null && dealIds.has(t.dealId)),
-            );
-            const activities = allActivities.filter((a) =>
-                (a.personId != null && personIds.has(a.personId)) ||
-                (a.dealId != null && dealIds.has(a.dealId)),
-            );
-            const notes = allNotes.filter((n) =>
-                (n.person != null && personIds.has(n.person)) ||
-                (n.deal != null && dealIds.has(n.deal)),
-            );
-            const userIds = new Set<number>();
-            for (const t of tasks) if (t.assignedToId != null) userIds.add(t.assignedToId);
-            for (const a of activities) userIds.add(a.createdById);
-            for (const n of notes) userIds.add(n.author);
-
-            const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-            const firstWeekStart = now - 11 * WEEK_MS;
-            const weeklyEngagement = Array.from({ length: 12 }, (_, i) => ({
-                weekStart: firstWeekStart + i * WEEK_MS,
-                count: 0,
-                activities: 0,
-                tasks: 0,
-                notes: 0,
-            }));
-            const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
-                if (!Number.isFinite(ts)) return;
-                const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
-                if (idx < 0 || idx >= weeklyEngagement.length) return;
-                weeklyEngagement[idx][kind]++;
-                weeklyEngagement[idx].count++;
-            };
-            for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
-            for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
-            for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
-
-            const currency = pickDominantCurrency(deals);
-            let pastRevenue = 0;
-            let projectedRevenue = 0;
-            for (const d of deals) {
-                if ((d.currency || 'USD') !== currency) continue;
-                if (isDealClosed(d)) {
-                    pastRevenue += d.value ?? 0;
-                } else {
-                    projectedRevenue += d.value ?? 0;
-                }
-            }
-
-            map.set(company.id, {
-                persons,
-                relatedUsers: allUsers.filter((u) => userIds.has(u.id)),
-                pastRevenue,
-                projectedRevenue,
-                currency,
-                numDeals: deals.length,
-                numTasks: tasks.length,
-                numActivities: activities.length,
-                numNotes: notes.length,
-                weeklyEngagement,
-            });
-        }
-        return map;
-    }, [now, companies, allContacts, allDeals, allTasks, allActivities, allNotes, allUsers]);
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={viewSelected}>
-                <EyeIcon className="size-4" />
-                {t('view')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                <PencilIcon className="size-4" />
-                {t('quickEdit')}
-            </Button>
+            {!allMatchingActive && (
+                <>
+                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                        <EyeIcon className="size-4" />
+                        {t('view')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                        <PencilIcon className="size-4" />
+                        {t('quickEdit')}
+                    </Button>
+                </>
+            )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -527,6 +727,10 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         <TagIcon />
                         {t('removeTag')}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
@@ -538,17 +742,30 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey, sortDirection, segments: definition }),
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: definition }),
         [filterState, query, sortKey, sortDirection, definition],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
-            setQuery(config.query ?? '');
-            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+            applyQuery(config.query ?? '');
+            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
             setDefinition(isSegmentDefinition(config.segments) ? config.segments : EMPTY_DEFINITION);
         },
-        [setFilterState, setQuery, applySort],
+        [setFilterState, applyQuery, applySort],
+    );
+
+    const { density, setDensity } = useRecordDensity();
+    const mergedColumns = useMemo(
+        () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
+        [columns, customColumns],
+    );
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
+    const peek = useRecordPeekController('company', companies, displayMode === 'table');
+
+    const recordRef = useCallback(
+        (company: Company): ActiveRecordRef => ({ type: 'company', id: company.id, label: company.name }),
+        [],
     );
 
     return (
@@ -560,11 +777,11 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         <div className="flex items-center gap-2">
                             <RecordsActions
                                 entity="companies"
-                                onNew={() => setNewDialogOpen(true)}
+                                onNew={openNewDialog}
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
-                                onImported={() => router.refresh()}
-                                exportIds={visibleCompanies.map((c) => c.id)}
+                                onImported={refresh}
+                                onExport={exportCompanies}
                             />
                         </div>
                     </div>
@@ -576,6 +793,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        defaultView={defaultView}
                     />
                 </Rise>
 
@@ -598,7 +816,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
+                                <SegmentBuilder definition={definition} fields={segmentFields} options={segmentOptions} onChange={setDefinition} />
                                 {displayMode === 'grid' && (
                                     <RecordsSortMenu
                                         columns={columns}
@@ -616,9 +834,24 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
                                     ]}
                                 />
+                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {displayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={filterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Company>
                             facets={facets}
                             filterState={filterState}
@@ -627,35 +860,74 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                     </FilterBar>
                 </Rise>
 
+                {(() => {
+                    const pageFullySelected = companies.length > 0 && companies.every((company) => selectedIds.has(company.id));
+                    const allMatchingSelected = allMatchingActive && total > companies.length && selectedIds.size >= total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > companies.length && selectedIds.size < total;
+                    if (!canSelectAllMatching && !allMatchingSelected) return null;
+                    return (
+                        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
+                            {allMatchingSelected ? (
+                                <>
+                                    <span>{t('allMatchingSelected', { total })}</span>
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                        {t('clearSelection')}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{t('pageSelected', { count: selectedCompanyIds.length })}</span>
+                                    <button
+                                        type="button"
+                                        onClick={selectAllMatching}
+                                        disabled={selectingAll || loading}
+                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                    >
+                                        {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    );
+                })()}
+
                 <Rise delay={0.18}>
                     <RecordsRenderView<Company>
-                        data={visibleCompanies}
-                        loading={segmentsLoading}
-                        columns={[...columns, ...customColumns]}
+                        data={companies}
+                        loading={loading}
+                        columns={visibleColumns}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <CompanyCard
                                 company={item}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 metrics={metricsByCompanyId.get(item.id)}
-                                metricsStatus={metricsStatus}
-                                onFirstExpand={ensureMetricsLoaded}
+                                metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
+                                onFirstExpand={() => ensureMetricsLoaded(item.id)}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={(item) => `/records/companies/${item.id}`}
+                        onRowClick={(item) => peek.openPeek(item.id)}
+                        activeId={peek.activeId}
+                        recordRef={recordRef}
                         displayMode={displayMode}
+                        density={density}
                         selectedIds={selectedIds}
-                        onSelectedIdsChange={setSelectedIds}
+                        onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}
                         onDelete={deleteOne}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
-                        sortState={sortState}
+                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
+                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditCompanySheet
                     open={editSheetOpen}
@@ -708,6 +980,20 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         failure: (failed) => t('toastTagFailed', { failed }),
                     }}
                     onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedCompanyIds.length}
+                    members={activeMembers}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignCompanyOwner(selectedCompanyIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
             </div>

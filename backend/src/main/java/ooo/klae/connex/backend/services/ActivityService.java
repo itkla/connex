@@ -10,6 +10,10 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.CountDto;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -18,6 +22,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,17 +65,66 @@ public class ActivityService {
         return referenceService.hydrateActivities(workspaceId, activityMapper.getAllActivities(workspaceId));
     }
 
+    public List<Activity> getActivitiesPage(int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateActivities(workspaceId,
+            activityMapper.getActivitiesPage(workspaceId, limit, offset));
+    }
+
+    public List<Activity> getActivitiesPage(Integer personId, Integer dealId, Integer createdById, int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireDealExists(workspaceId, dealId);
+        return referenceService.hydrateActivities(workspaceId,
+            activityMapper.getActivitiesFilteredPage(workspaceId, personId, dealId, createdById, limit, offset));
+    }
+
+    public long countActivities(Integer personId, Integer dealId, Integer createdById) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireDealExists(workspaceId, dealId);
+        return activityMapper.countActivities(workspaceId, personId, dealId, createdById);
+    }
+
+    public List<ActivityVolumeBucketDto> getActivityVolume(int days, MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int bucketCount = activityBucketCount(days);
+        double spanDays = days / (double) bucketCount;
+        List<ActivityVolumeBucketDto> volume = new ArrayList<>(bucketCount);
+        for (int bucketIndex = 0; bucketIndex < bucketCount; bucketIndex++) {
+            volume.add(new ActivityVolumeBucketDto(bucketIndex, 0, 0, 0, 0, 0));
+        }
+        for (ActivityVolumeBucketDto bucket :
+                activityMapper.activityVolume(workspaceId, days, bucketCount, spanDays, memberScope)) {
+            volume.set(bucket.bucketIndex(), bucket);
+        }
+        return volume;
+    }
+
+    public List<TeamLeaderboardEntryDto> getTeamLeaderboard(int days) {
+        return activityMapper.teamLeaderboard(workspaceService.getCurrentWorkspaceId(), days);
+    }
+
+    public CountDto getUpcomingCount(int days) {
+        return new CountDto(activityMapper.upcomingCount(workspaceService.getCurrentWorkspaceId(), days));
+    }
+
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesByPersonId(workspaceId, personId));
     }
 
+    private static int activityBucketCount(int days) {
+        return switch (days) {
+            case 30 -> 6;
+            case 90 -> 9;
+            case 365 -> 12;
+            default -> throw new IllegalArgumentException("Unsupported analytics range: " + days);
+        };
+    }
+
     public List<Activity> getActivitiesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        }
+        requireDealExists(workspaceId, dealId);
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesByDealId(workspaceId, dealId));
     }
@@ -102,6 +156,7 @@ public class ActivityService {
         try {
             activity.setWorkspaceId(workspaceId);
             activity.setCreatedBy(actor);
+            activity.setType(normalizeType(activity.getType()));
             activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
@@ -135,6 +190,7 @@ public class ActivityService {
         activity.setId(id);
         activity.setWorkspaceId(workspaceId);
         activity.setCreatedBy(before.getCreatedBy());
+        activity.setType(normalizeType(activity.getType()));
         activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), before.getTimestamp()));
         activityMapper.update(activity);
         auditService.record("activity.update", "activity", id, activity.getSubject(),
@@ -167,6 +223,16 @@ public class ActivityService {
 
     private Activity hydrate(int workspaceId, Activity activity) {
         return referenceService.hydrateActivities(workspaceId, List.of(activity)).get(0);
+    }
+
+    private void requireDealExists(int workspaceId, Integer dealId) {
+        if (dealId != null && !dealMapper.exists(workspaceId, dealId)) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+    }
+
+    private static String normalizeType(String type) {
+        return type == null ? null : type.trim();
     }
 
     private void notifyMentions(int workspaceId, Activity activity, List<Integer> recipientIds, User actor) {

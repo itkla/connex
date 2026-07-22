@@ -39,8 +39,9 @@ For minor changes to existing components/pages (spacing, copy, a single prop, a 
    - `--warmth-hot` / `--warmth-warm` / `--warmth-cool` / `--warmth-cold` for relationship temperature.
    - `--chart-*` (`chart-1..5`, `chart-won/lost/open`, `chart-grid/axis/stroke`) for data viz — use these with recharts/d3, not raw colors.
    - `--sidebar-*`, semantic `--background/--foreground/--muted/--accent/--destructive`, etc.
-3. **`emil-design-eng`** for the feel and the invisible details.
-4. **Live reference pages** — match these in look and behavior for any new UI:
+3. **Motion presets — `app/lib/motion.ts`.** Use the shared named springs/easings (`springJiggle` — the house bouncy "jiggle", `springSnappy`, `springSmooth`, `easeOut`, `instant`) instead of ad-hoc `{ type: 'spring', … }` literals, so motion feels consistent. Always pair with a `useReducedMotion()` fallback (`instant`).
+4. **`emil-design-eng`** for the feel and the invisible details.
+5. **Live reference pages** — match these in look and behavior for any new UI:
    - `app/(app)/overview/analytics`
    - `app/(app)/dashboard`
    - `app/(app)/records/*` (contacts, companies, deals, pipelines)
@@ -60,15 +61,16 @@ When in doubt, open a reference page and mirror it.
 
 ## API contract & integration
 
-- **The backend is reached at `/api/*`.** `next.config.ts` rewrites `/api/:path*` → `http://localhost:8080/api/:path*`, so the backend must be running (`./gradlew bootRun`) for the app to work. A few Next route handlers under `app/api/*` (uploads, logo/avatar) proxy specific flows — extend those patterns rather than inventing new ones.
+- **The backend is reached at `/api/*`.** `next.config.ts` rewrites `/api/:path*` → `http://localhost:8080/api/:path*`, so the backend must be running (`./gradlew bootRun`) for the app to work. Uploads, logos, avatars, and business-card images go directly to authenticated backend multipart endpoints through the shared API client; never store them in Next.js `public/` or add a frontend filesystem upload route.
 - **Use the shared API client** in `app/lib/api.ts`; types in `app/lib/types.ts` must match backend DTOs. Don't scatter raw `fetch` calls.
 - **Auth/session is cookie-based** (`JSESSIONID` + `connex_workspace`), enforced in `proxy.ts` (route protection, login/onboarding/invite redirects). When adding protected routes, update the prefixes there.
+- **Slow AI request de-duplication is identity-bound.** The shared client keys in-flight AI mutations by the opaque server-issued authenticated-session generation from `/api/auth/csrf`, workspace, and locale; auth/workspace transitions must invalidate locally and notify other tabs without persisting user or session identifiers.
 - **Surface errors as toasts** via `app/lib/toast.ts` (`sonner`) — don't swallow failures or leave dead UI. Handle loading and error states explicitly.
 
 ## Internationalization (EN + JA)
 
 - Connex is **bilingual: English and Japanese.** Every user-facing string goes through `next-intl` — add keys to **both** `messages/en` and `messages/ja`. Never hardcode copy.
-- Config lives in `i18n/request.ts`. Use the Japanese font (`--font-noto-sans-jp`) where JA renders; don't assume Latin-only text widths in layouts.
+- Supported locales and the default live in `i18n/config.ts`; request message loading lives in `i18n/request.ts`. Use the Japanese font (`--font-noto-sans-jp`) where JA renders; don't assume Latin-only text widths in layouts.
 
 ## Accessibility
 
@@ -76,6 +78,10 @@ When in doubt, open a reference page and mirror it.
 - Semantic HTML first; ARIA only to fill gaps. Everything interactive must be keyboard-operable with a visible focus state.
 - Color and contrast come from tokens (which carry the contrast guarantees) — don't hand-pick colors that break it.
 - Respect `prefers-reduced-motion` for animations (the `motion` lib + `review-animations` skill cover this).
+
+## Delegated work is plan-first
+
+Any subagent dispatched to implement frontend work must first return a short plan — components/files to touch, design-system pieces reused, state/URL contracts, i18n keys, and the browser-verification steps — and get it reviewed by the orchestrator before editing code (see the root `AGENTS.md` → *Plan-first dispatch*). Discovery, review, and verification agents are exempt.
 
 ## Definition of Done (frontend)
 

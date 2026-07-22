@@ -1,0 +1,885 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      build_epoch: ${{ steps.metadata.outputs.build_epoch }}
+      build_time: ${{ steps.metadata.outputs.build_time }}
+      transaction_exists: ${{ steps.transaction.outputs.exists }}
+      transaction_name: ${{ steps.transaction.outputs.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release event metadata
+        id: metadata
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Release tags must use strict vMAJOR.MINOR.PATCH SemVer."
+            exit 1
+          fi
+          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
+          {
+            echo "version=$VERSION"
+            echo "build_epoch=$BUILD_EPOCH"
+            echo "build_time=$BUILD_TIME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Detect a committed release transaction from an earlier attempt
+        id: transaction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="release-transaction-${GITHUB_RUN_ID}-"
+          artifacts="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          count="$(jq --arg prefix "$prefix" \
+            '[.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false)] | length' \
+            <<<"$artifacts")"
+          test "$count" -le 1
+          if [ "$count" = 1 ]; then
+            name="$(jq -r --arg prefix "$prefix" \
+              '.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false) | .name' \
+              <<<"$artifacts")"
+            {
+              echo "exists=true"
+              echo "name=$name"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "exists=false"
+              echo "name="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Revalidate release tag and immutable publication policy
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+
+      - name: Require release commit to remain the main head
+        if: steps.transaction.outputs.exists != 'true'
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
+      - name: Require successful trusted workflows for the release commit
+        if: steps.transaction.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          required=(ci.yml security.yml deploy-smoke.yml)
+          for attempt in $(seq 1 80); do
+            waiting=false
+            for workflow in "${required[@]}"; do
+              runs="$(gh api \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?head_sha=${GITHUB_SHA}&event=push&per_page=20")"
+              latest="$(jq '[.workflow_runs[] | select(
+                .head_sha == env.GITHUB_SHA
+                and .head_branch == "main"
+                and .event == "push"
+              )] | sort_by([.run_number, .run_attempt]) | last // null' <<<"$runs")"
+              if jq -e '.status == "completed" and .conclusion == "success"' \
+                  <<<"$latest" >/dev/null; then
+                continue
+              fi
+              if jq -e '.status == "completed"' <<<"$latest" >/dev/null; then
+                echo "::error::Required workflow did not succeed: ${workflow}"
+                exit 1
+              fi
+              waiting=true
+            done
+            if [ "$waiting" = false ]; then
+              exit 0
+            fi
+            if [ "$attempt" = 80 ]; then
+              echo "::error::Required release checks did not complete successfully."
+              exit 1
+            fi
+            sleep 15
+          done
+
+  candidate-images:
+    name: Build and verify ${{ matrix.component }} candidate
+    needs: metadata
+    if: needs.metadata.outputs.transaction_exists != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        component: [backend, frontend, ocr]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+
+      - name: Verify pinned build toolchain
+        run: |
+          docker buildx version | grep -F 'v0.35.0'
+          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push candidate
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.build_epoch }}
+        with:
+          context: ./${{ matrix.component }}
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.version }}
+            BUILD_TIME=${{ needs.metadata.outputs.build_time }}
+            SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.build_epoch }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+
+      - name: Resolve candidate digest
+        id: digest
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          digest="${BUILT_DIGEST:-}"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Attest candidate build provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
+      - name: Smoke exact OCR candidate
+        if: matrix.component == 'ocr'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-ocr
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: bash ocr/ci/smoke_image.sh "${IMAGE}@${DIGEST}"
+
+      - name: Scan exact candidate for high-severity vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Sign candidate digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.component }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest SBOM to candidate digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign attest --yes --predicate "sbom-${{ matrix.component }}.spdx.json" --type spdxjson "${IMAGE}@${DIGEST}"
+
+      - name: Write image descriptor
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}
+          CANDIDATE_TAG: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          SBOM_FILE="sbom-${COMPONENT}.spdx.json"
+          SBOM_SHA256="$(sha256sum "$SBOM_FILE" | cut -d ' ' -f1)"
+          jq -n \
+            --arg component "$COMPONENT" \
+            --arg image "$IMAGE" \
+            --arg candidate "$CANDIDATE_TAG" \
+            --arg digest "$DIGEST" \
+            --arg version "$VERSION" \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg sbomFile "$SBOM_FILE" \
+            --arg sbomSha256 "$SBOM_SHA256" \
+            '{component:$component,image:$image,candidate:$candidate,digest:$digest,version:$version,sourceSha:$sourceSha,runId:$runId,runAttempt:$runAttempt,sbom:{file:$sbomFile,sha256:$sbomSha256}}' \
+            > "release-${COMPONENT}.json"
+
+      - name: Upload verified candidate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.component }}
+          retention-days: 7
+          path: |
+            release-${{ matrix.component }}.json
+            sbom-${{ matrix.component }}.spdx.json
+
+  release-set-smoke:
+    name: Smoke exact release set
+    needs: [metadata, candidate-images]
+    if: needs.metadata.outputs.transaction_exists != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Require complete candidates from this attempt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          artifacts="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+          for component in backend frontend ocr; do
+            name="release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${component}"
+            count="$(jq --arg name "$name" \
+              '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
+              <<<"$artifacts")"
+            if [ "$count" != 1 ]; then
+              echo "::error::This attempt has no complete candidate set. Re-run all jobs, not only failed jobs."
+              exit 1
+            fi
+          done
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}-*
+          merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare exact-digest Compose release set
+        working-directory: deploy
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          test "$(find .. -maxdepth 1 -name 'release-*.json' -type f | wc -l)" = 3
+          for component in backend frontend ocr; do
+            descriptor="../release-${component}.json"
+            test "$(jq -r '.component' "$descriptor")" = "$component"
+            test "$(jq -r '.version' "$descriptor")" = "$VERSION"
+            test "$(jq -r '.sourceSha' "$descriptor")" = "$GITHUB_SHA"
+            test "$(jq -r '.runId' "$descriptor")" = "$GITHUB_RUN_ID"
+            test "$(jq -r '.runAttempt' "$descriptor")" = "$GITHUB_RUN_ATTEMPT"
+            expected_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/connex-${component}"
+            test "$(jq -r '.image' "$descriptor")" = "$expected_image"
+            sbom="../$(jq -r '.sbom.file' "$descriptor")"
+            test -f "$sbom"
+            test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = "$(jq -r '.sbom.sha256' "$descriptor")"
+          done
+          cp eval.env.example .env
+          TOKEN="$(openssl rand -hex 32)"
+          PASSWORD="BenchmarkAa1!$(openssl rand -hex 16)"
+          sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18088/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_SCANNING_ENABLED=.*/CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=120/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=120/' .env
+          sed -i "s/^CONNEX_BACKEND_DIGEST=.*/CONNEX_BACKEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-backend.json)/" .env
+          sed -i "s/^CONNEX_FRONTEND_DIGEST=.*/CONNEX_FRONTEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-frontend.json)/" .env
+          sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
+          sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
+          printf '%s\n' \
+            'COMPOSE_PROFILES=ocr' \
+            'CONNEX_BOOTSTRAP_ENABLED=true' \
+            'CONNEX_BOOTSTRAP_USERNAME=benchmark' \
+            'CONNEX_BOOTSTRAP_EMAIL=benchmark@example.test' \
+            "CONNEX_BOOTSTRAP_PASSWORD=${PASSWORD}" \
+            'CONNEX_BOOTSTRAP_DISPLAY_NAME=Release Benchmark' \
+            >> .env
+          printf '%s' "$PASSWORD" > /tmp/benchmark-password
+
+      - name: Boot and verify exact release set
+        working-directory: deploy
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          compose() {
+            docker compose "$@"
+          }
+          compose config --format json | jq -e '
+            .networks.ocr_internal.internal == true
+            and .networks.ocr_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+            and .networks.ocr_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv6"] == "isolated"
+            and .services.backend.networks.default.gw_priority == 1
+            and .services.backend.environment.CONNEX_DB_ROOT_PASSWORD == ""
+            and .services.ocr.environment.CONNEX_OCR_MAX_IMAGE_BYTES == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES
+            and .services.ocr.environment.CONNEX_OCR_MAX_WIDTH == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH
+            and .services.ocr.environment.CONNEX_OCR_MAX_HEIGHT == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT
+            and .services.ocr.environment.CONNEX_OCR_MAX_PIXELS == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS
+          '
+          compose pull
+          compose up -d --wait --wait-timeout 300
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:18088/api/version \
+                | jq -e --arg version "$VERSION" '.version == $version' >/dev/null \
+              && curl -fsS http://127.0.0.1:18088/api/capabilities \
+                | jq -e '.businessCardScanning == true and .businessCardImport == true' >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 120 ]; then
+              compose logs --no-color
+              exit 1
+            fi
+            sleep 2
+          done
+          for component in backend frontend ocr; do
+            container="$(compose ps -q "$component")"
+            expected="$(jq -r '.image + "@" + .digest' "../release-${component}.json")"
+            test "$(docker inspect "$container" --format '{{.Config.Image}}')" = "$expected"
+          done
+          BACKEND_CONTAINER="$(compose ps -q backend)"
+          test "$(docker inspect "$BACKEND_CONTAINER" --format '{{.Config.User}}')" = "10001:10001"
+          OCR_CONTAINER="$(compose ps -q ocr)"
+          docker inspect "$OCR_CONTAINER" | jq -e '.[0] |
+            .Config.User == "10001"
+            and (.Config.ExposedPorts | keys) == ["8090/tcp"]
+            and .HostConfig.Memory == 2147483648
+            and .HostConfig.MemorySwap == 2147483648
+            and .HostConfig.NanoCpus == 2000000000
+            and .HostConfig.PidsLimit == 128
+            and .HostConfig.ReadonlyRootfs == true
+            and .HostConfig.Privileged == false
+            and (.HostConfig.CapDrop | index("ALL") != null)
+            and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
+            and .HostConfig.Devices == []
+            and (.HostConfig.DeviceRequests == null or .HostConfig.DeviceRequests == [])
+            and (.HostConfig.Binds == null or .HostConfig.Binds == [])
+            and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
+            and .Mounts == []
+            and (.HostConfig.Tmpfs | keys) == ["/tmp"]
+            and (.HostConfig.Tmpfs["/tmp"] | contains("rw"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
+            and ((.HostConfig.Tmpfs["/tmp"] | contains("size=64m"))
+              or (.HostConfig.Tmpfs["/tmp"] | contains("size=67108864")))
+            and (.HostConfig.NetworkMode | endswith("_ocr_internal"))
+            and ((.NetworkSettings.Networks | keys) | length) == 1
+            and ((.NetworkSettings.Networks | keys)[0] | endswith("_ocr_internal"))
+            and ([.NetworkSettings.Ports[]? | select(. != null)] | length == 0)
+          '
+
+      - name: Qualify the exact release set on the canonical 40-card benchmark
+        working-directory: deploy
+        env:
+          BUILD_EPOCH: ${{ needs.metadata.outputs.build_epoch }}
+        run: |
+          compose() {
+            docker compose "$@"
+          }
+          FONT=/tmp/NotoSansCJKjp-Regular.otf
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$FONT" \
+            https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf
+          echo '68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5  /tmp/NotoSansCJKjp-Regular.otf' \
+            | sha256sum --check --strict
+          rm -rf /tmp/connex-benchmark-fixtures
+          install -d -m 0777 /tmp/connex-benchmark-fixtures
+          OCR_IMAGE="$(jq -r '.image + "@" + .digest' ../release-ocr.json)"
+          docker run --rm --network none --entrypoint python \
+            -e CONNEX_BENCHMARK_FONT=/font/NotoSansCJKjp-Regular.otf \
+            -v "$GITHUB_WORKSPACE/ocr/benchmark:/benchmark:ro" \
+            -v "$FONT:/font/NotoSansCJKjp-Regular.otf:ro" \
+            -v /tmp/connex-benchmark-fixtures:/fixtures \
+            "$OCR_IMAGE" \
+            /benchmark/generate_cards.py --output /fixtures
+          PASSWORD="$(cat /tmp/benchmark-password)"
+          for attempt in $(seq 1 30); do
+            if curl -fsS -c /tmp/benchmark.cookies \
+                -H 'Content-Type: application/json' \
+                --data "$(jq -nc --arg username benchmark --arg password "$PASSWORD" \
+                  '{username:$username,password:$password}')" \
+                http://127.0.0.1:18088/api/auth/login >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              compose logs --no-color backend
+              exit 1
+            fi
+            sleep 2
+          done
+          CSRF="$(curl -fsS -b /tmp/benchmark.cookies -c /tmp/benchmark.cookies \
+            http://127.0.0.1:18088/api/auth/csrf)"
+          CSRF_TOKEN="$(jq -er '.token' <<<"$CSRF")"
+          CSRF_HEADER="$(jq -er '.headerName' <<<"$CSRF")"
+          WORKSPACE_ID="$(curl -fsS -b /tmp/benchmark.cookies \
+            http://127.0.0.1:18088/api/workspaces | jq -er '.activeWorkspaceId')"
+          SESSION_COOKIE="$(awk '
+            /^#HttpOnly_/ { sub(/^#HttpOnly_/, "") }
+            !/^#/ && NF >= 7 { printf "%s=%s; ", $6, $7 }
+          ' /tmp/benchmark.cookies)"
+          test -n "$SESSION_COOKIE"
+          BACKEND_CONTAINER="$(compose ps -q backend)"
+          FRONTEND_CONTAINER="$(compose ps -q frontend)"
+          OCR_CONTAINER="$(compose ps -q ocr)"
+          CONNEX_BENCHMARK_BASE_URL=http://127.0.0.1:18088 \
+          CONNEX_BENCHMARK_SESSION_COOKIE="$SESSION_COOKIE" \
+          CONNEX_BENCHMARK_CSRF_TOKEN="$CSRF_TOKEN" \
+          CONNEX_BENCHMARK_CSRF_HEADER="$CSRF_HEADER" \
+          CONNEX_BENCHMARK_WORKSPACE_ID="$WORKSPACE_ID" \
+          CONNEX_BENCHMARK_BACKEND_CONTAINER="$BACKEND_CONTAINER" \
+          CONNEX_BENCHMARK_FRONTEND_CONTAINER="$FRONTEND_CONTAINER" \
+          CONNEX_BENCHMARK_OCR_CONTAINER="$OCR_CONTAINER" \
+            python ../ocr/benchmark/run_benchmark.py \
+              --images /tmp/connex-benchmark-fixtures \
+              --report ../business-card-benchmark.json \
+              --requests-per-minute 120
+          PYTHONPATH=../ocr python ../ocr/benchmark/verify_report.py \
+            ../business-card-benchmark.json "$GITHUB_SHA" \
+            --base-url http://127.0.0.1:18088 \
+            --requests-per-minute 120 \
+            --backend-image-reference "$(jq -r '.image + "@" + .digest' ../release-backend.json)" \
+            --frontend-image-reference "$(jq -r '.image + "@" + .digest' ../release-frontend.json)" \
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' ../release-ocr.json)"
+          tar --sort=name --mtime="@${BUILD_EPOCH}" --owner=0 --group=0 --numeric-owner \
+            -cf ../business-card-benchmark-fixtures.tar \
+            -C /tmp/connex-benchmark-fixtures .
+
+      - name: Verify isolated maintenance invocation exits
+        working-directory: deploy
+        run: |
+          compose() {
+            docker compose "$@"
+          }
+          compose stop caddy frontend backend ocr
+          test "$(compose ps --services --status running)" = "db"
+          LEGACY_VOLUME="connex_legacy_uploads_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          docker volume create "$LEGACY_VOLUME"
+          timeout 180 docker compose \
+            run --rm --no-deps \
+            -e SPRING_MAIN_WEB_APPLICATION_TYPE=none \
+            -e CONNEX_MAINTENANCE_MODE=legacy-upload-migration \
+            -e CONNEX_OBJECT_STORAGE_LEGACY_MIGRATION_MODE=DRY_RUN \
+            -e CONNEX_OBJECT_STORAGE_LEGACY_UPLOADS_ROOT=/legacy \
+            -v "$LEGACY_VOLUME:/legacy:ro" \
+            backend 2>&1 | tee /tmp/maintenance.log
+          grep -F 'Legacy upload migration DRY_RUN: discovered=0, migrated=0, valid=0, failed=0, remaining=0' /tmp/maintenance.log
+          docker volume rm "$LEGACY_VOLUME"
+
+      - name: Commit the immutable release transaction
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          DEPLOY_BUNDLE="connex-${VERSION}-deploy.tar"
+          git archive \
+            --format=tar \
+            --prefix="connex-${VERSION}/" \
+            "$GITHUB_SHA" \
+            deploy docs/DEPLOYMENT.md docs/UPGRADING.md docs/RELEASE.md \
+            > "$DEPLOY_BUNDLE"
+          REPORT_FILE=business-card-benchmark.json
+          FIXTURES_FILE=business-card-benchmark-fixtures.tar
+          REPORT_SHA256="$(sha256sum "$REPORT_FILE" | cut -d ' ' -f1)"
+          FIXTURES_SHA256="$(sha256sum "$FIXTURES_FILE" | cut -d ' ' -f1)"
+          DEPLOY_SHA256="$(sha256sum "$DEPLOY_BUNDLE" | cut -d ' ' -f1)"
+          PYTHONPATH=ocr python ocr/benchmark/verify_report.py \
+            "$REPORT_FILE" "$GITHUB_SHA" \
+            --base-url http://127.0.0.1:18088 \
+            --requests-per-minute 120 \
+            --backend-image-reference "$(jq -r '.image + "@" + .digest' release-backend.json)" \
+            --frontend-image-reference "$(jq -r '.image + "@" + .digest' release-frontend.json)" \
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' release-ocr.json)"
+          for component in backend frontend ocr; do
+            descriptor="release-${component}.json"
+            expected="$(jq -r '.image + "@" + .digest' "$descriptor")"
+            test "$(jq -r --arg component "$component" \
+              '.provenance.runtime.containers[$component].imageReference' "$REPORT_FILE")" = "$expected"
+            sbom="$(jq -r '.sbom.file' "$descriptor")"
+            test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = "$(jq -r '.sbom.sha256' "$descriptor")"
+          done
+          jq -s \
+            --arg version "$VERSION" \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg reportFile "$REPORT_FILE" \
+            --arg reportSha256 "$REPORT_SHA256" \
+            --arg fixturesFile "$FIXTURES_FILE" \
+            --arg fixturesSha256 "$FIXTURES_SHA256" \
+            --arg deployFile "$DEPLOY_BUNDLE" \
+            --arg deploySha256 "$DEPLOY_SHA256" \
+            '{
+              schemaVersion:1,
+              version:$version,
+              sourceSha:$sourceSha,
+              transaction:{runId:$runId,runAttempt:$runAttempt},
+              images:(map({key:.component,value:{image:.image,digest:.digest,sbom:.sbom}})|from_entries),
+              qualification:{
+                report:{file:$reportFile,sha256:$reportSha256},
+                fixtures:{file:$fixturesFile,sha256:$fixturesSha256},
+                protections:{rotatingSecretHoldout:false,debianSnapshot:false}
+              },
+              deploymentBundle:{file:$deployFile,sha256:$deploySha256}
+            }' \
+            release-backend.json release-frontend.json release-ocr.json \
+            > release-manifest.json
+          cosign sign-blob --yes --bundle release-manifest.bundle.json release-manifest.json
+
+      - name: Upload committed release transaction
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            release-*.json
+            release-manifest.bundle.json
+            sbom-*.spdx.json
+            business-card-benchmark.json
+            business-card-benchmark-fixtures.tar
+            connex-*-deploy.tar
+
+      - name: Show logs after failure
+        if: failure()
+        working-directory: deploy
+        run: docker compose logs --no-color || true
+
+      - name: Clean up release set
+        if: always()
+        working-directory: deploy
+        run: docker compose down -v --remove-orphans || true
+
+  promote:
+    name: Promote immutable release tags
+    needs: [metadata, candidate-images, release-set-smoke]
+    if: ${{ always() && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      transaction_name: ${{ steps.transaction.outputs.name }}
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Resolve the committed release transaction
+        id: transaction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="release-transaction-${GITHUB_RUN_ID}-"
+          for attempt in $(seq 1 20); do
+            artifacts="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
+            count="$(jq --arg prefix "$prefix" \
+              '[.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false)] | length' \
+              <<<"$artifacts")"
+            test "$count" -le 1
+            if [ "$count" = 1 ]; then
+              name="$(jq -r --arg prefix "$prefix" \
+                '.artifacts[] | select(.name | startswith($prefix)) | select(.expired == false) | .name' \
+                <<<"$artifacts")"
+              echo "name=$name" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$attempt" = 20 ]; then
+              echo "::error::The committed release transaction artifact was not found."
+              exit 1
+            fi
+            sleep 3
+          done
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ steps.transaction.outputs.name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+
+      - name: Verify pinned build toolchain
+        run: |
+          docker buildx version | grep -F 'v0.35.0'
+          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Verify the committed release transaction
+        env:
+          TRANSACTION_NAME: ${{ steps.transaction.outputs.name }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+          cosign verify-blob \
+            --bundle release-manifest.bundle.json \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release-manifest.json
+          test "$(jq -r '.schemaVersion' release-manifest.json)" = 1
+          test "$(jq -r '.version' release-manifest.json)" = "$VERSION"
+          test "$(jq -r '.sourceSha' release-manifest.json)" = "$GITHUB_SHA"
+          test "$(jq -r '.transaction.runId' release-manifest.json)" = "$GITHUB_RUN_ID"
+          TRANSACTION_ATTEMPT="$(jq -er '.transaction.runAttempt | select(type == "number" and . >= 1 and floor == .)' release-manifest.json)"
+          test "$TRANSACTION_NAME" = "release-transaction-${GITHUB_RUN_ID}-${TRANSACTION_ATTEMPT}"
+          test "$(jq -r '.qualification.protections.rotatingSecretHoldout' release-manifest.json)" = false
+          test "$(jq -r '.qualification.protections.debianSnapshot' release-manifest.json)" = false
+          for component in backend frontend ocr; do
+            expected_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/connex-${component}"
+            test "$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)" = "$expected_image"
+            digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            sbom="$(jq -r --arg component "$component" '.images[$component].sbom.file' release-manifest.json)"
+            expected_sbom_sha="$(jq -r --arg component "$component" '.images[$component].sbom.sha256' release-manifest.json)"
+            test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = "$expected_sbom_sha"
+          done
+          for selector in qualification.report qualification.fixtures deploymentBundle; do
+            file="$(jq -r ".${selector}.file" release-manifest.json)"
+            expected="$(jq -r ".${selector}.sha256" release-manifest.json)"
+            test "$(sha256sum "$file" | cut -d ' ' -f1)" = "$expected"
+          done
+
+      - name: Preflight every destination tag
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          remote_digest() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null \
+              | jq -er '.digest'
+          }
+          optional_remote_digest() {
+            local output
+            if output="$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>&1)"; then
+              jq -er '.digest' <<<"$output"
+              return
+            fi
+            if grep -Eqi 'manifest unknown|not found' <<<"$output"; then
+              return 3
+            fi
+            printf '%s\n' "$output" >&2
+            return 1
+          }
+          IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+          for component in backend frontend ocr; do
+            image="$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)"
+            digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
+            test "$(remote_digest "${image}@${digest}")" = "$digest"
+            cosign verify \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${image}@${digest}" >/dev/null
+            cosign verify-attestation --type spdxjson \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --output json \
+              "${image}@${digest}" > "verified-${component}-sbom-attestation.json"
+            sbom="$(jq -r --arg component "$component" \
+              '.images[$component].sbom.file' release-manifest.json)"
+            python .github/scripts/verify-attested-sbom.py \
+              "verified-${component}-sbom-attestation.json" \
+              "$sbom" "$image" "$digest"
+            gh attestation verify "oci://${image}@${digest}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "refs/tags/${GITHUB_REF_NAME}" >/dev/null
+            for tag in "$VERSION" "sha-${GITHUB_SHA}"; do
+              if existing="$(optional_remote_digest "${image}:${tag}")"; then
+                test "$existing" = "$digest"
+              else
+                status="$?"
+                test "$status" = 3
+              fi
+            done
+          done
+
+      - name: Revalidate release tag immediately before promotion
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+
+      - name: Promote and verify final tags
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          remote_digest() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' \
+              | jq -er '.digest'
+          }
+          for component in backend frontend ocr; do
+            image="$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)"
+            digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
+            docker buildx imagetools create --prefer-index=false \
+              --tag "${image}:${VERSION}" \
+              --tag "${image}:sha-${GITHUB_SHA}" \
+              "${image}@${digest}"
+            test "$(remote_digest "${image}:${VERSION}")" = "$digest"
+            test "$(remote_digest "${image}:sha-${GITHUB_SHA}")" = "$digest"
+          done
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [metadata, promote]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.promote.outputs.transaction_name }}
+
+      - name: Revalidate release tag immediately before publication
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+
+      - name: Publish the complete verified release atomically
+        env:
+          CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          assets=(
+            release-manifest.json
+            release-manifest.bundle.json
+            sbom-backend.spdx.json
+            sbom-frontend.spdx.json
+            sbom-ocr.spdx.json
+            business-card-benchmark.json
+            business-card-benchmark-fixtures.tar
+            "connex-${VERSION}-deploy.tar"
+          )
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+          done
+          printf '%s\n' "${assets[@]}" | sort > /tmp/expected-release-assets
+          verify_asset_names() {
+            gh release view "$GITHUB_REF_NAME" --json assets \
+              --jq '.assets[].name' | sort > /tmp/actual-release-assets
+            diff -u /tmp/expected-release-assets /tmp/actual-release-assets
+          }
+          if gh release view "$GITHUB_REF_NAME" --json isDraft >/tmp/release-state.json 2>/dev/null; then
+            if [ "$(jq -r '.isDraft' /tmp/release-state.json)" != true ]; then
+              verify_asset_names
+              rm -rf /tmp/published-release
+              mkdir /tmp/published-release
+              gh release download "$GITHUB_REF_NAME" --dir /tmp/published-release
+              for asset in "${assets[@]}"; do
+                test "$(sha256sum "$asset" | cut -d ' ' -f1)" = \
+                  "$(sha256sum "/tmp/published-release/$asset" | cut -d ' ' -f1)"
+              done
+              gh release verify "$GITHUB_REF_NAME"
+              exit 0
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "Connex ${VERSION}" \
+              --generate-notes \
+              --notes "One signed, benchmark-qualified frontend, backend, and OCR image set. Deploy only the immutable digests in release-manifest.json."
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          verify_asset_names
+          rm -rf /tmp/draft-release
+          mkdir /tmp/draft-release
+          gh release download "$GITHUB_REF_NAME" --dir /tmp/draft-release
+          for asset in "${assets[@]}"; do
+            test "$(sha256sum "$asset" | cut -d ' ' -f1)" = \
+              "$(sha256sum "/tmp/draft-release/$asset" | cut -d ' ' -f1)"
+          done
+          bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release verify "$GITHUB_REF_NAME"

@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     ChevronDownIcon,
     ChevronUpIcon,
     ChevronUpDownIcon,
-    EllipsisHorizontalIcon,
     InboxIcon,
     PencilSquareIcon,
     TrashIcon,
@@ -38,7 +37,16 @@ import { useTranslations } from 'next-intl';
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
+import type { RowDensity } from '@/app/hooks/useRecordDensity';
+import {
+    RecordActionMenuTrigger,
+    RecordActionsTriggerButton,
+    RecordContextMenu,
+    type RecordMenuModel,
+} from './RecordActionMenu';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
+import EditableCell from './EditableCell';
 
 type SortDirection = 'asc' | 'desc';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -55,7 +63,11 @@ function pageList(current: number, total: number): (number | 'gap')[] {
     out.push(total);
     return out;
 }
-const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
+const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-brand-foreground';
+
+function isSortableColumn<T>(column: ColumnDef<T>): boolean {
+    return column.sortable !== false && !!column.getSortValue;
+}
 
 interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
@@ -64,11 +76,14 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     renderAvatar?: (item: T) => ReactNode;
     detailPath?: (item: T) => string;
     onRowClick?: (item: T) => void;
+    activeId?: SelectionId | null;
     displayMode: DisplayMode;
+    density?: RowDensity;
     selectedIds: Set<SelectionId>;
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
     onQuickEdit?: (item: T) => void;
     onDelete?: (item: T) => void;
+    recordRef?: (item: T) => ActiveRecordRef | null;
     gridClassName?: string;
     entityLabel: string;
     selectionActions?: ReactNode; // pass along the react node for the selection actions
@@ -95,11 +110,14 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     renderAvatar,
     detailPath,
     onRowClick,
+    activeId,
     displayMode,
+    density = 'comfortable',
     selectedIds,
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
+    recordRef,
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
     selectionActions,
@@ -129,6 +147,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const sortedData = useMemo(() => {
         if (server || !activeSortKey) return data;
         const col = columns.find((c) => c.key === activeSortKey);
+        if (col?.sortable === false) return data;
         if (!col?.getSortValue) return data;
         const dir = activeSortDirection === 'asc' ? 1 : -1;
         return [...data].sort((a, b) => {
@@ -166,6 +185,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     const toggleAll = (checked: boolean) => {
         onSelectedIdsChange(checked ? new Set(sortedData.map((item) => item.id)) : new Set());
+        setSelectionAnchor(null);
     };
 
     const toggleOne = (id: SelectionId, checked: boolean) => {
@@ -175,7 +195,111 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         onSelectedIdsChange(next);
     };
 
-    const hasRowActions = !!(onQuickEdit || onDelete);
+    const [selectionAnchor, setSelectionAnchor] = useState<{ id: SelectionId; selected: boolean } | null>(null);
+    const rangeShiftRef = useRef(false);
+
+    const applyToggle = (id: SelectionId, checked: boolean) => {
+        const shift = rangeShiftRef.current;
+        rangeShiftRef.current = false;
+        const anchor = selectionAnchor;
+        if (shift && anchor != null && anchor.id !== id) {
+            const ids = pagedData.map((item) => item.id);
+            const anchorIndex = ids.indexOf(anchor.id);
+            const targetIndex = ids.indexOf(id);
+            if (anchorIndex !== -1 && targetIndex !== -1) {
+                const [lo, hi] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+                const next = new Set(selectedIds);
+                for (let i = lo; i <= hi; i++) {
+                    if (anchor.selected) next.add(ids[i]);
+                    else next.delete(ids[i]);
+                }
+                onSelectedIdsChange(next);
+                return;
+            }
+        }
+        toggleOne(id, checked);
+        setSelectionAnchor({ id, selected: checked });
+    };
+
+    const hasRowActions = !!(onQuickEdit || onDelete || recordRef);
+    const buildRecordMenu = useCallback(
+        (item: T): RecordMenuModel | null => {
+            const record = recordRef ? recordRef(item) : null;
+            if (!record) return null;
+            return {
+                record,
+                onPeek: onRowClick ? () => onRowClick(item) : undefined,
+                onQuickEdit: onQuickEdit ? () => onQuickEdit(item) : undefined,
+                onDelete: onDelete ? () => onDelete(item) : undefined,
+            };
+        },
+        [recordRef, onRowClick, onQuickEdit, onDelete],
+    );
+
+    const rowRefs = useRef(new Map<SelectionId, HTMLTableRowElement>());
+    const [rovingId, setRovingId] = useState<SelectionId | null>(null);
+
+    const focusRow = useCallback((id: SelectionId) => {
+        setRovingId(id);
+        rowRefs.current.get(id)?.focus();
+    }, []);
+
+    const handleRowKeyDown = useCallback(
+        (event: KeyboardEvent<HTMLTableRowElement>, item: T, rowIndex: number) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === 'ArrowDown') {
+                const next = pagedData[rowIndex + 1];
+                if (next) {
+                    event.preventDefault();
+                    focusRow(next.id);
+                }
+            } else if (event.key === 'ArrowUp') {
+                const prev = pagedData[rowIndex - 1];
+                if (prev) {
+                    event.preventDefault();
+                    focusRow(prev.id);
+                }
+            } else if (event.key === 'Home') {
+                const first = pagedData[0];
+                if (first) {
+                    event.preventDefault();
+                    focusRow(first.id);
+                }
+            } else if (event.key === 'End') {
+                const last = pagedData[pagedData.length - 1];
+                if (last) {
+                    event.preventDefault();
+                    focusRow(last.id);
+                }
+            } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                const el = rowRefs.current.get(item.id);
+                if (el) {
+                    event.preventDefault();
+                    const rect = el.getBoundingClientRect();
+                    el.dispatchEvent(
+                        new MouseEvent('contextmenu', {
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: rect.left + 40,
+                            clientY: rect.top + rect.height / 2,
+                        }),
+                    );
+                }
+            } else if (event.key === 'Enter') {
+                if (onRowClick) {
+                    event.preventDefault();
+                    onRowClick(item);
+                } else if (detailPath) {
+                    event.preventDefault();
+                    router.push(detailPath(item));
+                }
+            }
+        },
+        [pagedData, focusRow, onRowClick, detailPath, router],
+    );
+
+    const rovingRowId =
+        rovingId != null && pagedData.some((d) => d.id === rovingId) ? rovingId : pagedData[0]?.id ?? null;
 
     const [frozenOffsets, setFrozenOffsets] = useState({ avatar: 0, name: 0 });
     const frozenCleanup = useRef<(() => void) | null>(null);
@@ -198,13 +322,13 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         [renderAvatar],
     );
     const stickySeam = cn(
-        "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-4 after:translate-x-full after:bg-gradient-to-r after:from-black/15 after:to-transparent after:transition-opacity after:duration-200 after:content-[''] dark:after:from-black/45",
+        "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-4 after:translate-x-full after:bg-gradient-to-r after:from-black/15 after:to-transparent after:transition-opacity after:duration-200 after:content-[''] md:after:block dark:after:from-black/45",
         edges.left ? 'after:opacity-100' : 'after:opacity-0',
     );
     const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
 
     const gridSortOptions =
-        sortOptions ?? columns.filter((c) => c.getSortValue).map((c) => ({ key: c.key, label: c.label }));
+        sortOptions ?? columns.flatMap((column) => isSortableColumn(column) ? [{ key: column.key, label: column.label }] : []);
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
     const gridSortBar =
         !controlled && displayMode === 'grid' && gridSortOptions.length > 0 ? (
@@ -249,11 +373,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                     exit={reduce ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.97 }}
                     transition={{ duration: 0.24, ease: EASE_OUT }}
-                    className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+                    className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-40 flex justify-center px-4 md:bottom-6"
                 >
                     <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-card py-1.5 pr-1.5 pl-2 shadow-lg ring-1 ring-border">
                         <span className="flex items-center gap-2 pr-1 pl-1">
-                            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-white">
+                            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-brand-foreground">
                                 {selectedIds.size}
                             </span>
                             <span className="hidden text-sm text-muted-foreground sm:inline">{t('selectedLabel')}</span>
@@ -263,7 +387,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                         <span className="h-5 w-px shrink-0 bg-border" />
                         <button
                             type="button"
-                            onClick={() => onSelectedIdsChange(new Set())}
+                            onClick={() => {
+                                onSelectedIdsChange(new Set());
+                                setSelectionAnchor(null);
+                            }}
                             aria-label={t('clearSelection')}
                             className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
                         >
@@ -386,19 +513,29 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                 {gridSortBar}
                 <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
-                        {pagedData.map((item) => (
-                            <motion.div
-                                key={item.id}
-                                initial={false}
-                                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.18, ease: EASE_OUT } }}
-                                className={cn(
-                                    'rounded-2xl',
-                                    selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
-                                )}
-                            >
-                                {renderCard(item, { onQuickEdit, onDelete })}
-                            </motion.div>
-                        ))}
+                        {pagedData.map((item) => {
+                            const menuModel = buildRecordMenu(item);
+                            const card = renderCard(item, { onQuickEdit, onDelete });
+                            return (
+                                <motion.div
+                                    key={item.id}
+                                    initial={false}
+                                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.18, ease: EASE_OUT } }}
+                                    className={cn(
+                                        'rounded-2xl',
+                                        selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
+                                    )}
+                                >
+                                    {menuModel ? (
+                                        <RecordContextMenu model={menuModel}>
+                                            <div className="contents">{card}</div>
+                                        </RecordContextMenu>
+                                    ) : (
+                                        card
+                                    )}
+                                </motion.div>
+                            );
+                        })}
                     </AnimatePresence>
                 </div>
                 {pager}
@@ -411,10 +548,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         <>
             <div className={cn('relative overflow-hidden rounded-2xl border border-border bg-card', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                 <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing">
-                    <table className="w-full min-w-max border-collapse text-left text-sm">
+                    <table data-density={density} className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>
                             <tr ref={headerRowRef} className="cursor-grab border-b border-border bg-muted/60">
-                                <th className={cn('sticky left-0 z-20 w-12 px-4 py-2.5', stickyHeaderBg)}>
+                                <th className={cn('w-12 px-4 py-2.5 md:sticky md:left-0 md:z-20', stickyHeaderBg)}>
                                     <Checkbox
                                         checked={someSelected ? 'indeterminate' : allSelected}
                                         onCheckedChange={(checked) => toggleAll(checked === true)}
@@ -422,10 +559,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         className={CHECKBOX_CLASS}
                                     />
                                 </th>
-                                {renderAvatar && <th className={cn('sticky z-20 w-12 px-4 py-2.5', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
+                                {renderAvatar && <th className={cn('w-12 px-4 py-2.5 md:sticky md:z-20', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
                                 {columns.map((col, colIndex) => {
                                     const active = activeSortKey === col.key;
-                                    const sortable = !!col.getSortValue;
+                                    const sortable = isSortableColumn(col);
                                     const Icon = active
                                         ? activeSortDirection === 'asc'
                                             ? ChevronUpIcon
@@ -446,7 +583,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             className={cn(
                                                 'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
                                                 col.widthClass,
-                                                colIndex === 0 && cn('sticky z-20', stickyHeaderBg, stickySeam),
+                                                colIndex === 0 && cn('md:sticky md:z-20', stickyHeaderBg, stickySeam),
                                             )}
                                             style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                         >
@@ -475,39 +612,76 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedData.map((item) => {
+                            {pagedData.map((item, rowIndex) => {
                                 const isSelected = selectedIds.has(item.id);
+                                const isActive = activeId != null && item.id === activeId;
                                 const clickable = !!(onRowClick || detailPath);
+                                const menuModel = buildRecordMenu(item);
                                 const stickyBodyBg = isSelected
                                     ? "bg-card before:absolute before:inset-0 before:-z-10 before:bg-brand-light/40 before:transition-colors before:content-[''] group-hover:before:bg-brand-light/55"
                                     : 'bg-card transition-colors group-hover:bg-muted';
-                                return (
+                                const row = (
                                     <tr
                                         key={item.id}
+                                        ref={(el) => {
+                                            if (el) rowRefs.current.set(item.id, el);
+                                            else rowRefs.current.delete(item.id);
+                                        }}
                                         data-state={isSelected ? 'selected' : undefined}
+                                        tabIndex={menuModel ? (item.id === rovingRowId ? 0 : -1) : undefined}
+                                        aria-keyshortcuts={menuModel ? 'Shift+F10' : undefined}
+                                        onKeyDown={menuModel ? (event) => handleRowKeyDown(event, item, rowIndex) : undefined}
+                                        onFocus={menuModel ? () => setRovingId((prev) => (prev === item.id ? prev : item.id)) : undefined}
                                         className={cn(
-                                            'group border-b border-border transition-colors last:border-b-0',
+                                            'group border-b border-border outline-hidden transition-colors last:border-b-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
+                                            menuModel && '[&:focus-visible>td]:bg-brand-light/40',
                                             clickable && 'cursor-pointer',
                                             isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
+                                            isActive && 'ring-2 ring-inset ring-brand',
                                         )}
                                         onClick={() => {
                                             if (onRowClick) onRowClick(item);
                                             else if (detailPath) router.push(detailPath(item));
                                         }}
                                     >
-                                        <td className={cn('sticky left-0 z-10 px-4 py-2.5', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
+                                        <td className={cn('px-4 py-2.5 md:sticky md:left-0 md:z-10', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
                                             <Checkbox
                                                 checked={isSelected}
-                                                onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
+                                                onClick={(event) => {
+                                                    rangeShiftRef.current = event.shiftKey;
+                                                }}
+                                                onCheckedChange={(checked) => applyToggle(item.id, checked === true)}
                                                 aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
                                                 className={CHECKBOX_CLASS}
                                             />
                                         </td>
-                                        {renderAvatar && <td className={cn('sticky z-10 px-4 py-2.5', stickyBodyBg)} style={{ left: frozenOffsets.avatar }}>{renderAvatar(item)}</td>}
+                                        {renderAvatar && <td className={cn('px-4 py-2.5 md:sticky md:z-10', stickyBodyBg)} style={{ left: frozenOffsets.avatar }}>{renderAvatar(item)}</td>}
                                         {columns.map((col, colIndex) => {
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
+                                            if (col.editable) {
+                                                const editable = col.editable;
+                                                return (
+                                                    <td
+                                                        key={col.key}
+                                                        className={cn(
+                                                            'px-4 py-2.5 whitespace-nowrap text-foreground',
+                                                            colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
+                                                        )}
+                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                    >
+                                                        <EditableCell
+                                                            value={editable.getValue(item)}
+                                                            display={col.render ? content : undefined}
+                                                            onCommit={(next) => editable.save(item, next)}
+                                                            inputType={editable.inputType}
+                                                            validate={editable.validate}
+                                                            ariaLabel={t('editFieldAria', { field: col.label, name: item.name ?? entityLabel })}
+                                                        />
+                                                    </td>
+                                                );
+                                            }
                                             if (col.copyable) {
                                                 const { label, getValue } = col.copyable;
                                                 return (
@@ -515,7 +689,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                         key={col.key}
                                                         className={cn(
                                                             'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark',
-                                                            colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                            colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
                                                         style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                                         onClick={(e) => {
@@ -537,7 +711,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     key={col.key}
                                                     className={cn(
                                                         'px-4 py-2.5 whitespace-nowrap text-foreground',
-                                                        colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                        colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                     )}
                                                     style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                                 >
@@ -548,17 +722,28 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         {addColumnSlot && <td className="px-2 py-2.5" aria-hidden />}
                                         {hasRowActions && (
                                             <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                                                <RowActions
-                                                    name={item.name ?? entityLabel}
-                                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                                                    onDelete={onDelete ? () => onDelete(item) : undefined}
-                                                    actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
-                                                    quickEditLabel={t('quickEdit')}
-                                                    deleteLabel={t('delete')}
-                                                />
+                                                {menuModel ? (
+                                                    <RecordActionMenuTrigger model={menuModel} />
+                                                ) : (
+                                                    <RowActions
+                                                        name={item.name ?? entityLabel}
+                                                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                                                        actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
+                                                        quickEditLabel={t('quickEdit')}
+                                                        deleteLabel={t('delete')}
+                                                    />
+                                                )}
                                             </td>
                                         )}
                                     </tr>
+                                );
+                                return menuModel ? (
+                                    <RecordContextMenu key={item.id} model={menuModel}>
+                                        {row}
+                                    </RecordContextMenu>
+                                ) : (
+                                    row
                                 );
                             })}
                         </tbody>
@@ -595,13 +780,7 @@ function RowActions({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={actionsAria}
-                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                >
-                    <EllipsisHorizontalIcon className="size-5" />
-                </button>
+                <RecordActionsTriggerButton ariaLabel={actionsAria} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
                 {onQuickEdit && (

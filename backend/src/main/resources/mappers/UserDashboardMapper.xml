@@ -23,4 +23,9 @@
     DELETE FROM user_dashboard
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </delete>
+
+  <delete id="deleteForUserAnywhere">
+    DELETE FROM user_dashboard WHERE user_id = #{userId}
+  </delete>
+
 </mapper>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.GoalMapper">
+
+  <sql id="columns">
+    id, workspace_id, owner_id, metric, period_type, period_start, target_value,
+    currency, created_by, created_at, updated_at
+  </sql>
+
+  <select id="getGoals" resultType="ReportGoal">
+    SELECT <include refid="columns"/> FROM report_goal
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY period_start DESC, period_type, currency, owner_id, id
+  </select>
+
+  <select id="getGoal" resultType="ReportGoal">
+    SELECT <include refid="columns"/> FROM report_goal
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getGoalsForPeriod" resultType="ReportGoal">
+    SELECT <include refid="columns"/> FROM report_goal
+    WHERE workspace_id = #{workspaceId}
+      AND metric = #{metric}
+      AND period_type = #{periodType}
+      AND period_start = #{periodStart}
+    ORDER BY currency, owner_id, id
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO report_goal
+      (workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by)
+    VALUES
+      (#{workspaceId}, #{ownerId}, #{metric}, #{periodType}, #{periodStart},
+       #{targetValue}, #{currency}, #{createdBy})
+  </insert>
+
+  <update id="update">
+    UPDATE report_goal
+    SET owner_id = #{ownerId}, metric = #{metric}, period_type = #{periodType},
+        period_start = #{periodStart}, target_value = #{targetValue}, currency = #{currency}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM report_goal
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+</mapper>

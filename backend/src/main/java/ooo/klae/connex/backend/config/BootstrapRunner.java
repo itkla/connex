@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,11 @@ import ooo.klae.connex.backend.services.AuthService;
  * environment and is never logged.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 @RequiredArgsConstructor
 public class BootstrapRunner implements ApplicationListener<ApplicationReadyEvent> {
 

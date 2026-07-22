@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -39,6 +40,7 @@ public class RuleEngineService {
 
     private final RuleMapper ruleMapper;
     private final DealMapper dealMapper;
+    private final PersonMapper personMapper;
     private final SegmentService segmentService;
     private final RuleActionExecutor actionExecutor;
     private final AutomationExecutor automationExecutor;
@@ -53,6 +55,10 @@ public class RuleEngineService {
 
     /** Runs every enabled entity-change rule whose trigger matches this committed change. */
     public void onEntityChange(int workspaceId, String recordType, int entityId, String event) {
+        if ("person".equals(recordType)
+                && personMapper.getProcessablePersonIds(workspaceId, List.of(entityId)).isEmpty()) {
+            return;
+        }
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "entity_change")) {
             try {
                 if (!recordType.equals(rule.getRecordType())) {
@@ -106,7 +112,7 @@ public class RuleEngineService {
             return true;
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition).contains(entityId);
+        return segmentService.matchesEntity(workspaceId, conditionActorId(rule), rule.getRecordType(), definition, entityId);
     }
 
     private List<Integer> scheduleMatches(Rule rule, int workspaceId) {

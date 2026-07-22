@@ -1,12 +1,19 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.BadCredentialsException;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -20,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 class AuthServiceTest extends AbstractServiceTest {
 
     @Autowired private AuthService authService;
+    @Autowired private SessionSecurityService sessionSecurityService;
 
     private RegisterDto registration(String username, String email) {
         RegisterDto dto = new RegisterDto();
@@ -60,5 +68,93 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertTrue(userMapper.getUserById(user.getId()).isEmailVerified(),
             "with verification off, self-serve accounts are verified so enabling it later never gates them");
+    }
+
+    @Test
+    void requireCurrentPassword_acceptsTheAccountPassword() {
+        User user = authService.register(registration("pw_" + unique(), unique() + "@example.com"), true);
+
+        assertDoesNotThrow(() -> authService.requireCurrentPassword(user.getId(), "Aa1!aaaa", "203.0.113.10"));
+    }
+
+    @Test
+    void requireCurrentPassword_rejectsWrongPassword() {
+        User user = authService.register(registration("badpw_" + unique(), unique() + "@example.com"), true);
+
+        assertThrows(BadCredentialsException.class,
+            () -> authService.requireCurrentPassword(user.getId(), "wrong", "203.0.113.10"));
+    }
+
+    @Test
+    void firstPasskeyBootstrap_passwordBackedAccountStillRequiresPasswordAfterFreshLogin() {
+        User user = authService.register(registration("bootstrap_pw_" + unique(),
+            unique() + "@example.com"), true);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markAuthenticated(request, user.getId());
+
+        assertThrows(BadCredentialsException.class,
+            () -> authService.requireFirstPasskeyBootstrapAuthentication(user.getId(), "wrong", request));
+        assertDoesNotThrow(() -> authService.requireFirstPasskeyBootstrapAuthentication(
+            user.getId(), "Aa1!aaaa", request));
+    }
+
+    @Test
+    void firstPasskeyBootstrap_passwordlessAccountAcceptsFreshSameUserSession() {
+        User user = passwordlessUser();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markAuthenticated(request, user.getId());
+
+        assertDoesNotThrow(() -> authService.requireFirstPasskeyBootstrapAuthentication(
+            user.getId(), null, request));
+    }
+
+    @Test
+    void firstPasskeyBootstrap_passwordlessAccountRejectsUnboundSession() {
+        User user = passwordlessUser();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+
+        assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
+            () -> authService.requireFirstPasskeyBootstrapAuthentication(user.getId(), null, request));
+    }
+
+    @Test
+    void hasPasswordCredentialReflectsStoredCredentialType() {
+        User passwordBacked = authService.register(registration("credential_pw_" + unique(),
+            unique() + "@example.com"), true);
+        User passwordless = passwordlessUser();
+
+        assertTrue(authService.hasPasswordCredential(passwordBacked.getId()));
+        assertFalse(authService.hasPasswordCredential(passwordless.getId()));
+    }
+
+    @Test
+    void principalSwitchClearsPriorSessionStateAndWorkspaceCookieForAccountWithoutMemberships() {
+        User passwordless = passwordlessUser();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        sessionSecurityService.markAuthenticated(request, currentUser.getId());
+        MockHttpSession priorSession = (MockHttpSession) request.getSession();
+        priorSession.setAttribute("pending-passkey-options", "secret state");
+
+        authService.establishAuthenticatedSession(passwordless, request, response);
+
+        assertNotSame(priorSession, request.getSession(false));
+        assertNull(request.getSession(false).getAttribute("pending-passkey-options"));
+        assertTrue(response.getHeaders("Set-Cookie").stream()
+            .anyMatch(header -> header.startsWith("connex_workspace=;") && header.contains("Max-Age=0")));
+    }
+
+    private User passwordlessUser() {
+        String value = unique();
+        User user = new User();
+        user.setUsername("passwordless_" + value);
+        user.setDisplayName("Passwordless " + value);
+        user.setEmail(value + "@example.com");
+        user.setEmailVerified(true);
+        user.setTimezone("UTC");
+        user.setPasswordHash(null);
+        userMapper.insert(user);
+        return user;
     }
 }

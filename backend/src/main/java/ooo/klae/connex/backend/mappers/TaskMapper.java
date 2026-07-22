@@ -3,7 +3,11 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -14,12 +18,26 @@ import java.util.List;
 
 public interface TaskMapper {
     List<Task> getAllTasks(int workspaceId);
+    List<Task> getTasksPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
+    long countTasks(int workspaceId);
+    TaskSummaryDto taskSummary(
+        @Param("workspaceId") int workspaceId,
+        @Param("today") LocalDate today,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<Task> getUpcomingOpenTasks(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
     List<Task> getTasksByAssignedToId(
         @Param("workspaceId") int workspaceId,
         @Param("assignedToId") int assignedToId
     );
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds);
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Task> getCompanyTasks(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Task> getTasksByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
@@ -37,8 +55,12 @@ public interface TaskMapper {
     List<Integer> getTaskIdsInStatusOrdered(@Param("workspaceId") int workspaceId, @Param("status") String status);
     /** The next free tail position in a status column ({@code MAX(position)+1}, or 0 when empty). */
     int nextTaskPosition(@Param("workspaceId") int workspaceId, @Param("status") String status);
-    /** Sets a single task's manual sort position within its status column. */
-    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+    /** Sets manual sort positions for tasks that still belong to the expected workspace status. */
+    int setPositions(
+        @Param("workspaceId") int workspaceId,
+        @Param("status") String status,
+        @Param("positions") List<BoardPositionUpdate> positions
+    );
     /** Sets a task's status, completion flag and position together so the done/completed CHECK holds. */
     int moveTask(
         @Param("workspaceId") int workspaceId,
@@ -53,4 +75,17 @@ public interface TaskMapper {
         @Param("id") int id,
         @Param("dueDate") String dueDate
     );
+
+    /**
+     * Unassigns a member's tasks within one workspace. Moved from
+     * {@code WorkspaceMapper} so the control plane never writes org-data tables
+     * (#440 increment 3).
+     */
+    void unassignMemberTasks(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /**
+     * Unassigns a user's tasks across all workspaces. Offboarding replacement
+     * for the {@code task.assigned_to_id} ON DELETE SET NULL (#440 increment 3).
+     */
+    void unassignAnywhere(@Param("userId") int userId);
 }

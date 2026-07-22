@@ -1,0 +1,21 @@
+services:
+  ocr:
+    build:
+      context: ../ocr
+      args:
+        VERSION: ${CONNEX_VERSION:-dev}
+    image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:-dev}
+
+  backend:
+    build:
+      context: ../backend
+      args:
+        VERSION: ${CONNEX_VERSION:-dev}
+    image: ghcr.io/itkla/connex-backend:${CONNEX_VERSION:-dev}
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        VERSION: ${CONNEX_VERSION:-dev}
+    image: ghcr.io/itkla/connex-frontend:${CONNEX_VERSION:-dev}

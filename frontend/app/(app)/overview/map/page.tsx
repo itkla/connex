@@ -4,21 +4,16 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ShareIcon } from "@heroicons/react/24/outline";
 import {
-    getActivities,
-    getCompanies,
-    getCompanyTemperatures,
-    getContacts,
     getContactTemperatures,
     getCurrentUserFromCookie,
-    getDeals,
+    getMapCompanyTemperatures,
     getMyWorkspacesFromCookie,
-    getNotes,
     getPipelines,
+    getRelationshipMapData,
     getStagesByPipelineId,
-    getTasks,
     getUsers,
 } from "@/app/lib/api";
-import type { Activity, Company, Contact, Deal, Note, Pipeline, RelationshipTemperature, Stage, Task, TemperatureBand, User } from "@/app/lib/types";
+import type { Pipeline, RelationshipTemperature, Stage, TemperatureBand, User } from "@/app/lib/types";
 import MapView from "@/app/components/map/MapView";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
 
@@ -30,28 +25,39 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     const t = await getTranslations("MapPage");
     const { companyId, contactId } = await searchParams;
 
-    const [user, workspaces, companies, contacts, deals, users, allActivities, allTasks, allNotes, pipelines, contactTemps, companyTemps] =
+    const [user, workspaces, mapData, users, pipelines] =
         await Promise.all([
             getCurrentUserFromCookie(cookie),
             getMyWorkspacesFromCookie(cookie),
-            getCompanies(init).catch(() => [] as Company[]),
-            getContacts({}, init).catch(() => [] as Contact[]),
-            getDeals(init).catch(() => [] as Deal[]),
+            getRelationshipMapData(init).catch(() => null),
             getUsers(init).catch(() => [] as User[]),
-            getActivities(init).catch(() => [] as Activity[]),
-            getTasks(init).catch(() => [] as Task[]),
-            getNotes(init).catch(() => [] as Note[]),
             getPipelines(init).catch(() => [] as Pipeline[]),
-            getContactTemperatures(init).catch(() => [] as RelationshipTemperature[]),
-            getCompanyTemperatures(init).catch(() => [] as RelationshipTemperature[]),
         ]);
 
     if (!user) {
         redirect('/auth/login');
     }
 
+    if (!mapData) {
+        return (
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+                <div role="alert" className="max-w-md rounded-2xl border border-border bg-card px-6 py-12 text-center">
+                    <h2 className="text-lg font-semibold text-foreground">{t("limitTitle")}</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">{t("limitBody")}</p>
+                </div>
+            </div>
+        );
+    }
+
+    const { companies, contacts, deals, activities: allActivities, tasks: allTasks, notes: allNotes } = mapData;
+
     const activeWorkspace = workspaces.workspaces.find((w) => w.id === workspaces.activeWorkspaceId);
     const ucLabel = activeWorkspace?.name ?? t("yourCompany");
+
+    const [contactTemps, companyTemps] = await Promise.all([
+        getContactTemperatures(contacts.map((contact) => contact.id), init).catch(() => [] as RelationshipTemperature[]),
+        getMapCompanyTemperatures(init).catch(() => [] as RelationshipTemperature[]),
+    ]);
 
     const contactWarmth = new Map<number, TemperatureBand>(contactTemps.map((t) => [t.id, t.band]));
     const companyWarmth = new Map<number, TemperatureBand>(companyTemps.map((t) => [t.id, t.band]));
@@ -100,7 +106,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
                         <p className="mt-2 text-sm text-muted-foreground">{t("emptyBody")}</p>
                         <Link
                             href="/records/companies"
-                            className="mt-6 inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-hover"
+                            className="mt-6 inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-hover"
                         >
                             {t("emptyCta")}
                         </Link>

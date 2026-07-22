@@ -13,11 +13,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 class ShareServiceTest extends AbstractServiceTest {
@@ -26,10 +29,11 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
+    @Autowired ShareMapper shareMapper;
 
     @AfterEach
     void clearContext() {
-        tenantContext.clear();
+        clearRequestContext();
     }
 
     private Company companyIn(int workspaceId) {
@@ -46,9 +50,9 @@ class ShareServiceTest extends AbstractServiceTest {
      * reuses the active org for owner/admin creators).
      */
     private WorkspaceMembershipDto createSiblingWorkspace(WorkspaceMembershipDto first, String name) {
-        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner");
+        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner", null);
         WorkspaceMembershipDto sibling = workspaceService.createWorkspace(name, currentUser.getId());
-        tenantContext.clear();
+        authenticateAs(currentUser, first.getId());
         return sibling;
     }
 
@@ -61,9 +65,9 @@ class ShareServiceTest extends AbstractServiceTest {
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
         assertFalse(companyMapper.exists(b.getId(), company.getId()));
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
-        tenantContext.clear();
+        authenticateAs(currentUser, b.getId());
 
         Company seenByB = companyMapper.getCompanyById(b.getId(), company.getId());
         assertNotNull(seenByB);
@@ -77,12 +81,12 @@ class ShareServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee2 WS");
         Company company = companyIn(a.getId());
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
         assertNotNull(companyMapper.getCompanyById(b.getId(), company.getId()));
 
         shareService.unshare("company", company.getId(), b.getId());
-        tenantContext.clear();
+        authenticateAs(currentUser, b.getId());
 
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
     }
@@ -99,7 +103,7 @@ class ShareServiceTest extends AbstractServiceTest {
         User outsider = newUser();
         workspaceMapper.addMember(foreign.getId(), outsider.getId(), "owner");
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), foreign.getId(), false));
     }
@@ -120,8 +124,31 @@ class ShareServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(otherOrgWs);
         workspaceMapper.addMember(otherOrgWs.getId(), currentUser.getId(), "owner");
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), otherOrgWs.getId(), false));
+    }
+
+    @Test
+    void provisionCeasedPersonBlocksNewShareButStillAllowsUnshare() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Person Owner WS", currentUser.getId());
+        WorkspaceMembershipDto existingTarget = createSiblingWorkspace(owner, "Existing Target WS");
+        Person person = new Person();
+        person.setWorkspaceId(owner.getId());
+        person.setName("Provision ceased " + unique());
+        personMapper.insert(person);
+
+        shareService.share("person", person.getId(), existingTarget.getId(), false);
+        WorkspaceMembershipDto blockedTarget = createSiblingWorkspace(owner, "Blocked Target WS");
+        personMapper.updateProcessingRestrictions(owner.getId(), person.getId(), false, true);
+
+        assertEquals(0, shareMapper.sharePerson(
+            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false));
+        BadRequestException blocked = assertThrows(BadRequestException.class,
+            () -> shareService.share("person", person.getId(), blockedTarget.getId(), false));
+        assertEquals("Third-party provision has been ceased for this contact", blocked.getMessage());
+
+        shareService.unshare("person", person.getId(), existingTarget.getId());
+        assertTrue(shareService.listShares("person", person.getId()).isEmpty());
     }
 }

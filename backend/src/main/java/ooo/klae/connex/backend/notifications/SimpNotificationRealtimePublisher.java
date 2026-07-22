@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.notifications;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +16,11 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * implementation replaces.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 @RequiredArgsConstructor
 public class SimpNotificationRealtimePublisher implements NotificationRealtimePublisher {
 

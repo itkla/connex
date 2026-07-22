@@ -6,37 +6,17 @@ import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ArrowPathIcon, PlusIcon, Squares2X2Icon } from '@heroicons/react/24/outline';
 import {
-    DndContext,
-    DragOverlay,
-    KeyboardSensor,
-    PointerSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type Announcements,
-    type DragEndEvent,
-    type DragStartEvent,
-    type UniqueIdentifier,
-} from '@dnd-kit/core';
-import {
-    SortableContext,
-    arrayMove,
-    rectSortingStrategy,
-    sortableKeyboardCoordinates,
-    useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
-
-import { cn } from '@/lib/utils';
+    type SortableGridMessages,
+} from '@/app/components/layout/SortableGrid';
+import SortableGrid from '@/app/components/layout/SortableGrid';
 import { Button } from '@/components/ui/button';
 import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetHeader,
-    SheetTitle,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerDescription,
+    DrawerHeader,
+    DrawerTitle,
+} from '@/components/ui/drawer';
 import { toastError } from '@/app/lib/toast';
 import { resetDashboardLayout, saveDashboardLayout } from '@/app/lib/api';
 import type { DashboardWidgetInstance, DashboardWidgetType } from '@/app/lib/types';
@@ -139,33 +119,16 @@ export default function DashboardGrid({
         [],
     );
 
-    const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-    );
-
     const titleFor = useCallback(
         (type: DashboardWidgetType) => tp(WIDGET_META[type].titleKey),
         [tp],
     );
     const nameFor = useCallback(
-        (id: UniqueIdentifier) => {
-            const widget = widgets.find((w) => w.id === String(id));
-            return widget ? titleFor(widget.type) : '';
+        (widget: DashboardWidgetInstance) => {
+            return titleFor(widget.type);
         },
-        [widgets, titleFor],
+        [titleFor],
     );
-
-    const onDragStart = (event: DragStartEvent) => setActiveId(String(event.active.id));
-    const onDragEnd = (event: DragEndEvent) => {
-        const { active, over } = event;
-        setActiveId(null);
-        if (!over || active.id === over.id) return;
-        const oldIndex = widgets.findIndex((w) => w.id === active.id);
-        const newIndex = widgets.findIndex((w) => w.id === over.id);
-        if (oldIndex < 0 || newIndex < 0) return;
-        mutate(arrayMove(widgets, oldIndex, newIndex));
-    };
 
     const toggleWidth = (id: string) => {
         mutate(
@@ -190,8 +153,6 @@ export default function DashboardGrid({
 
     const presentTypes = new Set(widgets.map((w) => w.type));
     const availableTypes = ALL_WIDGET_TYPES.filter((type) => !presentTypes.has(type));
-    const activeWidget = activeId != null ? widgets.find((w) => w.id === activeId) : undefined;
-
     const actionFor = (type: DashboardWidgetType): ReactNode => {
         const meta = WIDGET_META[type];
         if (!meta.actionHref || !meta.actionLabelKey) return null;
@@ -202,15 +163,13 @@ export default function DashboardGrid({
         );
     };
 
-    const announcements: Announcements = {
-        onDragStart: ({ active }) => t('a11yLifted', { name: nameFor(active.id) }),
-        onDragOver: ({ active, over }) =>
-            over ? t('a11yOver', { name: nameFor(active.id), target: nameFor(over.id) }) : undefined,
-        onDragEnd: ({ active, over }) =>
-            over
-                ? t('a11yDropped', { name: nameFor(active.id), target: nameFor(over.id) })
-                : t('a11yCancelled', { name: nameFor(active.id) }),
-        onDragCancel: ({ active }) => t('a11yCancelled', { name: nameFor(active.id) }),
+    const messages: SortableGridMessages = {
+        instructions: t('a11yInstructions'),
+        handleLabel: (name) => t('dragHandle', { name }),
+        lifted: (name) => t('a11yLifted', { name }),
+        over: (name, target) => t('a11yOver', { name, target }),
+        dropped: (name, target) => t('a11yDropped', { name, target }),
+        cancelled: (name) => t('a11yCancelled', { name }),
     };
 
     return (
@@ -273,60 +232,55 @@ export default function DashboardGrid({
                     </Button>
                 </div>
             ) : (
-                <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragStart={onDragStart}
-                    onDragEnd={onDragEnd}
-                    onDragCancel={() => setActiveId(null)}
-                    accessibility={{ announcements, screenReaderInstructions: { draggable: t('a11yInstructions') } }}
-                >
-                    <SortableContext items={widgets.map((w) => w.id)} strategy={rectSortingStrategy}>
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                            {widgets.map((w) => (
-                                <SortableWidget
-                                    key={w.id}
-                                    instance={w}
-                                    node={nodes[w.type]}
-                                    title={titleFor(w.type)}
-                                    action={actionFor(w.type)}
-                                    editMode={editMode}
-                                    reduce={reduce}
-                                    dragHandleLabel={t('dragHandle', { name: titleFor(w.type) })}
-                                    widthLabel={w.span === 2 ? t('collapse') : t('expand')}
-                                    removeLabel={t('remove', { name: titleFor(w.type) })}
-                                    canToggleWidth={WIDGET_META[w.type].allowedSpans.length > 1}
-                                    onToggleWidth={() => toggleWidth(w.id)}
-                                    onRemove={() => removeWidget(w.id)}
-                                />
-                            ))}
-                        </div>
-                    </SortableContext>
-                    <DragOverlay>
-                        {activeWidget ? (
+                <SortableGrid
+                    items={widgets}
+                    getLabel={nameFor}
+                    onChange={mutate}
+                    onActiveIdChange={setActiveId}
+                    messages={messages}
+                    reduceMotion={reduce}
+                    gridClassName="grid grid-cols-1 gap-6 lg:grid-cols-2"
+                    itemClassName={(widget) => widget.span === 2 ? 'lg:col-span-2' : undefined}
+                    renderItem={(widget, { dragHandle, isDragging }) => (
+                        <WidgetShell
+                            title={titleFor(widget.type)}
+                            action={actionFor(widget.type)}
+                            editMode={editMode}
+                            isDragging={isDragging}
+                            dragHandle={editMode ? dragHandle : null}
+                            span={widget.span}
+                            canToggleWidth={WIDGET_META[widget.type].allowedSpans.length > 1}
+                            widthLabel={widget.span === 2 ? t('collapse') : t('expand')}
+                            removeLabel={t('remove', { name: titleFor(widget.type) })}
+                            onToggleWidth={() => toggleWidth(widget.id)}
+                            onRemove={() => removeWidget(widget.id)}
+                        >
+                            {nodes[widget.type]}
+                        </WidgetShell>
+                    )}
+                    renderOverlay={(widget) => (
                             <div className={reduce ? 'cursor-grabbing' : 'cursor-grabbing scale-[1.02] shadow-2xl'}>
                                 <WidgetShell
-                                    title={titleFor(activeWidget.type)}
+                                    title={titleFor(widget.type)}
                                     editMode={false}
-                                    span={activeWidget.span}
+                                    span={widget.span}
                                     canToggleWidth={false}
                                     widthLabel=""
                                     removeLabel=""
                                 >
-                                    {nodes[activeWidget.type]}
+                                    {nodes[widget.type]}
                                 </WidgetShell>
                             </div>
-                        ) : null}
-                    </DragOverlay>
-                </DndContext>
+                        )}
+                />
             )}
 
-            <Sheet open={trayOpen} onOpenChange={setTrayOpen}>
-                <SheetContent side="right" className="w-full gap-0 sm:max-w-sm">
-                    <SheetHeader>
-                        <SheetTitle>{t('trayTitle')}</SheetTitle>
-                        <SheetDescription>{t('trayDescription')}</SheetDescription>
-                    </SheetHeader>
+            <Drawer open={trayOpen} onOpenChange={setTrayOpen} swipeDirection="right">
+                <DrawerContent className="w-full gap-0 sm:max-w-sm">
+                    <DrawerHeader>
+                        <DrawerTitle>{t('trayTitle')}</DrawerTitle>
+                        <DrawerDescription>{t('trayDescription')}</DrawerDescription>
+                    </DrawerHeader>
                     <div className="flex flex-col gap-2 overflow-y-auto p-4">
                         {availableTypes.length === 0 ? (
                             <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -349,76 +303,8 @@ export default function DashboardGrid({
                             ))
                         )}
                     </div>
-                </SheetContent>
-            </Sheet>
-        </div>
-    );
-}
-
-function SortableWidget({
-    instance,
-    node,
-    title,
-    action,
-    editMode,
-    reduce,
-    dragHandleLabel,
-    widthLabel,
-    removeLabel,
-    canToggleWidth,
-    onToggleWidth,
-    onRemove,
-}: {
-    instance: DashboardWidgetInstance;
-    node: ReactNode;
-    title: string;
-    action: ReactNode;
-    editMode: boolean;
-    reduce: boolean;
-    dragHandleLabel: string;
-    widthLabel: string;
-    removeLabel: string;
-    canToggleWidth: boolean;
-    onToggleWidth: () => void;
-    onRemove: () => void;
-}) {
-    const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
-        useSortable({ id: instance.id });
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition: reduce ? undefined : transition,
-    };
-
-    const dragHandle = (
-        <button
-            type="button"
-            ref={setActivatorNodeRef}
-            aria-label={dragHandleLabel}
-            className="cursor-grab touch-none rounded-md p-1 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
-            {...attributes}
-            {...listeners}
-        >
-            <GripVertical className="size-4" aria-hidden />
-        </button>
-    );
-
-    return (
-        <div ref={setNodeRef} style={style} className={cn('min-w-0', instance.span === 2 && 'lg:col-span-2')}>
-            <WidgetShell
-                title={title}
-                action={action}
-                editMode={editMode}
-                isDragging={isDragging}
-                dragHandle={dragHandle}
-                span={instance.span}
-                canToggleWidth={canToggleWidth}
-                widthLabel={widthLabel}
-                removeLabel={removeLabel}
-                onToggleWidth={onToggleWidth}
-                onRemove={onRemove}
-            >
-                {node}
-            </WidgetShell>
+                </DrawerContent>
+            </Drawer>
         </div>
     );
 }

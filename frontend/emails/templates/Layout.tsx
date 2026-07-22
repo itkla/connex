@@ -38,6 +38,7 @@ const styles = {
 type LayoutProps = {
     preview: string;
     eyebrow: string;
+    lang?: string;
     footer?: string;
     children: React.ReactNode;
 };
@@ -47,9 +48,9 @@ type LayoutProps = {
  * wordmark eyebrow, and an optional muted footer line. Renders to inline-styled,
  * email-client-safe HTML via React Email primitives.
  */
-export function Layout({ preview, eyebrow, footer, children }: LayoutProps) {
+export function Layout({ preview, eyebrow, lang = "en", footer, children }: LayoutProps) {
     return (
-        <Html lang="en">
+        <Html lang={lang}>
             <Head />
             <Preview>{preview}</Preview>
             <Body style={styles.body}>

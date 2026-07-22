@@ -34,6 +34,7 @@ public class User implements org.springframework.security.core.userdetails.UserD
     private String email;
     private boolean emailVerified;
     private String timezone;
+    private String locale = "en";
     @JsonIgnore
     private String passwordHash; // can be null
     private String createdAt;

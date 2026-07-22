@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -49,6 +51,7 @@ public class SsoLinkService {
     private final PasswordEncoder passwordEncoder;
     private final LoginRateLimiter loginRateLimiter;
     private final AuthService authService;
+    private final AuditService auditService;
 
     @Value("${connex.sso.link-challenge-expiry-minutes:15}")
     private int challengeExpiryMinutes;
@@ -123,15 +126,19 @@ public class SsoLinkService {
         }
 
         loginRateLimiter.recordSuccess(username);
-        linkIdentity(challenge, user.getId());
-        return authService.establishAuthenticatedSession(user, httpRequest, httpResponse);
+        if (linkIdentity(challenge, user.getId())) {
+            recordFederatedLink(challenge, user);
+        }
+        User authenticatedUser = authService.establishAuthenticatedSession(user, httpRequest, httpResponse);
+        recordFederatedLinkLogin(challenge, authenticatedUser);
+        return authenticatedUser;
     }
 
-    private void linkIdentity(SsoLinkChallenge challenge, int userId) {
+    private boolean linkIdentity(SsoLinkChallenge challenge, int userId) {
         FederatedIdentity existing = federatedIdentityMapper.findByProviderIssuerSubject(
                 challenge.getProvider(), challenge.getIssuer(), challenge.getExternalSubject());
         if (existing != null) {
-            return;
+            return false;
         }
         FederatedIdentity link = new FederatedIdentity();
         link.setUserId(userId);
@@ -140,6 +147,38 @@ public class SsoLinkService {
         link.setIssuer(challenge.getIssuer());
         link.setExternalSubject(challenge.getExternalSubject());
         federatedIdentityMapper.insert(link);
+        return true;
+    }
+
+    private static Map<String, Object> federationContext(SsoLinkChallenge challenge) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("provider", challenge.getProvider());
+        if (challenge.getOrgId() != null) {
+            context.put("orgId", challenge.getOrgId());
+        }
+        return context;
+    }
+
+    private void recordFederatedLink(SsoLinkChallenge challenge, User user) {
+        if (challenge.getOrgId() != null) {
+            auditService.record("org.federated_identity.link", "organization", challenge.getOrgId(),
+                    user.getDisplayName(), "Federated identity linked",
+                    Map.of("userId", user.getId(), "provider", challenge.getProvider()));
+            return;
+        }
+        auditService.record("auth.federated_identity.link", "user", user.getId(), user.getDisplayName(),
+                "Federated identity linked", federationContext(challenge));
+    }
+
+    private void recordFederatedLinkLogin(SsoLinkChallenge challenge, User user) {
+        if (challenge.getOrgId() != null) {
+            auditService.record("org.login.federated_link", "organization", challenge.getOrgId(),
+                    user.getDisplayName(), user.getDisplayName() + " logged in after SSO link",
+                    Map.of("userId", user.getId(), "provider", challenge.getProvider()));
+            return;
+        }
+        auditService.record("auth.login.federated_link", "user", user.getId(), user.getDisplayName(),
+                user.getDisplayName() + " logged in after social link", federationContext(challenge));
     }
 
     /**

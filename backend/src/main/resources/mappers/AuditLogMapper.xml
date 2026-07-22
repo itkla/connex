@@ -21,6 +21,11 @@
     <result property="userAgent" column="user_agent"/>
     <result property="sessionId" column="session_id"/>
     <result property="requestId" column="request_id"/>
+    <result property="chainScopeType" column="chain_scope_type"/>
+    <result property="chainScopeId" column="chain_scope_id"/>
+    <result property="chainIndex" column="chain_index"/>
+    <result property="prevHash" column="prev_hash"/>
+    <result property="rowHash" column="row_hash"/>
     <result property="createdAt" column="created_at"/>
     <result property="currentActorLabel" column="current_actor_label"/>
   </resultMap>
@@ -28,17 +33,20 @@
   <sql id="auditColumns">
     al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id, al.actor_id, al.actor_label,
     al.target_label, al.outcome, al.summary, al.changes, al.context, al.ip_address,
-    al.user_agent, al.session_id, al.request_id, al.created_at,
+    al.user_agent, al.session_id, al.request_id, al.chain_scope_type, al.chain_scope_id,
+    al.chain_index, al.prev_hash, al.row_hash, al.created_at,
     u.display_name AS current_actor_label
   </sql>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO audit_log
       (workspace_id, org_id, action, entity_type, entity_id, actor_id, actor_label, target_label,
-       outcome, summary, changes, context, ip_address, user_agent, session_id, request_id)
+       outcome, summary, changes, context, ip_address, user_agent, session_id, request_id,
+       chain_scope_type, chain_scope_id, chain_index, prev_hash, row_hash, created_at)
     VALUES
       (#{workspaceId}, #{orgId}, #{action}, #{entityType}, #{entityId}, #{actorId}, #{actorLabel}, #{targetLabel},
-       #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId})
+       #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId},
+       #{chainScopeType}, #{chainScopeId}, #{chainIndex}, #{prevHash}, #{rowHash}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
 
   <select id="findRecent" resultMap="AuditLogResult">
@@ -56,6 +64,24 @@
     LEFT JOIN app_user u ON u.id = al.actor_id
     WHERE al.workspace_id = #{workspaceId} AND al.entity_type = #{entityType} AND al.entity_id = #{entityId}
     ORDER BY al.created_at DESC, al.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="findWorkspaceExport" resultMap="AuditLogResult">
+    SELECT <include refid="auditColumns"/>
+    FROM audit_log al
+    LEFT JOIN app_user u ON u.id = al.actor_id
+    WHERE al.workspace_id = #{workspaceId}
+    ORDER BY al.chain_index IS NULL, al.chain_index ASC, al.created_at ASC, al.id ASC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="findOrgExport" resultMap="AuditLogResult">
+    SELECT <include refid="auditColumns"/>
+    FROM audit_log al
+    LEFT JOIN app_user u ON u.id = al.actor_id
+    WHERE al.org_id = #{orgId} AND al.workspace_id IS NULL
+    ORDER BY al.chain_index IS NULL, al.chain_index ASC, al.created_at ASC, al.id ASC
     LIMIT #{limit} OFFSET #{offset}
   </select>
 

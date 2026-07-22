@@ -48,6 +48,8 @@ export function createSuggestionRenderer<Item>(
                 popup = document.createElement("div");
                 popup.style.position = "fixed";
                 popup.style.zIndex = "60";
+                popup.style.pointerEvents = "auto";
+                popup.setAttribute("data-slot", "editor-suggestion");
                 popup.appendChild(renderer.element);
                 document.body.appendChild(popup);
                 place(props.clientRect?.());
@@ -57,6 +59,7 @@ export function createSuggestionRenderer<Item>(
                 place(props.clientRect?.());
             },
             onKeyDown: (props: SuggestionKeyDownProps) => {
+                if (props.event.isComposing || props.event.keyCode === 229) return false;
                 if (props.event.key === "Escape") return false;
                 return renderer?.ref?.onKeyDown(props) ?? false;
             },

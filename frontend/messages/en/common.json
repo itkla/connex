@@ -13,6 +13,13 @@
     "deal": "Deal",
     "company": "Company"
   },
+  "MemberScope": {
+    "label": "Owner",
+    "ariaLabel": "Filter by owner",
+    "me": "Me",
+    "unassigned": "Unassigned",
+    "clear": "Clear"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "Features",
@@ -22,6 +29,8 @@
     "navMenu": "Menu",
     "navPrivacy": "Privacy",
     "navDisclosure": "Data disclosure",
+    "navTerms": "Terms of Service",
+    "navTokushoho": "Commercial transactions",
     "ctaDashboard": "Go to dashboard",
     "ctaGetStarted": "Get started",
     "languageLabel": "Language",
@@ -77,8 +86,11 @@
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",
     "brand": "CONNEX",
+    "sectionPinnedViews": "Pinned views",
+    "sectionRecent": "Recent",
     "sectionOverview": "Overview",
     "sectionRecords": "Records",
+    "sectionMarketing": "Marketing",
     "sectionActivity": "Activity",
     "sectionLibrary": "Library",
     "sectionWorkspace": "Workspace",
@@ -93,12 +105,14 @@
     "navContacts": "Contacts",
     "navDeals": "Deals",
     "navPipelines": "Pipelines",
+    "navCampaigns": "Campaigns",
     "navActivities": "Activities",
     "navTasks": "Tasks",
     "navNotes": "Notes",
     "navTags": "Tags",
     "navFiles": "Files",
     "navUsers": "Users",
+    "navWorkflows": "Workflows",
     "navAuditLog": "Audit log",
     "navSettings": "Settings",
     "navOrganization": "Organization",
@@ -111,15 +125,56 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "themeSystem": "System",
-    "profilePictureAlt": "{name}'s profile picture"
+    "language": "Language",
+    "languageEnglish": "English",
+    "languageJapanese": "Japanese",
+    "languageSaveFailed": "Couldn't update your language. Please try again.",
+    "profilePictureAlt": "{name}'s profile picture",
+    "navProducts": "Products",
+    "navDocuments": "Documents"
   },
   "CommonContentShell": {
     "hideSidebar": "Hide sidebar",
-    "showSidebar": "Show sidebar"
+    "showSidebar": "Show sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
+  },
+  "MobileNav": {
+    "barLabel": "Primary",
+    "more": "More",
+    "search": "Search",
+    "tasksBadge": "{count} tasks need attention"
+  },
+  "ConfirmDiscard": {
+    "title": "Discard unsaved changes?",
+    "description": "You have unsaved changes. If you leave now, they'll be lost.",
+    "discard": "Discard changes",
+    "keepEditing": "Keep editing"
+  },
+  "DraftResume": {
+    "activityMessage": "You have an unfinished activity — resume it?",
+    "activityMessageNamed": "Unfinished activity: “{label}” — resume it?",
+    "resume": "Resume",
+    "discard": "Discard"
+  },
+  "RecordDensity": {
+    "ariaLabel": "Row density",
+    "comfortable": "Comfortable rows",
+    "compact": "Compact rows"
+  },
+  "RecordColumns": {
+    "ariaLabel": "Choose columns",
+    "label": "Columns",
+    "title": "Show columns",
+    "reset": "Reset columns",
+    "sorted": "sorted"
+  },
+  "DuplicateWarning": {
+    "heading": "You may already have:",
+    "more": "+{count} more"
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
-    "search": "Search",
     "searching": "Searching...",
     "noResults": "No results for “{query}”",
     "resultsHeading": "Results for “{query}”",

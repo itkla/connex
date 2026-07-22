@@ -8,18 +8,26 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.UpdateLocaleDto;
 import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
 
@@ -38,6 +46,7 @@ public class UserController {
     private final UserService userService;
     private final AuthService authService;
     private final WorkspaceService workspaceService;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -66,6 +75,7 @@ public class UserController {
     @PostMapping
     public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
         workspaceService.requirePermission(Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(authService.getCurrentUser().getId());
         return UserDto.from(authService.register(dto, true));
     }
 
@@ -120,18 +130,31 @@ public class UserController {
     }
 
     /**
-     * PUT endpoint to update the profile picture of a user.
-     * @param id
-     * @param profilePictureUrl
-     * @return
+     * Stores and assigns a private profile picture for the current user.
      */
-    @PutMapping("/{id}/profile-picture")
-    public UserDto updateProfilePicture(@PathVariable int id, @RequestBody String profilePictureUrl) {
-        return UserDto.from(userService.updateProfilePictureUrl(id, profilePictureUrl));
+    @PutMapping(value = "/me/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public UserDto updateCurrentProfilePicture(@RequestPart("file") MultipartFile file) {
+        return UserDto.from(userService.updateCurrentProfilePicture(
+            authService.getCurrentUser().getId(), UploadSource.from(file)));
+    }
+
+    /**
+     * Streams a workspace member's current profile picture after membership authorization.
+     */
+    @GetMapping("/{id}/profile-picture/{token:.+}")
+    public ResponseEntity<StreamingResponseBody> getProfilePicture(
+            @PathVariable int id,
+            @PathVariable String token) {
+        return ManagedContentResponse.inline(userService.getProfilePictureContent(id, token));
     }
 
     @PatchMapping("/me")
     public UserDto updateCurrentUser(@Valid @RequestBody UpdateTimezoneDto dto) {
         return UserDto.from(userService.updateTimezone(authService.getCurrentUser().getId(), dto.getTimezone()));
+    }
+
+    @PatchMapping("/me/locale")
+    public UserDto updateCurrentUserLocale(@Valid @RequestBody UpdateLocaleDto dto) {
+        return UserDto.from(userService.updateLocale(authService.getCurrentUser().getId(), dto.getLocale()));
     }
 }

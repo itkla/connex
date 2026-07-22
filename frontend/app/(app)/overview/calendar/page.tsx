@@ -10,14 +10,14 @@ export default async function CalendarPage() {
         redirect('/auth/login');
     }
 
-    const [activities, tasks, persons, deals, notes, temperatures] = await Promise.all([
+    const [activities, tasks, persons, deals, notes] = await Promise.all([
         getActivitiesFromCookie(cookie),
         getTasksFromCookie(cookie),
         getContactsFromCookie(cookie),
         getDealsFromCookie(cookie),
         getNotesFromCookie(cookie),
-        getContactTemperaturesFromCookie(cookie),
     ]);
+    const temperatures = await getContactTemperaturesFromCookie(cookie, persons.map((person) => person.id));
     return (
         <CalendarShell
             activities={activities}

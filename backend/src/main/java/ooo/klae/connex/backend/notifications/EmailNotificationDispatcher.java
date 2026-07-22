@@ -17,7 +17,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 /**
  * Delivers a generated notification to its recipient's email. Selected per user
  * via the {@code email} notification-preference channel and gated to first
- * occurrence by {@link NotificationDelivery}. Uses the workspace sender (falling
+ * occurrence by {@link NotificationDelivery}, which invokes this dispatcher only
+ * after the notification transaction commits. Uses the workspace sender (falling
  * back to the instance default) through {@link MailService}, which is async and
  * failure-tolerant — an email failure never affects the in-app delivery.
  */
@@ -36,10 +37,10 @@ public class EmailNotificationDispatcher implements NotificationDispatcher {
     }
 
     @Override
-    public void dispatch(Notification notification) {
+    public int dispatch(Notification notification) {
         User recipient = userMapper.getUserById(notification.getRecipientId());
         if (recipient == null || recipient.getEmail() == null || recipient.getEmail().isBlank()) {
-            return;
+            return 0;
         }
 
         String actionUrl = notification.getActionUrl() == null ? mailProperties.getAppBaseUrl()
@@ -60,5 +61,6 @@ public class EmailNotificationDispatcher implements NotificationDispatcher {
 
         mailService.sendForWorkspace(notification.getWorkspaceId(),
                 MailMessage.html(recipient.getEmail(), subject, body));
+        return 1;
     }
 }

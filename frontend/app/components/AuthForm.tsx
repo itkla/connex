@@ -33,6 +33,7 @@ type FieldKey = "username" | "email" | "displayName" | "password";
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const FIELD_KEYS = ["username", "email", "displayName", "password"] as const;
+const SSO_ENFORCED_CODE = "SSO_ENFORCED";
 
 const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
     login: ["username", "password"],
@@ -63,6 +64,10 @@ function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
 
         return picked;
     }, {});
+}
+
+function isSsoEnforcedError(err: ApiError): boolean {
+    return err.status === 403 && err.code === SSO_ENFORCED_CODE;
 }
 
 export function AuthForm({
@@ -139,8 +144,7 @@ export function AuthForm({
             if (canceled) {
                 return;
             }
-            const message =
-                err instanceof ApiError && err.status === 401 ? tLogin("passkeyFailed") : tForm("genericError");
+            const message = getPasskeyErrorMessage(err);
             setError(message);
             toastError(message);
         } finally {
@@ -196,8 +200,12 @@ export function AuthForm({
             return tLogin("invalidCredentials");
         }
 
-        if (mode === "login" && err.status === 403) {
+        if (mode === "login" && isSsoEnforcedError(err)) {
             return tLogin("ssoEnforced");
+        }
+
+        if (mode === "login" && err.status === 403) {
+            return tForm("genericError");
         }
 
         if (hasFieldErrors) {
@@ -209,6 +217,18 @@ export function AuthForm({
         }
 
         return err.message;
+    }
+
+    function getPasskeyErrorMessage(err: unknown) {
+        if (err instanceof ApiError && isSsoEnforcedError(err)) {
+            return tLogin("ssoEnforced");
+        }
+
+        if (err instanceof ApiError && err.status === 401) {
+            return tLogin("passkeyFailed");
+        }
+
+        return tForm("genericError");
     }
 
     async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
@@ -386,7 +406,7 @@ export function AuthForm({
                                 className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
                                     hasFieldErrors
                                         ? "bg-muted text-muted-foreground"
-                                        : "bg-brand text-neutral-950 hover:bg-brand-hover disabled:opacity-70"
+                                        : "bg-brand text-brand-foreground hover:bg-brand-hover disabled:opacity-70"
                                 }`}
                             >
                                 {submitting ? (

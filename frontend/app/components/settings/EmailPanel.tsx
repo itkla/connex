@@ -11,6 +11,7 @@ import {
     sendWorkspaceMailTest,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 
 type FormState = {
     enabled: boolean;
@@ -63,6 +64,7 @@ function toForm(config: MailConfig): FormState {
 
 export default function EmailPanel() {
     const t = useTranslations("WorkspaceEmail");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState>(EMPTY);
@@ -132,7 +134,9 @@ export default function EmailPanel() {
             setSavedEnabled(saved.enabled);
             toastSuccess(t("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
         } finally {
             setSaving(false);
         }
@@ -149,7 +153,9 @@ export default function EmailPanel() {
                 toastError(result.error ?? t("testFailed"));
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("testFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("testFailed"));
+            }
         } finally {
             setTesting(false);
         }
@@ -166,18 +172,17 @@ export default function EmailPanel() {
             setSavedEnabled(false);
             toastSuccess(t("removed"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <Rise className="space-y-3">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+        <Rise className="space-y-4">
+            <SettingsSection title={t("title")} description={t("subtitle")} />
 
             {error ? (
                 <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">

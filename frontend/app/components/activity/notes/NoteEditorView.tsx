@@ -25,6 +25,12 @@ const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false })
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+const MAX_NOTE_TITLE_LENGTH = 255;
+
+function titleIsTooLong(value: string): boolean {
+    return value.length > MAX_NOTE_TITLE_LENGTH;
+}
+
 type Props = {
     note: Note | null;
     currentUserId: number;
@@ -47,6 +53,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         note?.visibility ?? (note?.person || note?.deal ? "workspace" : "private"),
     );
     const [status, setStatus] = useState<SaveStatus>("idle");
+    const [titleError, setTitleError] = useState<string | null>(null);
     const dirtyRef = useRef(false);
     const savingRef = useRef(false);
     const saveRef = useRef<() => void>(() => {});
@@ -70,6 +77,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             setStatus("idle");
             return;
         }
+        if (nextTitle != null && titleIsTooLong(nextTitle)) {
+            setTitleError(t("titleTooLong", { max: MAX_NOTE_TITLE_LENGTH }));
+            setStatus("error");
+            return;
+        }
+        setTitleError(null);
         savingRef.current = true;
         dirtyRef.current = false;
         setStatus("saving");
@@ -148,15 +161,30 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
 
                 <div className="mx-auto w-full max-w-3xl">
                     <input
+                        id="note-title"
                         value={title}
                         onChange={(event) => {
-                            setTitle(event.target.value);
+                            const nextTitle = event.target.value;
+                            const nextTitleError = titleIsTooLong(nextTitle.trim())
+                                ? t("titleTooLong", { max: MAX_NOTE_TITLE_LENGTH })
+                                : null;
+                            setTitle(nextTitle);
+                            setTitleError(nextTitleError);
+                            if (nextTitleError) setStatus("error");
+                            else if (titleError) setStatus("idle");
                             markDirty();
                         }}
                         placeholder={t("titlePlaceholder")}
                         aria-label={t("titlePlaceholder")}
+                        aria-invalid={titleError ? true : undefined}
+                        aria-describedby={titleError ? "note-title-error" : undefined}
                         className="w-full border-0 bg-transparent p-0 text-4xl font-extrabold tracking-tight text-foreground outline-none placeholder:text-muted-foreground/50"
                     />
+                    {titleError ? (
+                        <p id="note-title-error" className="mt-2 text-sm text-destructive">
+                            {titleError}
+                        </p>
+                    ) : null}
 
                     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                         {author ? <span>{author.displayName || author.username}</span> : null}

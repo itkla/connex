@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -119,7 +120,7 @@ export default function EditTaskSheet({
     };
 
     return (
-        <Drawer open={open} onOpenChange={handleOpenChange}>
+        <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
@@ -142,6 +143,7 @@ export default function EditTaskSheet({
                                 value={draft.description}
                                 onChange={(next) => setDraft((d) => ({ ...d, description: next }))}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                             />
                         </div>
@@ -223,7 +225,7 @@ export default function EditTaskSheet({
                                 id="task-completed"
                                 checked={draft.completed}
                                 onCheckedChange={(checked) => setDraft((d) => ({ ...d, completed: checked === true }))}
-                                className="size-[18px] rounded-full border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                                className="size-[18px] rounded-full border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                             />
                             <Label
                                 htmlFor="task-completed"
@@ -241,8 +243,9 @@ export default function EditTaskSheet({
                     </DrawerClose>
                     <Button
                         onClick={saveUpdates}
+                        variant="brand"
                         disabled={isSaving}
-                        className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                        className="transition-transform active:scale-[0.98]"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>

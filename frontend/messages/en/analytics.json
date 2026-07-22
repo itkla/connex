@@ -141,6 +141,7 @@
   },
   "AnalyticsDealRisk": {
     "empty": "No open deals are at risk right now.",
+    "truncated": "Partial results: risk analysis is limited to the 1,000 highest-priority open deals, so totals may be understated.",
     "summary": "{count, plural, one {# deal at risk} other {# deals at risk}}",
     "factorsLabel": "Common factors",
     "factor_close_overdue": "Close date overdue",

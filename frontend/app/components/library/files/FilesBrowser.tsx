@@ -50,7 +50,7 @@ import {
 } from '@/app/lib/api';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { deleteUploadedFile, formatDate, formatFileSize } from '@/app/lib/utils';
+import { formatDate, formatFileSize } from '@/app/lib/utils';
 import type { Attachment, AttachmentFacets, AttachmentsPageParams, PageParams, Tag } from '@/app/lib/types';
 import {
     classifyKind,
@@ -152,7 +152,7 @@ export default function FilesBrowser() {
     const { items, total, loading, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
         Attachment,
         AttachmentsPageParams
-    >(getAttachmentsPage, extraParams, PAGE_SIZE);
+    >(getAttachmentsPage, extraParams, { defaultSize: PAGE_SIZE });
 
     // seed the search box + deep-linked file from the URL once on mount
     useEffect(() => {
@@ -196,12 +196,18 @@ export default function FilesBrowser() {
 
     const kindOptions = useMemo(() => {
         const counts = new Map((facets?.kinds ?? []).map((f) => [f.key, f.count]));
-        return FILE_KINDS.filter((k) => counts.has(k)).map((k) => ({ kind: k, count: counts.get(k)! }));
+        return FILE_KINDS.flatMap((kind) => {
+            const count = counts.get(kind);
+            return count === undefined ? [] : [{ kind, count }];
+        });
     }, [facets]);
 
     const sourceOptions = useMemo(() => {
         const counts = new Map((facets?.sources ?? []).map((f) => [f.key, f.count]));
-        return SOURCE_TYPES.filter((s) => counts.has(s)).map((s) => ({ source: s, count: counts.get(s)! }));
+        return SOURCE_TYPES.flatMap((source) => {
+            const count = counts.get(source);
+            return count === undefined ? [] : [{ source, count }];
+        });
     }, [facets]);
 
     const tagById = useMemo(() => new Map(allTags.map((tg) => [tg.id, tg])), [allTags]);
@@ -254,7 +260,6 @@ export default function FilesBrowser() {
         if (!deleting) return;
         setBusy(true);
         try {
-            await deleteUploadedFile(deleting.url);
             await deleteAttachment(deleting.id);
             toastSuccess(t('toastDeleted'));
             setDeleting(null);
@@ -287,7 +292,7 @@ export default function FilesBrowser() {
         setBulkBusy(true);
         try {
             await Promise.all(
-                selectedAttachments.map((a) => deleteUploadedFile(a.url).then(() => deleteAttachment(a.id))),
+                selectedAttachments.map((a) => deleteAttachment(a.id)),
             );
             toastSuccess(t('toastDeletedCount', { count: selectedAttachments.length }));
             setBulkDeleting(false);

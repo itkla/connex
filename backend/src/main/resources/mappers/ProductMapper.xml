@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ProductMapper">
+
+  <resultMap id="ProductResult" type="Product">
+    <id     property="id"               column="id"/>
+    <result property="workspaceId"      column="workspace_id"/>
+    <result property="sku"              column="sku"/>
+    <result property="name"             column="name"/>
+    <result property="description"      column="description"/>
+    <result property="active"           column="active"/>
+    <result property="unit"             column="unit"/>
+    <result property="unitPrice"        column="unit_price"/>
+    <result property="currency"         column="currency"/>
+    <result property="taxRate"          column="tax_rate"/>
+    <result property="billingFrequency" column="billing_frequency"/>
+    <result property="effectiveStart"   column="effective_start"/>
+    <result property="effectiveEnd"     column="effective_end"/>
+    <result property="createdAt"        column="created_at"/>
+    <result property="updatedAt"        column="updated_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, workspace_id, sku, name, description, active, unit, unit_price, currency,
+    tax_rate, billing_frequency, effective_start, effective_end, created_at, updated_at
+  </sql>
+
+  <select id="getAll" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY name, id
+  </select>
+
+  <select id="getById" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM product WHERE workspace_id = #{workspaceId} AND id = #{id})
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO product (
+      workspace_id, sku, name, description, active, unit, unit_price, currency,
+      tax_rate, billing_frequency, effective_start, effective_end
+    ) VALUES (
+      #{workspaceId}, #{sku}, #{name}, #{description}, #{active}, #{unit}, #{unitPrice}, #{currency},
+      #{taxRate}, #{billingFrequency}, #{effectiveStart}, #{effectiveEnd}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE product SET
+      sku = #{sku}, name = #{name}, description = #{description}, active = #{active},
+      unit = #{unit}, unit_price = #{unitPrice}, currency = #{currency}, tax_rate = #{taxRate},
+      billing_frequency = #{billingFrequency}, effective_start = #{effectiveStart},
+      effective_end = #{effectiveEnd}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM product WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+</mapper>

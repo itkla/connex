@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper">
+
+  <insert id="enqueue">
+    INSERT INTO object_deletion_queue (
+      workspace_id, object_key, attempts, delete_passes_remaining, next_attempt_at
+    )
+    VALUES (#{workspaceId}, #{objectKey}, 1, #{deletePassesRemaining}, #{nextAttemptAt})
+    ON DUPLICATE KEY UPDATE
+      attempts = LEAST(object_deletion_queue.attempts + 1, 2147483647),
+      next_attempt_at = IF(
+        VALUES(delete_passes_remaining) &gt; object_deletion_queue.delete_passes_remaining,
+        GREATEST(object_deletion_queue.next_attempt_at, VALUES(next_attempt_at)),
+        LEAST(object_deletion_queue.next_attempt_at, VALUES(next_attempt_at))
+      ),
+      delete_passes_remaining = GREATEST(
+        object_deletion_queue.delete_passes_remaining,
+        VALUES(delete_passes_remaining)
+      )
+  </insert>
+
+  <select id="countPending" resultType="long">
+    SELECT COUNT(*) FROM object_deletion_queue WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="countPendingAmbiguousWrites" resultType="long">
+    SELECT COUNT(*)
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND delete_passes_remaining = 2
+  </select>
+
+  <select id="workspaceIdsWithDueTasks" resultType="int">
+    SELECT workspace_id
+    FROM object_deletion_queue
+    WHERE next_attempt_at &lt;= #{now}
+    GROUP BY workspace_id
+    ORDER BY CASE WHEN workspace_id &gt; #{afterWorkspaceId} THEN 0 ELSE 1 END,
+             workspace_id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findDue" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND next_attempt_at &lt;= #{now}
+    ORDER BY next_attempt_at, id
+    LIMIT #{limit}
+  </select>
+
+  <select id="lockByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId}
+      AND object_key = #{objectKey}
+      AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, workspace_id AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND object_key = #{objectKey}
+      AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteById">
+    DELETE FROM object_deletion_queue WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <delete id="deleteByKey">
+    DELETE FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+  </delete>
+
+  <delete id="deleteByIdentity">
+    DELETE FROM object_deletion_queue
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND object_key = #{objectKey}
+  </delete>
+
+  <update id="reschedule">
+    UPDATE object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647), next_attempt_at = #{nextAttemptAt}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="rescheduleByKey">
+    UPDATE object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647), next_attempt_at = #{nextAttemptAt}
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+  </update>
+
+  <update id="confirmDeletePass">
+    UPDATE object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647),
+        delete_passes_remaining = delete_passes_remaining - 1,
+        next_attempt_at = #{nextAttemptAt}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND delete_passes_remaining &gt; 1
+  </update>
+
+</mapper>

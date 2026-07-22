@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
@@ -119,7 +120,7 @@ export default function EditActivitySheet({
     };
 
     return (
-        <Drawer open={open} onOpenChange={handleOpenChange}>
+        <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
@@ -218,6 +219,7 @@ export default function EditActivitySheet({
                                 id="activity-notes"
                                 value={draft.notes}
                                 onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
+                                commands={ENTITY_COMMANDS}
                                 className={`${inputClass} min-h-24`}
                             />
                         </div>
@@ -230,8 +232,9 @@ export default function EditActivitySheet({
                     </DrawerClose>
                     <Button
                         onClick={saveUpdates}
+                        variant="brand"
                         disabled={isSaving}
-                        className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                        className="transition-transform active:scale-[0.98]"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>

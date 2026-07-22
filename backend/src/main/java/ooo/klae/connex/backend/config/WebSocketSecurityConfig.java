@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
@@ -22,12 +23,17 @@ import org.springframework.security.messaging.web.csrf.CsrfChannelInterceptor;
  * <p>The CONNECT frame carries the same session CSRF token the SPA already
  * echoes on mutating HTTP requests. The default {@code XorCsrfChannelInterceptor}
  * expects a masked token, but {@link SecurityConfig} hands the SPA a plain one
- * ({@code CsrfTokenRequestAttributeHandler}), so the plain
+ * ({@code HeaderOnlyCsrfTokenRequestHandler}), so the plain
  * {@link CsrfChannelInterceptor} is installed instead; when CSRF is disabled by
  * configuration the frame-level check is a no-op to match the HTTP posture.
  */
 @Configuration
 @EnableWebSocketSecurity
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 public class WebSocketSecurityConfig {
 
     @Bean

@@ -2,27 +2,24 @@ import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 import { warmthDotClass } from '@/app/lib/utils';
-import type { RelationshipTemperature, TemperatureBand } from '@/app/lib/types';
+import type { TemperatureBand, WarmthSummary } from '@/app/lib/types';
 
 const BANDS: readonly TemperatureBand[] = ['hot', 'warm', 'cool', 'cold'];
 
-/** Props for {@link WarmthDistribution}: the contact temperatures to bucket by band. */
-export type WarmthDistributionProps = { temps: RelationshipTemperature[] };
+/** Props for {@link WarmthDistribution}: the server-computed workspace-wide warmth summary. */
+export type WarmthDistributionProps = { summary: WarmthSummary };
 
 /**
  * Dashboard widget: a compact segmented meter showing how contacts are distributed across the
  * warmth bands (hot, warm, cool, cold). A single proportional bar summarises the mix and a legend
  * lists each band's colour, localized label, and count. Purely informational.
  */
-export default function WarmthDistribution({ temps }: WarmthDistributionProps) {
+export default function WarmthDistribution({ summary }: WarmthDistributionProps) {
     const t = useTranslations('WarmthDistribution');
     const tBand = useTranslations('Temperature');
 
-    const total = temps.length;
-    const counts = BANDS.map((band) => ({
-        band,
-        count: temps.filter((temp) => temp.band === band).length,
-    }));
+    const counts = BANDS.map((band) => ({ band, count: summary.contacts[band] }));
+    const total = counts.reduce((sum, entry) => sum + entry.count, 0);
 
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">

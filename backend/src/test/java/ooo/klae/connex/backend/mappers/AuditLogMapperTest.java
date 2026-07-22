@@ -16,6 +16,8 @@ import ooo.klae.connex.backend.beans.Workspace;
 class AuditLogMapperTest extends AbstractMapperTest {
     @Autowired private AuditLogMapper auditLogMapper;
 
+    private long nextChainIndex = 1;
+
     @Test
     void findRecentPagesThroughWorkspaceScopedEventsWithoutOverlap() {
         Workspace ws = newWorkspace();
@@ -64,6 +66,15 @@ class AuditLogMapperTest extends AbstractMapperTest {
         assertEquals(newestFirst, paged);
     }
 
+    @Test
+    void findWorkspaceExportOrdersByChainIndex() {
+        Workspace ws = newWorkspace();
+        int second = insertAuditWithChain(ws.getId(), 2, "second");
+        int first = insertAuditWithChain(ws.getId(), 1, "first");
+
+        assertEquals(List.of(first, second), idsOf(auditLogMapper.findWorkspaceExport(ws.getId(), 50, 0)));
+    }
+
     private Workspace newWorkspace() {
         Workspace ws = new Workspace();
         ws.setName("WS " + unique());
@@ -80,8 +91,37 @@ class AuditLogMapperTest extends AbstractMapperTest {
         entry.setEntityId(entityId);
         entry.setOutcome("success");
         entry.setSummary(summary);
+        entry.setOrgId(workspaceMapper.getOrgId(workspaceId));
+        entry.setChainScopeType("workspace");
+        entry.setChainScopeId(workspaceId);
+        entry.setChainIndex(nextChainIndex);
+        entry.setPrevHash(hash(nextChainIndex - 1));
+        entry.setRowHash(hash(nextChainIndex));
+        nextChainIndex++;
         auditLogMapper.insert(entry);
         return entry.getId();
+    }
+
+    private int insertAuditWithChain(Integer workspaceId, long chainIndex, String summary) {
+        AuditLog entry = new AuditLog();
+        entry.setWorkspaceId(workspaceId);
+        entry.setOrgId(workspaceMapper.getOrgId(workspaceId));
+        entry.setAction("company.update");
+        entry.setEntityType("company");
+        entry.setEntityId(1);
+        entry.setOutcome("success");
+        entry.setSummary(summary);
+        entry.setChainScopeType("workspace");
+        entry.setChainScopeId(workspaceId);
+        entry.setChainIndex(chainIndex);
+        entry.setPrevHash(hash(chainIndex - 1));
+        entry.setRowHash(hash(chainIndex));
+        auditLogMapper.insert(entry);
+        return entry.getId();
+    }
+
+    private static String hash(long index) {
+        return String.format("%064d", index);
     }
 
     private static List<Integer> idsOf(List<AuditLog> entries) {

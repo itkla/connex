@@ -4,47 +4,31 @@ import Link from 'next/link';
 import { TrophyIcon } from '@heroicons/react/24/solid';
 import { useLocale, useTranslations } from 'next-intl';
 
-import { type Company, type Deal } from '@/app/lib/types';
+import { type DealSummary, type DealTop } from '@/app/lib/types';
 import { formatCompactCurrency } from '@/app/lib/utils';
-import { isDealClosed } from './dealOutcome';
 
 const RANK_COLORS = ['#fbbf24', '#94a3b8', '#cd7f32'] as const; // gold, silver, bronze
 
-type Field = 'value' | 'actualValue';
-
-export default function TopDeals({
-    deals,
-    companyById,
-}: {
-    deals: Deal[];
-    companyById: Map<number, Company>;
-}) {
+/**
+ * Biggest open deals and top wins from the server-computed {@link DealTop} rollup. Company names
+ * are pre-resolved on each {@link DealSummary}; no client-side deal aggregation.
+ */
+export default function TopDeals({ data }: { data: DealTop }) {
     const t = useTranslations('DealsTopDeals');
-    const topOpen = [...deals]
-        .filter((d) => !isDealClosed(d))
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-        .slice(0, 3);
-
-    const topWins = [...deals]
-        .filter(isDealClosed)
-        .sort((a, b) => (b.actualValue ?? 0) - (a.actualValue ?? 0))
-        .slice(0, 3);
 
     return (
         <div className="grid h-64 grid-rows-2 gap-3">
             <Section
                 title={t('biggestOpenDeals')}
-                deals={topOpen}
-                field="value"
-                companyById={companyById}
+                deals={data.topOpen}
+                valueField="value"
                 emptyLabel={t('noOpenDeals')}
                 rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
             <Section
                 title={t('topWins')}
-                deals={topWins}
-                field="actualValue"
-                companyById={companyById}
+                deals={data.topWon}
+                valueField="actualValue"
                 emptyLabel={t('noClosedDeals')}
                 rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
@@ -55,15 +39,13 @@ export default function TopDeals({
 function Section({
     title,
     deals,
-    field,
-    companyById,
+    valueField,
     emptyLabel,
     rankLabels,
 }: {
     title: string;
-    deals: Deal[];
-    field: Field;
-    companyById: Map<number, Company>;
+    deals: DealSummary[];
+    valueField: 'value' | 'actualValue';
     emptyLabel: string;
     rankLabels: readonly string[];
 }) {
@@ -75,34 +57,31 @@ function Section({
                 <p className="text-sm text-muted-foreground">{emptyLabel}</p>
             ) : (
                 <ul className="space-y-0.5">
-                    {deals.map((d, i) => {
-                        const companyName = d.company != null ? companyById.get(d.company)?.name : null;
-                        return (
-                            <li key={d.id}>
-                                <Link
-                                    href={`/records/deals/${d.id}`}
-                                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm transition hover:bg-muted"
-                                >
-                                    <span className="flex min-w-0 items-center gap-1.5">
-                                        <TrophyIcon
-                                            aria-label={rankLabels[i]}
-                                            className="size-4 shrink-0"
-                                            style={{ color: RANK_COLORS[i] }}
-                                        />
-                                        <span className="min-w-0 truncate">
-                                            <span className="font-medium text-foreground">{d.name}</span>
-                                            {companyName && (
-                                                <span className="text-muted-foreground"> · {companyName}</span>
-                                            )}
-                                        </span>
+                    {deals.map((d, i) => (
+                        <li key={d.id}>
+                            <Link
+                                href={`/records/deals/${d.id}`}
+                                className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm transition hover:bg-muted"
+                            >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    <TrophyIcon
+                                        aria-label={rankLabels[i]}
+                                        className="size-4 shrink-0"
+                                        style={{ color: RANK_COLORS[i] }}
+                                    />
+                                    <span className="min-w-0 truncate">
+                                        <span className="font-medium text-foreground">{d.name}</span>
+                                        {d.companyName && (
+                                            <span className="text-muted-foreground"> · {d.companyName}</span>
+                                        )}
                                     </span>
-                                    <span className="shrink-0 font-medium text-foreground">
-                                        {formatCompactCurrency(d[field] ?? 0, d.currency || 'USD', locale)}
-                                    </span>
-                                </Link>
-                            </li>
-                        );
-                    })}
+                                </span>
+                                <span className="shrink-0 font-medium text-foreground">
+                                    {formatCompactCurrency(d[valueField], d.currency || 'USD', locale)}
+                                </span>
+                            </Link>
+                        </li>
+                    ))}
                 </ul>
             )}
         </div>

@@ -1,23 +1,20 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
-export const locales = ["en", "ja"] as const;
-export const defaultLocale: Locale = "en";
-export type Locale = (typeof locales)[number];
-export const LOCALE_COOKIE = "NEXT_LOCALE";
+import { LOCALE_COOKIE, resolveLocale, type Locale } from "@/i18n/config";
 
-function isLocale(value: string | undefined): value is Locale {
-    return value !== undefined && (locales as readonly string[]).includes(value);
-}
+export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "@/i18n/config";
 
 const namespaces = [
     "common",
+    "actions",
     "auth",
     "workspace",
     "organization",
     "account",
     "dashboard",
     "analytics",
+    "reports",
     "activity",
     "me",
     "records",
@@ -25,6 +22,10 @@ const namespaces = [
     "contacts",
     "deals",
     "pipelines",
+    "products",
+    "document-templates",
+    "approval-policies",
+    "campaigns",
     "users",
     "map",
     "introductions",
@@ -35,6 +36,7 @@ const namespaces = [
     "importExport",
     "legal",
     "docs",
+    "unsubscribe",
 ] as const;
 
 async function loadMessages(locale: Locale) {
@@ -52,7 +54,7 @@ async function loadMessages(locale: Locale) {
 
 export default getRequestConfig(async () => {
     const requested = (await cookies()).get(LOCALE_COOKIE)?.value;
-    const locale: Locale = isLocale(requested) ? requested : defaultLocale;
+    const locale = resolveLocale(requested);
 
     return {
         locale,

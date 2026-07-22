@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -36,7 +36,8 @@ import NoteContent from '@/app/components/activity/notes/NoteContent';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
-import { deleteActivity } from '@/app/lib/api';
+import { deleteActivity, getActivityById } from '@/app/lib/api';
+import { useUrlSync } from '@/app/hooks/useUrlSync';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -129,6 +130,16 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<Activity | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    const searchParams = useSearchParams();
+    useEffect(() => {
+        const activityId = searchParams.get('activity');
+        if (activityId && /^\d+$/.test(activityId)) {
+            getActivityById(Number(activityId)).then(setEditing).catch(() => {});
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useUrlSync({ activity: editing ? String(editing.id) : undefined });
 
     useEffect(() => {
         const stored = window.localStorage.getItem(FILTER_STORAGE_KEY);
@@ -325,7 +336,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
                 <Rise>
                     <header className="flex flex-wrap items-start justify-between gap-4">
                         <div>
@@ -333,7 +344,8 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                             <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
                         </div>
                         <Button
-                            className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                            variant="brand"
+                            className="shadow-sm transition-transform active:scale-[0.98]"
                             aria-label={t('newAria')}
                             onClick={() => setCreating(true)}
                         >

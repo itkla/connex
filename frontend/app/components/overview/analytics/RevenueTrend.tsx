@@ -5,8 +5,8 @@ import { Area, AreaChart, CartesianGrid, Line, ReferenceLine, XAxis, YAxis, Tool
 import { useLocale, useTranslations } from 'next-intl';
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart';
-import { type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
+import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
 import { type RangeKey } from '@/app/components/overview/analytics/metrics';
 
 const MIN_MONTHS_FORWARD = 3;
@@ -15,83 +15,74 @@ const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 
 type Bucket = { key: string; label: string; won: number; projected: number };
 
-function forwardHorizon(deals: Deal[], now: number): number {
-    const reference = new Date(now);
-    const base = reference.getFullYear() * 12 + reference.getMonth();
+function forwardHorizon(series: DealRevenueSeries, base: number): number {
     let furthest = MIN_MONTHS_FORWARD;
-    // find the furthest expected close date
-    for (const deal of deals) {
-        const expected = parseMysqlDateTime(deal.expectedCloseDate);
-        if (!Number.isFinite(expected)) continue;
-        const d = new Date(expected);
-        const offset = d.getFullYear() * 12 + d.getMonth() - base;
+    for (const point of [...series.closed, ...series.projected]) {
+        const offset = point.year * 12 + (point.month - 1) - base;
         if (offset > furthest) furthest = offset;
     }
     return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
 }
 
-function buildBuckets(deals: Deal[], now: number, locale: string, range: RangeKey) {
-    const start = new Date(now);
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - (MONTHS_BACK[range] - 1));
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey, timezone: string) {
+    const current = yearMonthInTimezone(now, timezone);
+    const currentIndex = current.year * 12 + current.month - 1;
+    const startIndex = currentIndex - (MONTHS_BACK[range] - 1);
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
-    const total = MONTHS_BACK[range] + forwardHorizon(deals, now);
+    const total = MONTHS_BACK[range] + forwardHorizon(series, currentIndex);
 
-    // build buckets
     for (let i = 0; i < total; i++) {
-        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        const monthIndex = startIndex + i;
+        const year = Math.floor(monthIndex / 12);
+        const month = ((monthIndex % 12) + 12) % 12;
+        const d = new Date(Date.UTC(year, month, 1));
+        const key = `${year}-${month}`;
         keyToIndex.set(key, buckets.length);
-        const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
+        const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
         buckets.push({ key, label, won: 0, projected: 0 });
     }
 
-    // mark the current month by its unique key (month labels repeat across years)
-    const today = new Date(now);
-    const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
+    const todayKey = `${current.year}-${current.month - 1}`;
 
-    for (const deal of deals) {
-        const closed = parseMysqlDateTime(deal.closedAt);
-        const expected = parseMysqlDateTime(deal.expectedCloseDate);
-        const isClosed = Number.isFinite(closed) && closed <= now;
-
-        // add won value to the bucket
-        if (isClosed) {
-            const d = new Date(closed);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].won += deal.actualValue ?? 0;
-        }
-        // add projected value to the bucket
-        if (Number.isFinite(expected)) {
-            const d = new Date(expected);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].projected += deal.value ?? 0;
-        }
+    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${point.month - 1}`;
+    for (const point of series.closed) {
+        const idx = keyToIndex.get(bucketKeyOf(point));
+        if (idx !== undefined) buckets[idx].won += point.total;
+    }
+    for (const point of series.projected) {
+        const idx = keyToIndex.get(bucketKeyOf(point));
+        if (idx !== undefined) buckets[idx].projected += point.total;
     }
 
     return { data: buckets, todayKey: keyToIndex.has(todayKey) ? todayKey : null };
 }
 
+/**
+ * Monthly revenue trend — realized (won-by-close-month) vs projected (by expected-close-month) —
+ * from the server-computed {@link DealRevenueSeries}. {@code range} only sizes the historical
+ * window shown; the series itself is aggregated server-side over all deals.
+ */
 export default function RevenueTrend({
-    deals,
+    series,
     currency,
     range,
+    timezone,
 }: {
-    deals: Deal[];
+    series: DealRevenueSeries;
     currency: string;
     range: RangeKey;
+    timezone: string;
 }) {
     const t = useTranslations('AnalyticsRevenue');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
     const { data, todayKey } = useMemo(
-        () => buildBuckets(deals, now, locale, range),
-        [deals, now, locale, range],
+        () => buildBuckets(series, now, locale, range, timezone),
+        [series, now, locale, range, timezone],
     );
 
     const labelByKey = useMemo(() => {
@@ -100,7 +91,7 @@ export default function RevenueTrend({
         return map;
     }, [data]);
 
-    const hasData = data.some((b) => b.won > 0 || b.projected > 0);
+    const hasData = data.some((b) => b.won !== 0 || b.projected !== 0);
 
     const chartConfig = {
         won: { label: t('actual'), color: 'var(--color-brand)' },

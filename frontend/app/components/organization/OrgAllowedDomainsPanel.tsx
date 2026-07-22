@@ -8,6 +8,7 @@ import { AtSymbolIcon, EllipsisHorizontalIcon, GlobeAltIcon, TrashIcon } from "@
 import { addOrgAllowedDomain, getOrgAllowedDomains, removeOrgAllowedDomain } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { ApiError } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/compon
 
 export default function OrgAllowedDomainsPanel() {
     const t = useTranslations("OrgDomains");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
     const { fieldErrors, setFieldErrors, clearError } = useFieldErrors();
@@ -68,7 +70,7 @@ export default function OrgAllowedDomainsPanel() {
             toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
-            else toastError(err instanceof Error ? err.message : String(err));
+            else if (!handlePasskeyStepUpError(err)) toastError(err instanceof Error ? err.message : String(err));
         } finally {
             setAdding(false);
         }
@@ -82,7 +84,9 @@ export default function OrgAllowedDomainsPanel() {
             setDomains((prev) => prev.filter((d) => d !== domain));
             toastSuccess(t("removedToast"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : String(err));
+            }
         } finally {
             setBusy(null);
         }
@@ -124,8 +128,9 @@ export default function OrgAllowedDomainsPanel() {
                 </div>
                 <Button
                     type="submit"
+                    variant="brand"
                     disabled={adding || input.trim().length === 0}
-                    className="min-w-28 bg-brand text-white hover:bg-brand-hover"
+                    className="min-w-28"
                 >
                     {adding ? <Loader2Icon className="size-4 animate-spin" /> : t("addButton")}
                 </Button>

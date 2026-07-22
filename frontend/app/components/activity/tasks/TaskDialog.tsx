@@ -1,21 +1,21 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+} from '@/components/ui/responsive-dialog';
 import {
     Combobox,
     ComboboxContent,
@@ -27,11 +27,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createTask, isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
@@ -46,6 +48,9 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
     defaultDueDate?: string;
+    /** Prefills the description, e.g. text carried over from the Quick Create panel. */
+    defaultDescription?: string;
+    requestInit?: RequestInit;
 };
 
 export default function TaskDialog({
@@ -58,32 +63,55 @@ export default function TaskDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultDueDate = '',
+    defaultDescription = '',
+    requestInit,
 }: Props) {
+    const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
+    }
+
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <TaskDialogForm
-                    persons={persons}
-                    deals={deals}
-                    users={users}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultDueDate={defaultDueDate}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onClose={() => onOpenChange(false)}
-                />
-            </DialogContent>
-        </Dialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <TaskDialogForm
+                        key={openCount}
+                        persons={persons}
+                        deals={deals}
+                        users={users}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultDueDate={defaultDueDate}
+                        defaultDescription={defaultDescription}
+                        requestInit={requestInit}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -95,15 +123,23 @@ type TaskDialogFormProps = {
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultDueDate: string;
+    defaultDescription: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
+    /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
+    onCancel: () => void;
+    /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
     onClose: () => void;
 };
 
 /**
- * The task-create form. It lives inside {@code DialogContent} — which unmounts on
- * close — so its state initializes fresh from props on each open, with no reset effect.
+ * The task-create form body — free of any dialog/drawer shell so it can render inside the standalone
+ * {@link TaskDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
+ * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
  */
-function TaskDialogForm({
+export function TaskDialogForm({
     persons,
     deals,
     users,
@@ -111,13 +147,17 @@ function TaskDialogForm({
     defaultPerson,
     defaultDeal,
     defaultDueDate,
+    defaultDescription,
+    requestInit,
     onSubmittingChange,
+    onDirtyChange,
+    onCancel,
     onClose,
 }: TaskDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityTasksDialog');
 
-    const [description, setDescription] = useState('');
+    const [description, setDescription] = useState(() => defaultDescription);
     const [dueDate, setDueDate] = useState(() => defaultDueDate);
     const [assignee, setAssignee] = useState<User | null>(() => users.find((u) => u.id === currentUserId) ?? null);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
@@ -125,6 +165,25 @@ function TaskDialogForm({
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const [initial] = useState(() => ({
+        description,
+        dueDate,
+        assigneeId: assignee?.id ?? null,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (description.trim() !== initial.description.trim() ||
+            dueDate !== initial.dueDate ||
+            (assignee?.id ?? null) !== initial.assigneeId ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -139,18 +198,23 @@ function TaskDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createTask({
-                description: description.trim(),
-                dueDate: dueDate || undefined,
-                assignedToId,
-                personId: selectedPerson?.id ?? undefined,
-                dealId: selectedDeal?.id ?? undefined,
-            });
+            await createTask(
+                {
+                    description: description.trim(),
+                    dueDate: dueDate || undefined,
+                    assignedToId,
+                    personId: selectedPerson?.id ?? undefined,
+                    dealId: selectedDeal?.id ?? undefined,
+                },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -168,8 +232,10 @@ function TaskDialogForm({
                       : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
@@ -181,19 +247,28 @@ function TaskDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
-                            <DialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</DialogTitle>
-                            <DialogDescription>{t('description')}</DialogDescription>
+                            <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{t('titleCreate')}</h2>
+                            <p className="text-sm text-muted-foreground">{t('description')}</p>
                         </div>
                     </div>
-                </DialogHeader>
+                </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && description.trim()) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
                         <div className="group relative">
@@ -209,6 +284,7 @@ function TaskDialogForm({
                                 ariaInvalid={Boolean(fieldErrors.description)}
                                 ariaDescribedby={fieldErrors.description ? 'task-description-error' : undefined}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
                             />
                         </div>
@@ -323,16 +399,15 @@ function TaskDialogForm({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise" style={{ animationDelay: '240ms' }}>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={submitting}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
+                    <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '240ms' }}>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
+                            {t('cancel')}
+                        </Button>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={submitting || succeeded || !description.trim()}
-                            className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {submitting ? (
                                 <Loader2Icon className="size-4 animate-spin" />
@@ -340,7 +415,7 @@ function TaskDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </DialogFooter>
+                    </div>
                 </form>
             </div>
         </>

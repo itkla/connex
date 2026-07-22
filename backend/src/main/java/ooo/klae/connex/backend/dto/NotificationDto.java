@@ -1,5 +1,10 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+
 import com.fasterxml.jackson.annotation.JsonRawValue;
 
 import lombok.Data;
@@ -12,6 +17,8 @@ import ooo.klae.connex.backend.beans.Notification;
 @Data
 @NoArgsConstructor
 public class NotificationDto {
+    private static final String MENTION_SUFFIX = ".mention";
+
     private int id;
     private int workspaceId;
     private String workspaceName;
@@ -36,8 +43,10 @@ public class NotificationDto {
     private String dismissedAt;
     private String resolvedAt;
     private String snoozedUntil;
+    private String snoozeTimezone;
     private String createdAt;
     private String updatedAt;
+    private long stateVersion;
 
     @JsonRawValue
     public String getData() {
@@ -59,7 +68,9 @@ public class NotificationDto {
         dto.setActorLabel(notification.getActorLabel());
         dto.setSourceType(notification.getSourceType());
         dto.setSourceId(notification.getSourceId());
-        dto.setSourceLabel(notification.getSourceLabel());
+        dto.setSourceLabel(notification.getType() != null && notification.getType().endsWith(MENTION_SUFFIX)
+            ? null
+            : notification.getSourceLabel());
         dto.setContextType(notification.getContextType());
         dto.setContextId(notification.getContextId());
         dto.setContextLabel(notification.getContextLabel());
@@ -69,9 +80,23 @@ public class NotificationDto {
         dto.setReadAt(notification.getReadAt());
         dto.setDismissedAt(notification.getDismissedAt());
         dto.setResolvedAt(notification.getResolvedAt());
-        dto.setSnoozedUntil(notification.getSnoozedUntil());
+        dto.setSnoozedUntil(toUtcInstant(notification.getSnoozedUntil()));
+        dto.setSnoozeTimezone(notification.getSnoozeTimezone());
         dto.setCreatedAt(notification.getCreatedAt());
         dto.setUpdatedAt(notification.getUpdatedAt());
         return dto;
+    }
+
+    private static String toUtcInstant(String value) {
+        if (value == null || value.contains("T")) {
+            return value;
+        }
+        try {
+            return LocalDateTime.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                .toInstant(ZoneOffset.UTC)
+                .toString();
+        } catch (DateTimeParseException exception) {
+            throw new IllegalStateException("Invalid notification UTC timestamp", exception);
+        }
     }
 }

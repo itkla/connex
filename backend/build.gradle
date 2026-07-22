@@ -6,11 +6,21 @@ plugins {
 }
 
 group = 'ooo.klae.connex'
-version = '0.0.1-SNAPSHOT'
 
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(26)
+	}
+}
+
+springBoot {
+	buildInfo {
+		def releaseBuildTime = providers.gradleProperty('buildTime')
+		if (releaseBuildTime.isPresent()) {
+			properties {
+				time.set(releaseBuildTime)
+			}
+		}
 	}
 }
 
@@ -27,11 +37,14 @@ repositories {
 }
 
 ext['tomcat.version'] = '11.0.23'
+ext['jackson-2-bom.version'] = '2.21.5'
+ext['logback.version'] = '1.5.35'
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.apache.httpcomponents.client5:httpclient5'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.0.1'
@@ -39,11 +52,15 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
 	implementation 'org.springframework.security:spring-security-saml2-service-provider'
 	implementation 'org.bouncycastle:bcpkix-jdk18on:1.84'
+	implementation 'com.twelvemonkeys.imageio:imageio-jpeg:3.13.1'
+	implementation 'com.twelvemonkeys.imageio:imageio-webp:3.13.1'
 	implementation 'org.springframework.boot:spring-boot-flyway'
 	implementation 'org.flywaydb:flyway-mysql'
 	implementation("org.springframework.data:spring-data-commons:4.1.0")
 	implementation 'org.springframework.security:spring-security-webauthn'
 	implementation 'org.springframework.security:spring-security-messaging'
+	implementation platform('software.amazon.awssdk:bom:2.46.8')
+	implementation 'software.amazon.awssdk:s3'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.mysql:mysql-connector-j'
@@ -64,4 +81,6 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	maxHeapSize = '1536m'
+	forkEvery = 100
 }

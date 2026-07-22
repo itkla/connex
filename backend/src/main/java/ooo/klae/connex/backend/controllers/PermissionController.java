@@ -1,14 +1,13 @@
 package ooo.klae.connex.backend.controllers;
 
-import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -19,15 +18,21 @@ import ooo.klae.connex.backend.tenant.Permission;
  */
 @RestController
 @RequestMapping("/api/permissions")
+@RequiredArgsConstructor
 public class PermissionController {
-
-    private static final Set<Permission> INERT = EnumSet.of(Permission.SSO_MANAGE);
+    private final WorkspaceService workspaceService;
 
     @GetMapping
     public List<String> catalog() {
-        return Arrays.stream(Permission.values())
-                .filter(permission -> !INERT.contains(permission))
+        return Permission.grantableNames();
+    }
+
+    /** Returns the current member's effective permissions in the active workspace. */
+    @GetMapping("/effective")
+    public List<String> effective() {
+        return workspaceService.getCurrentPermissions().stream()
                 .map(Enum::name)
+                .sorted()
                 .toList();
     }
 }

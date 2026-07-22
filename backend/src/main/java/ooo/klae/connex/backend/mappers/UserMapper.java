@@ -15,6 +15,7 @@ import java.util.List;
 public interface UserMapper {
     List<User> getAllUsers();
     User getUserById(int id);
+    Integer lockById(int id);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
@@ -24,13 +25,17 @@ public interface UserMapper {
     int update(User user);
     int delete(int id);
     int updateLastLoginAt(int id);
-    int updateProfilePictureUrl(@Param("id") int id, @Param("profilePictureUrl") String profilePictureUrl);
+    int updateProfilePictureUrlIfCurrent(
+        @Param("id") int id,
+        @Param("currentProfilePictureUrl") String currentProfilePictureUrl,
+        @Param("profilePictureUrl") String profilePictureUrl);
     int updateDisplayName(@Param("id") int id, @Param("displayName") String displayName);
     int updateEmail(@Param("id") int id, @Param("email") String email);
     int markEmailVerified(int id);
     int updateUsername(@Param("id") int id, @Param("username") String username);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);
     int updateTimezone(@Param("id") int id, @Param("timezone") String timezone);
+    int updateLocale(@Param("id") int id, @Param("locale") String locale);
     int updateCreatedAt(@Param("id") int id, @Param("createdAt") String createdAt);
     int updateUpdatedAt(@Param("id") int id, @Param("updatedAt") String updatedAt);
 }

@@ -30,6 +30,8 @@ type Props = {
     excludeUserId?: number;
     autofocus?: boolean;
     className?: string;
+    /** Miniaturized layout for embedding in a dialog: shorter body, condensed toolbar, no drag handle. */
+    compact?: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export default function RichNoteEditor({
     excludeUserId,
     autofocus = false,
     className,
+    compact = false,
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
@@ -77,7 +80,7 @@ export default function RichNoteEditor({
         ],
         editorProps: {
             attributes: {
-                class: "note-prose min-h-[15rem] max-w-none focus:outline-none",
+                class: `note-prose ${compact ? "min-h-[8.5rem]" : "min-h-[15rem]"} max-w-none focus:outline-none`,
             },
         },
         onUpdate: ({ editor: instance }) => {
@@ -117,15 +120,21 @@ export default function RichNoteEditor({
 
     return (
         <div className={className}>
-            {editable ? <EditorToolbar editor={editor} labels={labels} /> : null}
-            {editable && editor ? (
+            {editable ? <EditorToolbar editor={editor} labels={labels} compact={compact} /> : null}
+            {editable && !compact && editor ? (
                 <DragHandle editor={editor} className="note-drag-handle">
                     <span className="note-drag-handle-grip" title={t("dragHandleAria")} aria-hidden="true">
                         <GripVertical className="size-4" />
                     </span>
                 </DragHandle>
             ) : null}
-            <EditorContent editor={editor} />
+            {compact ? (
+                <div className="px-3 py-2.5">
+                    <EditorContent editor={editor} />
+                </div>
+            ) : (
+                <EditorContent editor={editor} />
+            )}
         </div>
     );
 }

@@ -30,6 +30,7 @@
     <result property="dismissedAt" column="dismissed_at"/>
     <result property="resolvedAt" column="resolved_at"/>
     <result property="snoozedUntil" column="snoozed_until"/>
+    <result property="snoozeTimezone" column="snooze_timezone"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
@@ -81,12 +82,21 @@
     n.template_version, n.title, n.body, n.actor_id, n.actor_label,
     n.source_type, n.source_id, n.source_label, n.context_type, n.context_id,
     n.context_label, n.action_url, n.data, n.dedupe_key, n.triggered_at,
-    n.read_at, n.dismissed_at, n.resolved_at, n.snoozed_until, n.created_at, n.updated_at
+    n.read_at, n.dismissed_at, n.resolved_at, n.snoozed_until, n.snooze_timezone,
+    n.created_at, n.updated_at
   </sql>
 
   <sql id="recipientScope">
     n.workspace_id = #{workspaceId}
     AND n.recipient_id = #{recipientId}
+  </sql>
+
+  <sql id="visiblePersonJoin">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
   <!-- Reconciliation-managed reminder types. Every reconcile/resolve/purge statement scopes to
@@ -102,42 +112,172 @@
        a mention queued while pending — but surfaces only once their membership activates, so workspace
        content is never disclosed to a not-yet-joined invitee. The sole exception is the
        'workspace.join' invitation itself, which carries no workspace content and must reach the
-       pending member so they can accept. Member removal cascades a member's content notifications. -->
+       pending member so they can accept. Member removal deletes a member's notifications in the service layer
+       (UserOffboardingService.detachMemberContent; the FK cascade was dropped in #440 increment 3). -->
   <sql id="inboxScope">
     n.recipient_id = #{recipientId}
       AND (
-        n.type = 'workspace.join'
-        OR EXISTS (
+        EXISTS (
           SELECT 1 FROM workspace_member wm
           WHERE wm.workspace_id = n.workspace_id
             AND wm.user_id = n.recipient_id
             AND wm.status = 'active'
         )
+        OR (
+          n.type = 'workspace.join'
+          AND EXISTS (
+            SELECT 1 FROM workspace_member pending_wm
+            WHERE pending_wm.workspace_id = n.workspace_id
+              AND pending_wm.user_id = n.recipient_id
+              AND pending_wm.status = 'pending'
+          )
+        )
       )
   </sql>
 
   <!-- A snoozed notification is hidden from the active inbox and unread count until its snooze
-       window passes; timestamps are stored in UTC, so compare against UTC_TIMESTAMP(). -->
+       window passes. Every query in a page/count snapshot binds the same database UTC instant. -->
   <sql id="notSnoozed">
-    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= UTC_TIMESTAMP())
+    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= #{asOf})
+  </sql>
+
+  <sql id="contentAccessible">
+    (
+      (n.source_type IS NULL AND n.source_id IS NULL)
+      OR (n.source_type = 'activity' AND EXISTS (
+        SELECT 1 FROM activity source_activity
+        WHERE source_activity.workspace_id = n.workspace_id
+          AND source_activity.id = n.source_id
+      ))
+      OR (n.source_type = 'task' AND EXISTS (
+        SELECT 1 FROM task source_task
+        WHERE source_task.workspace_id = n.workspace_id
+          AND source_task.id = n.source_id
+      ))
+      OR (n.source_type = 'note' AND EXISTS (
+        SELECT 1 FROM note source_note
+        WHERE source_note.workspace_id = n.workspace_id
+          AND source_note.id = n.source_id
+          AND (source_note.visibility = 'workspace' OR source_note.author_id = #{recipientId})
+      ))
+      OR (n.source_type = 'deal' AND EXISTS (
+        SELECT 1 FROM deal source_deal
+        WHERE source_deal.workspace_id = n.workspace_id
+          AND source_deal.id = n.source_id
+      ))
+      OR (n.source_type = 'introduction' AND EXISTS (
+        SELECT 1 FROM introduction source_introduction
+        WHERE source_introduction.workspace_id = n.workspace_id
+          AND source_introduction.id = n.source_id
+      ))
+      OR (n.source_type = 'deal_document' AND EXISTS (
+        SELECT 1 FROM deal_document source_document
+        WHERE source_document.workspace_id = n.workspace_id
+          AND source_document.id = n.source_id
+      ))
+      OR (n.source_type = 'person' AND EXISTS (
+        SELECT 1 FROM person source_person
+        WHERE source_person.id = n.source_id
+          AND (
+            source_person.workspace_id = n.workspace_id
+            OR EXISTS (
+              SELECT 1 FROM person_share source_person_share
+              JOIN workspace source_person_viewer
+                ON source_person_viewer.id = source_person_share.workspace_id
+              JOIN workspace source_person_owner
+                ON source_person_owner.id = source_person.workspace_id
+               AND source_person_owner.org_id = source_person_viewer.org_id
+              WHERE source_person_share.person_id = source_person.id
+                AND source_person_share.workspace_id = n.workspace_id
+            )
+          )
+      ))
+      OR (n.source_type = 'company' AND EXISTS (
+        SELECT 1 FROM company source_company
+        WHERE source_company.id = n.source_id
+          AND (
+            source_company.workspace_id = n.workspace_id
+            OR EXISTS (
+              SELECT 1 FROM company_share source_company_share
+              JOIN workspace source_company_viewer
+                ON source_company_viewer.id = source_company_share.workspace_id
+              JOIN workspace source_company_owner
+                ON source_company_owner.id = source_company.workspace_id
+               AND source_company_owner.org_id = source_company_viewer.org_id
+              WHERE source_company_share.company_id = source_company.id
+                AND source_company_share.workspace_id = n.workspace_id
+            )
+          )
+      ))
+    )
+  </sql>
+
+  <sql id="contextAccessible">
+    (
+      (n.context_type IS NULL AND n.context_id IS NULL)
+      OR (n.context_type = 'deal' AND EXISTS (
+        SELECT 1 FROM deal context_deal
+        WHERE context_deal.workspace_id = n.workspace_id
+          AND context_deal.id = n.context_id
+      ))
+      OR (n.context_type = 'person' AND EXISTS (
+        SELECT 1 FROM person context_person
+        WHERE context_person.id = n.context_id
+          AND (
+            context_person.workspace_id = n.workspace_id
+            OR EXISTS (
+              SELECT 1 FROM person_share context_person_share
+              JOIN workspace context_person_viewer
+                ON context_person_viewer.id = context_person_share.workspace_id
+              JOIN workspace context_person_owner
+                ON context_person_owner.id = context_person.workspace_id
+               AND context_person_owner.org_id = context_person_viewer.org_id
+              WHERE context_person_share.person_id = context_person.id
+                AND context_person_share.workspace_id = n.workspace_id
+            )
+          )
+      ))
+    )
   </sql>
 
   <sql id="inboxFilters">
     <choose>
-      <when test="state == 'active'">
+      <when test="status == 'active'">
         AND n.dismissed_at IS NULL AND n.resolved_at IS NULL
         <include refid="notSnoozed"/>
       </when>
-      <when test="state == 'unread'">
+      <when test="status == 'unread'">
         AND n.dismissed_at IS NULL AND n.resolved_at IS NULL AND n.read_at IS NULL
         <include refid="notSnoozed"/>
       </when>
-      <when test="state == 'history'">
+      <when test="status == 'snoozed'">
+        AND n.dismissed_at IS NULL AND n.resolved_at IS NULL
+        AND n.snoozed_until &gt; #{asOf}
+      </when>
+      <when test="status == 'history'">
         AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
       </when>
     </choose>
-    <if test="category != null">
-      AND n.category = #{category}
+    <if test="types != null and !types.isEmpty()">
+      AND n.type IN
+      <foreach collection="types" item="type" open="(" separator="," close=")">
+        #{type}
+      </foreach>
+    </if>
+    <if test="categories != null and !categories.isEmpty()">
+      AND n.category IN
+      <foreach collection="categories" item="category" open="(" separator="," close=")">
+        #{category}
+      </foreach>
+    </if>
+    <if test="severities != null and !severities.isEmpty()">
+      AND n.severity IN
+      <foreach collection="severities" item="severity" open="(" separator="," close=")">
+        #{severity}
+      </foreach>
+    </if>
+    <if test="workspaceId != null">
+      AND n.workspace_id = #{workspaceId}
     </if>
     <if test="contextType != null and contextId != null">
       AND n.context_type = #{contextType} AND n.context_id = #{contextId}
@@ -149,6 +289,8 @@
     FROM notification n
     JOIN workspace w ON w.id = n.workspace_id
     WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
     <include refid="inboxFilters"/>
     ORDER BY n.triggered_at DESC, n.id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -158,18 +300,119 @@
     SELECT COUNT(*)
     FROM notification n
     WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
     <include refid="inboxFilters"/>
+  </select>
+
+  <select id="countsByCategory" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT n.category AS `key`, COUNT(*) AS `count`, NULL AS label
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.category
+    ORDER BY n.category
+  </select>
+
+  <select id="countsBySeverity" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT n.severity AS `key`, COUNT(*) AS `count`, NULL AS label
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.severity
+    ORDER BY n.severity
+  </select>
+
+  <select id="countsByWorkspace" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT CAST(n.workspace_id AS CHAR) AS `key`, COUNT(*) AS `count`, w.name AS label
+    FROM notification n
+    JOIN workspace w ON w.id = n.workspace_id
+    JOIN workspace_member active_wm
+      ON active_wm.workspace_id = n.workspace_id
+     AND active_wm.user_id = #{recipientId}
+     AND active_wm.status = 'active'
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+    GROUP BY n.workspace_id, w.name
+    ORDER BY n.workspace_id
   </select>
 
   <select id="getUnreadCounts"
           resultType="ooo.klae.connex.backend.dto.NotificationCountsDto">
-    SELECT COUNT(*) AS unread
+    SELECT COALESCE(SUM(
+        CASE WHEN n.dismissed_at IS NULL
+          AND n.resolved_at IS NULL
+          AND n.read_at IS NULL
+          AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= #{asOf})
+        THEN 1 ELSE 0 END
+      ), 0) AS unread,
+      COALESCE(SUM(
+        CASE WHEN n.dismissed_at IS NULL
+          AND n.resolved_at IS NULL
+          AND n.snoozed_until &gt; #{asOf}
+        THEN 1 ELSE 0 END
+      ), 0) AS snoozed,
+      COALESCE((
+        SELECT state_version
+        FROM notification_recipient_state
+        WHERE recipient_id = #{recipientId}
+      ), 0) AS state_version
     FROM notification n
     WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+  </select>
+
+  <select id="getNextSnoozeExpiry" resultType="string">
+    SELECT DATE_FORMAT(MIN(n.snoozed_until), '%Y-%m-%d %H:%i:%s')
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
       AND n.dismissed_at IS NULL
       AND n.resolved_at IS NULL
-      AND n.read_at IS NULL
-      <include refid="notSnoozed"/>
+      AND n.snoozed_until &gt; #{asOf}
+  </select>
+
+  <select id="getStateVersion" resultType="long">
+    SELECT COALESCE((
+      SELECT state_version
+      FROM notification_recipient_state
+      WHERE recipient_id = #{recipientId}
+    ), 0)
+  </select>
+
+  <insert id="bumpStateVersions">
+    INSERT INTO notification_recipient_state (recipient_id, state_version)
+    VALUES
+    <foreach collection="recipientIds" item="recipientId" separator=",">
+      (#{recipientId}, 1)
+    </foreach>
+    ON DUPLICATE KEY UPDATE
+      state_version = notification_recipient_state.state_version + 1
+  </insert>
+
+  <select id="lockRecipientMemberships" resultType="int">
+    SELECT workspace_id
+    FROM workspace_member
+    WHERE user_id = #{recipientId}
+    ORDER BY workspace_id
+    FOR UPDATE
+  </select>
+
+  <select id="getInboxCutoffId" resultType="long">
+    SELECT COALESCE(MAX(n.id), 0)
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+  </select>
+
+  <select id="getDatabaseUtcTimestamp" resultType="string">
+    SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')
   </select>
 
   <select id="findById" resultMap="NotificationResult">
@@ -177,59 +420,96 @@
     FROM notification n
     JOIN workspace w ON w.id = n.workspace_id
     WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
       AND n.id = #{id}
   </select>
 
+  <select id="findByIdForUpdate" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
+    FROM notification n
+    JOIN workspace w ON w.id = n.workspace_id
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+    FOR UPDATE
+  </select>
+
   <update id="markRead">
-    UPDATE notification
+    UPDATE notification n
     SET read_at = CURRENT_TIMESTAMP
-    WHERE recipient_id = #{recipientId}
-      AND id = #{id}
-      AND read_at IS NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND n.read_at IS NULL
   </update>
 
   <update id="markUnread">
-    UPDATE notification
+    UPDATE notification n
     SET read_at = NULL
-    WHERE recipient_id = #{recipientId}
-      AND id = #{id}
-      AND read_at IS NOT NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND n.read_at IS NOT NULL
   </update>
 
   <update id="dismiss">
-    UPDATE notification
+    UPDATE notification n
     SET dismissed_at = CURRENT_TIMESTAMP
-    WHERE recipient_id = #{recipientId}
-      AND id = #{id}
-      AND dismissed_at IS NULL
-      AND resolved_at IS NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND n.dismissed_at IS NULL
+      AND n.resolved_at IS NULL
   </update>
 
   <update id="restore">
-    UPDATE notification
-    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL, snoozed_until = NULL
-    WHERE recipient_id = #{recipientId}
-      AND id = #{id}
-      AND (dismissed_at IS NOT NULL OR resolved_at IS NOT NULL)
+    UPDATE notification n
+    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL,
+        snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
   </update>
 
   <update id="snooze">
-    UPDATE notification
-    SET snoozed_until = #{snoozedUntil}
-    WHERE recipient_id = #{recipientId}
-      AND id = #{id}
-      AND dismissed_at IS NULL
-      AND resolved_at IS NULL
+    UPDATE notification n
+    SET snoozed_until = #{snoozedUntil}, snooze_timezone = #{snoozeTimezone}
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND n.dismissed_at IS NULL
+      AND n.resolved_at IS NULL
+  </update>
+
+  <update id="unsnooze">
+    UPDATE notification n
+    SET snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id = #{id}
+      AND n.snoozed_until IS NOT NULL
   </update>
 
   <update id="markAllRead">
-    UPDATE notification
-    SET read_at = CURRENT_TIMESTAMP
-    WHERE recipient_id = #{recipientId}
+    UPDATE notification n
+    SET read_at = #{readAt}
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.id &lt;= #{cutoffId}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
       AND read_at IS NULL
-      AND (snoozed_until IS NULL OR snoozed_until &lt;= UTC_TIMESTAMP())
+      AND (snoozed_until IS NULL OR snoozed_until &lt;= #{readAt})
   </update>
 
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
@@ -241,7 +521,8 @@
     )
     VALUES (
       #{workspaceId}, #{recipientId}, #{type}, #{category}, #{severity},
-      #{templateVersion}, #{title}, #{body}, #{actorId}, #{actorLabel},
+      #{templateVersion}, #{title}, #{body},
+      (SELECT id FROM app_user WHERE id = #{actorId} FOR SHARE), #{actorLabel},
       #{sourceType}, #{sourceId}, #{sourceLabel}, #{contextType}, #{contextId},
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
@@ -270,6 +551,12 @@
         NULL,
         notification.snoozed_until
       ),
+      snooze_timezone = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.snooze_timezone
+      ),
       resolved_at = IF(
         notification.severity &lt;&gt; incoming.severity
           OR notification.resolved_at IS NOT NULL,
@@ -294,8 +581,17 @@
       severity = incoming.severity
   </insert>
 
+  <update id="claimEmailDelivery">
+    UPDATE notification
+    SET email_delivery_claimed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND dedupe_key = #{dedupeKey}
+      AND email_delivery_claimed_at IS NULL
+  </update>
+
   <select id="findByDedupe" resultMap="NotificationResult">
-    SELECT n.id, n.severity, n.resolved_at
+    SELECT <include refid="notificationColumns"/>
     FROM notification n
     WHERE n.workspace_id = #{workspaceId}
       AND n.recipient_id = #{recipientId}
@@ -348,8 +644,8 @@
       ON d.workspace_id = t.workspace_id
      AND d.id = t.deal_id
     LEFT JOIN person p
-      ON p.workspace_id = t.workspace_id
-     AND p.id = t.person_id
+      ON p.id = t.person_id
+     AND <include refid="visiblePersonJoin"/>
     WHERE t.workspace_id = #{workspaceId}
       AND t.completed = FALSE
       AND t.due_date IS NOT NULL
@@ -405,7 +701,7 @@
     JOIN deal_person dp ON dp.deal_id = d.id
     JOIN person p
       ON p.id = dp.person_id
-     AND p.workspace_id = d.workspace_id
+     AND <include refid="visiblePersonJoin"/>
     LEFT JOIN stage s
       ON s.id = d.stage_id
      AND s.workspace_id = d.workspace_id
@@ -440,6 +736,7 @@
       AND d.owner_id IS NOT NULL
       AND d.closed_at IS NULL
       AND p.risk_excluded = FALSE
+      AND p.suspended_at IS NULL
     ORDER BY d.id, p.id, recipients.recipient_id
   </select>
 
@@ -495,6 +792,31 @@
     ORDER BY user_id
   </select>
 
+  <select id="findPurgeRecipientIds" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND type IN (<include refid="reminderTypes"/>)
+      AND resolved_at IS NOT NULL
+      AND resolved_at &lt; #{cutoff}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="findRecipientIdsByActor" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="lockRecipientIdsByActor" resultType="int">
+    SELECT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id, id
+    FOR UPDATE
+  </select>
+
   <delete id="purgeReminderHistory">
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId}
@@ -511,4 +833,18 @@
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
+
+  <delete id="deleteAllForRecipient">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+  </delete>
+
+  <delete id="deleteAllForRecipientAnywhere">
+    DELETE FROM notification WHERE recipient_id = #{recipientId}
+  </delete>
+
+  <update id="clearActorAnywhere">
+    UPDATE notification SET actor_id = NULL WHERE actor_id = #{userId}
+  </update>
+
 </mapper>

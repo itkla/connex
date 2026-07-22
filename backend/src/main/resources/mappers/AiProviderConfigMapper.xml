@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiProviderConfigMapper">
+
+  <resultMap id="AiProviderConfigResult" type="AiProviderConfig">
+    <id property="orgId" column="org_id"/>
+    <result property="provider" column="provider"/>
+    <result property="region" column="region"/>
+    <result property="endpoint" column="endpoint"/>
+    <result property="apiVersion" column="api_version"/>
+    <result property="deployment" column="deployment"/>
+    <result property="projectId" column="project_id"/>
+    <result property="allowInternalEndpoint" column="allow_internal_endpoint"/>
+    <result property="modelId" column="model_id"/>
+    <result property="credentialRef" column="credential_ref"/>
+    <result property="credentialLast4" column="credential_last4"/>
+    <result property="noTrainingAttested" column="no_training_attested"/>
+    <result property="attestedAt" column="attested_at"/>
+    <result property="enabled" column="enabled"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="columns">
+    org_id, provider, region, endpoint, api_version, deployment, project_id,
+    allow_internal_endpoint, model_id, credential_ref, credential_last4,
+    no_training_attested, attested_at, enabled, created_at, updated_at
+  </sql>
+
+  <select id="findByOrg" resultMap="AiProviderConfigResult">
+    SELECT <include refid="columns"/>
+    FROM ai_provider_config
+    WHERE org_id = #{orgId}
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO ai_provider_config
+      (org_id, provider, region, endpoint, api_version, deployment, project_id,
+       allow_internal_endpoint, model_id, credential_ref, credential_last4,
+       no_training_attested, attested_at, enabled)
+    VALUES
+      (#{orgId}, #{provider}, #{region}, #{endpoint}, #{apiVersion}, #{deployment}, #{projectId},
+       #{allowInternalEndpoint}, #{modelId}, #{credentialRef}, #{credentialLast4},
+       #{noTrainingAttested}, #{attestedAt}, #{enabled})
+    ON DUPLICATE KEY UPDATE
+      provider = VALUES(provider),
+      region = VALUES(region),
+      endpoint = VALUES(endpoint),
+      api_version = VALUES(api_version),
+      deployment = VALUES(deployment),
+      project_id = VALUES(project_id),
+      allow_internal_endpoint = VALUES(allow_internal_endpoint),
+      model_id = VALUES(model_id),
+      credential_ref = VALUES(credential_ref),
+      credential_last4 = VALUES(credential_last4),
+      no_training_attested = VALUES(no_training_attested),
+      attested_at = VALUES(attested_at),
+      enabled = VALUES(enabled)
+  </insert>
+
+  <delete id="deleteByOrg">
+    DELETE FROM ai_provider_config WHERE org_id = #{orgId}
+  </delete>
+</mapper>

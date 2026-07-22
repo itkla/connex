@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useMemo } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Loader2Icon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { cn } from '@/lib/utils';
 
 export const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -29,6 +30,7 @@ type QuickEditSheetShellProps = {
     description?: string;
     count: number;
     isSaving: boolean;
+    interactionPending?: boolean;
     onSave: () => void;
     saveLabel: string;
     cancelLabel: string;
@@ -48,13 +50,14 @@ export function QuickEditSheetShell({
     description,
     count,
     isSaving,
+    interactionPending = false,
     onSave,
     saveLabel,
     cancelLabel,
     children,
 }: QuickEditSheetShellProps) {
     return (
-        <Drawer open={open} onOpenChange={onOpenChange}>
+        <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
             <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-center gap-3">
@@ -74,13 +77,14 @@ export function QuickEditSheetShell({
                 <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
 
                 <DrawerFooter className="flex-row justify-end gap-2 border-t">
-                    <DrawerClose render={<Button variant="outline" disabled={isSaving} />}>
+                    <DrawerClose render={<Button variant="outline" disabled={isSaving || interactionPending} />}>
                         {cancelLabel}
                     </DrawerClose>
                     <Button
                         onClick={onSave}
-                        disabled={isSaving}
-                        className="min-w-24 bg-brand text-brand-foreground hover:bg-brand-hover"
+                        variant="brand"
+                        disabled={isSaving || interactionPending}
+                        className="min-w-24"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
                         {saveLabel}
@@ -165,6 +169,10 @@ type QuickEditMediaUploadProps = {
     existingUrl: string | null;
     fallback: ReactNode;
     onSelect: (file: File | null) => void;
+    onInvalidSelect?: () => void;
+    onPendingChange?: (pending: boolean) => void;
+    active?: boolean;
+    disabled?: boolean;
 };
 
 /**
@@ -172,8 +180,53 @@ type QuickEditMediaUploadProps = {
  * and keyboard focus. Previews the pending file (managing the object URL's lifecycle so it
  * is revoked, not leaked) and otherwise falls back to the existing image.
  */
-export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fallback, onSelect }: QuickEditMediaUploadProps) {
+export function QuickEditMediaUpload({
+    id,
+    label,
+    shape,
+    file,
+    existingUrl,
+    fallback,
+    onSelect,
+    onInvalidSelect,
+    onPendingChange,
+    active = true,
+    disabled = false,
+}: QuickEditMediaUploadProps) {
     const previewSrc = useMemo(() => (file ? URL.createObjectURL(file) : existingUrl), [file, existingUrl]);
+    const [selectionPending, setSelectionPending] = useState(false);
+    const [previousActive, setPreviousActive] = useState(active);
+    const activeRef = useRef(active);
+    const sequenceRef = useRef(0);
+    const onSelectRef = useRef(onSelect);
+    const onInvalidSelectRef = useRef(onInvalidSelect);
+    const onPendingChangeRef = useRef(onPendingChange);
+
+    useLayoutEffect(() => {
+        onSelectRef.current = onSelect;
+        onInvalidSelectRef.current = onInvalidSelect;
+        onPendingChangeRef.current = onPendingChange;
+    });
+
+    useLayoutEffect(() => {
+        activeRef.current = active;
+        if (!active) {
+            sequenceRef.current += 1;
+            onPendingChangeRef.current?.(false);
+        }
+    }, [active]);
+
+    if (active !== previousActive) {
+        setPreviousActive(active);
+        if (!active) setSelectionPending(false);
+    }
+
+    useEffect(() => () => {
+        activeRef.current = false;
+        sequenceRef.current += 1;
+        onPendingChangeRef.current?.(false);
+    }, []);
+
     useEffect(() => {
         if (!file || !previewSrc) return;
         return () => URL.revokeObjectURL(previewSrc);
@@ -185,6 +238,7 @@ export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fall
             className={cn(
                 'group relative flex size-16 shrink-0 cursor-pointer items-center justify-center overflow-hidden bg-muted ring-1 ring-border transition focus-within:ring-2 focus-within:ring-brand hover:ring-2 hover:ring-brand',
                 shape === 'round' ? 'rounded-full' : 'rounded-2xl',
+                (disabled || selectionPending) && 'pointer-events-none opacity-60',
             )}
         >
             {previewSrc ? (
@@ -198,9 +252,32 @@ export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fall
             <input
                 id={id}
                 type="file"
-                accept="image/*"
+                accept={MANAGED_IMAGE_ACCEPT}
                 aria-label={label}
-                onChange={(e) => onSelect(e.target.files?.[0] ?? null)}
+                disabled={disabled || selectionPending}
+                onChange={async (event) => {
+                    const sequence = sequenceRef.current + 1;
+                    sequenceRef.current = sequence;
+                    const selectedFile = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (!selectedFile) return;
+                    setSelectionPending(true);
+                    onPendingChangeRef.current?.(true);
+                    try {
+                        const supported = await isManagedImageFile(selectedFile);
+                        if (!activeRef.current || sequence !== sequenceRef.current) return;
+                        if (supported) {
+                            onSelectRef.current(selectedFile);
+                        } else {
+                            onInvalidSelectRef.current?.();
+                        }
+                    } finally {
+                        if (activeRef.current && sequence === sequenceRef.current) {
+                            setSelectionPending(false);
+                            onPendingChangeRef.current?.(false);
+                        }
+                    }
+                }}
                 className="sr-only"
             />
         </label>

@@ -145,7 +145,7 @@ class DashboardLayoutIsolationIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isBadRequest());
     }
 
@@ -160,7 +160,7 @@ class DashboardLayoutIsolationIntegrationTest {
         mockMvc.perform(delete("/api/dashboard-layout")
                 .header("X-Workspace-Id", ws.getId())
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/dashboard-layout")
@@ -177,7 +177,7 @@ class DashboardLayoutIsolationIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .session(session)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.layout.marker").value(marker));
     }

@@ -11,10 +11,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function DocsHomePage() {
-    const meta = await getTranslations("DocsMeta");
-    const home = await getTranslations("DocsHome");
-    const t = await getTranslations();
-    const blocks = await readHomeBlocks();
+    const [meta, home, t, blocks] = await Promise.all([
+        getTranslations("DocsMeta"),
+        getTranslations("DocsHome"),
+        getTranslations(),
+        readHomeBlocks(),
+    ]);
 
     return (
         <div className="space-y-12">

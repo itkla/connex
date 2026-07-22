@@ -68,6 +68,35 @@ public class NoteService {
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotes(workspaceId, currentUserId));
     }
 
+    public List<Note> getNotesPage(int limit, int offset) {
+        return getNotesPage(limit, offset, false);
+    }
+
+    /** Returns a bounded note page, optionally excluding every private note. */
+    public List<Note> getNotesPage(int limit, int offset, boolean workspaceOnly) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (workspaceOnly) {
+            return referenceService.hydrate(
+                workspaceId, noteMapper.getWorkspaceNotesPage(workspaceId, limit, offset));
+        }
+        int currentUserId = workspaceService.getCurrentUserId();
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(workspaceId, currentUserId, limit, offset));
+    }
+
+    public long countNotes() {
+        return countNotes(false);
+    }
+
+    /** Counts notes in the active workspace, optionally excluding every private note. */
+    public long countNotes(boolean workspaceOnly) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (workspaceOnly) {
+            return noteMapper.countWorkspaceNotes(workspaceId);
+        }
+        int currentUserId = workspaceService.getCurrentUserId();
+        return noteMapper.countVisibleNotes(workspaceId, currentUserId);
+    }
+
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();

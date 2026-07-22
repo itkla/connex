@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ public class SsoConnectionService {
     private final AuditService auditService;
     private final DbClientRegistrationRepository dbClientRegistrationRepository;
     private final DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * Returns the SSO connection for the acting workspace's organization, with the
@@ -96,6 +98,7 @@ public class SsoConnectionService {
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
         }
@@ -123,14 +126,20 @@ public class SsoConnectionService {
         connection.setSamlSsoUrl(trimToNull(request.getSamlSsoUrl()));
         connection.setSamlIdpMetadataXml(trimToNull(request.getSamlIdpMetadataXml()));
         connection.setSamlIdpX509(trimToNull(request.getSamlIdpX509()));
-        if (!isBlank(request.getOidcClientSecret())) {
-            connection.setOidcClientSecretEnc(ssoSecretCipher.encrypt(request.getOidcClientSecret().trim()));
+        if ("oidc".equals(protocol)) {
+            if (!isBlank(request.getOidcClientSecret())) {
+                connection.setOidcClientSecretEnc(
+                        ssoSecretCipher.encryptOidcClientSecret(orgId, request.getOidcClientSecret().trim()));
+            } else if (existing != null && "oidc".equals(existing.getProtocol())) {
+                connection.setOidcClientSecretEnc(existing.getOidcClientSecretEnc());
+            }
         }
         if ("saml".equals(protocol)) {
             ensureSamlSpCredential(connection, existing, orgId);
         }
 
         ssoConnectionMapper.upsert(connection);
+        deleteReplacedSecretReferences(existing, connection);
         replaceDomains(orgId, request.getDomains());
         dbClientRegistrationRepository.evict(orgId);
         dbRelyingPartyRegistrationRepository.evict(orgId);
@@ -250,14 +259,26 @@ public class SsoConnectionService {
     }
 
     private void ensureSamlSpCredential(SsoConnection connection, SsoConnection existing, int orgId) {
-        if (existing != null && existing.getSamlSpPrivateKeyEnc() != null) {
+        if (existing != null && "saml".equals(existing.getProtocol()) && existing.getSamlSpPrivateKeyEnc() != null) {
             connection.setSamlSpPrivateKeyEnc(existing.getSamlSpPrivateKeyEnc());
             connection.setSamlSpCertificate(existing.getSamlSpCertificate());
             return;
         }
         SamlSpKeyMaterial material = samlSpCredentialFactory.generate(REGISTRATION_PREFIX + orgId);
-        connection.setSamlSpPrivateKeyEnc(ssoSecretCipher.encrypt(material.privateKeyBase64()));
+        connection.setSamlSpPrivateKeyEnc(ssoSecretCipher.encryptSamlSpPrivateKey(orgId, material.privateKeyBase64()));
         connection.setSamlSpCertificate(material.certificatePem());
+    }
+
+    private void deleteReplacedSecretReferences(SsoConnection existing, SsoConnection replacement) {
+        if (existing == null) {
+            return;
+        }
+        if (!Objects.equals(existing.getOidcClientSecretEnc(), replacement.getOidcClientSecretEnc())) {
+            ssoSecretCipher.deleteOidcClientSecretReference(existing.getOrgId(), existing.getOidcClientSecretEnc());
+        }
+        if (!Objects.equals(existing.getSamlSpPrivateKeyEnc(), replacement.getSamlSpPrivateKeyEnc())) {
+            ssoSecretCipher.deleteSamlSpPrivateKeyReference(existing.getOrgId(), existing.getSamlSpPrivateKeyEnc());
+        }
     }
 
     private void requireSameOrgWorkspace(int jitWorkspaceId, int orgId) {
@@ -274,7 +295,8 @@ public class SsoConnectionService {
             }
             SsoUrlSafety.requireValidHttpUrl(request.getOidcIssuer());
             boolean hasSecret = !isBlank(request.getOidcClientSecret())
-                    || (existing != null && existing.getOidcClientSecretEnc() != null);
+                    || (existing != null && "oidc".equals(existing.getProtocol())
+                        && existing.getOidcClientSecretEnc() != null);
             if (!hasSecret) {
                 throw new BadRequestException("An OIDC client secret is required to enable SSO");
             }

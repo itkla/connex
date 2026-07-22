@@ -134,7 +134,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
             <Rise>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -143,7 +143,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     </div>
                     {hasTags && (
                         <Button
-                            className="bg-brand text-white hover:bg-brand-dark"
+                            variant="brand"
                             aria-label={t('newAria')}
                             onClick={openCreate}
                         >
@@ -397,7 +397,7 @@ function EmptyState({
             </div>
             <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
             <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
-            <Button onClick={onCreate} className="mt-6 bg-brand text-white hover:bg-brand-dark">
+            <Button onClick={onCreate} variant="brand" className="mt-6">
                 <PlusIcon strokeWidth={2.5} />
                 {cta}
             </Button>

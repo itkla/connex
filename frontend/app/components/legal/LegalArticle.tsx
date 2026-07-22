@@ -1,4 +1,4 @@
-import { InformationCircleIcon } from "@heroicons/react/24/outline";
+import LegalPageShell from "./LegalPageShell";
 
 /**
  * A single titled section of a legal document. `body` is plain text; blank
@@ -51,30 +51,14 @@ function renderBody(body: string, keyPrefix: string) {
 }
 
 /**
- * Presentational shell for long-form legal / disclosure pages. Renders a draft
- * notice, a title with "last updated" metadata, an anchored table of contents,
- * and each section at a readable measure. Server component — no motion, since
- * these pages are informational and rarely visited.
+ * Presentational shell for long-form legal / disclosure pages that read as
+ * prose sections. Renders an anchored table of contents (when there are more
+ * than three sections) and each section at a readable measure, inside the
+ * shared {@link LegalPageShell}. Server component — no motion.
  */
 export default function LegalArticle({ title, updated, lede, notice, tocLabel, sections }: LegalArticleProps) {
     return (
-        <section className="mx-auto max-w-3xl px-6 py-16 lg:px-8 lg:py-24">
-            <div
-                role="note"
-                className="flex items-start gap-3 rounded-2xl border border-border bg-muted/60 px-4 py-3.5 text-sm leading-relaxed text-muted-foreground"
-            >
-                <InformationCircleIcon className="mt-0.5 size-5 shrink-0 text-brand-dark" aria-hidden="true" />
-                <span className="text-pretty">{notice}</span>
-            </div>
-
-            <header className="mt-10">
-                <h1 className="font-display text-[clamp(2.25rem,5vw,3.25rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground">
-                    {title}
-                </h1>
-                <p className="mt-4 text-sm text-muted-foreground">{updated}</p>
-                <p className="mt-6 text-lg leading-relaxed text-foreground text-pretty">{lede}</p>
-            </header>
-
+        <LegalPageShell title={title} updated={updated} lede={lede} notice={notice}>
             {sections.length > 3 && (
                 <nav aria-label={tocLabel} className="mt-12 border-t border-border pt-8">
                     <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">{tocLabel}</p>
@@ -106,6 +90,6 @@ export default function LegalArticle({ title, updated, lede, notice, tocLabel, s
                     </section>
                 ))}
             </div>
-        </section>
+        </LegalPageShell>
     );
 }

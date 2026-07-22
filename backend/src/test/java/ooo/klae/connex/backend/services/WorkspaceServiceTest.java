@@ -34,11 +34,11 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto second = workspaceService.createWorkspace("Second", currentUser.getId());
 
         // Simulate the interceptor pinning the second workspace for this request.
-        tenantContext.set(second.getId(), workspaceService.getOrgId(second.getId()), currentUser.getId(), "owner");
+        tenantContext.set(second.getId(), workspaceService.getOrgId(second.getId()), currentUser.getId(), "owner", null);
         try {
             assertEquals(second.getId(), workspaceService.getCurrentWorkspaceId());
         } finally {
-            tenantContext.clear();
+            clearRequestContext();
         }
         // Off the request thread it falls back to the first/default membership.
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
@@ -49,11 +49,11 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     void getCurrentOrgId_readsResolvedContext() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ctx WS", currentUser.getId());
         int orgId = workspaceService.getOrgId(ws.getId());
-        tenantContext.set(ws.getId(), orgId, currentUser.getId(), "owner");
+        tenantContext.set(ws.getId(), orgId, currentUser.getId(), "owner", null);
         try {
             assertEquals(orgId, workspaceService.getCurrentOrgId());
         } finally {
-            tenantContext.clear();
+            clearRequestContext();
         }
     }
 
@@ -64,6 +64,18 @@ class WorkspaceServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.requireMember(solo.getId(), outsider.getId()));
+    }
+
+    @Test
+    void lockAndRequireMember_passesForActiveMemberAndThrowsForNonMember() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Lock", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        User outsider = newUser();
+
+        assertDoesNotThrow(() -> workspaceService.lockAndRequireMember(ws.getId(), member.getId()));
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.lockAndRequireMember(ws.getId(), outsider.getId()));
     }
 
     @Test

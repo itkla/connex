@@ -31,6 +31,18 @@ const STATUS_ACCENT: Record<TaskStatus, string> = {
     done: 'var(--chart-won)',
 };
 
+function taskId(task: Task): number {
+    return task.id;
+}
+
+function taskColumnId(task: Task): string {
+    return task.status;
+}
+
+function taskPosition(task: Task): number {
+    return task.position;
+}
+
 export default function TasksKanban({
     tasks,
     personById,
@@ -145,9 +157,9 @@ export default function TasksKanban({
         <KanbanBoard<Task>
             columns={columns}
             items={tasks}
-            getId={(task) => task.id}
-            getColumnId={(task) => task.status}
-            getPosition={(task) => task.position}
+            getId={taskId}
+            getColumnId={taskColumnId}
+            getPosition={taskPosition}
             renderCard={renderCard}
             onMove={onMove}
             reduce={reduce}

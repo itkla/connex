@@ -16,7 +16,10 @@ public interface AttachmentMapper {
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    int countUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    /** Locks every same-workspace attachment reference for an exact URL. */
+    List<Integer> lockIdsByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Attachment attachment);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -39,4 +42,11 @@ public interface AttachmentMapper {
     int removeTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
     int clearTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
     int insertTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagIds") List<Integer> tagIds);
+
+    /**
+     * Nulls the uploader reference on every attachment a user uploaded.
+     * Offboarding replacement for the {@code attachment.uploaded_by_id}
+     * ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearUploaderAnywhere(@Param("userId") int userId);
 }

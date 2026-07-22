@@ -6,13 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class UserMapperTest extends AbstractMapperTest {
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     /**
      * Inserts a new user and checks if the generated ID is not zero.
@@ -38,6 +43,7 @@ class UserMapperTest extends AbstractMapperTest {
         assertEquals(user.getEmail(), found.getEmail());
         assertEquals(user.getPasswordHash(), found.getPassword());
         assertEquals("UTC", found.getTimezone());
+        assertEquals("en", found.getLocale());
     }
 
     /**
@@ -89,6 +95,23 @@ class UserMapperTest extends AbstractMapperTest {
         assertEquals(user.getEmail(), found.getEmail());
     }
 
+    @Test
+    void genericUpdateCannotReplaceManagedImageAndCasRejectsStaleReplacement() {
+        User user = newUser();
+        String first = "/api/users/" + user.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        String second = "/api/users/" + user.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440001.png";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), null, first));
+
+        user.setProfilePictureUrl("https://attacker.example/image.png");
+        userMapper.update(user);
+
+        assertEquals(first, userMapper.getUserById(user.getId()).getProfilePictureUrl());
+        assertEquals(0, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), null, second));
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(user.getId(), first, second));
+    }
+
     /**
      * Deletes a user and checks if the user is removed.
      */
@@ -108,6 +131,28 @@ class UserMapperTest extends AbstractMapperTest {
         userMapper.updateTimezone(user.getId(), "Asia/Tokyo");
 
         assertEquals("Asia/Tokyo", userMapper.getUserById(user.getId()).getTimezone());
+    }
+
+    @Test
+    void updateLocale_persistsValue() {
+        User user = newUser();
+
+        userMapper.updateLocale(user.getId(), "ja");
+
+        assertEquals("ja", userMapper.getUserById(user.getId()).getLocale());
+    }
+
+    @Test
+    void localeConstraintRejectsValuesOutsideExactAllowlist() {
+        User user = newUser();
+
+        for (String locale : List.of("fr", "EN", "en-US", "en ", "ja ", "../../ja")) {
+            assertThrows(DataAccessException.class,
+                    () -> jdbcTemplate.update("UPDATE app_user SET locale = ? WHERE id = ?", locale, user.getId()));
+        }
+        assertThrows(DataAccessException.class,
+                () -> jdbcTemplate.update("UPDATE app_user SET locale = NULL WHERE id = ?", user.getId()));
+        assertEquals("en", userMapper.getUserById(user.getId()).getLocale());
     }
 
     /**

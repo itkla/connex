@@ -4,13 +4,26 @@ import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } f
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
-import { ArrowPathIcon, ArrowsRightLeftIcon, ExclamationTriangleIcon, PlusIcon } from '@heroicons/react/24/outline';
+import {
+    ArrowPathIcon,
+    ArrowsRightLeftIcon,
+    ExclamationTriangleIcon,
+    MapIcon,
+    PlusIcon,
+} from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { dismissIntroSuggestion, recordIntroduction } from '@/app/lib/api';
+import { acceptWarmPath, dismissIntroSuggestion, dismissWarmPath, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { Contact, IntroSuggestion, IntroductionRecord } from '@/app/lib/types';
+import type {
+    Contact,
+    IntroSuggestion,
+    IntroductionRecord,
+    WarmPath,
+    WarmPathBridge,
+    WarmPathReachType,
+} from '@/app/lib/types';
 
 import Rise from '@/app/components/motion/Rise';
 import IntroLineageList from './IntroLineageList';
@@ -19,6 +32,7 @@ import { tierFor } from './IntroStrength';
 import IntroSuggestionCard from './IntroSuggestionCard';
 import IntroSuggestionRow from './IntroSuggestionRow';
 import LogIntroDialog from './LogIntroDialog';
+import WarmPathRow from './WarmPathRow';
 
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
@@ -83,6 +97,9 @@ function StatePanel({
  * and the lineage of intros made. Recording a pair here also creates the connection on the backend,
  * so a recorded pair simply leaves the queue and lands in the timeline. The queue is one animated list
  * so promoting the next-best suggestion to the lead is a continuous transition, not a remount.
+ * Between the queue and the lineage sits the warm-paths feed (issue #614) — targets worth reaching
+ * with the bridges who can introduce you, filterable by re-warm vs new reach; accepting a path
+ * creates the follow-up task on the backend and removes the row optimistically.
  * When a fetch failed ({@code suggestionsFailed} / {@code lineageFailed}), the affected section
  * renders a distinct error state instead of masquerading as an empty workspace, and the
  * queue-derived counts show an unavailable marker instead of claiming zero.
@@ -90,6 +107,8 @@ function StatePanel({
 export default function IntroductionsBoard({
     initialSuggestions,
     suggestionsFailed = false,
+    initialPaths,
+    pathsFailed = false,
     initialLineage,
     initialLineageTotal,
     lineageFailed = false,
@@ -97,6 +116,8 @@ export default function IntroductionsBoard({
 }: {
     initialSuggestions: IntroSuggestion[];
     suggestionsFailed?: boolean;
+    initialPaths: WarmPath[];
+    pathsFailed?: boolean;
     initialLineage: IntroductionRecord[];
     initialLineageTotal: number;
     lineageFailed?: boolean;
@@ -126,6 +147,8 @@ export default function IntroductionsBoard({
     };
     const [lineage, setLineage] = useState(initialLineage);
     const [madeTotal, setMadeTotal] = useState(initialLineageTotal);
+    const [paths, setPaths] = useState(() => initialPaths.filter((p) => p.bridges.length > 0));
+    const [pathFilter, setPathFilter] = useState<'all' | WarmPathReachType>('all');
 
     const strongCount = useMemo(
         () => suggestions.filter((s) => tierFor(s.score).tier === 'strong').length,
@@ -188,6 +211,91 @@ export default function IntroductionsBoard({
         }
     };
 
+    const visiblePaths = useMemo(
+        () => (pathFilter === 'all' ? paths : paths.filter((p) => p.reachType === pathFilter)),
+        [paths, pathFilter],
+    );
+
+    const mention = (name: string, id: number) => `[${name}](person:${id})`;
+
+    const removePathRow = (targetId: number) => {
+        setPaths((current) => current.filter((p) => p.targetId !== targetId));
+    };
+
+    const restorePathRow = (path: WarmPath, index: number) => {
+        setPaths((current) => {
+            if (current.some((p) => p.targetId === path.targetId)) return current;
+            const next = [...current];
+            next.splice(Math.min(Math.max(index, 0), next.length), 0, path);
+            return next;
+        });
+    };
+
+    const askIntro = async (path: WarmPath, bridge: WarmPathBridge) => {
+        const index = paths.findIndex((p) => p.targetId === path.targetId);
+        removePathRow(path.targetId);
+        try {
+            await acceptWarmPath({
+                targetPersonId: path.targetId,
+                bridgePersonId: bridge.personId,
+                taskDescription: t('acceptTaskDescription', {
+                    bridge: mention(bridge.name, bridge.personId),
+                    target: mention(path.targetName, path.targetId),
+                }),
+            });
+            toastSuccess(t('acceptToast', { name: path.targetName }));
+        } catch (err) {
+            restorePathRow(path, index);
+            toastError(err instanceof Error ? err.message : t('acceptFailed'));
+            throw err;
+        }
+    };
+
+    const dismissTarget = async (path: WarmPath) => {
+        const index = paths.findIndex((p) => p.targetId === path.targetId);
+        removePathRow(path.targetId);
+        try {
+            await dismissWarmPath({ targetPersonId: path.targetId });
+        } catch (err) {
+            restorePathRow(path, index);
+            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            throw err;
+        }
+    };
+
+    const restoreAvenue = (path: WarmPath, rowIndex: number, bridge: WarmPathBridge, bridgeIndex: number) => {
+        setPaths((current) => {
+            const existing = current.find((p) => p.targetId === path.targetId);
+            if (!existing) {
+                const next = [...current];
+                next.splice(Math.min(Math.max(rowIndex, 0), next.length), 0, path);
+                return next;
+            }
+            if (existing.bridges.some((b) => b.personId === bridge.personId)) return current;
+            const at = Math.min(Math.max(bridgeIndex, 0), existing.bridges.length);
+            return current.map((p) => p.targetId === path.targetId
+                ? { ...p, bridges: [...p.bridges.slice(0, at), bridge, ...p.bridges.slice(at)] }
+                : p);
+        });
+    };
+
+    const dismissAvenue = async (path: WarmPath, bridge: WarmPathBridge) => {
+        const rowIndex = paths.findIndex((p) => p.targetId === path.targetId);
+        const bridgeIndex = path.bridges.findIndex((b) => b.personId === bridge.personId);
+        setPaths((current) => current
+            .map((p) => p.targetId === path.targetId
+                ? { ...p, bridges: p.bridges.filter((b) => b.personId !== bridge.personId) }
+                : p)
+            .filter((p) => p.bridges.length > 0));
+        try {
+            await dismissWarmPath({ targetPersonId: path.targetId, bridgePersonId: bridge.personId });
+        } catch (err) {
+            restoreAvenue(path, rowIndex, bridge, bridgeIndex);
+            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            throw err;
+        }
+    };
+
     const logManual = async (personAId: number, personBId: number, note?: string) => {
         try {
             const created = await recordIntroduction({ personAId, personBId, note });
@@ -215,7 +323,7 @@ export default function IntroductionsBoard({
               };
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6 px-2 pb-12">
+        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
             <Rise>
                 <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
@@ -313,6 +421,76 @@ export default function IntroductionsBoard({
             </Rise>
 
             <Rise delay={0.18}>
+                <section className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <SectionHeading
+                            title={t('pathsTitle')}
+                            count={pathsFailed ? null : visiblePaths.length}
+                        />
+                        {!pathsFailed && paths.length > 0 ? (
+                            <div role="group" aria-label={t('pathsFilterLabel')} className="flex items-center gap-1">
+                                {(['all', 'rewarm', 'reach'] as const).map((filter) => (
+                                    <button
+                                        key={filter}
+                                        type="button"
+                                        aria-pressed={pathFilter === filter}
+                                        onClick={() => setPathFilter(filter)}
+                                        className={cn(
+                                            'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                                            pathFilter === filter
+                                                ? 'border-foreground/20 bg-muted text-foreground'
+                                                : 'border-transparent text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        {filter === 'all'
+                                            ? t('pathsFilterAll')
+                                            : filter === 'rewarm'
+                                              ? t('reachRewarm')
+                                              : t('reachNew')}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+                    {pathsFailed ? (
+                        <StatePanel
+                            icon={<ExclamationTriangleIcon className="size-6 text-destructive" aria-hidden />}
+                            title={t('pathsErrorTitle')}
+                            hint={t('pathsErrorHint')}
+                            alert
+                        />
+                    ) : visiblePaths.length === 0 ? (
+                        <StatePanel
+                            icon={<MapIcon className="size-6 text-muted-foreground" aria-hidden />}
+                            title={t('pathsEmptyTitle')}
+                            hint={t('pathsEmptyHint')}
+                            dashed
+                        />
+                    ) : (
+                        <motion.div layout={!reduce} role="list" className="space-y-3">
+                            <AnimatePresence mode="popLayout" initial={false}>
+                                {visiblePaths.map((path, index) => (
+                                    <motion.div
+                                        key={path.targetId}
+                                        role="listitem"
+                                        layout={!reduce}
+                                        {...enter(index)}
+                                    >
+                                        <WarmPathRow
+                                            path={path}
+                                            onAsk={(bridge) => askIntro(path, bridge)}
+                                            onDismissAvenue={(bridge) => dismissAvenue(path, bridge)}
+                                            onDismissTarget={() => dismissTarget(path)}
+                                        />
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+                        </motion.div>
+                    )}
+                </section>
+            </Rise>
+
+            <Rise delay={0.24}>
                 <section className="space-y-3">
                     <SectionHeading title={t('lineageTitle')} count={lineageFailed ? null : madeTotal} />
                     {lineageFailed ? (

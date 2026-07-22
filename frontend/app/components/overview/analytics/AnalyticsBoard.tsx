@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
@@ -13,21 +14,45 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 import {
-    type Activity,
-    type Company,
-    type Deal,
-    type DealRisk,
+    type ActivityVolumeBucket,
+    type DealAging,
+    type DealKpis,
+    type DealMetrics,
+    type DealPipelineValue,
+    type DealRevenueSeries,
+    type DealRiskAnalytics,
+    type DealStageDistribution,
+    type DealTop,
     type IntroSuggestion,
     type IntroductionRecord,
     type JobMove,
-    type Note,
     type Pipeline,
-    type RelationshipTemperature,
     type Stage,
-    type Task,
+    type MemberScopeParams,
+    type TaskSummary,
+    type TeamLeaderboardEntry,
     type User,
+    type WarmthSummary,
+    type WorkspaceMember,
 } from '@/app/lib/types';
-import { formatCompactCurrency, pickDominantCurrency } from '@/app/lib/utils';
+import {
+    getActiveWorkspaceMembers,
+    getActivityVolume,
+    getDealAging,
+    getDealKpis,
+    getDealPipelineValue,
+    getDealRevenueTimeseries,
+    getDealRiskAnalytics,
+    getDealStageDistribution,
+    getDealTop,
+    getTaskSummary,
+    getTeamLeaderboard,
+} from '@/app/lib/api';
+import { MemberScopeFilter, interpretMemberScope } from '@/app/components/filters';
+import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { resolveCan } from '@/app/lib/actions/permissions';
+import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
 
@@ -48,8 +73,46 @@ import TaskStatusDonut from '@/app/components/overview/analytics/TaskStatusDonut
 import IntroActivity from '@/app/components/overview/analytics/IntroActivity';
 import RecentMovesList from '@/app/components/overview/analytics/RecentMovesList';
 import FirstRun from '@/app/components/overview/analytics/FirstRun';
-import { computeKpis, isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
-import { atRiskDealIds, warmSummary } from '@/app/components/overview/analytics/relationshipMetrics';
+import { type RangeKey } from '@/app/components/overview/analytics/metrics';
+
+const EMPTY_KPIS: DealKpis = {
+    wonRevenue: 0,
+    wonRevenuePrev: null,
+    newPipeline: 0,
+    newPipelinePrev: null,
+    wonCount: 0,
+    lostCount: 0,
+    wonValue: 0,
+    lostValue: 0,
+    wonCountPrev: null,
+    lostCountPrev: null,
+    avgCycleDays: 0,
+    avgCycleDaysPrev: null,
+    wonSeries: [],
+    newPipelineSeries: [],
+    winRateSeries: [],
+    avgCycleSeries: [],
+};
+
+const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
+const EMPTY_REVENUE: DealRevenueSeries = { closed: [], projected: [] };
+const EMPTY_PIPELINE_VALUES: DealPipelineValue[] = [];
+const EMPTY_AGING: DealAging[] = [];
+const EMPTY_STAGE_DISTRIBUTION: DealStageDistribution[] = [];
+const EMPTY_ACTIVITY_BUCKETS: ActivityVolumeBucket[] = [];
+const EMPTY_LEADERBOARD: TeamLeaderboardEntry[] = [];
+const EMPTY_RISK: DealRiskAnalytics = { currencies: [], truncated: false };
+const EMPTY_TASKS: TaskSummary = { todo: 0, inProgress: 0, done: 0, overdue: 0, dueSoon: 0 };
+const ALL_TEAM_KEY = '{}';
+
+type ScopedData<T> = {
+    scope: string;
+    data: T;
+};
+
+function dataForScope<T>(value: ScopedData<T>, scope: string, empty: T): T {
+    return value.scope === scope ? value.data : empty;
+}
 
 function Reveal({
     children,
@@ -75,35 +138,29 @@ function Reveal({
 }
 
 export default function AnalyticsBoard({
-    deals,
-    companies,
+    dealMetrics,
+    timezone,
     pipelines,
     stages,
-    activities,
-    tasks,
-    notes,
     users,
-    contactTemps,
-    companyTemps,
-    dealRisks,
+    dealRiskAnalytics,
     introSuggestions,
     introLineage,
     recentMoves,
+    taskSummary,
+    warmth,
 }: {
-    deals: Deal[];
-    companies: Company[];
+    dealMetrics: DealMetrics;
+    timezone: string;
     pipelines: Pipeline[];
     stages: Stage[];
-    activities: Activity[];
-    tasks: Task[];
-    notes: Note[];
     users: User[];
-    contactTemps: RelationshipTemperature[];
-    companyTemps: RelationshipTemperature[];
-    dealRisks: DealRisk[];
+    dealRiskAnalytics: DealRiskAnalytics;
     introSuggestions: IntroSuggestion[];
     introLineage: IntroductionRecord[];
     recentMoves: JobMove[];
+    taskSummary: TaskSummary;
+    warmth: WarmthSummary;
 }) {
     const t = useTranslations('AnalyticsPage');
     const tRevenue = useTranslations('AnalyticsRevenue');
@@ -112,56 +169,185 @@ export default function AnalyticsBoard({
     const tTeam = useTranslations('AnalyticsTeam');
     const locale = useLocale();
     const reduce = useReducedMotion();
-    const [range, setRange] = useState<RangeKey>('90d');
-    const [now] = useState(() => Date.now());
+    const searchParams = useSearchParams();
+    const [range, setRange] = useState<RangeKey>(() => {
+        const initial = searchParams.get('range');
+        return initial === '30d' || initial === '12m' ? initial : '90d';
+    });
+    const [ownerValues, setOwnerValues] = useState<string[]>(() => {
+        const initial = searchParams.get('owner');
+        return initial ? initial.split(',').filter(Boolean) : [];
+    });
+
+    const { activeWorkspace } = useWorkspace();
+    const canScopeByMember = useMemo(() => resolveCan(activeWorkspace)('WORKSPACE_MANAGE'), [activeWorkspace]);
+
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => {
+        if (!canScopeByMember) return;
+        getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([]));
+    }, [canScopeByMember]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const effectiveOwnerValues = useMemo(
+        () => (canScopeByMember ? ownerValues : []),
+        [canScopeByMember, ownerValues],
+    );
+    const ownerScope = useMemo(() => interpretMemberScope(effectiveOwnerValues), [effectiveOwnerValues]);
+    const scopeParams = useMemo<MemberScopeParams>(() => ({
+        scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
+        memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
+    }), [ownerScope]);
+    const memberKey = useMemo(() => JSON.stringify(scopeParams), [scopeParams]);
 
     const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
-    const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
 
     const currencyCounts = useMemo(() => {
         const counts = new Map<string, number>();
-        for (const d of deals) {
-            const c = d.currency || 'USD';
-            counts.set(c, (counts.get(c) ?? 0) + 1);
-        }
+        for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
-    }, [deals]);
-    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
-    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
+    }, [dealMetrics]);
+    const dominantCurrency = useMemo(() => {
+        let best: string | null = null;
+        let bestCount = -1;
+        for (const c of dealMetrics.byCurrency) {
+            const n = c.openCount + c.closedCount;
+            if (n > bestCount) {
+                bestCount = n;
+                best = c.currency;
+            }
+        }
+        return best ?? 'USD';
+    }, [dealMetrics]);
+    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(() => searchParams.get('currency'));
     const currency =
         selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
-    const dealsInCurrency = useMemo(
-        () => deals.filter((d) => (d.currency || 'USD') === currency),
-        [deals, currency],
-    );
 
-    const kpis = useMemo(
-        () => computeKpis(dealsInCurrency, now, RANGE_DAYS[range]),
-        [dealsInCurrency, now, range],
-    );
+    useUrlSync({
+        range: range === '90d' ? undefined : range,
+        currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,
+        owner: effectiveOwnerValues.length ? effectiveOwnerValues.join(',') : undefined,
+    });
+
+    const dealRangeScope = `${currency}:${range}:${memberKey}`;
+    const revenueScope = `${currency}:${timezone}:${memberKey}`;
+    const currencyScope = `${currency}:${memberKey}`;
+    const rangeMemberScope = `${range}:${memberKey}`;
+    const [kpisResult, setKpisResult] = useState<ScopedData<DealKpis>>({ scope: '', data: EMPTY_KPIS });
+    const [pipelineResult, setPipelineResult] = useState<ScopedData<DealPipelineValue[]>>({
+        scope: '',
+        data: EMPTY_PIPELINE_VALUES,
+    });
+    const [agingResult, setAgingResult] = useState<ScopedData<DealAging[]>>({ scope: '', data: EMPTY_AGING });
+    const [topDealsResult, setTopDealsResult] = useState<ScopedData<DealTop>>({ scope: '', data: EMPTY_TOP });
+    const [revenueResult, setRevenueResult] = useState<ScopedData<DealRevenueSeries>>({
+        scope: '',
+        data: EMPTY_REVENUE,
+    });
+    const [stageResult, setStageResult] = useState<ScopedData<DealStageDistribution[]>>({
+        scope: '',
+        data: EMPTY_STAGE_DISTRIBUTION,
+    });
+    const [activityResult, setActivityResult] = useState<ScopedData<ActivityVolumeBucket[]>>({
+        scope: '',
+        data: EMPTY_ACTIVITY_BUCKETS,
+    });
+    const [leaderboardResult, setLeaderboardResult] = useState<ScopedData<TeamLeaderboardEntry[]>>({
+        scope: '',
+        data: EMPTY_LEADERBOARD,
+    });
+
+    const kpis = dataForScope(kpisResult, dealRangeScope, EMPTY_KPIS);
+    const pipelineValues = dataForScope(pipelineResult, dealRangeScope, EMPTY_PIPELINE_VALUES);
+    const aging = dataForScope(agingResult, currencyScope, EMPTY_AGING);
+    const topDeals = dataForScope(topDealsResult, currencyScope, EMPTY_TOP);
+    const revenueSeries = dataForScope(revenueResult, revenueScope, EMPTY_REVENUE);
+    const stageDistribution = dataForScope(stageResult, currencyScope, EMPTY_STAGE_DISTRIBUTION);
+    const activityBuckets = dataForScope(activityResult, rangeMemberScope, EMPTY_ACTIVITY_BUCKETS);
+    const leaderboard = dataForScope(leaderboardResult, range, EMPTY_LEADERBOARD);
+
+    useEffect(() => {
+        let cancelled = false;
+        getDealKpis(currency, range, scopeParams)
+            .then((data) => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data }); })
+            .catch(() => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data: EMPTY_KPIS }); });
+        getDealPipelineValue(currency, range, scopeParams)
+            .then((data) => { if (!cancelled) setPipelineResult({ scope: dealRangeScope, data }); })
+            .catch(() => {
+                if (!cancelled) setPipelineResult({ scope: dealRangeScope, data: EMPTY_PIPELINE_VALUES });
+            });
+        return () => { cancelled = true; };
+    }, [currency, dealRangeScope, range, scopeParams]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getDealRevenueTimeseries(currency, timezone, scopeParams)
+            .then((data) => { if (!cancelled) setRevenueResult({ scope: revenueScope, data }); })
+            .catch(() => { if (!cancelled) setRevenueResult({ scope: revenueScope, data: EMPTY_REVENUE }); });
+        getDealStageDistribution(currency, scopeParams)
+            .then((data) => { if (!cancelled) setStageResult({ scope: currencyScope, data }); })
+            .catch(() => {
+                if (!cancelled) setStageResult({ scope: currencyScope, data: EMPTY_STAGE_DISTRIBUTION });
+            });
+        getDealAging(currency, scopeParams)
+            .then((data) => { if (!cancelled) setAgingResult({ scope: currencyScope, data }); })
+            .catch(() => { if (!cancelled) setAgingResult({ scope: currencyScope, data: EMPTY_AGING }); });
+        getDealTop(currency, scopeParams)
+            .then((data) => { if (!cancelled) setTopDealsResult({ scope: currencyScope, data }); })
+            .catch(() => { if (!cancelled) setTopDealsResult({ scope: currencyScope, data: EMPTY_TOP }); });
+        return () => { cancelled = true; };
+    }, [currency, revenueScope, currencyScope, timezone, scopeParams]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getActivityVolume(range, scopeParams)
+            .then((data) => { if (!cancelled) setActivityResult({ scope: rangeMemberScope, data }); })
+            .catch(() => { if (!cancelled) setActivityResult({ scope: rangeMemberScope, data: EMPTY_ACTIVITY_BUCKETS }); });
+        getTeamLeaderboard(range)
+            .then((data) => { if (!cancelled) setLeaderboardResult({ scope: range, data }); })
+            .catch(() => { if (!cancelled) setLeaderboardResult({ scope: range, data: EMPTY_LEADERBOARD }); });
+        return () => { cancelled = true; };
+    }, [range, rangeMemberScope, scopeParams]);
+
+    const [riskResult, setRiskResult] = useState<ScopedData<DealRiskAnalytics>>({ scope: ALL_TEAM_KEY, data: dealRiskAnalytics });
+    const [taskResult, setTaskResult] = useState<ScopedData<TaskSummary>>({ scope: ALL_TEAM_KEY, data: taskSummary });
+    useEffect(() => {
+        if (ownerScope.mode === 'all') return;
+        let cancelled = false;
+        getDealRiskAnalytics(scopeParams)
+            .then((data) => { if (!cancelled) setRiskResult({ scope: memberKey, data }); })
+            .catch(() => { if (!cancelled) setRiskResult({ scope: memberKey, data: EMPTY_RISK }); });
+        getTaskSummary(scopeParams)
+            .then((data) => { if (!cancelled) setTaskResult({ scope: memberKey, data }); })
+            .catch(() => { if (!cancelled) setTaskResult({ scope: memberKey, data: EMPTY_TASKS }); });
+        return () => { cancelled = true; };
+    }, [memberKey, ownerScope.mode, scopeParams]);
+    const riskAnalytics = ownerScope.mode === 'all' ? dealRiskAnalytics : dataForScope(riskResult, memberKey, EMPTY_RISK);
+    const tasks = ownerScope.mode === 'all' ? taskSummary : dataForScope(taskResult, memberKey, EMPTY_TASKS);
 
     const openPipeline = useMemo(
-        () =>
-            dealsInCurrency
-                .filter((d) => !isClosed(d))
-                .reduce((sum, d) => sum + (d.value ?? 0), 0),
-        [dealsInCurrency],
+        () => dealMetrics.byCurrency.find((c) => c.currency === currency)?.openValue ?? 0,
+        [dealMetrics, currency],
     );
 
-    const warm = useMemo(() => warmSummary(contactTemps), [contactTemps]);
+    const warm = useMemo(() => {
+        const { hot, warm: warmBand, cool, cold } = warmth.contacts;
+        const tracked = hot + warmBand + cool + cold;
+        const warmCount = hot + warmBand;
+        return {
+            tracked,
+            share: tracked > 0 ? warmCount / tracked : 0,
+            cooling: warmth.contactTrends.cooling,
+        };
+    }, [warmth]);
 
-    const dealRisksInCurrency = useMemo(() => {
-        const inCurrency = new Set(dealsInCurrency.map((d) => d.id));
-        return dealRisks.filter((r) => inCurrency.has(r.dealId));
-    }, [dealRisks, dealsInCurrency]);
-
-    const atRisk = useMemo(() => {
-        const valueById = new Map(dealsInCurrency.map((d) => [d.id, d.value ?? 0]));
-        const ids = atRiskDealIds(dealRisksInCurrency);
-        let value = 0;
-        for (const id of ids) value += valueById.get(id) ?? 0;
-        return { value, count: ids.size };
-    }, [dealRisksInCurrency, dealsInCurrency]);
+    const riskSummary = useMemo(
+        () => riskAnalytics.currencies.find((entry) => entry.currency === currency),
+        [riskAnalytics, currency],
+    );
+    const atRisk = useMemo(
+        () => ({ value: riskSummary?.value ?? 0, count: riskSummary?.count ?? 0 }),
+        [riskSummary],
+    );
 
     const relationshipKpis = useMemo(
         () => ({
@@ -175,15 +361,19 @@ export default function AnalyticsBoard({
         [warm, atRisk, introSuggestions],
     );
 
-    const hasDeals = deals.length > 0;
+    const companiesTracked =
+        warmth.companies.hot + warmth.companies.warm + warmth.companies.cool + warmth.companies.cold;
+    const tasksTracked = tasks.todo + tasks.inProgress + tasks.done;
+
+    const hasDeals = dealMetrics.totalCount > 0;
     const hasRelationshipData =
-        contactTemps.length > 0 ||
-        companyTemps.length > 0 ||
-        dealRisks.length > 0 ||
+        warm.tracked > 0 ||
+        companiesTracked > 0 ||
+        riskAnalytics.currencies.some((entry) => entry.count > 0) ||
         introSuggestions.length > 0 ||
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
-        tasks.length > 0;
+        tasksTracked > 0;
     const relBase = hasDeals ? 6 : 0;
 
     const rangeOptions: { key: RangeKey; label: string }[] = [
@@ -200,7 +390,10 @@ export default function AnalyticsBoard({
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 {(hasDeals || hasRelationshipData) && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                    {canScopeByMember && (
+                        <MemberScopeFilter values={ownerValues} onChange={setOwnerValues} members={activeMembers} />
+                    )}
                     {currencyCounts.size > 1 ? (
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -226,7 +419,7 @@ export default function AnalyticsBoard({
                                     ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
-                    ) : deals.length > 0 ? (
+                    ) : hasDeals ? (
                         <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
                             {currency}
                         </span>
@@ -263,7 +456,7 @@ export default function AnalyticsBoard({
                         </div>
                     }
                 >
-                    <RevenueTrend deals={dealsInCurrency} currency={currency} range={range} />
+                    <RevenueTrend series={revenueSeries} currency={currency} range={range} timezone={timezone} />
                 </Panel>
             </Reveal>
 
@@ -274,9 +467,8 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                 >
                     <PipelineValue
-                        deals={dealsInCurrency}
+                        values={pipelineValues}
                         pipelines={pipelines}
-                        range={range}
                         currency={currency}
                     />
                 </Panel>
@@ -289,7 +481,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <StageFunnel deals={dealsInCurrency} pipelines={pipelines} stages={stages} currency={currency} />
+                    <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />
                 </Panel>
                 <Panel
                     title={t('winRateTitle')}
@@ -298,7 +490,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <WinRateDonut deals={dealsInCurrency} range={range} currency={currency} />
+                    <WinRateDonut kpis={kpis} currency={currency} />
                 </Panel>
             </Reveal>
 
@@ -310,7 +502,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <ActivityVolume activities={activities} range={range} />
+                    <ActivityVolume buckets={activityBuckets} range={range} />
                 </Panel>
                 <Panel
                     title={t('teamTitle')}
@@ -319,13 +511,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <TeamLeaderboard
-                        users={users}
-                        activities={activities}
-                        tasks={tasks}
-                        notes={notes}
-                        range={range}
-                    />
+                    <TeamLeaderboard users={users} standings={leaderboard} />
                 </Panel>
             </Reveal>
 
@@ -336,7 +522,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <DealsAging deals={dealsInCurrency} stageById={stageById} />
+                    <DealsAging aging={aging} stageById={stageById} />
                 </Panel>
                 <Panel
                     title={t('topDealsTitle')}
@@ -344,7 +530,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <TopDeals deals={dealsInCurrency} companyById={companyById} />
+                    <TopDeals data={topDeals} />
                 </Panel>
             </Reveal>
                 </>
@@ -373,7 +559,7 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-3"
                         >
-                            <WarmthDistribution contacts={contactTemps} companies={companyTemps} />
+                            <WarmthDistribution summary={warmth} />
                         </Panel>
                         <Panel
                             title={t('decayTitle')}
@@ -381,7 +567,7 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-2"
                         >
-                            <RelationshipDecay contacts={contactTemps} />
+                            <RelationshipDecay decay={warmth.contactDecay} />
                         </Panel>
                     </Reveal>
 
@@ -393,10 +579,9 @@ export default function AnalyticsBoard({
                             className="lg:col-span-3"
                         >
                             <DealRiskBreakdown
-                                risks={dealRisksInCurrency}
-                                pipelineAtRisk={atRisk.value}
-                                atRiskDeals={atRisk.count}
+                                summary={riskSummary}
                                 currency={currency}
+                                truncated={riskAnalytics.truncated}
                             />
                         </Panel>
                         <Panel
@@ -406,7 +591,13 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-2"
                         >
-                            <TaskStatusDonut tasks={tasks} />
+                            <TaskStatusDonut
+                                counts={{
+                                    todo: tasks.todo,
+                                    inProgress: tasks.inProgress,
+                                    done: tasks.done,
+                                }}
+                            />
                         </Panel>
                     </Reveal>
 

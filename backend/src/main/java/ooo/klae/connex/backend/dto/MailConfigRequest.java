@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * Upsert of a workspace's SMTP config. Structural constraints only; the
@@ -14,6 +15,7 @@ import lombok.Data;
  * stored password unchanged; a blank string is never persisted as the password.
  */
 @Data
+@ToString(exclude = "password")
 public class MailConfigRequest {
 
     private boolean enabled;

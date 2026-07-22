@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { cn } from "@/lib/utils";
 import { ChevronUpDownIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { CheckIcon } from "@heroicons/react/20/solid";
 
@@ -23,7 +24,7 @@ function Glyph({ name, size = "trigger" }: { name: string; size?: "trigger" | "i
             aria-hidden="true"
             className={
                 trigger
-                    ? "flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-semibold leading-none text-neutral-950"
+                    ? "flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-semibold leading-none text-brand-foreground"
                     : "flex aspect-square size-6 shrink-0 items-center justify-center rounded-md border text-xs font-semibold leading-none"
             }
         >
@@ -32,7 +33,7 @@ function Glyph({ name, size = "trigger" }: { name: string; size?: "trigger" | "i
     );
 }
 
-export default function WorkspaceSwitcher() {
+export default function WorkspaceSwitcher({ compact = false }: { compact?: boolean }) {
     const t = useTranslations("WorkspaceSwitcher");
     const { workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo } = useWorkspace();
 
@@ -49,16 +50,23 @@ export default function WorkspaceSwitcher() {
                 <DropdownMenuTrigger
                     aria-label={t("switchAria")}
                     disabled={switching}
-                    className="group flex h-12 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                    className={cn(
+                        "group flex items-center rounded-md outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
+                        compact ? "justify-center p-1" : "h-12 min-w-0 flex-1 gap-2 overflow-hidden p-2 text-left text-sm",
+                    )}
                 >
                     <Glyph name={activeWorkspace?.name ?? "?"} />
-                    <span className="grid flex-1 text-left leading-tight">
-                        <span className="truncate font-medium text-sidebar-foreground">
-                            {activeWorkspace?.name ?? t("label")}
-                        </span>
-                        <span className="truncate text-xs text-muted-foreground">{count}</span>
-                    </span>
-                    <ChevronUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                    {!compact && (
+                        <>
+                            <span className="grid flex-1 text-left leading-tight">
+                                <span className="truncate font-medium text-sidebar-foreground">
+                                    {activeWorkspace?.name ?? t("label")}
+                                </span>
+                                <span className="truncate text-xs text-muted-foreground">{count}</span>
+                            </span>
+                            <ChevronUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                        </>
+                    )}
                 </DropdownMenuTrigger>
 
                 <DropdownMenuContent

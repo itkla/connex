@@ -99,6 +99,130 @@
           "b": "Where retained personal data is stored or handled outside Japan, we identify the relevant country and take account of its personal-data protection framework in our safeguards.\n\nSaaS data is currently stored in Japan. [Name any country and provider here if applicable.]"
         }
       }
+    },
+    "terms": {
+      "title": "Terms of Service",
+      "lede": "These Terms of Service govern your access to and use of the Connex service. Please read them carefully — by using the Service you agree to them.",
+      "sec": {
+        "acceptance": {
+          "h": "1. Agreement to these terms",
+          "b": "These Terms of Service (the \"Terms\") form a binding agreement between [legal entity name] (\"Connex\", \"we\", \"us\") and the organization or individual that accesses the Connex service (the \"Service\"). By creating an account, accessing, or using the Service, you agree to these Terms.\n\nIf you use the Service on behalf of an organization, you represent that you are authorized to bind it, and \"you\" refers to that organization."
+        },
+        "service": {
+          "h": "2. The Service",
+          "b": "Connex is a multi-tenant relationship-intelligence CRM provided as software as a service. We may update, improve, or modify the Service over time, and may add or remove features. We will not materially reduce the core functionality of a paid plan during a paid term without notice."
+        },
+        "accounts": {
+          "h": "3. Accounts, workspaces, and security",
+          "b": "- You must provide accurate account information and keep it current.\n- You are responsible for activity under your account and workspace, and for keeping your authentication credentials, including passkeys, confidential.\n- You must notify us promptly of any unauthorized use of your account.\n- Access within the Service is governed by the workspace membership and role-based permissions that you administer."
+        },
+        "customerData": {
+          "h": "4. Customer data and your responsibilities",
+          "b": "You retain all rights to the data you and your users submit to the Service (\"Customer Data\"). You grant us a limited licence to host and process Customer Data solely to provide and support the Service for you.\n\nAs between you and Connex, you are responsible for Customer Data. For personal information within it, you act as the handling business operator and Connex acts as your entrustee (委託先), handling it on your instructions. You are responsible for having a lawful basis and any required consents to collect and use that data, and for the privacy notices your own data subjects require. Connex's handling of personal information is described in our Privacy Policy."
+        },
+        "acceptableUse": {
+          "h": "5. Acceptable use",
+          "b": "You agree not to:\n\n- use the Service in violation of applicable law or the rights of others;\n- upload special care-required personal information (要配慮個人情報) or comparably sensitive data unless you have obtained the consents the law requires;\n- attempt to gain unauthorized access to the Service, other tenants' data, or the underlying infrastructure;\n- probe, scan, or test the vulnerability of the Service without our prior written consent;\n- interfere with or disrupt the integrity or performance of the Service;\n- resell or make the Service available to third parties except as expressly permitted."
+        },
+        "fees": {
+          "h": "6. Fees and payment",
+          "b": "Paid plans are billed as set out in your order or plan. Unless stated otherwise, fees are exclusive of applicable taxes, for which you are responsible, and are non-refundable except where required by law or expressly stated.\n\n[Pricing, the billing cycle, and payment terms are set out on the order page or in a separate agreement.]"
+        },
+        "ip": {
+          "h": "7. Intellectual property",
+          "b": "The Service — including its software, design, and content, but excluding Customer Data — is owned by Connex and its licensors and is protected by intellectual-property laws. These Terms grant you no rights in the Service except the limited right to use it in accordance with them. Feedback you choose to provide may be used by us without restriction."
+        },
+        "confidentiality": {
+          "h": "8. Confidentiality",
+          "b": "Each party may access the other's confidential information in connection with the Service. Each party will protect the other's confidential information with reasonable care and use it only to perform under these Terms, except where disclosure is required by law."
+        },
+        "privacy": {
+          "h": "9. Privacy and personal data",
+          "b": "Connex's handling of personal information is described in our Privacy Policy and our Disclosure Regarding Retained Personal Data. Where we handle personal information within Customer Data on your behalf, we do so as your entrustee under the applicable data-processing terms, and we support your obligations under Japan's Act on the Protection of Personal Information (APPI) as described in those documents."
+        },
+        "warranty": {
+          "h": "10. Disclaimers",
+          "b": "The Service is provided \"as is\" and \"as available\". To the extent permitted by law, we disclaim all warranties not expressly stated, including implied warranties of merchantability, fitness for a particular purpose, and non-infringement. We do not warrant that the Service will be uninterrupted or error-free."
+        },
+        "liability": {
+          "h": "11. Limitation of liability",
+          "b": "To the extent permitted by law, neither party is liable for indirect, incidental, special, or consequential damages, or for lost profits or lost data, arising out of these Terms.\n\n[Connex's aggregate liability under these Terms is limited to the fees you paid for the Service in the twelve months before the event giving rise to the claim.] Nothing in these Terms limits liability that cannot be limited by law."
+        },
+        "term": {
+          "h": "12. Term and termination",
+          "b": "These Terms apply while you use the Service. Either party may terminate as set out in the applicable order or, for free use, at any time. On termination we will make Customer Data available for export for a limited period and then delete it as described in our Privacy Policy and any separate agreement. Provisions that by their nature should survive termination will do so."
+        },
+        "governingLaw": {
+          "h": "13. Governing law and jurisdiction",
+          "b": "These Terms are governed by the laws of Japan. The [Tokyo District Court] has exclusive jurisdiction as the court of first instance over disputes arising out of or relating to these Terms, except where mandatory law provides otherwise."
+        },
+        "changes": {
+          "h": "14. Changes to these terms",
+          "b": "We may update these Terms from time to time. We will indicate material changes by updating the \"last updated\" date and, where appropriate, by notice within the Service. Your continued use of the Service after changes take effect constitutes acceptance."
+        },
+        "contact": {
+          "h": "15. Contact",
+          "b": "Questions about these Terms can be sent to [contact email], [legal entity name], [registered address]."
+        }
+      }
+    },
+    "tokushoho": {
+      "title": "Notation Based on the Act on Specified Commercial Transactions",
+      "lede": "This notation is provided under the Act on Specified Commercial Transactions (特定商取引法) in connection with the sale of the Connex service.",
+      "row": {
+        "seller": {
+          "t": "Business operator",
+          "d": "[legal entity name]"
+        },
+        "manager": {
+          "t": "Operations manager",
+          "d": "[name of the operations manager]"
+        },
+        "address": {
+          "t": "Address",
+          "d": "[registered address]. Disclosed without delay upon request."
+        },
+        "phone": {
+          "t": "Telephone number",
+          "d": "[telephone number]. Disclosed without delay upon request."
+        },
+        "email": {
+          "t": "Email address",
+          "d": "[contact email]"
+        },
+        "url": {
+          "t": "Website",
+          "d": "[service URL]"
+        },
+        "price": {
+          "t": "Sales price",
+          "d": "The price shown on the applicable order page or in an individual quotation or agreement. Any consumption tax is shown there."
+        },
+        "additionalFees": {
+          "t": "Charges other than the price",
+          "d": "Any consumption tax and bank-transfer or other payment charges incurred at the time of payment, as shown on the order page."
+        },
+        "paymentMethods": {
+          "t": "Payment methods",
+          "d": "Credit card, bank transfer, or other methods shown on the order page."
+        },
+        "paymentTiming": {
+          "t": "Payment timing",
+          "d": "As shown on the order page or in the applicable agreement — for example, in advance for each billing period."
+        },
+        "deliveryTiming": {
+          "t": "Time of service provision",
+          "d": "Access is provided promptly after the application and any required payment are completed, unless otherwise agreed."
+        },
+        "returns": {
+          "t": "Returns and cancellation",
+          "d": "As the Service is a digital service, returns are not available once provision has begun. Cancellation and any refunds are governed by the applicable order or agreement."
+        },
+        "environment": {
+          "t": "System requirements",
+          "d": "A current version of a major web browser with a network connection."
+        }
+      }
     }
   }
 }

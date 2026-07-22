@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,16 +12,25 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 
 class PersonMapperTest extends AbstractMapperTest {
+
+    @Autowired private NoteMapper noteMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     /**
      * Inserts a new person and checks if the generated ID is not zero.
@@ -47,6 +59,98 @@ class PersonMapperTest extends AbstractMapperTest {
         assertEquals("Engineer", found.getTitle());
         assertNotNull(found.getCompany());
         assertEquals(company.getId(), found.getCompany().getId());
+    }
+
+    @Test
+    void ownerRoundTripsThroughInsertAndGeneralUpdateCannotChangeIt() {
+        Person person = new Person();
+        person.setWorkspaceId(workspace.getId());
+        person.setOwnerId(41);
+        person.setName("Owned " + unique());
+        person.setEmail(unique() + "@example.com");
+        personMapper.insert(person);
+
+        assertEquals(41, personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+
+        person.setOwnerId(42);
+        person.setName("Renamed " + unique());
+        personMapper.update(person);
+
+        Person updated = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertEquals(41, updated.getOwnerId());
+        assertEquals(person.getName(), updated.getName());
+    }
+
+    @Test
+    void batchInsertPersistsOwnersAndUnassignedRows() {
+        Person owned = personForBatch(workspace, "Owned batch", 51);
+        Person unassigned = personForBatch(workspace, "Unassigned batch", null);
+
+        assertEquals(2, personMapper.insertBatch(List.of(owned, unassigned)));
+
+        List<Person> inserted = personMapper.getAllPersons(workspace.getId()).stream()
+            .filter(person -> person.getName().endsWith("batch"))
+            .toList();
+        assertEquals(51, inserted.stream()
+            .filter(person -> person.getName().equals("Owned batch"))
+            .findFirst().orElseThrow().getOwnerId());
+        assertNull(inserted.stream()
+            .filter(person -> person.getName().equals("Unassigned batch"))
+            .findFirst().orElseThrow().getOwnerId());
+    }
+
+    @Test
+    void ownerMutationsAreWorkspaceScopedAndAccountErasureClearsEveryWorkspace() {
+        Workspace target = newWorkspace();
+        Workspace other = newWorkspace();
+        Person targetOwned = newPersonIn(target);
+        Person targetOtherOwner = newPersonIn(target);
+        Person foreignOwned = newPersonIn(other);
+        personMapper.updateOwner(target.getId(), targetOwned.getId(), 61);
+        personMapper.updateOwner(target.getId(), targetOtherOwner.getId(), 62);
+        personMapper.updateOwner(other.getId(), foreignOwned.getId(), 61);
+
+        assertEquals(0, personMapper.updateOwner(other.getId(), targetOwned.getId(), 62));
+        personMapper.clearMemberOwnership(target.getId(), 61);
+        assertNull(personMapper.getPersonById(target.getId(), targetOwned.getId()).getOwnerId());
+        assertEquals(62, personMapper.getPersonById(target.getId(), targetOtherOwner.getId()).getOwnerId());
+        assertEquals(61, personMapper.getPersonById(other.getId(), foreignOwned.getId()).getOwnerId());
+
+        personMapper.clearOwnershipAnywhere(61);
+        assertNull(personMapper.getPersonById(other.getId(), foreignOwned.getId()).getOwnerId());
+        assertEquals(62, personMapper.getPersonById(target.getId(), targetOtherOwner.getId()).getOwnerId());
+    }
+
+    @Test
+    void ownerScopesAndFacetCountsMatchPageAndCountQueries() {
+        Workspace target = newWorkspace();
+        Person mine = newPersonIn(target);
+        Person selected = newPersonIn(target);
+        Person selectedToo = newPersonIn(target);
+        Person unassigned = newPersonIn(target);
+        Person other = newPersonIn(target);
+        personMapper.updateOwner(target.getId(), mine.getId(), 71);
+        personMapper.updateOwner(target.getId(), selected.getId(), 72);
+        personMapper.updateOwner(target.getId(), selectedToo.getId(), 73);
+        personMapper.updateOwner(target.getId(), other.getId(), 74);
+
+        assertOwnerScope(target, MemberScope.fromRequest("me", null, 71), List.of(mine.getId()));
+        assertOwnerScope(target, MemberScope.fromRequest("members", List.of(72, 73), 71),
+            List.of(selected.getId(), selectedToo.getId()));
+        assertOwnerScope(target, MemberScope.fromRequest("unassigned", null, 71),
+            List.of(unassigned.getId()));
+        assertEquals(Map.of("71", 1L, "72", 1L, "73", 1L, "74", 1L, "__empty__", 1L),
+            facetCounts(personMapper.countsByOwner(target.getId())));
+    }
+
+    @Test
+    void getPersonByIdDoesNotEmbedPrivateNoteIdentifiers() {
+        Person person = newPerson(newCompany());
+        addNote(person, newUser(), "private");
+
+        Person found = personMapper.getPersonById(workspace.getId(), person.getId());
+
+        assertNull(found.getNotes());
     }
 
     /**
@@ -85,6 +189,85 @@ class PersonMapperTest extends AbstractMapperTest {
         assertTrue(personMapper.getPersonById(workspace.getId(), person.getId()).isRiskExcluded());
     }
 
+    @Test
+    void updateProcessingRestrictionsPreservesTimestampsClearsIndependentlyAndIsWorkspaceScoped() {
+        Person person = newPerson(newCompany());
+
+        assertEquals(1, personMapper.updateProcessingRestrictions(
+            workspace.getId(), person.getId(), true, true));
+        Person restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNotNull(restricted.getSuspendedAt());
+        assertNotNull(restricted.getProvisionCeasedAt());
+
+        LocalDateTime preserved = LocalDateTime.parse("2025-01-02T03:04:05");
+        jdbcTemplate.update("UPDATE person SET suspended_at = ? WHERE id = ?", preserved, person.getId());
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, true);
+        assertEquals(preserved, personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), false, true);
+        restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNull(restricted.getSuspendedAt());
+        assertNotNull(restricted.getProvisionCeasedAt());
+
+        Workspace other = newWorkspace();
+        assertEquals(0, personMapper.updateProcessingRestrictions(other.getId(), person.getId(), true, false));
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId()).getProvisionCeasedAt());
+    }
+
+    @Test
+    void suspendedContactsAreExcludedOnlyFromProcessingReads() {
+        Company company = newCompany();
+        Person normal = newPerson(company);
+        Person suspended = newPerson(company);
+        Person provisionCeased = newPerson(company);
+        User author = newUser();
+        addNote(normal, author, "workspace");
+        addNote(suspended, author, "workspace");
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), provisionCeased.getId(), false, true);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), suspended.getId(), "suspended");
+        dealMapper.addPerson(workspace.getId(), deal.getId(), provisionCeased.getId(), "ceased");
+
+        List<Integer> processableIds = personMapper.getProcessablePersons(workspace.getId()).stream()
+            .map(Person::getId).toList();
+        assertTrue(processableIds.contains(normal.getId()));
+        assertTrue(processableIds.contains(provisionCeased.getId()));
+        assertFalse(processableIds.contains(suspended.getId()));
+        assertFalse(personMapper.getProcessablePersonIds(
+            workspace.getId(), List.of(normal.getId(), suspended.getId(), provisionCeased.getId()))
+            .contains(suspended.getId()));
+        assertFalse(personMapper.getPersonsByCompanyIds(workspace.getId(), List.of(company.getId())).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertFalse(personMapper.getRelationshipScoreAggregates(
+            workspace.getId(), LocalDateTime.now().plusDays(1)).stream()
+            .anyMatch(score -> score.id() == suspended.getId()));
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId()).contains(suspended.getId()));
+        assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertFalse(personMapper.getPersonsFiltered(
+            workspace.getId(), null, null, null, false, allTeamScope()).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+
+        assertNotNull(personMapper.getPersonById(workspace.getId(), suspended.getId()));
+        assertTrue(personMapper.getAllPersons(workspace.getId()).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertTrue(personMapper.getPersonsPage(
+            workspace.getId(), null, null, null, null, null, false, allTeamScope(), 10_000, 0).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .filter(dealPerson -> dealPerson.getPerson().getId() == suspended.getId())
+            .findFirst().orElseThrow().getPerson().getSuspendedAt());
+        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .filter(dealPerson -> dealPerson.getPerson().getId() == provisionCeased.getId())
+            .findFirst().orElseThrow().getPerson().getProvisionCeasedAt());
+    }
+
     /**
      * Gets all persons and checks if the returned list includes the inserted person.
      */
@@ -95,6 +278,51 @@ class PersonMapperTest extends AbstractMapperTest {
         List<Person> all = personMapper.getAllPersons(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == person.getId()));
+    }
+
+    @Test
+    void getProcessablePersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
+        Person included = newPerson(newCompany());
+        Workspace other = newWorkspace();
+        Person foreign = newPersonIn(other);
+
+        List<Integer> ids = personMapper.getProcessablePersonIds(
+            workspace.getId(), List.of(included.getId(), foreign.getId(), Integer.MAX_VALUE));
+
+        assertEquals(List.of(included.getId()), ids);
+    }
+
+    @Test
+    void getPersonsPageLimitsAndCountsWorkspaceRows() {
+        Workspace pageWorkspace = newWorkspace();
+        Person first = newPersonIn(pageWorkspace);
+        Person second = newPersonIn(pageWorkspace);
+        Person third = newPersonIn(pageWorkspace);
+        Person foreign = newPerson(newCompany());
+
+        List<Person> page = personMapper.getPersonsPage(
+            pageWorkspace.getId(), null, null, null, null, null, false, allTeamScope(), 2, 0);
+
+        assertEquals(2, page.size());
+        assertEquals(3, personMapper.countPersons(
+            pageWorkspace.getId(), null, null, null, false, allTeamScope()));
+        assertTrue(page.stream().noneMatch(person -> person.getId() == foreign.getId()));
+        assertTrue(page.stream().allMatch(person -> List.of(first.getId(), second.getId(), third.getId()).contains(person.getId())));
+    }
+
+    @Test
+    void getPersonIdsFilteredAppliesLimitAndWorkspaceScope() {
+        Workspace pageWorkspace = newWorkspace();
+        Person first = newPersonIn(pageWorkspace);
+        Person second = newPersonIn(pageWorkspace);
+        newPersonIn(pageWorkspace);
+        Person foreign = newPerson(newCompany());
+
+        List<Integer> ids = personMapper.getPersonIdsFiltered(
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), 2);
+
+        assertEquals(List.of(first.getId(), second.getId()), ids);
+        assertFalse(ids.contains(foreign.getId()));
     }
 
     /**
@@ -114,6 +342,27 @@ class PersonMapperTest extends AbstractMapperTest {
         assertEquals("Renamed Person", found.getName());
         assertEquals("Director", found.getTitle());
         assertNull(found.getCompany());
+    }
+
+    @Test
+    void genericUpdateCannotReplaceManagedImageAndCasRejectsStaleReplacement() {
+        Person person = newPerson(newCompany());
+        String first = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        String second = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440001.png";
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, first));
+
+        person.setImageUrl("https://attacker.example/image.png");
+        personMapper.update(person);
+
+        assertEquals(first,
+            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+        assertEquals(0, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, second));
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), first, second));
     }
 
     /**
@@ -137,11 +386,27 @@ class PersonMapperTest extends AbstractMapperTest {
         Company company2 = newCompany();
         Person person1 = newPerson(company1);
         Person person2 = newPerson(company2);
+        addNote(person1, newUser(), "private");
 
-        List<Person> in1 = personMapper.getPersonsByCompanyId(workspace.getId(), company1.getId());
+        List<Person> in1 = personMapper.getPersonsByCompanyId(workspace.getId(), company1.getId(), null);
 
         assertTrue(in1.stream().anyMatch(x -> x.getId() == person1.getId()));
         assertTrue(in1.stream().noneMatch(x -> x.getId() == person2.getId()));
+        assertNull(in1.stream().filter(x -> x.getId() == person1.getId()).findFirst().orElseThrow().getNotes());
+    }
+
+    @Test
+    void getEngagedPersonIdsExcludesPrivateNoteOnlyContacts() {
+        Person privateOnly = newPerson(newCompany());
+        Person workspaceVisible = newPerson(newCompany());
+        User author = newUser();
+        addNote(privateOnly, author, "private");
+        addNote(workspaceVisible, author, "workspace");
+
+        List<Integer> engaged = personMapper.getEngagedPersonIds(workspace.getId());
+
+        assertFalse(engaged.contains(privateOnly.getId()));
+        assertTrue(engaged.contains(workspaceVisible.getId()));
     }
 
     /**
@@ -156,6 +421,16 @@ class PersonMapperTest extends AbstractMapperTest {
 
         List<Person> matched = personMapper.getPersonsByTagId(workspace.getId(), tag.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
+    }
+
+    private void addNote(Person person, User author, String visibility) {
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Note " + unique());
+        note.setVisibility(visibility);
+        note.setAuthor(author);
+        note.setPerson(person);
+        noteMapper.insert(note);
     }
 
     /**
@@ -212,6 +487,8 @@ class PersonMapperTest extends AbstractMapperTest {
     void getPersonsByDealId_returnsLinkedPeople() {
         Company company = newCompany();
         Person person = newPerson(company);
+        User owner = newUser();
+        personMapper.updateOwner(workspace.getId(), person.getId(), owner.getId());
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
@@ -220,6 +497,8 @@ class PersonMapperTest extends AbstractMapperTest {
         List<Person> matched = personMapper.getPersonsByDealId(workspace.getId(), deal.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
+        assertEquals(owner.getId(), dealMapper.getDealPeopleByDealId(
+            workspace.getId(), deal.getId()).getFirst().getPerson().getOwnerId());
     }
 
     /**
@@ -255,5 +534,31 @@ class PersonMapperTest extends AbstractMapperTest {
         p.setWorkspaceId(ws.getId());
         personMapper.insert(p);
         return p;
+    }
+
+    private Person personForBatch(Workspace ws, String name, Integer ownerId) {
+        Person person = new Person();
+        person.setWorkspaceId(ws.getId());
+        person.setOwnerId(ownerId);
+        person.setName(name);
+        person.setEmail(unique() + "@example.com");
+        return person;
+    }
+
+    private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
+        List<Integer> actualIds = personMapper.getPersonsPage(
+            ws.getId(), null, "name", "asc", null, null, false, memberScope, 100, 0)
+            .stream().map(Person::getId).toList();
+        assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
+        assertEquals(expectedIds.size(), personMapper.countPersons(
+            ws.getId(), null, null, null, false, memberScope));
+    }
+
+    private Map<String, Long> facetCounts(List<FacetCount> counts) {
+        return counts.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private MemberScope allTeamScope() {
+        return MemberScope.allTeam();
     }
 }

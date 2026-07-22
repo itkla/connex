@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import type { Contact } from '@/app/lib/types';
 
 function ContactPicker({
@@ -156,6 +157,7 @@ export default function LogIntroDialog({
                             value={note}
                             onChange={setNote}
                             placeholder={t('notePlaceholder')}
+                            commands={ENTITY_COMMANDS}
                             className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                         />
                     </div>

@@ -31,9 +31,11 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
 
     @BeforeEach
     void freshOrgOwnedByCurrentUser() {
+        clearRequestContext();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Org Gate WS " + unique(), currentUser.getId());
         workspaceId = ws.getId();
         orgId = workspaceService.getOrgId(workspaceId);
+        authenticateAs(currentUser, workspaceId);
     }
 
     private User register(String email) {

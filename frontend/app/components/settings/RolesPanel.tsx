@@ -21,6 +21,7 @@ import {
     updateWorkspaceRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
 
@@ -89,6 +90,7 @@ function PermissionSummary({
 
 export default function RolesPanel() {
     const t = useTranslations("WorkspaceRoles");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
@@ -160,7 +162,9 @@ export default function RolesPanel() {
                 toastSuccess(t("created"));
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
             throw err;
         }
     };
@@ -174,7 +178,9 @@ export default function RolesPanel() {
             toastSuccess(t("deleted"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("deleteFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("deleteFailed"));
+            }
         } finally {
             setIsRemoving(false);
         }
@@ -192,21 +198,19 @@ export default function RolesPanel() {
 
     return (
         <div className="space-y-10">
-            <Rise className="space-y-3">
-                <div>
-                    <SectionHeader
-                        title={t("defaultRolesLabel")}
-                        action={
-                            !loading && (
-                                <Button onClick={openCreate} className="bg-brand text-white hover:bg-brand-hover">
-                                    <PlusIcon className="size-4" />
-                                    {t("newRole")}
-                                </Button>
-                            )
-                        }
-                    />
-                    <p className="px-6 text-sm text-muted-foreground">{t("builtInSubtitle")}</p>
-                </div>
+            <Rise className="space-y-4">
+                <SettingsSection
+                    title={t("defaultRolesLabel")}
+                    description={t("builtInSubtitle")}
+                    action={
+                        !loading && (
+                            <Button onClick={openCreate} variant="brand">
+                                <PlusIcon className="size-4" />
+                                {t("newRole")}
+                            </Button>
+                        )
+                    }
+                />
 
                 {loading ? (
                     <RoleSkeleton rows={3} />
@@ -237,14 +241,14 @@ export default function RolesPanel() {
                 )}
             </Rise>
 
-            <Rise className="space-y-3">
-                <SectionHeader
+            <Rise className="space-y-4">
+                <SettingsSection
                     title={t("customRolesLabel")}
                     action={
                         !loading && roles.length > 0 ? (
-                            <span className="text-xs text-muted-foreground">
+                            <Badge variant="secondary" className="tabular-nums">
                                 {t("permissionCount", { count: roles.length })}
-                            </span>
+                            </Badge>
                         ) : undefined
                     }
                 />

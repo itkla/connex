@@ -172,9 +172,12 @@ function CustomFieldForm({
     const keyValid = /^[a-z][a-z0-9_]{0,63}$/.test(derivedKey);
     const isSelect = fieldType === "select";
 
-    const submitOptions = options
-        .filter((option) => option.label.trim().length > 0)
-        .map((option) => ({ key: option.key || toKey(option.label.trim()), label: option.label.trim() }));
+    const submitOptions = options.flatMap((option) => {
+        const trimmedOptionLabel = option.label.trim();
+        return trimmedOptionLabel
+            ? [{ key: option.key || toKey(trimmedOptionLabel), label: trimmedOptionLabel }]
+            : [];
+    });
     const optionKeys = submitOptions.map((option) => option.key);
     const optionsUnique = new Set(optionKeys).size === optionKeys.length;
     const optionsValid = !isSelect || (submitOptions.length > 0 && optionsUnique);
@@ -393,8 +396,9 @@ function CustomFieldForm({
                         </DialogClose>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={!canSubmit}
-                            className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {submitting ? (
                                 <Loader2Icon className="size-4 animate-spin" />

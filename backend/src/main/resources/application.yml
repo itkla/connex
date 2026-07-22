@@ -4,10 +4,9 @@ spring:
     application:
         name: connex-backend
     datasource:
-        url: ${CONNEX_DB_URL:jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true}
-        username: ${CONNEX_DB_USERNAME:connexuser}
-        password: ${CONNEX_DB_PASSWORD:connexpassword}
-        # driver-class-name: com.mysql.cj.jdbc.Driver
+        url: ${CONNEX_DB_URL}
+        username: ${CONNEX_DB_USERNAME}
+        password: ${CONNEX_DB_PASSWORD}
         hikari:
             connection-init-sql: "SET time_zone = '+00:00'"
     # Schema is owned by Flyway (classpath:db/migration). Legacy sql.init drop-and-recreate is off.
@@ -24,10 +23,38 @@ spring:
         # (V38), so Spring Session must not try to create it.
         jdbc:
             initialize-schema: never
+    servlet:
+        multipart:
+            max-file-size: ${CONNEX_MULTIPART_MAX_FILE_SIZE:64MB}
+            max-request-size: ${CONNEX_MULTIPART_MAX_REQUEST_SIZE:72MB}
+            resolve-lazily: true
     jackson:
         default-property-inclusion: non_null
+        read:
+            strict-duplicate-detection: true
 
 connex:
+    audit:
+        integrity:
+            hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:}
+    secret-store:
+        # Active envelope key id and Base64 AES key for never-searched integration secrets.
+        # During rotation, keep older keys under connex.secret-store.keys.<key-id> until
+        # all rows with that key_id have been rewrapped.
+        key-id: ${CONNEX_SECRET_STORE_KEY_ID:local-v1}
+        master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:}
+        disabled-key-ids: ${CONNEX_SECRET_STORE_DISABLED_KEY_IDS:}
+        lazy-rewrap-enabled: ${CONNEX_SECRET_STORE_LAZY_REWRAP_ENABLED:true}
+        batch-rewrap-on-startup: ${CONNEX_SECRET_STORE_BATCH_REWRAP_ON_STARTUP:false}
+        batch-rewrap-limit: ${CONNEX_SECRET_STORE_BATCH_REWRAP_LIMIT:1000}
+        # keys:
+        #   old-v1: ${CONNEX_SECRET_STORE_KEY_OLD_V1:}
+        # metadata:
+        #   local-v1:
+        #     version: "1"
+        #     owner: "operator"
+        #     scope: "instance"
+        #     created-at: "2026-07-09T00:00:00Z"
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000}
     websocket:
@@ -61,6 +88,27 @@ connex:
         # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
         # without a resolved tenant context. Disable only to debug isolation issues.
         enforce-scope: ${CONNEX_TENANCY_ENFORCE_SCOPE:true}
+        routing:
+            # Placement-based catalog routing (#313 Phase 3 / #440). 'single-database'
+            # (the default, and the only mode for on-prem/silo) never switches catalogs;
+            # an org whose placement row demands routing is refused with 503 rather than
+            # silently served from shared storage. 'catalog-per-placement' switches the
+            # pooled connection to the org's database_handle at checkout and resets it on
+            # return. Off-request-thread work (@Async rule triggers, @Scheduled
+            # rule/notification jobs) resolves the org catalog via TenantWorkScope and
+            # the schedulers fan out over every active catalog. DO NOT enable
+            # catalog-per-placement in production until the remaining flag-enable gate
+            # (#485) clears.
+            mode: ${CONNEX_TENANCY_ROUTING_MODE:single-database}
+            # Control-plane/default catalog; required when mode=catalog-per-placement.
+            default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
+    deployment:
+        # Authoritative deployment profile: saas | silo | on-prem. Drives fail-closed posture
+        # enforcement (issue #497). Unset is tolerated for now (soft-launch: a warning is logged
+        # in non-dev) and will become mandatory once every deployment sets it.
+        profile: ${CONNEX_DEPLOYMENT_PROFILE:}
+    maintenance:
+        mode: ${CONNEX_MAINTENANCE_MODE:off}
     security:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
@@ -75,6 +123,80 @@ connex:
         # so a mis-config degrades to per-username throttling rather than a global lockout,
         # but per-IP protection and accurate audit IPs both require this to be set.)
         trusted-proxies: ${CONNEX_SECURITY_TRUSTED_PROXIES:}
+        session:
+            absolute-timeout: ${CONNEX_SESSION_ABSOLUTE_TIMEOUT:12h}
+            recent-authentication-window: ${CONNEX_RECENT_AUTHENTICATION_WINDOW:10m}
+    workspace-cookie:
+        same-site: ${CONNEX_WORKSPACE_COOKIE_SAME_SITE:Lax}
+        secure: ${CONNEX_WORKSPACE_COOKIE_SECURE:true}
+    request-limits:
+        max-body-bytes: ${CONNEX_API_MAX_BODY_BYTES:10485760}
+        import-max-body-bytes: ${CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
+        upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
+        business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
+        webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
+        workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
+        form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
+    object-storage:
+        provider: ${CONNEX_OBJECT_STORAGE_PROVIDER:filesystem}
+        filesystem-root: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT:${user.home}/.connex/object-storage}
+        filesystem-min-free-bytes: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_MIN_FREE_BYTES:1073741824}
+        filesystem-temp-retention: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_RETENTION:1h}
+        filesystem-temp-cleanup-delay-ms: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_TEMP_CLEANUP_DELAY_MS:60000}
+        max-upload-bytes: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:26214400}
+        max-image-pixels: ${CONNEX_OBJECT_STORAGE_MAX_IMAGE_PIXELS:40000000}
+        max-image-working-bytes: ${CONNEX_OBJECT_STORAGE_MAX_IMAGE_WORKING_BYTES:268435456}
+        max-concurrent-image-decodes: ${CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_IMAGE_DECODES:2}
+        max-concurrent-writes: ${CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_WRITES:4}
+        max-concurrent-reads: ${CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS:32}
+        max-concurrent-reads-per-user: ${CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_READS_PER_USER:4}
+        read-timeout-ms: ${CONNEX_OBJECT_STORAGE_READ_TIMEOUT_MS:30000}
+        max-workspace-bytes: ${CONNEX_OBJECT_STORAGE_MAX_WORKSPACE_BYTES:10737418240}
+        max-workspace-objects: ${CONNEX_OBJECT_STORAGE_MAX_WORKSPACE_OBJECTS:10000}
+        delete-retry-warning-entries: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_WARNING_ENTRIES:1000}
+        max-pending-tenant-ambiguous-write-cleanups: ${CONNEX_OBJECT_STORAGE_MAX_PENDING_TENANT_AMBIGUOUS_WRITE_CLEANUPS:100}
+        max-pending-user-image-deletions: ${CONNEX_OBJECT_STORAGE_MAX_PENDING_USER_IMAGE_DELETIONS:2}
+        max-user-image-replacements-per-hour: ${CONNEX_OBJECT_STORAGE_MAX_USER_IMAGE_REPLACEMENTS_PER_HOUR:12}
+        user-image-rate-limit-max-keys: ${CONNEX_OBJECT_STORAGE_USER_IMAGE_RATE_LIMIT_MAX_KEYS:10000}
+        delete-retry-batch-size: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_BATCH_SIZE:100}
+        delete-retry-delay-ms: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_DELAY_MS:60000}
+        ambiguous-write-cleanup-delay-ms: ${CONNEX_OBJECT_STORAGE_AMBIGUOUS_WRITE_CLEANUP_DELAY_MS:60000}
+        readiness-cache-ttl-ms: ${CONNEX_OBJECT_STORAGE_READINESS_CACHE_TTL_MS:30000}
+        s3:
+            bucket: ${CONNEX_OBJECT_STORAGE_S3_BUCKET:}
+            region: ${CONNEX_OBJECT_STORAGE_S3_REGION:}
+            endpoint: ${CONNEX_OBJECT_STORAGE_S3_ENDPOINT:}
+            path-style: ${CONNEX_OBJECT_STORAGE_S3_PATH_STYLE:false}
+            api-call-timeout: ${CONNEX_OBJECT_STORAGE_S3_API_CALL_TIMEOUT:15s}
+            api-call-attempt-timeout: ${CONNEX_OBJECT_STORAGE_S3_API_CALL_ATTEMPT_TIMEOUT:5s}
+        legacy-migration:
+            mode: ${CONNEX_OBJECT_STORAGE_LEGACY_MIGRATION_MODE:off}
+            uploads-root: ${CONNEX_OBJECT_STORAGE_LEGACY_UPLOADS_ROOT:}
+            batch-size: ${CONNEX_OBJECT_STORAGE_LEGACY_MIGRATION_BATCH_SIZE:100}
+            apply-confirmation: ${CONNEX_OBJECT_STORAGE_LEGACY_MIGRATION_APPLY_CONFIRMATION:}
+    business-cards:
+        enabled: ${CONNEX_BUSINESS_CARD_SCANNING_ENABLED:false}
+        ocr-base-url: ${CONNEX_OCR_BASE_URL:}
+        plain-http-private-host: ${CONNEX_OCR_PLAIN_HTTP_PRIVATE_HOST:}
+        ocr-service-token: ${CONNEX_OCR_SERVICE_TOKEN:}
+        connect-timeout: ${CONNEX_OCR_CONNECT_TIMEOUT:2s}
+        request-timeout: ${CONNEX_OCR_REQUEST_TIMEOUT:15s}
+        readiness-cache: ${CONNEX_OCR_READINESS_CACHE:5s}
+        local-first-wait: ${CONNEX_OCR_LOCAL_FIRST_WAIT:2s}
+        max-response-bytes: ${CONNEX_OCR_MAX_RESPONSE_BYTES:1048576}
+        max-image-bytes: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:8388608}
+        max-width: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:8192}
+        max-height: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT:8192}
+        max-pixels: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS:24000000}
+        max-scans-per-minute: ${CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE:3}
+        max-global-scans-per-minute: ${CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE:5}
+        max-imports-per-minute: ${CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE:12}
+        rate-limit-max-keys: ${CONNEX_BUSINESS_CARD_RATE_LIMIT_MAX_KEYS:10000}
+        idempotency-retention: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_RETENTION:24h}
+        reservation-lease: ${CONNEX_BUSINESS_CARD_RESERVATION_LEASE:2m}
+        max-outstanding-reservations: ${CONNEX_BUSINESS_CARD_MAX_OUTSTANDING_RESERVATIONS:4}
+        idempotency-cleanup-delay: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_DELAY:1m}
+        idempotency-cleanup-per-workspace-batch-size: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE:100}
     login:
         # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
         # per-IP or per-username failure cap is hit within the window, further attempts are
@@ -97,10 +219,8 @@ connex:
         # Instance-level kill switch for the whole SSO subsystem (#296). Default false so a
         # deployment ships with OIDC/SAML dormant; set true only where enterprise SSO is offered.
         enabled: ${CONNEX_SSO_ENABLED:false}
-        # Per-organization enterprise SSO/IdP (#296). secret-key is a Base64 AES key
-        # (16/24/32 bytes) that encrypts each org's OIDC client secret at rest; it is
-        # required only once an org stores a client secret, and rotating it invalidates
-        # previously stored secrets.
+        # Per-organization enterprise SSO/IdP (#296). secret-key is the legacy Base64
+        # AES key used only to decrypt SSO secrets stored before the central secret store.
         secret-key: ${CONNEX_SSO_SECRET_KEY:}
         # Whether an OIDC issuer may resolve to a loopback/private address. Defaults false so the
         # server-side discovery fetch cannot be aimed at internal services or the cloud metadata
@@ -119,6 +239,38 @@ connex:
             enabled: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_ENABLED:false}
             client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
+    connected-accounts:
+        # Per-user connected accounts (#60) — OAuth clients for connecting a user's own mailbox
+        # and calendar with offline access. Deliberately separate client apps from social login:
+        # a sign-in client must never hold mail/calendar scopes. Off until configured.
+        google:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_SECRET:}
+        microsoft:
+            enabled: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_ENABLED:false}
+            client-id: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_ID:}
+            client-secret: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_SECRET:}
+    ai:
+        # Instance-level switch for AI features (#94/#386). Defaults false pending live public/APPI
+        # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,
+        # and the feature gate still requires an enabled, attested BYOP provider plus AI_USE.
+        enabled: ${CONNEX_AI_ENABLED:false}
+        # Instance gate for org-configured private/internal OpenAI-compatible endpoints. Defaults
+        # false: on a shared multi-tenant deployment an org-supplied internal endpoint is an SSRF
+        # vector, so the org-level allowInternalEndpoint flag is honored only when the operator of
+        # a self-hosted instance opts in.
+        allow-internal-endpoints: ${CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:false}
+        # Comma-separated RFC 6052 network-specific prefixes used by this deployment's translators.
+        # Invalid or overlapping prefixes fail startup; unclassified org-controlled IPv6 fails closed
+        # whenever any valid RFC 6052 interpretation could reach a blocked IPv4 destination.
+        nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}
+        connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
+        request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
+        max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
+        max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
+        max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}
+        max-media-working-bytes: ${CONNEX_AI_MAX_MEDIA_WORKING_BYTES:67108864}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).
@@ -134,6 +286,10 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    reports:
+        scheduling-enabled: ${CONNEX_REPORTS_SCHEDULING_ENABLED:true}
+        delivery-delay-ms: ${CONNEX_REPORTS_DELIVERY_DELAY_MS:300000}
+        initial-delay-ms: ${CONNEX_REPORTS_INITIAL_DELAY_MS:300000}
     mail:
         # Instance-wide SMTP transport. enabled=true wires the default sender and lets
         # workspace invites be emailed; it is also the transport that the account-level
@@ -141,9 +297,13 @@ connex:
         # (password-reset.email-enabled / email-change.email-enabled) — enabling mail alone
         # does NOT start sending reset/verification mail. It is the fallback sender for
         # workspaces without their own SMTP. A workspace can override host/from via
-        # Settings → Email; its SMTP password is AES/GCM-encrypted at rest with secret-key.
+        # Settings → Email; its SMTP password is stored in the central secret store.
         # app-base-url is the frontend origin used to build invite links (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
+        # When true, per-workspace SMTP overrides are disabled and the instance transport
+        # (enabled + host/from below) is authoritative for all workspace mail; if the instance
+        # transport is left unconfigured, workspace mail is disabled entirely.
+        managed: ${CONNEX_MAIL_MANAGED:false}
         host: ${CONNEX_MAIL_HOST:}
         port: ${CONNEX_MAIL_PORT:587}
         username: ${CONNEX_MAIL_USERNAME:}
@@ -156,8 +316,8 @@ connex:
         connection-timeout-ms: ${CONNEX_MAIL_CONNECTION_TIMEOUT_MS:10000}
         timeout-ms: ${CONNEX_MAIL_TIMEOUT_MS:10000}
         write-timeout-ms: ${CONNEX_MAIL_WRITE_TIMEOUT_MS:10000}
-        # Base64 AES key (16/24/32 bytes) for encrypting per-workspace SMTP passwords.
-        # Required once a workspace stores its own password; rotating it invalidates them.
+        # Legacy Base64 AES key used only to decrypt workspace SMTP passwords stored
+        # before the central secret store.
         secret-key: ${CONNEX_MAIL_SECRET_KEY:}
         app-base-url: ${CONNEX_MAIL_APP_BASE_URL:http://localhost:3000}
         # Allow workspace-supplied SMTP hosts that resolve to private/loopback/link-local
@@ -232,12 +392,13 @@ mybatis:
 server:
     servlet:
         session:
+            timeout: ${CONNEX_SESSION_IDLE_TIMEOUT:30m}
             cookie:
                 # Keep the JSESSIONID name after moving to Spring Session (which otherwise defaults
                 # the cookie to SESSION); frontend/proxy.ts gates protected routes on JSESSIONID.
                 name: JSESSIONID
                 http-only: true
-                same-site: lax
+                same-site: ${CONNEX_SESSION_COOKIE_SAME_SITE:lax}
                 # Fail closed: the session cookie carries the Secure attribute by default, so an
                 # HTTPS deployment that forgets to configure this still never emits JSESSIONID over
                 # plaintext HTTP. Local HTTP dev opts out via the `dev` profile (application-dev.yml).

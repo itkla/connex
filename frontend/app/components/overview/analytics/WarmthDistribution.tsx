@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowTrendingUpIcon, ArrowTrendingDownIcon, MinusIcon } from '@heroicons/react/16/solid';
 
-import { type RelationshipTemperature, type TemperatureBand, type TemperatureTrend } from '@/app/lib/types';
-import { WARMTH_BANDS, WARMTH_VAR, bandCounts, trendCounts } from '@/app/components/overview/analytics/relationshipMetrics';
+import { type TemperatureBand, type TemperatureTrend, type WarmthSummary } from '@/app/lib/types';
+import { WARMTH_BANDS, WARMTH_VAR } from '@/app/components/overview/analytics/relationshipMetrics';
 
 const TREND_ICON: Record<TemperatureTrend, typeof ArrowTrendingUpIcon> = {
     rising: ArrowTrendingUpIcon,
@@ -55,22 +54,20 @@ function EntityRow({
     );
 }
 
-export default function WarmthDistribution({
-    contacts,
-    companies,
-}: {
-    contacts: RelationshipTemperature[];
-    companies: RelationshipTemperature[];
-}) {
+/**
+ * Warmth distribution across contacts and companies, plus contact trend counts, all read from
+ * the server-computed workspace-wide {@link WarmthSummary}.
+ */
+export default function WarmthDistribution({ summary }: { summary: WarmthSummary }) {
     const t = useTranslations('AnalyticsWarmth');
     const tBand = useTranslations('Temperature');
 
-    const contactCounts = useMemo(() => bandCounts(contacts), [contacts]);
-    const companyCounts = useMemo(() => bandCounts(companies), [companies]);
-    const trends = useMemo(() => trendCounts(contacts), [contacts]);
+    const contactCounts = summary.contacts;
+    const companyCounts = summary.companies;
+    const trends = summary.contactTrends;
 
-    const contactTotal = contacts.length;
-    const companyTotal = companies.length;
+    const contactTotal = WARMTH_BANDS.reduce((sum, band) => sum + contactCounts[band], 0);
+    const companyTotal = WARMTH_BANDS.reduce((sum, band) => sum + companyCounts[band], 0);
 
     if (contactTotal === 0 && companyTotal === 0) {
         return (

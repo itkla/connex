@@ -8,4 +8,8 @@ package ooo.klae.connex.backend.sso;
  * @param certificatePem the PEM-encoded self-signed certificate
  */
 public record SamlSpKeyMaterial(String privateKeyBase64, String certificatePem) {
+    @Override
+    public String toString() {
+        return "SamlSpKeyMaterial[privateKeyBase64=<redacted>, certificatePem=" + certificatePem + "]";
+    }
 }

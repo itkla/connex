@@ -12,49 +12,54 @@ import {
     ChartTooltipContent,
     type ChartConfig,
 } from '@/components/ui/chart';
-import { type Activity } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { type ActivityVolumeBucket } from '@/app/lib/types';
 import {
     ACTIVITY_COLORS,
     ACTIVITY_TYPES,
     buildTimeBuckets,
-    normalizeActivityType,
     type ActivityType,
     type RangeKey,
 } from './metrics';
 
 type Row = { label: string } & Record<ActivityType, number>;
 
-export default function ActivityVolume({ activities, range }: { activities: Activity[]; range: RangeKey }) {
+/**
+ * Stacked activity-volume chart. Consumes server-aggregated {@link ActivityVolumeBucket}s
+ * (oldest→newest by {@code bucketIndex}) and renders one bar per time bucket. The {@code range}
+ * only drives the human-readable bucket labels via {@link buildTimeBuckets}.
+ */
+export default function ActivityVolume({
+    buckets,
+    range,
+}: {
+    buckets: ActivityVolumeBucket[];
+    range: RangeKey;
+}) {
     const t = useTranslations('AnalyticsActivity');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
 
     const { data, activeTypes } = useMemo(() => {
-        const buckets = buildTimeBuckets(range, now, locale);
-        const rows: Row[] = buckets.map((b) => ({
-            label: b.label,
-            Call: 0,
-            Email: 0,
-            Meeting: 0,
-            Note: 0,
-            Other: 0,
-        }));
-        const present = new Set<ActivityType>();
-        for (const activity of activities) {
-            const ts = parseMysqlDateTime(activity.timestamp);
-            if (!Number.isFinite(ts)) continue;
-            const idx = buckets.findIndex((b) => ts >= b.start && ts < b.end);
-            if (idx < 0) continue;
-            const type = normalizeActivityType(activity.type);
-            rows[idx][type] += 1;
-            present.add(type);
-        }
+        const labels = buildTimeBuckets(range, now, locale);
+        const byIndex = new Map(buckets.map((bucket) => [bucket.bucketIndex, bucket]));
+        const rows: Row[] = labels.map((slot, index) => {
+            const bucket = byIndex.get(index);
+            return {
+                label: slot.label,
+                Call: bucket?.call ?? 0,
+                Email: bucket?.email ?? 0,
+                Meeting: bucket?.meeting ?? 0,
+                Note: bucket?.note ?? 0,
+                Other: bucket?.other ?? 0,
+            };
+        });
         return {
             data: rows,
-            activeTypes: ACTIVITY_TYPES.filter((type) => present.has(type)),
+            activeTypes: ACTIVITY_TYPES.filter(
+                (type) => rows.reduce((sum, row) => sum + row[type], 0) > 0,
+            ),
         };
-    }, [activities, range, now, locale]);
+    }, [buckets, range, now, locale]);
 
     const total = useMemo(
         () => data.reduce((sum, row) => sum + ACTIVITY_TYPES.reduce((s, type) => s + row[type], 0), 0),

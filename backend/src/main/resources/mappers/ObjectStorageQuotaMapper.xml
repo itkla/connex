@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ObjectStorageQuotaMapper">
+
+  <insert id="ensureQuota">
+    INSERT IGNORE INTO object_storage_quota (workspace_id, used_bytes, object_count)
+    VALUES (#{workspaceId}, 0, 0)
+  </insert>
+
+  <select id="lockQuota" resultType="ooo.klae.connex.backend.storage.WorkspaceObjectStorageQuota">
+    SELECT workspace_id AS workspaceId, used_bytes AS usedBytes, object_count AS objectCount
+    FROM object_storage_quota
+    WHERE workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
+  <select id="findQuota" resultType="ooo.klae.connex.backend.storage.WorkspaceObjectStorageQuota">
+    SELECT workspace_id AS workspaceId, used_bytes AS usedBytes, object_count AS objectCount
+    FROM object_storage_quota
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="lockUsageSize" resultType="java.lang.Long">
+    SELECT size_bytes
+    FROM managed_object_usage
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertUsage">
+    INSERT INTO managed_object_usage (workspace_id, object_key, size_bytes)
+    VALUES (#{workspaceId}, #{objectKey}, #{sizeBytes})
+  </insert>
+
+  <update id="addToQuota">
+    UPDATE object_storage_quota
+    SET used_bytes = used_bytes + #{sizeBytes}, object_count = object_count + 1
+    WHERE workspace_id = #{workspaceId}
+  </update>
+
+  <delete id="deleteUsage">
+    DELETE FROM managed_object_usage
+    WHERE workspace_id = #{workspaceId} AND object_key = #{objectKey}
+  </delete>
+
+  <update id="subtractFromQuota">
+    UPDATE object_storage_quota
+    SET used_bytes = used_bytes - #{sizeBytes}, object_count = object_count - 1
+    WHERE workspace_id = #{workspaceId}
+      AND used_bytes &gt;= #{sizeBytes}
+      AND object_count &gt; 0
+  </update>
+
+</mapper>

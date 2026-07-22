@@ -13,7 +13,8 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * The single choke point for outbound email. Resolves the effective SMTP config
- * (instance default for account mail, workspace override for workspace mail),
+ * (instance default for account mail, managed instance transport or workspace override
+ * for workspace mail),
  * builds a MIME message and delivers it. The {@code send*} entry points run
  * asynchronously and never propagate delivery failures, so a mail outage cannot
  * break the request that triggered it; {@link #sendNow(ResolvedMailConfig, MailMessage)}
@@ -27,6 +28,7 @@ public class MailService {
 
     private final MailConfigResolver resolver;
     private final JavaMailSenderFactory senderFactory;
+    private final SmtpDestinationGuard smtpDestinationGuard;
 
     /**
      * Sends account-level mail through the instance default sender, off-thread.
@@ -39,8 +41,8 @@ public class MailService {
     }
 
     /**
-     * Sends workspace-scoped mail through the workspace's sender (or the instance
-     * default when the workspace has none), off-thread.
+     * Sends workspace-scoped mail through the managed instance transport or the
+     * workspace's sender, falling back to the instance default, off-thread.
      * @param workspaceId the workspace whose sender to use
      * @param message the message to deliver
      */
@@ -76,7 +78,7 @@ public class MailService {
     }
 
     private void deliver(ResolvedMailConfig config, MailMessage message) {
-        JavaMailSender sender = senderFactory.forConfig(config);
+        JavaMailSender sender = senderFactory.forConfig(config, smtpDestinationGuard.resolveForSend(config));
         try {
             MimeMessage mime = sender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mime, message.textBody() != null, "UTF-8");

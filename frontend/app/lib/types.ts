@@ -1,3 +1,5 @@
+import type { Locale } from "@/i18n/config";
+
 // type definitions becaue the api.ts library was getting too bloated
 
 export type Page<T> = {
@@ -13,10 +15,30 @@ export type PageParams = {
     dir?: 'asc' | 'desc';
 };
 
-export type ContactsPageParams = PageParams & {
+export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
+};
+
+export type CompaniesPageParams = PageParams & MemberScopeParams & {
+    industry?: string[];
+    noIndustry?: boolean;
+    ids?: number[];
+};
+
+export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
+    definition: SegmentDefinition;
+};
+
+export type ActivitiesPageParams = PageParams & {
+    personId?: number;
+    dealId?: number;
+    createdById?: number;
+};
+
+export type NotesPageParams = PageParams & {
+    workspaceOnly?: boolean;
 };
 
 /** One record that a bulk operation could not apply, with its index in the request and the reason. */
@@ -86,6 +108,13 @@ export type PersonFacets = {
     companies: string[];
     titles: string[];
     hasNoCompany: boolean;
+    owners: FacetCount[];
+};
+
+export type CompanyFacets = {
+    industries: string[];
+    hasNoIndustry: boolean;
+    owners: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -185,6 +214,67 @@ export type DealRisk = {
     score: number;
     factors: DealRiskFactor[];
     assessedAt: string;
+    value: number;
+    currency: string;
+};
+
+export type DealRiskCurrencySummary = {
+    currency: string;
+    value: number;
+    count: number;
+    high: number;
+    medium: number;
+    low: number;
+    factors: Array<{ code: DealRiskFactorCode; count: number }>;
+};
+
+export type DealRiskAnalytics = {
+    currencies: DealRiskCurrencySummary[];
+    truncated: boolean;
+};
+
+/** Why an AI deal brief is unavailable: AI is not configured for the org, or the provider call failed. */
+export type DealBriefUnavailableReason = 'not_configured' | 'provider_error';
+
+/** One titled section of an AI deal brief. */
+export type DealBriefSection = {
+    title: string;
+    body: string;
+};
+
+/**
+ * AI-generated "before you call" brief for a deal, or a graceful unavailability result. Presentation-only:
+ * the deterministic risk/warmth signals remain the source of truth. {@code sections} is the structured
+ * source of truth; {@code brief} is a plain-text flattening kept for backward compatibility. {@code warnings}
+ * counts demasking integrity warnings; nonzero means parts of the brief may reference unknown placeholders.
+ */
+export type DealBrief = {
+    dealId: number;
+    available: boolean;
+    sections?: DealBriefSection[] | null;
+    brief?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: DealBriefUnavailableReason | null;
+};
+
+export type DealRationaleUnavailableReason = 'not_configured' | 'provider_error' | 'not_at_risk';
+
+/**
+ * AI-generated narrative rationale for an at-risk deal, or a graceful unavailability result.
+ * Presentation-only: the deterministic {@link DealRisk} factors remain the source of truth and the
+ * fallback. {@code not_at_risk} means the deal has no active risk signals to explain. {@code warnings}
+ * counts demasking integrity warnings; nonzero means parts of the text may reference unknown placeholders.
+ */
+export type DealRationale = {
+    dealId: number;
+    available: boolean;
+    narrative?: string | null;
+    actions?: string[] | null;
+    rationale?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: DealRationaleUnavailableReason | null;
 };
 
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */
@@ -274,6 +364,23 @@ export type IntroSuggestion = {
     sharedCompany?: string | null;
 };
 
+export type IntroRationaleUnavailableReason = 'not_configured' | 'provider_error' | 'not_a_suggestion';
+
+/**
+ * AI-generated one-line rationale for a suggested reverse introduction, or a graceful unavailability
+ * result. Presentation-only: the deterministic {@link IntroSuggestion} reasons/chips remain the source
+ * of truth and the fallback. {@code not_a_suggestion} means the pair is no longer a current suggestion.
+ */
+export type IntroRationale = {
+    personAId: number;
+    personBId: number;
+    available: boolean;
+    rationale?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: IntroRationaleUnavailableReason | null;
+};
+
 /** A recorded introduction in the lineage feed ("intros you've made"). */
 export type IntroductionRecord = {
     id: number;
@@ -300,6 +407,56 @@ export type IntroductionPayload = {
     note?: string;
 };
 
+export type WarmPathEvidence = 'connection' | 'colleagues' | 'former_colleagues';
+
+export type WarmPathReachType = 'rewarm' | 'reach';
+
+/** One avenue to a warm-path target: a warm bridge contact plus the labeled evidence tier. */
+export type WarmPathBridge = {
+    personId: number;
+    name: string;
+    title?: string | null;
+    company?: string | null;
+    imageUrl?: string | null;
+    warmth?: TemperatureBand | null;
+    evidenceType: WarmPathEvidence;
+    evidenceCompany?: string | null;
+    overlapStartYear?: number | null;
+    overlapEndYear?: number | null;
+    score: number;
+};
+
+/**
+ * A warm introduction path surfaced to the user (the "receive side"): a target contact worth
+ * reaching — dormant ({@code rewarm}) or never engaged ({@code reach}) — plus the best bridges
+ * who can make the introduction, ordered by descending score.
+ */
+export type WarmPath = {
+    targetId: number;
+    targetName: string;
+    targetTitle?: string | null;
+    targetCompany?: string | null;
+    targetImageUrl?: string | null;
+    targetWarmth?: TemperatureBand | null;
+    targetDaysSinceTouch?: number | null;
+    reachType: WarmPathReachType;
+    score: number;
+    bridges: WarmPathBridge[];
+};
+
+/** Request body identifying the warm path an accept or dismiss targets. */
+export type WarmPathPayload = {
+    targetPersonId: number;
+    bridgePersonId?: number;
+    taskDescription?: string;
+};
+
+/** Combined introductions feed — suggestions + warm paths from one backend warmth pass (#630). */
+export type IntroOverview = {
+    suggestions: IntroSuggestion[];
+    paths: WarmPath[];
+};
+
 export type User = {
     id: number;
     username: string;
@@ -310,6 +467,7 @@ export type User = {
     lastLoginAt?: string;
     profilePictureUrl?: string;
     timezone: string;
+    locale: Locale;
 };
 
 export type LoginPayload = {
@@ -346,6 +504,11 @@ export type ResetPasswordPayload = {
     newPassword: string;
 };
 
+export type EmailChangePayload = {
+    newEmail: string;
+    currentPassword: string;
+};
+
 export type ResetTokenValidation = {
     valid: boolean;
 };
@@ -364,6 +527,68 @@ export type CreateContactPayload = {
     title: string;
     companyId?: number;
 };
+
+export type BusinessCardDetectedField = {
+    value?: string | null;
+    confidence?: number | null;
+};
+
+export type BusinessCardScanResult = {
+    fields: {
+        name: BusinessCardDetectedField;
+        email: BusinessCardDetectedField;
+        phone: BusinessCardDetectedField;
+        title: BusinessCardDetectedField;
+    };
+    company: BusinessCardDetectedField & {
+        matchedCompanyId?: number | null;
+    };
+    warnings: string[];
+};
+
+export type BusinessCardCompanyAction =
+    | { type: 'existing'; companyId: number }
+    | { type: 'create'; companyName: string }
+    | { type: 'none' };
+
+export type BusinessCardRecoveryContext = {
+    scope: string;
+    workspaceId: string;
+};
+
+export type BusinessCardImportDraft = {
+    requestId: string;
+    recoveryContext: BusinessCardRecoveryContext;
+    image: File;
+    contact: CreateContactPayload;
+    companyAction: BusinessCardCompanyAction;
+};
+
+export type BusinessCardImportReservation = {
+    expiresAt: string;
+};
+
+export type BusinessCardImportResult = {
+    contact: Pick<Contact, 'id' | 'name'> & Partial<Pick<Contact, 'email' | 'phone' | 'title' | 'imageUrl'>>;
+    attachment: Pick<Attachment, 'id' | 'fileName' | 'url' | 'size'> & Partial<Pick<Attachment, 'contentType'>>;
+    company?: (Pick<Company, 'id' | 'name'> & Partial<Pick<Company, 'website' | 'industry' | 'phone' | 'address' | 'logoUrl'>>) | null;
+};
+
+export type BusinessCardRequestErrorKind =
+    | 'aborted'
+    | 'unauthorized'
+    | 'forbidden'
+    | 'tooLarge'
+    | 'unsupportedType'
+    | 'unreadable'
+    | 'busy'
+    | 'conflict'
+    | 'gone'
+    | 'timeout'
+    | 'unavailable'
+    | 'recoveryStorage'
+    | 'rejected'
+    | 'failed';
 
 export type CreateTaskPayload = {
     description: string;
@@ -436,6 +661,7 @@ export type DealSummary = {
     id: number;
     name: string;
     value: number;
+    actualValue: number;
     currency: string;
     status: string;
     expectedCloseDate?: string | null;
@@ -506,6 +732,7 @@ export type UpdateNotePayload = {
 export type Company = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     website: string;
     industry: string;
@@ -524,8 +751,10 @@ export type Company = {
 
 // metrics for a company, filled via relationship traversal
 export type CompanyMetrics = {
-    persons: Contact[];
+    persons: Array<Pick<Contact, 'id' | 'name' | 'imageUrl'>>;
+    personCount: number;
     relatedUsers: User[];
+    relatedUserCount: number;
     pastRevenue: number;
     projectedRevenue: number;
     currency: string;
@@ -562,12 +791,12 @@ export type UpdateCompanyPayload = {
     industry?: string;
     phone?: string;
     address?: string;
-    logoUrl?: string;
 };
 
 export type Contact = {
     id: number;
     workspaceId?: number;
+    ownerId?: number | null;
     name: string;
     email: string;
     phone: string;
@@ -586,6 +815,61 @@ export type Contact = {
     /** Engine-evaluation opt-outs (issue #358); read-only, set via the evaluation endpoint. */
     riskExcluded?: boolean;
     introExcluded?: boolean;
+    /** APPI processing restrictions (issue #221); read-only, set via the restrictions endpoint. */
+    suspendedAt?: string | null;
+    provisionCeasedAt?: string | null;
+};
+
+export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';
+
+export type DataSubjectRequestStatus =
+    | 'received'
+    | 'verifying'
+    | 'in_progress'
+    | 'responded'
+    | 'refused'
+    | 'closed';
+
+export type DataSubjectRequest = {
+    id: number;
+    orgId: number;
+    requestType: DataSubjectRequestType;
+    status: DataSubjectRequestStatus;
+    channel?: string | null;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string | null;
+    subjectWorkspaceId?: number | null;
+    subjectPersonId?: number | null;
+    receivedAt: string;
+    identityVerifiedAt?: string | null;
+    dueAt?: string | null;
+    respondedAt?: string | null;
+    closedAt?: string | null;
+    summary?: string | null;
+    resolution?: string | null;
+    createdBy?: number | null;
+    updatedBy?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DataSubjectRequestBody = {
+    requestType: DataSubjectRequestType;
+    status?: DataSubjectRequestStatus;
+    channel?: string;
+    requesterName: string;
+    subjectName: string;
+    subjectEmail?: string;
+    subjectWorkspaceId?: number;
+    subjectPersonId?: number;
+    receivedAt?: string;
+    identityVerifiedAt?: string;
+    dueAt?: string;
+    respondedAt?: string;
+    closedAt?: string;
+    summary?: string;
+    resolution?: string;
 };
 
 export type Deal = {
@@ -612,6 +896,13 @@ export type Deal = {
     riskExcluded?: boolean;
     createdAt: string;
     updatedAt: string;
+};
+
+export type DealPrimaryContact = {
+    dealId: number;
+    personId: number;
+    name: string;
+    imageUrl: string;
 };
 
 export type UpdateContactEvaluationPayload = {
@@ -740,6 +1031,252 @@ export type UpdateTagPayload = {
     color?: string;
 };
 
+export type BillingFrequency = 'one_time' | 'recurring';
+export type LineDiscountType = 'amount' | 'percent';
+
+/** A workspace-scoped catalog product/service. Money fields are server-authoritative. */
+export type Product = {
+    id: number;
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateProductPayload = {
+    sku?: string | null;
+    name: string;
+    description?: string | null;
+    active?: boolean;
+    unit?: string | null;
+    unitPrice: number;
+    currency: string;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    effectiveStart?: string | null;
+    effectiveEnd?: string | null;
+};
+
+export type UpdateProductPayload = Partial<CreateProductPayload>;
+
+/**
+ * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
+ * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
+ * server-computed (BigDecimal) — the client never does money arithmetic.
+ */
+export type DealLineItem = {
+    id: number;
+    dealId: number;
+    productId?: number | null;
+    name: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position: number;
+    currency: string;
+    lineSubtotal: number;
+    lineTax: number;
+    lineTotal: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** Server-computed deal roll-up; recurring vs one-time kept separate to avoid double-counting. */
+export type DealLineItemTotals = {
+    currency: string;
+    subtotal: number;
+    tax: number;
+    oneTimeTotal: number;
+    recurringTotal: number;
+    grandTotal: number;
+};
+
+export type DealLineItemsResponse = {
+    items: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+export type DealLineItemPayload = {
+    productId?: number | null;
+    name?: string;
+    sku?: string | null;
+    unit?: string | null;
+    unitPrice?: number;
+    quantity: number;
+    discountType?: LineDiscountType | null;
+    discountValue?: number | null;
+    taxRate?: number | null;
+    billingFrequency?: BillingFrequency;
+    description?: string | null;
+    servicePeriodStart?: string | null;
+    servicePeriodEnd?: string | null;
+    position?: number;
+};
+
+export type DocumentType = 'quote' | 'proposal' | 'order_form' | 'contract';
+
+/** A mark on a document body text run (bold, italic, link, …), as ProseMirror/Tiptap JSON. */
+export type DocumentBodyMark = {
+    type: string;
+    attrs?: Record<string, unknown>;
+};
+
+/**
+ * One node in a document template's block body (ProseMirror/Tiptap JSON). The block builder
+ * authors this tree; merge tokens live as inline {@code mergeToken} nodes and the line-items table
+ * as a {@code lineItems} placeholder, both resolved server-side at generation.
+ */
+export type DocumentBodyNode = {
+    type: string;
+    attrs?: Record<string, unknown>;
+    content?: DocumentBodyNode[];
+    marks?: DocumentBodyMark[];
+    text?: string;
+};
+
+/** A workspace-scoped commercial-document template. Sections may carry {{merge tokens}}. */
+export type DocumentTemplate = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    body?: string | null;
+    active: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateDocumentTemplatePayload = {
+    name: string;
+    type: DocumentType;
+    locale?: string;
+    title?: string | null;
+    intro?: string | null;
+    terms?: string | null;
+    footer?: string | null;
+    body?: string | null;
+    active?: boolean;
+};
+
+export type UpdateDocumentTemplatePayload = Partial<CreateDocumentTemplatePayload>;
+
+export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final' | 'superseded';
+
+/**
+ * Statuses a client may request through the status endpoint. The approval states are owned by the
+ * approval flow and are rejected server-side if sent here.
+ */
+export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
+
+export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+/** One approval request on a generated document, with its decision once made. */
+export type DocumentApproval = {
+    id: number;
+    documentId: number;
+    policyId?: number | null;
+    status: DocumentApprovalStatus;
+    requestedBy?: number | null;
+    requestComment?: string | null;
+    decidedBy?: number | null;
+    decisionComment?: string | null;
+    decidedAt?: string | null;
+    createdAt: string;
+};
+
+/** Declares when a generated document requires internal approval before finalization. */
+export type ApprovalPolicy = {
+    id: number;
+    name: string;
+    active: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateApprovalPolicyPayload = {
+    name: string;
+    active?: boolean;
+    documentType?: DocumentType | null;
+    currency?: string | null;
+    minTotal?: number | null;
+    minDiscountPercent?: number | null;
+};
+
+/**
+ * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
+ * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ */
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
+
+/** A party rendered on a document (workspace, company, or owner). */
+export type DocumentParty = {
+    name: string;
+    address?: string | null;
+};
+
+/**
+ * The immutable, resolved snapshot stored on a generated document. Merge tokens are already
+ * substituted and the line items/totals frozen at generation — the client only renders this.
+ */
+export type DocumentContent = {
+    generatedAt: string;
+    workspace?: DocumentParty | null;
+    company?: DocumentParty | null;
+    owner?: DocumentParty | null;
+    deal: { name: string; currency: string };
+    sections: {
+        title?: string | null;
+        intro?: string | null;
+        terms?: string | null;
+        footer?: string | null;
+    };
+    body?: DocumentBodyNode | null;
+    lineItems: DealLineItem[];
+    totals: DealLineItemTotals;
+};
+
+/** A generated, immutable, versioned commercial document on a deal. */
+export type DealDocument = {
+    id: number;
+    dealId: number;
+    templateId?: number | null;
+    type: DocumentType;
+    locale: string;
+    status: DocumentStatus;
+    version: number;
+    title?: string | null;
+    currency: string;
+    generatedAt: string;
+    content: DocumentContent;
+    requiresApproval: boolean;
+    latestApproval?: DocumentApproval | null;
+};
+
 export type CustomFieldEntityType = 'company' | 'person' | 'deal';
 
 export type CustomFieldType =
@@ -822,12 +1359,330 @@ export type SegmentDefinition = {
     negate?: boolean;
 };
 
+/**
+ * The browser's flat working shape of a saved-view configuration. {@link visibleColumns},
+ * {@link columnOrder}, and {@link pageSize} are carried purely so they survive a round-trip through
+ * the persisted config DTO — capturing and applying them in the UI is deferred (issue #412).
+ */
 export type SavedViewConfig = {
     filters?: Record<string, string[]>;
     query?: string;
     sortKey?: string | null;
     sortDirection?: "asc" | "desc";
     segments?: SegmentDefinition;
+    visibleColumns?: string[] | null;
+    columnOrder?: string[] | null;
+    pageSize?: number | null;
+};
+
+/** Who can see a saved view: only its owner, or everyone in the workspace. */
+export type SavedViewVisibility = "private" | "workspace";
+
+export type CampaignStatus =
+    | "draft"
+    | "scheduled"
+    | "active"
+    | "paused"
+    | "completed"
+    | "archived";
+
+export type Campaign = {
+    id: number;
+    name: string;
+    objective: string | null;
+    type: string;
+    status: CampaignStatus;
+    ownerUserId: number | null;
+    budgetAmount: number | null;
+    budgetCurrency: string | null;
+    startAt: string | null;
+    endAt: string | null;
+    parentCampaignId: number | null;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignPayload = {
+    name: string;
+    objective?: string | null;
+    type: string;
+    status?: CampaignStatus | null;
+    ownerUserId?: number | null;
+    budgetAmount?: number | null;
+    budgetCurrency?: string | null;
+    startAt?: string | null;
+    endAt?: string | null;
+    parentCampaignId?: number | null;
+};
+
+export type CampaignAudienceRecordType = "person" | "company" | "deal";
+
+export type CampaignAudience = {
+    campaignId: number;
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+    mode: string;
+    updatedAt: string;
+};
+
+export type CampaignAudiencePayload = {
+    recordType: CampaignAudienceRecordType;
+    definition: SegmentDefinition;
+};
+
+export type RecordLabel = {
+    id: number;
+    label: string;
+};
+
+export type CampaignAudienceEstimate = {
+    estimatedIncluded: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    excludedTotal: number;
+    sampleLabels: RecordLabel[];
+};
+
+export type CampaignAudienceExclusionReason =
+    | "consent_revoked"
+    | "consent_missing"
+    | "suppressed"
+    | "restricted";
+
+export type CampaignAudienceMember = {
+    recordType: CampaignAudienceRecordType;
+    recordId: number;
+    status: "included" | "excluded";
+    exclusionReason: CampaignAudienceExclusionReason | null;
+};
+
+export type CampaignAudienceSnapshotSummary = {
+    version: number;
+    recordType: CampaignAudienceRecordType;
+    estimatedIncluded: number;
+    excludedTotal: number;
+    excludedConsent: number;
+    excludedSuppressed: number;
+    excludedRestricted: number;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
+    campaignId: number;
+    definition: SegmentDefinition;
+    members: CampaignAudienceMember[];
+};
+
+export type CampaignChannel = "email" | "sms";
+
+export type CampaignMessageStatus = "draft" | "final";
+
+export type CampaignMessageLocale = "en" | "ja";
+
+/** One immutable, locale-scoped revision of a campaign message. */
+export type CampaignMessageRevision = {
+    version: number;
+    locale: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText: string | null;
+    createdAt: string;
+};
+
+/** A campaign message and its append-only revisions, newest first. */
+export type CampaignMessage = {
+    id: number;
+    campaignId: number;
+    channel: string;
+    name: string;
+    status: CampaignMessageStatus;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+    revisions: CampaignMessageRevision[];
+};
+
+export type CampaignMessagePayload = {
+    name: string;
+    channel: CampaignChannel;
+};
+
+/**
+ * Content for a new message revision. Which fields carry the content is channel-specific: an email
+ * revision sends {@code subject} and {@code bodyHtml}, an SMS revision sends only {@code bodyText}.
+ */
+export type CampaignMessageRevisionPayload = {
+    locale: CampaignMessageLocale;
+    subject?: string | null;
+    bodyHtml?: string | null;
+    bodyText?: string | null;
+};
+
+export type CampaignSendStatus =
+    | "draft"
+    | "queued"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+/** A campaign send bound to a frozen audience snapshot and a message revision. */
+export type CampaignSend = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    messageId: number;
+    messageVersion: number;
+    channel: string;
+    purpose: string;
+    providerId: string | null;
+    status: CampaignSendStatus;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    totalRecipients: number;
+    dispatchedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignSendPayload = {
+    snapshotVersion: number;
+    messageId: number;
+    messageVersion: number;
+    purpose?: string | null;
+    scheduledAt?: string | null;
+};
+
+/** Per-channel delivery tally within a campaign's engagement rollup. */
+export type CampaignChannelStat = {
+    channel: string;
+    deliveries: number;
+};
+
+/** Delivery-outcome rollup for a single send within a campaign's engagement view. */
+export type CampaignSendEngagement = {
+    sendId: number;
+    status: string;
+    channel: string;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+};
+
+/**
+ * Campaign-wide engagement rollup aggregated across every send. Rate fields are {@code null} when
+ * they cannot be measured (for example, an SMTP transport that returns no delivery receipts), which
+ * the UI surfaces as "Not measured" rather than a misleading zero.
+ */
+export type CampaignEngagement = {
+    campaignId: number;
+    totalRecipients: number;
+    dispatched: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    unsubscribed: number;
+    failed: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    eventCounts: Record<string, number>;
+    channels: CampaignChannelStat[];
+    deliveryReceiptsAvailable: boolean;
+    deliveryRate: number | null;
+    bounceRate: number | null;
+    complaintRate: number | null;
+    sends: CampaignSendEngagement[];
+};
+
+export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
+
+/** A campaign audience export bound to a frozen snapshot and an external connector. */
+export type CampaignAudienceExport = {
+    id: number;
+    campaignId: number;
+    snapshotId: number;
+    connector: string;
+    externalListId: string | null;
+    status: CampaignExportStatus;
+    totalMembers: number;
+    pushedCount: number;
+    failedCount: number;
+    createdById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CampaignAudienceExportPayload = {
+    snapshotVersion: number;
+    connector: string;
+};
+
+/** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+export type DeliveryUnsubscribeInfo = {
+    channel: string;
+    address: string;
+    unsubscribed: boolean;
+};
+
+export type ContactChannelConsent = {
+    id: number;
+    personId: number;
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string | null;
+    evidenceRef: string | null;
+    capturedAt: string | null;
+    updatedAt: string;
+};
+
+export type ContactChannelConsentPayload = {
+    channel: string;
+    purpose: string;
+    status: "granted" | "revoked" | "unknown";
+    source: string;
+    evidenceRef?: string | null;
+    capturedAt?: string | null;
+};
+
+export type SuppressionEntry = {
+    id: number;
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId: number | null;
+    reason: string;
+    note: string | null;
+    createdById: number | null;
+    createdAt: string;
+};
+
+export type SuppressionEntryPayload = {
+    scope: "workspace" | "global";
+    channel: string;
+    address: string;
+    personId?: number | null;
+    reason: string;
+    note?: string | null;
 };
 
 export type SegmentResult = {
@@ -845,17 +1700,72 @@ export type SegmentFields = {
     tags: SegmentTag[];
 };
 
+export type SegmentFieldKind = "string" | "number" | "id" | "enum" | "tag" | "date";
+
+export type SegmentValueSource =
+    | "none"
+    | "tags"
+    | "industries"
+    | "owners"
+    | "stages"
+    | "pipelines"
+    | "companies";
+
+export type SegmentCatalogField = {
+    field: string;
+    kind: SegmentFieldKind;
+    valueSource: SegmentValueSource;
+    operators: string[];
+};
+
+export type SegmentCatalogPredicate = {
+    key: string;
+    recordTypes: string[];
+    acceptsDays: boolean;
+    defaultDays: number | null;
+    minDays: number | null;
+    maxDays: number | null;
+};
+
+export type SegmentCatalogLimits = {
+    maxConditions: number;
+    maxGroupConditions: number;
+    maxGroups: number;
+    maxDepth: number;
+};
+
+export type SegmentCatalog = {
+    recordType: string;
+    fields: SegmentCatalogField[];
+    predicates: SegmentCatalogPredicate[];
+    enumOptions: Record<string, string[]>;
+    limits: SegmentCatalogLimits;
+};
+
 export type SavedView = {
     id: number;
+    workspaceId: number;
     recordType: SavedViewRecordType;
     name: string;
+    visibility: SavedViewVisibility;
+    ownerUserId: number;
+    /** Whether the requesting user owns this view; drives owner-only menu actions. */
+    ownedByCurrentUser: boolean;
     config: SavedViewConfig;
     position: number;
+    pinned: boolean;
+    /** Sort order among the user's pinned views; null when not pinned. */
+    pinPosition: number | null;
+    /** Whether this view is the requesting user's default for its record type. */
+    default: boolean;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type SavedViewInput = {
     recordType: SavedViewRecordType;
     name: string;
+    visibility?: SavedViewVisibility;
     config: SavedViewConfig;
     position?: number;
 };
@@ -907,13 +1817,262 @@ export type DashboardLayoutResponse = {
     updatedAt?: string | null;
 };
 
+export type ReportCadence = "weekly" | "monthly" | "quarterly" | "custom";
+
+export type ReportScheduleCadence = Exclude<ReportCadence, "custom">;
+
+export type ReportScheduleTimezone = string;
+
+export type ReportBucket = "day" | "week" | "month";
+
+export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
+
+export type ReportDataSource = "deals" | "people" | "companies" | "activities" | "tasks" | "relationships";
+
+export type ReportMeasure =
+    | "count"
+    | "new_pipeline_value"
+    | "won_revenue"
+    | "win_rate"
+    | "avg_cycle_days"
+    | "open_pipeline_value"
+    | "open_deal_count"
+    | "at_risk_revenue"
+    | "company_count"
+    | "coverage_gap_count"
+    | "coverage_gap_open_pipeline_value"
+    | "single_threaded_deal_count"
+    | "single_threaded_deal_value"
+    | "warm_intro_opportunity_value"
+    | "warm_intro_reachable_account_count"
+    | "reverse_intro_weighted_opportunities"
+    | "forecast_best"
+    | "forecast_weighted"
+    | "forecast_worst"
+    | "attainment";
+
+export type ReportGroupBy =
+    | "none"
+    | "date"
+    | "pipeline"
+    | "stage"
+    | "owner"
+    | "status"
+    | "company"
+    | "deal"
+    | "risk"
+    | "activity_type"
+    | "industry"
+    | "warmth_band"
+    | "trend"
+    | "connector"
+    | "pair";
+
+export type ReportRange = {
+    start: string;
+    end: string;
+};
+
+export type ReportFilters = {
+    pipelineIds: number[] | null;
+    ownerIds: number[] | null;
+    statuses: string[] | null;
+    tagIds: number[] | null;
+    warmthBands: string[] | null;
+};
+
+export type ReportWidgetConfig = {
+    id: string;
+    title: string | null;
+    dataSource: ReportDataSource;
+    measure: ReportMeasure;
+    groupBy: ReportGroupBy | null;
+    chartType: ReportChartType;
+};
+
+export type ReportLayoutItem = {
+    widgetId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+
+export type ReportConfig = {
+    widgets: ReportWidgetConfig[];
+    filters: ReportFilters | null;
+    range: ReportRange | null;
+    bucket: ReportBucket;
+    layout: ReportLayoutItem[];
+};
+
+export type ReportDefinitionInput = {
+    name: string;
+    description: string | null;
+    cadence: ReportCadence;
+    templateKey: string | null;
+    config: ReportConfig;
+};
+
+export type ReportDefinition = ReportDefinitionInput & {
+    id: number;
+    createdBy: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ReportTemplate = {
+    key: string;
+    name: string;
+    description: string;
+    cadence: ReportCadence;
+    config: ReportConfig;
+};
+
+export type ReportGenerateInput = {
+    start?: string | null;
+    end?: string | null;
+};
+
+export type ReportNarrativeMode = "cached" | "full";
+
+export type ReportDataPoint = {
+    key: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    sourceId: string;
+};
+
+export type ReportWidgetData = {
+    widgetId: string;
+    title: string;
+    chartType: ReportChartType;
+    dataSource: ReportDataSource;
+    measure: ReportMeasure;
+    groupBy: ReportGroupBy | null;
+    unit: string | null;
+    total: number | null;
+    priorTotal: number | null;
+    changePercent: number | null;
+    points: ReportDataPoint[];
+};
+
+export type ReportAppendixRow = {
+    sourceId: string;
+    widgetId: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    unit: string | null;
+};
+
+export type ReportCitation = {
+    sourceId: string;
+    widgetId: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    unit: string | null;
+};
+
+export type ReportNarrativeClaim = {
+    text: string;
+    sourceIds: string[];
+};
+
+export type ReportNarrativeSection = {
+    title: string;
+    claims: ReportNarrativeClaim[];
+};
+
+export type ReportNarrative = {
+    available: boolean;
+    sections: ReportNarrativeSection[];
+    findings: ReportNarrativeClaim[];
+    reason: string | null;
+    generatedAt: string | null;
+    warnings: number;
+};
+
+export type ReportDocument = {
+    definition: ReportDefinition;
+    periodStart: string;
+    periodEnd: string;
+    priorPeriodStart: string;
+    priorPeriodEnd: string;
+    narrative: ReportNarrative;
+    widgets: ReportWidgetData[];
+    appendix: ReportAppendixRow[];
+    citations: ReportCitation[];
+    generatedAt: string;
+};
+
+export type ReportSnapshotSummary = {
+    id: number;
+    reportDefinitionId: number;
+    periodStart: string;
+    periodEnd: string;
+    generatedBy: number | null;
+    generatedAt: string;
+};
+
+export type ReportSnapshot = ReportSnapshotSummary & {
+    computedResult: ReportDocument;
+};
+
+export type ReportScheduleRecipient = {
+    userId: number;
+    displayName: string;
+    email: string;
+};
+
+export type ReportScheduleRequest = {
+    cadence: ReportScheduleCadence;
+    recipientUserIds: number[];
+    timezone: ReportScheduleTimezone;
+    hourOfDay: number;
+    enabled: boolean;
+};
+
+export type ReportSchedule = ReportScheduleRequest & {
+    id: number;
+    reportDefinitionId: number;
+    recipients: ReportScheduleRecipient[];
+    runAsUserId: number;
+    runAsLabel: string | null;
+    nextRunAt: string;
+    lastRunAt: string | null;
+    createdBy: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ReportGoalPeriodType = 'month' | 'quarter';
+
+export type ReportGoalInput = {
+    ownerId: number | null;
+    metric: 'won_revenue';
+    periodType: ReportGoalPeriodType;
+    periodStart: string;
+    targetValue: number;
+    currency: string;
+};
+
+export type ReportGoal = ReportGoalInput & {
+    id: number;
+    ownerLabel: string | null;
+    createdBy: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;
     phone?: string;
     title?: string;
     companyId?: number | null;
-    imageUrl?: string;
 };
 
 export type ContactFilters = {
@@ -940,7 +2099,55 @@ export type UpdateTaskPayload = {
     dealId?: number;
 };
 
-export type NotificationState = 'active' | 'unread' | 'history' | 'all';
+export type NotificationState = 'active' | 'unread' | 'snoozed' | 'history' | 'all';
+
+/**
+ * Server-side snooze presets. Exactly one of a preset or an explicit `until`
+ * instant is sent per snooze request, always alongside the caller's IANA timezone.
+ */
+export type SnoozePreset = 'later_today' | 'tomorrow_morning' | 'next_week';
+
+/**
+ * Snooze request body: exactly one of a named preset or an explicit ISO-UTC
+ * `until` instant, plus the caller's IANA timezone.
+ */
+export type SnoozeRequest =
+    | { preset: SnoozePreset; timezone: string }
+    | { until: string; timezone: string };
+
+/**
+ * Day-of-week names used by the quiet-hours contract. The wire format is the
+ * uppercase English day name, independent of the display locale.
+ */
+export type QuietHoursDay =
+    | 'MONDAY'
+    | 'TUESDAY'
+    | 'WEDNESDAY'
+    | 'THURSDAY'
+    | 'FRIDAY'
+    | 'SATURDAY'
+    | 'SUNDAY';
+
+/**
+ * Editable quiet-hours configuration sent to the server as a full replacement.
+ */
+export type QuietHoursConfig = {
+    enabled: boolean;
+    timezone: string;
+    start: string;
+    end: string;
+    days: QuietHoursDay[];
+    bypassPolicy: string;
+};
+
+/**
+ * Quiet-hours state returned by the server: the editable config plus the
+ * server-computed `activeNow` flag and the next start/end transition instant.
+ */
+export type QuietHours = QuietHoursConfig & {
+    activeNow: boolean;
+    nextTransitionAt?: string | null;
+};
 
 export type Notification = {
     id: number;
@@ -967,17 +2174,38 @@ export type Notification = {
     dismissedAt?: string | null;
     resolvedAt?: string | null;
     snoozedUntil?: string | null;
+    snoozeTimezone?: string | null;
     createdAt: string;
     updatedAt: string;
+    stateVersion?: number;
 };
 
 export type NotificationCounts = {
     unread: number;
+    snoozed: number;
+    stateVersion: number;
+    asOf: string;
+    nextSnoozeExpiry?: string | null;
+    quietHoursActive: boolean;
+    nextQuietHoursTransition?: string | null;
+};
+
+export type NotificationMarkAllResult = NotificationCounts & {
+    cutoffId: number;
+    readAt: string;
+};
+
+export type NotificationPage = Page<Notification> & {
+    stateVersion: number;
+    asOf: string;
 };
 
 export type NotificationParams = {
-    state?: NotificationState;
-    category?: string;
+    status?: NotificationState;
+    type?: string | string[];
+    workspaceId?: number;
+    category?: string | string[];
+    severity?: string | string[];
     contextType?: string;
     contextId?: number;
     page?: number;
@@ -1020,6 +2248,14 @@ export type CreateAttachmentPayload = {
 export type FacetCount = {
     key: string;
     count: number;
+    label?: string | null;
+};
+
+export type NotificationFacets = {
+    categories: FacetCount[];
+    severities: FacetCount[];
+    workspaces: FacetCount[];
+    stateVersion: number;
 };
 
 export type AttachmentsPageParams = PageParams & {
@@ -1038,11 +2274,215 @@ export type AttachmentFacets = {
     totalSize: number;
 };
 
-export type UploadedFile = {
-    url: string;
-    fileName: string;
-    contentType: string;
-    size: number;
+/**
+ * Canonical member-scope wire params shared by record, metric, and facet endpoints:
+ * `scope` selects Me / selected members / Unassigned (absent = all team), and
+ * `memberIds` carries the selection when {@code scope === 'members'}.
+ */
+export type MemberScopeParams = {
+    scope?: 'me' | 'members' | 'unassigned';
+    memberIds?: number[];
+};
+
+export type DealFilterParams = MemberScopeParams & {
+    q?: string;
+    status?: Array<'open' | 'closed' | 'won' | 'lost'>;
+    risk?: Array<'high' | 'medium' | 'low' | 'none'>;
+    stageId?: number[];
+    pipelineId?: number[];
+    companyId?: number[];
+    noCompany?: boolean;
+    currency?: string;
+};
+
+export type DealsPageParams = PageParams & DealFilterParams;
+
+export type DealCurrencyMetrics = {
+    currency: string;
+    openCount: number;
+    openValue: number;
+    closedCount: number;
+    closedForecast: number;
+    closedRevenue: number;
+    wonCount: number;
+    lostCount: number;
+};
+
+export type DealMetrics = {
+    byCurrency: DealCurrencyMetrics[];
+    totalCount: number;
+};
+
+export type DealFacets = {
+    status: FacetCount[];
+    stages: FacetCount[];
+    pipelines: FacetCount[];
+    companies: FacetCount[];
+    currencies: FacetCount[];
+    risk: FacetCount[];
+    owners: FacetCount[];
+};
+
+export type CompanyEngagement = {
+    persons: Array<Pick<Contact, 'id' | 'name' | 'imageUrl'>>;
+    personCount: number;
+    relatedUserIds: number[];
+    relatedUserCount: number;
+    pastRevenue: number;
+    projectedRevenue: number;
+    currency: string;
+    numDeals: number;
+    numTasks: number;
+    openTasks: number;
+    numActivities: number;
+    numNotes: number;
+    weeklyEngagement: CompanyMetrics['weeklyEngagement'];
+};
+
+export type CompanyTimeline = {
+    activities: Activity[];
+    tasks: Task[];
+    notes: Note[];
+};
+
+/** Coherent relationship snapshot computed once for all dashboard relationship widgets. */
+export type RelationshipDashboard = {
+    warmthSummary: WarmthSummary;
+    coolingContacts: Array<{ contact: Contact; temperature: RelationshipTemperature }>;
+    coolingCompanies: Array<{ company: Company; temperature: RelationshipTemperature }>;
+    dealRisks: Array<{ deal: Deal; company: Company | null; risk: DealRisk }>;
+    dealRisksTruncated: boolean;
+};
+
+/** One month's aggregated total; {@code month} is 1-12 (MySQL MONTH()). */
+export type DealMonthTotal = {
+    year: number;
+    month: number;
+    total: number;
+};
+
+/** Server-computed monthly revenue series for the deals page trend chart. */
+export type DealRevenueSeries = {
+    closed: DealMonthTotal[];
+    projected: DealMonthTotal[];
+};
+
+/** Per-stage open/closed rollup for the deals page stage-distribution chart. */
+export type DealStageDistribution = {
+    stageId: number | null;
+    pipelineId: number | null;
+    openCount: number;
+    openValue: number;
+    closedCount: number;
+    closedValue: number;
+};
+
+/**
+ * Server-computed deal KPIs for the analytics/dashboard clusters over ALL deals in a range.
+ * Scalars are current-period; {@code *Prev} are the previous window (null = no baseline).
+ * The four series are 12 buckets, oldest→newest, over the current period.
+ */
+export type DealKpis = {
+    wonRevenue: number;
+    wonRevenuePrev: number | null;
+    newPipeline: number;
+    newPipelinePrev: number | null;
+    wonCount: number;
+    lostCount: number;
+    wonValue: number;
+    lostValue: number;
+    wonCountPrev: number | null;
+    lostCountPrev: number | null;
+    avgCycleDays: number;
+    avgCycleDaysPrev: number | null;
+    wonSeries: number[];
+    newPipelineSeries: number[];
+    /** Win-rate per bucket as a 0–100 percent (note: the {@link DealKpis} scalar win rate is derived from wonCount/lostCount, not this series). */
+    winRateSeries: number[];
+    avgCycleSeries: number[];
+};
+
+/** Server-computed per-pipeline won-in-range + open rollup for the analytics pipeline-value chart. */
+export type DealPipelineValue = {
+    pipelineId: number | null;
+    wonValue: number;
+    openValue: number;
+    openCount: number;
+};
+
+/** Server-computed per-stage open-deal age buckets for the deals-aging chart. */
+export type DealAging = {
+    stageId: number | null;
+    fresh: number;
+    active: number;
+    aging: number;
+    stalled: number;
+};
+
+/** Server-computed top open/won deals for the analytics top-deals widget. */
+export type DealTop = {
+    topOpen: DealSummary[];
+    topWon: DealSummary[];
+};
+
+/** One time bucket of the activity-volume chart: counts per activity type. */
+export type ActivityVolumeBucket = {
+    bucketIndex: number;
+    call: number;
+    email: number;
+    meeting: number;
+    note: number;
+    other: number;
+};
+
+/** One user's touch count (activities + completed tasks + notes) for the team leaderboard. */
+export type TeamLeaderboardEntry = {
+    userId: number;
+    touches: number;
+};
+
+/** A bare server-computed count. */
+export type Count = {
+    count: number;
+};
+
+/** Server-computed task status + due-window counts (backs the task donut + greeting). */
+export type TaskSummary = {
+    todo: number;
+    inProgress: number;
+    done: number;
+    overdue: number;
+    dueSoon: number;
+};
+
+/** Relationship-temperature band counts. */
+export type WarmthBandCounts = {
+    hot: number;
+    warm: number;
+    cool: number;
+    cold: number;
+};
+
+/** Contact warmth-trend counts. */
+export type WarmthTrendCounts = {
+    rising: number;
+    steady: number;
+    cooling: number;
+};
+
+/** Contact decay-horizon counts (days until cold): {@code soon} ≤30, {@code mid} ≤60, {@code later} ≤90. */
+export type WarmthDecayCounts = {
+    soon: number;
+    mid: number;
+    later: number;
+};
+
+/** Server-computed workspace-wide warmth summary over ALL contacts/companies (not a bounded slice). */
+export type WarmthSummary = {
+    contacts: WarmthBandCounts;
+    companies: WarmthBandCounts;
+    contactTrends: WarmthTrendCounts;
+    contactDecay: WarmthDecayCounts;
 };
 
 export type SearchResults = {
@@ -1156,6 +2596,18 @@ export type RulePreview = {
     sample: RuleRecordLabel[];
 };
 
+/** Current lifecycle states emitted by the legacy rule execution engine. */
+export type RuleExecutionStatus = "running" | "matched" | "partial" | "skipped" | "failed";
+
+/** A bounded recent execution returned by the rule audit-log endpoint. */
+export type RuleExecution = {
+    id: number;
+    triggerEntityType: string | null;
+    triggerEntityId: number | null;
+    status: RuleExecutionStatus;
+    executedAt: string;
+};
+
 export type Rule = {
     id: number;
     name: string;
@@ -1259,6 +2711,7 @@ export type AuditLogEntry = {
     requestId?: string | null;
     createdAt: string;
     currentActorLabel?: string | null;
+    contentRedacted?: boolean;
 };
 
 export type AuditLogParams = PageParams & {
@@ -1299,6 +2752,90 @@ export type MailConfigRequest = {
 export type MailTestResult = {
     success: boolean;
     error: string | null;
+};
+
+export type DeliveryEmailProvider = "smtp" | "http_esp";
+
+export type DeliverySmsProvider = "sms_http";
+
+export type DeliveryProvider = DeliveryEmailProvider | DeliverySmsProvider;
+
+export type DeliveryProviderConfig = {
+    channel: string;
+    provider: DeliveryProvider;
+    endpoint: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    webhookConfigured: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type DeliveryProviderConfigPayload = {
+    channel: string;
+    provider: string;
+    endpoint?: string | null;
+    fromAddress?: string | null;
+    fromName?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
+export type DeliveryWebhookToken = {
+    token: string;
+    secret: string;
+    signatureHeader: string;
+};
+
+export type ConnectorConfig = {
+    connector: string;
+    endpoint: string | null;
+    externalListId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type ConnectorConfigPayload = {
+    connector: string;
+    endpoint?: string | null;
+    externalListId?: string | null;
+    apiKey?: string | null;
+    enabled: boolean;
+};
+
+export type InstanceCapabilities = {
+    sso: boolean;
+    socialLogin: { google: boolean; microsoft: boolean };
+    connectedAccounts: { google: boolean; microsoft: boolean };
+    mailManaged: boolean;
+    businessCardScanning: boolean;
+    businessCardImport: boolean;
+};
+
+export type ConnectedAccountProvider = 'google' | 'microsoft';
+
+export type ProviderConnectionStatus = 'connected' | 'paused' | 'error' | 'revoked';
+
+/** A user's OAuth connection to an external mail/calendar provider (masked, no token material). */
+export type ProviderConnection = {
+    provider: ConnectedAccountProvider;
+    status: ProviderConnectionStatus;
+    providerAccountEmail?: string | null;
+    grantedScopes?: string | null;
+    hasCredential: boolean;
+    lastSyncAt?: string | null;
+    errorCode?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type BusinessCardAvailability = {
+    scanning: boolean;
+    importing: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";
@@ -1345,4 +2882,40 @@ export type SsoConnectionRequest = {
     samlIdpMetadataXml?: string | null;
     samlIdpX509?: string | null;
     domains: string[];
+};
+
+export type AiProviderKind = "bedrock" | "azure_openai" | "vertex" | "openai_compatible";
+
+export type AiProviderConfig = {
+    provider: AiProviderKind | null;
+    region: string | null;
+    endpoint: string | null;
+    apiVersion: string | null;
+    deployment: string | null;
+    projectId: string | null;
+    allowInternalEndpoint: boolean;
+    modelId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    noTrainingAttested: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type AiProviderConfigRequest = {
+    provider: AiProviderKind;
+    modelId: string;
+    noTrainingAttested: boolean;
+    enabled: boolean;
+    region?: string | null;
+    endpoint?: string | null;
+    apiVersion?: string | null;
+    deployment?: string | null;
+    projectId?: string | null;
+    allowInternalEndpoint?: boolean;
+    accessKeyId?: string | null;
+    secretAccessKey?: string | null;
+    sessionToken?: string | null;
+    apiKey?: string | null;
+    serviceAccountJson?: string | null;
 };

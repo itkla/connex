@@ -1,7 +1,9 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
-import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
+import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
+import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
+import { type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -33,18 +35,22 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
     const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
-    const t = await getTranslations("ContactsPage");
-    const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+    const [t, locale, contact, currentUser, allTags, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+        getTranslations("ContactsPage"),
+        getLocale(),
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
-        getCompanies(init).catch(() => [] as Company[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
-        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0 })),
+        getContextNotifications("person", id, init).catch(() => ({
+            items: [],
+            total: 0,
+            stateVersion: 0,
+            asOf: "1970-01-01T00:00:00Z",
+        })),
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
@@ -76,6 +82,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
         await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
     ).filter((u): u is User => u !== null);
 
+    const owner = contact.ownerId != null
+        ? interactionUsers.find((u) => u.id === contact.ownerId)
+            ?? await getUserById(contact.ownerId, init).catch(() => null)
+        : null;
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
@@ -91,6 +102,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     </div>
 
                     <CrumbLabel value={contact.name} />
+                    <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
+                    <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />
@@ -99,6 +112,16 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                                         {contact.name}
                                     </h1>
+                                    {contact.suspendedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("processingSuspended")}
+                                        </span>
+                                    ) : null}
+                                    {contact.provisionCeasedAt ? (
+                                        <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                                            {t("provisionCeased")}
+                                        </span>
+                                    ) : null}
                                     <TagEditor
                                         contactId={contact.id}
                                         currentTags={contact.tags ?? []}
@@ -107,7 +130,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 </div>
                                 <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                     {contact.title ? (
-                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white">
+                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground">
                                             {contact.title}
                                         </Link>
                                     ) : null}
@@ -116,7 +139,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                             <span>@</span>
                                             <Link
                                                 href={`/records/companies/${contact.company.id}`}
-                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                             >
                                                 {contact.company.name}
                                             </Link>
@@ -167,13 +190,18 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     <div className="mt-4 flex justify-end">
                         <ContactActionsMenu
                             contact={contact}
-                            companies={allCompanies}
                             currentUserId={currentUser.id}
                             persons={allPersons}
                             deals={allDeals}
                         />
                     </div>
-                    <EntityNotificationBanner initialNotifications={notificationPage.items} />
+                    <EntityNotificationBanner
+                        key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(",")}`}
+                        initialNotifications={notificationPage.items}
+                        contextType="person"
+                        contextId={id}
+                        initialStateVersion={notificationPage.stateVersion}
+                    />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -185,6 +213,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                                 <InfoRow label={t("title")} value={contact.title ?? ''} />
                                 <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
+                                <InfoRow
+                                    label={t("owner")}
+                                    value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
+                                />
                                 <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                                 <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                                 <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />

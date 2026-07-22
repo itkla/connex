@@ -1,0 +1,796 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ReportMapper">
+
+  <sql id="definitionColumns">
+    id, workspace_id, name, description, cadence, template_key, config_json,
+    created_by, created_at, updated_at
+  </sql>
+
+  <sql id="snapshotColumns">
+    id, workspace_id, report_definition_id, period_start, period_end,
+    computed_result, generated_by, generated_at
+  </sql>
+
+  <select id="getDefinitions" resultType="ReportDefinition">
+    SELECT <include refid="definitionColumns"/> FROM report_definition
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="getDefinition" resultType="ReportDefinition">
+    SELECT <include refid="definitionColumns"/> FROM report_definition
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="lockDefinitions" resultType="int">
+    SELECT id FROM report_definition
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
+  <select id="countDefinitions" resultType="int">
+    SELECT COUNT(*) FROM report_definition WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <insert id="insertDefinition" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO report_definition
+      (workspace_id, name, description, cadence, template_key, config_json, created_by)
+    VALUES
+      (#{workspaceId}, #{name}, #{description}, #{cadence}, #{templateKey}, #{configJson}, #{createdBy})
+  </insert>
+
+  <update id="updateDefinition">
+    UPDATE report_definition
+    SET name = #{name}, description = #{description}, cadence = #{cadence},
+        template_key = #{templateKey}, config_json = #{configJson}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="deleteDefinition">
+    DELETE FROM report_definition
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <select id="getSnapshots" resultType="ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto">
+    SELECT id, report_definition_id, period_start, period_end, generated_by, generated_at
+    FROM report_snapshot
+    WHERE workspace_id = #{workspaceId} AND report_definition_id = #{reportDefinitionId}
+    ORDER BY generated_at DESC, id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getSnapshot" resultType="ReportSnapshot">
+    SELECT <include refid="snapshotColumns"/> FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+      AND id = #{id}
+  </select>
+
+  <select id="countSnapshots" resultType="int">
+    SELECT COUNT(*) FROM report_snapshot
+    WHERE workspace_id = #{workspaceId} AND report_definition_id = #{reportDefinitionId}
+  </select>
+
+  <select id="countWorkspaceSnapshots" resultType="int">
+    SELECT COUNT(*) FROM report_snapshot WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="workspaceSnapshotBytes" resultType="long">
+    SELECT COALESCE(SUM(OCTET_LENGTH(computed_result)), 0)
+    FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO report_snapshot
+      (workspace_id, report_definition_id, period_start, period_end,
+       computed_result, generated_by)
+    VALUES
+      (#{workspaceId}, #{reportDefinitionId}, #{periodStart}, #{periodEnd},
+       #{computedResult}, #{generatedBy})
+  </insert>
+
+  <delete id="deleteSnapshot">
+    DELETE FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+      AND id = #{id}
+  </delete>
+
+  <sql id="dealEventDate">
+    <choose>
+      <when test="query.measure == 'won_revenue' or query.measure == 'win_rate' or query.measure == 'avg_cycle_days'">d.closed_at</when>
+      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">d.expected_close_date</when>
+      <otherwise>d.created_at</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="dealDateGroupKey">
+    <choose>
+      <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedDealEventDate"/>, '%Y-%m-%d')</when>
+      <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedDealEventDate"/>), INTERVAL WEEKDAY(<include refid="localizedDealEventDate"/>) DAY), '%Y-%m-%d')</when>
+      <otherwise>DATE_FORMAT(<include refid="localizedDealEventDate"/>, '%Y-%m')</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="localizedDealEventDate">
+    <choose>
+      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">
+        d.expected_close_date
+      </when>
+      <otherwise>
+        CASE
+          <foreach item="segment" collection="query.offsets">
+            WHEN <include refid="dealEventDate"/> &gt;= #{segment.startUtc}
+              AND <include refid="dealEventDate"/> &lt; #{segment.endUtc}
+            THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, <include refid="dealEventDate"/>)
+          </foreach>
+          ELSE <include refid="dealEventDate"/>
+        END
+      </otherwise>
+    </choose>
+  </sql>
+
+  <sql id="dealGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="dealDateGroupKey"/></when>
+      <when test="query.groupBy == 'pipeline'">COALESCE(CAST(d.pipeline_id AS CHAR), 'unassigned')</when>
+      <when test="query.groupBy == 'stage'">COALESCE(CAST(d.stage_id AS CHAR), 'unassigned')</when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(d.owner_id AS CHAR), 'unassigned')</when>
+      <when test="query.groupBy == 'status'">CASE WHEN d.won = TRUE THEN 'won' WHEN d.won = FALSE THEN 'lost' ELSE 'open' END</when>
+      <when test="query.groupBy == 'company'">COALESCE(CAST(d.company_id AS CHAR), 'unassigned')</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="dealGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="dealDateGroupKey"/></when>
+      <when test="query.groupBy == 'pipeline'">COALESCE(p.name, 'Unassigned')</when>
+      <when test="query.groupBy == 'stage'">COALESCE(s.name, 'Unassigned')</when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(d.owner_id AS CHAR), 'Unassigned')</when>
+      <when test="query.groupBy == 'status'">CASE WHEN d.won = TRUE THEN 'Won' WHEN d.won = FALSE THEN 'Lost' ELSE 'Open' END</when>
+      <when test="query.groupBy == 'company'">COALESCE(c.name, 'Unassigned')</when>
+      <otherwise>'Total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="dealFilters">
+    <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+      AND d.pipeline_id IN
+      <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND d.owner_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.statuses != null and !query.statuses.isEmpty()">
+      AND (CASE WHEN d.won = TRUE THEN 'won' WHEN d.won = FALSE THEN 'lost' ELSE 'open' END) IN
+      <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (
+        SELECT 1 FROM deal_tag dt
+        JOIN tag filter_tag ON filter_tag.id = dt.tag_id AND filter_tag.workspace_id = #{query.workspaceId}
+        WHERE dt.deal_id = d.id AND dt.tag_id IN
+        <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    </if>
+    <if test="query.riskIds != null and !query.riskIds.isEmpty()">
+      AND d.id IN
+      <foreach item="id" collection="query.riskIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+  </sql>
+
+  <select id="aggregateDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      <choose>
+        <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">
+          CONCAT(COALESCE(d.currency, ''), ':', <include refid="dealGroupKey"/>)
+        </when>
+        <otherwise><include refid="dealGroupKey"/></otherwise>
+      </choose> AS group_key,
+      <choose>
+        <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">
+          CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="dealGroupLabel"/>)
+        </when>
+        <otherwise><include refid="dealGroupLabel"/></otherwise>
+      </choose> AS group_label,
+      <choose>
+        <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(d.currency, '')</when>
+        <when test="query.measure == 'win_rate'">'percent'</when>
+        <when test="query.measure == 'avg_cycle_days'">'days'</when>
+        <otherwise>'count'</otherwise>
+      </choose> AS unit,
+      <choose>
+        <when test="query.measure == 'won_revenue'">COALESCE(SUM(d.actual_value), 0)</when>
+        <when test="query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(SUM(d.value), 0)</when>
+        <when test="query.measure == 'win_rate'">COALESCE(100.0 * SUM(CASE WHEN d.won = TRUE THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0)</when>
+        <when test="query.measure == 'avg_cycle_days'">COALESCE(AVG(DATEDIFF(d.closed_at, d.created_at)), 0)</when>
+        <otherwise>COUNT(*)</otherwise>
+      </choose> AS value
+    FROM deal d
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND p.workspace_id = #{query.workspaceId}
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND s.workspace_id = #{query.workspaceId}
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    WHERE d.workspace_id = #{query.workspaceId}
+    <choose>
+      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">
+        AND d.expected_close_date &gt;= #{query.startDate}
+        AND d.expected_close_date &lt; #{query.endDateExclusive}
+      </when>
+      <otherwise>
+        AND <include refid="dealEventDate"/> &gt;= #{query.startUtc}
+        AND <include refid="dealEventDate"/> &lt; #{query.endUtc}
+      </otherwise>
+    </choose>
+    <if test="query.measure == 'won_revenue' or query.measure == 'avg_cycle_days'">AND d.won = TRUE</if>
+    <if test="query.measure == 'win_rate'">AND d.won IS NOT NULL</if>
+    <if test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">AND d.won IS NULL</if>
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
+    <choose>
+      <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
+      <otherwise>ORDER BY group_key</otherwise>
+    </choose>
+  </select>
+
+  <sql id="forecastGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">DATE_FORMAT(d.expected_close_date, '%Y-%m')</when>
+      <otherwise><include refid="dealGroupKey"/></otherwise>
+    </choose>
+  </sql>
+
+  <sql id="forecastGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'">DATE_FORMAT(d.expected_close_date, '%Y-%m')</when>
+      <otherwise><include refid="dealGroupLabel"/></otherwise>
+    </choose>
+  </sql>
+
+  <sql id="forecastPriorWinRate">
+    COALESCE(legacy_stage_history.win_rate, workspace_history.win_rate, #{query.fallbackWinRate})
+  </sql>
+
+  <sql id="forecastWinRate">
+    COALESCE(
+      (
+        reached_stage_history.won_count
+        + (#{query.forecastHistoryPriorDeals} * <include refid="forecastPriorWinRate"/>)
+      ) / NULLIF(
+        reached_stage_history.deal_count + #{query.forecastHistoryPriorDeals},
+        0
+      ),
+      <include refid="forecastPriorWinRate"/>
+    )
+  </sql>
+
+  <select id="aggregateForecast" resultType="ooo.klae.connex.backend.dto.ReportForecastAggregateRow">
+    SELECT
+      CONCAT(COALESCE(d.currency, ''), ':', <include refid="forecastGroupKey"/>) AS group_key,
+      CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="forecastGroupLabel"/>) AS group_label,
+      COALESCE(d.currency, '') AS unit,
+      COALESCE(SUM(GREATEST(d.value, 0)), 0) AS best_value,
+      COALESCE(SUM(GREATEST(d.value, 0) * <include refid="forecastWinRate"/>), 0)
+        AS weighted_value,
+      COALESCE(SUM(
+        GREATEST(d.value, 0) * <include refid="forecastWinRate"/> * <include refid="forecastWinRate"/>
+      ), 0) AS worst_value
+    FROM deal d
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND p.workspace_id = #{query.workspaceId}
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND s.workspace_id = #{query.workspaceId}
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    LEFT JOIN (
+      SELECT closed_stage_deal.pipeline_id,
+             closed_stage_deal.stage_id,
+             1.0 * SUM(CASE WHEN closed_stage_deal.won = TRUE THEN 1 ELSE 0 END)
+               / NULLIF(COUNT(*), 0) AS win_rate
+      FROM deal closed_stage_deal
+      WHERE closed_stage_deal.workspace_id = #{query.workspaceId}
+        AND closed_stage_deal.won IS NOT NULL
+      GROUP BY closed_stage_deal.pipeline_id, closed_stage_deal.stage_id
+    ) legacy_stage_history ON legacy_stage_history.pipeline_id = d.pipeline_id
+      AND legacy_stage_history.stage_id = d.stage_id
+    LEFT JOIN (
+      SELECT stage_event.stage_id,
+             COUNT(DISTINCT CASE WHEN reached_deal.won = TRUE THEN stage_event.deal_id END) AS won_count,
+             COUNT(DISTINCT stage_event.deal_id) AS deal_count
+      FROM deal_stage_history stage_event
+      JOIN deal reached_deal ON reached_deal.id = stage_event.deal_id
+        AND reached_deal.workspace_id = stage_event.workspace_id
+      WHERE stage_event.workspace_id = #{query.workspaceId}
+        AND stage_event.stage_id IS NOT NULL
+        AND stage_event.conversion_eligible = TRUE
+        AND reached_deal.workspace_id = #{query.workspaceId}
+        AND reached_deal.won IS NOT NULL
+      GROUP BY stage_event.stage_id
+    ) reached_stage_history ON reached_stage_history.stage_id = d.stage_id
+    CROSS JOIN (
+      SELECT 1.0 * SUM(CASE WHEN workspace_deal.won = TRUE THEN 1 ELSE 0 END)
+               / NULLIF(COUNT(*), 0) AS win_rate
+      FROM deal workspace_deal
+      WHERE workspace_deal.workspace_id = #{query.workspaceId}
+        AND workspace_deal.won IS NOT NULL
+    ) workspace_history
+    WHERE d.workspace_id = #{query.workspaceId}
+      AND d.won IS NULL
+      AND d.expected_close_date &gt;= #{query.startDate}
+      AND d.expected_close_date &lt; #{query.endDateExclusive}
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
+    <choose>
+      <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
+      <otherwise>ORDER BY group_key</otherwise>
+    </choose>
+  </select>
+
+  <sql id="activityGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">
+        <choose>
+          <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedActivityDate"/>, '%Y-%m-%d')</when>
+          <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedActivityDate"/>), INTERVAL WEEKDAY(<include refid="localizedActivityDate"/>) DAY), '%Y-%m-%d')</when>
+          <otherwise>DATE_FORMAT(<include refid="localizedActivityDate"/>, '%Y-%m')</otherwise>
+        </choose>
+      </when>
+      <when test="query.groupBy == 'activity_type'">COALESCE(NULLIF(LOWER(TRIM(a.type)), ''), 'other')</when>
+      <when test="query.groupBy == 'owner'">CAST(a.created_by_id AS CHAR)</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="localizedActivityDate">
+    CASE
+      <foreach item="segment" collection="query.offsets">
+        WHEN a.timestamp &gt;= #{segment.startUtc} AND a.timestamp &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, a.timestamp)
+      </foreach>
+      ELSE a.timestamp
+    END
+  </sql>
+
+  <select id="aggregateActivities" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="activityGroupKey"/> AS group_key,
+           <include refid="activityGroupKey"/> AS group_label,
+           'count' AS unit,
+           COUNT(*) AS value
+    FROM activity a
+    WHERE a.workspace_id = #{query.workspaceId}
+      AND a.timestamp &gt;= #{query.startUtc} AND a.timestamp &lt; #{query.endUtc}
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND a.created_by_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+      AND EXISTS (SELECT 1 FROM deal ad WHERE ad.workspace_id = #{query.workspaceId}
+        AND ad.id = a.deal_id AND ad.pipeline_id IN
+        <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>)
+    </if>
+    GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
+  <sql id="taskGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">
+        <choose>
+          <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedTaskDate"/>, '%Y-%m-%d')</when>
+          <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedTaskDate"/>), INTERVAL WEEKDAY(<include refid="localizedTaskDate"/>) DAY), '%Y-%m-%d')</when>
+          <otherwise>DATE_FORMAT(<include refid="localizedTaskDate"/>, '%Y-%m')</otherwise>
+        </choose>
+      </when>
+      <when test="query.groupBy == 'status'">t.status</when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(t.assigned_to_id AS CHAR), 'unassigned')</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="localizedTaskDate">
+    CASE
+      <foreach item="segment" collection="query.offsets">
+        WHEN t.updated_at &gt;= #{segment.startUtc} AND t.updated_at &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, t.updated_at)
+      </foreach>
+      ELSE t.updated_at
+    END
+  </sql>
+
+  <select id="aggregateTasks" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="taskGroupKey"/> AS group_key,
+           <include refid="taskGroupKey"/> AS group_label,
+           'count' AS unit,
+           COUNT(*) AS value
+    FROM task t
+    WHERE t.workspace_id = #{query.workspaceId}
+      AND t.updated_at &gt;= #{query.startUtc} AND t.updated_at &lt; #{query.endUtc}
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND t.assigned_to_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.statuses != null and !query.statuses.isEmpty()">
+      AND t.status IN
+      <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
+  <select id="aggregatePeople" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      <choose>
+        <when test="query.groupBy == 'company'">COALESCE(CAST(person.company_id AS CHAR), 'unassigned')</when>
+        <otherwise>'total'</otherwise>
+      </choose> AS group_key,
+      <choose>
+        <when test="query.groupBy == 'company'">COALESCE(company.name, 'Unassigned')</when>
+        <otherwise>'Total'</otherwise>
+      </choose> AS group_label,
+      'count' AS unit,
+      COUNT(*) AS value
+    FROM person
+    LEFT JOIN company ON company.id = person.company_id AND company.workspace_id = #{query.workspaceId}
+    WHERE person.workspace_id = #{query.workspaceId}
+      AND person.created_at &gt;= #{query.startUtc} AND person.created_at &lt; #{query.endUtc}
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (SELECT 1 FROM person_tag pt
+        JOIN tag filter_tag ON filter_tag.id = pt.tag_id AND filter_tag.workspace_id = #{query.workspaceId}
+        WHERE pt.person_id = person.id AND pt.tag_id IN
+        <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>)
+    </if>
+    GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
+  <select id="aggregateCompanies" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      <choose>
+        <when test="query.groupBy == 'industry'">COALESCE(NULLIF(company.industry, ''), 'Unspecified')</when>
+        <otherwise>'total'</otherwise>
+      </choose> AS group_key,
+      <choose>
+        <when test="query.groupBy == 'industry'">COALESCE(NULLIF(company.industry, ''), 'Unspecified')</when>
+        <otherwise>'Total'</otherwise>
+      </choose> AS group_label,
+      'count' AS unit,
+      COUNT(*) AS value
+    FROM company
+    WHERE company.workspace_id = #{query.workspaceId}
+      AND company.created_at &gt;= #{query.startUtc} AND company.created_at &lt; #{query.endUtc}
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (SELECT 1 FROM company_tag ct
+        JOIN tag filter_tag ON filter_tag.id = ct.tag_id AND filter_tag.workspace_id = #{query.workspaceId}
+        WHERE ct.company_id = company.id AND ct.tag_id IN
+        <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>)
+    </if>
+    GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
+  <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      <choose>
+        <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+          CONCAT(COALESCE(open_deal.currency, ''), ':',
+            <choose>
+              <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+              <otherwise>'total'</otherwise>
+            </choose>)
+        </when>
+        <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+        <otherwise>'total'</otherwise>
+      </choose> AS group_key,
+      <choose>
+        <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+          CONCAT(COALESCE(open_deal.currency, ''), ' · ',
+            <choose>
+              <when test="query.groupBy == 'company'">gap_company.name</when>
+              <otherwise>'Total'</otherwise>
+            </choose>)
+        </when>
+        <when test="query.groupBy == 'company'">gap_company.name</when>
+        <otherwise>'Total'</otherwise>
+      </choose> AS group_label,
+      <choose>
+        <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+        <otherwise>'count'</otherwise>
+      </choose> AS unit,
+      <choose>
+        <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
+        <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
+      </choose> AS value
+    FROM (
+      SELECT c.id, c.name
+      FROM company c
+      LEFT JOIN person gap_person ON gap_person.company_id = c.id
+        AND gap_person.created_at &lt; #{query.endUtc}
+        AND gap_person.suspended_at IS NULL
+        AND (
+          gap_person.workspace_id = #{query.workspaceId}
+          OR EXISTS (
+            SELECT 1
+            FROM person_share gap_person_share
+            JOIN workspace gap_person_viewer
+              ON gap_person_viewer.id = gap_person_share.workspace_id
+              AND gap_person_viewer.id = #{query.workspaceId}
+            JOIN workspace gap_person_owner
+              ON gap_person_owner.id = gap_person.workspace_id
+              AND gap_person_owner.org_id = gap_person_viewer.org_id
+            WHERE gap_person_share.person_id = gap_person.id
+              AND gap_person_share.workspace_id = #{query.workspaceId}
+              AND gap_person_share.created_at &lt; #{query.endUtc}
+          )
+        )
+      LEFT JOIN (
+        SELECT warmth_touch.person_id,
+               SUM(warmth_touch.weight * POW(2.0, -warmth_touch.age_days / 30.0)) AS raw_weight
+        FROM (
+          SELECT a.person_id,
+                 CASE LOWER(a.type)
+                   WHEN 'meeting' THEN 1.0
+                   WHEN 'call' THEN 0.8
+                   WHEN 'email' THEN 0.6
+                   ELSE 0.5
+                 END AS weight,
+                 GREATEST(0.0,
+                   TIMESTAMPDIFF(MICROSECOND, a.timestamp, #{query.endUtc}) / 86400000000.0) AS age_days
+          FROM activity a
+          WHERE a.workspace_id = #{query.workspaceId}
+            AND a.person_id IS NOT NULL
+            AND a.timestamp &lt; #{query.endUtc}
+          UNION ALL
+          SELECT n.person_id, 0.4 AS weight,
+                 GREATEST(0.0,
+                   TIMESTAMPDIFF(MICROSECOND, n.created_at, #{query.endUtc}) / 86400000000.0) AS age_days
+          FROM note n
+          WHERE n.workspace_id = #{query.workspaceId}
+            AND n.visibility = 'workspace'
+            AND n.person_id IS NOT NULL
+            AND n.created_at &lt; #{query.endUtc}
+          UNION ALL
+          SELECT t.person_id, 0.3 AS weight,
+                 GREATEST(0.0,
+                   TIMESTAMPDIFF(MICROSECOND, t.created_at, #{query.endUtc}) / 86400000000.0) AS age_days
+          FROM task t
+          WHERE t.workspace_id = #{query.workspaceId}
+            AND t.person_id IS NOT NULL
+            AND t.created_at &lt; #{query.endUtc}
+        ) warmth_touch
+        GROUP BY warmth_touch.person_id
+      ) person_warmth ON person_warmth.person_id = gap_person.id
+      WHERE c.created_at &lt; #{query.endUtc}
+        AND (
+          c.workspace_id = #{query.workspaceId}
+          OR EXISTS (
+            SELECT 1
+            FROM company_share gap_company_share
+            JOIN workspace gap_company_viewer
+              ON gap_company_viewer.id = gap_company_share.workspace_id
+              AND gap_company_viewer.id = #{query.workspaceId}
+            JOIN workspace gap_company_owner
+              ON gap_company_owner.id = c.workspace_id
+              AND gap_company_owner.org_id = gap_company_viewer.org_id
+            WHERE gap_company_share.company_id = c.id
+              AND gap_company_share.workspace_id = #{query.workspaceId}
+              AND gap_company_share.created_at &lt; #{query.endUtc}
+          )
+        )
+      <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+        AND EXISTS (
+          SELECT 1
+          FROM company_tag coverage_company_tag
+          JOIN tag coverage_tag ON coverage_tag.id = coverage_company_tag.tag_id
+            AND coverage_tag.workspace_id = #{query.workspaceId}
+          WHERE coverage_company_tag.company_id = c.id
+            AND coverage_company_tag.tag_id IN
+            <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+        )
+      </if>
+      GROUP BY c.id, c.name
+      HAVING COUNT(DISTINCT CASE
+        WHEN ROUND(100.0 * (1.0 - POW(2.0, -COALESCE(person_warmth.raw_weight, 0.0) / 0.7))) &gt;= 35
+        THEN gap_person.id
+        ELSE NULL
+      END) &lt;= 1
+    ) gap_company
+    LEFT JOIN deal open_deal ON open_deal.company_id = gap_company.id
+      AND open_deal.workspace_id = #{query.workspaceId}
+      AND open_deal.won IS NULL
+      <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+        AND open_deal.pipeline_id IN
+        <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+        AND open_deal.owner_id IN
+        <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      <if test="query.statuses != null and !query.statuses.isEmpty()">
+        AND 'open' IN
+        <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+      </if>
+    <if test="query.measure == 'coverage_gap_open_pipeline_value'
+        or query.pipelineIds != null and !query.pipelineIds.isEmpty()
+        or query.ownerIds != null and !query.ownerIds.isEmpty()
+        or query.statuses != null and !query.statuses.isEmpty()">
+      WHERE open_deal.id IS NOT NULL
+    </if>
+    GROUP BY group_key, group_label, unit
+    ORDER BY value DESC, group_label, group_key
+  </select>
+
+  <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      <choose>
+        <when test="query.measure == 'single_threaded_deal_value'">
+          CONCAT(single_deal.currency, ':',
+            <choose>
+              <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+              <when test="query.groupBy == 'company'">COALESCE(CAST(single_deal.company_id AS CHAR), 'unassigned')</when>
+              <otherwise>'total'</otherwise>
+            </choose>)
+        </when>
+        <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+        <when test="query.groupBy == 'company'">COALESCE(CAST(single_deal.company_id AS CHAR), 'unassigned')</when>
+        <otherwise>'total'</otherwise>
+      </choose> AS group_key,
+      <choose>
+        <when test="query.measure == 'single_threaded_deal_value'">
+          CONCAT(single_deal.currency, ' · ',
+            <choose>
+              <when test="query.groupBy == 'deal'">single_deal.name</when>
+              <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+              <otherwise>'Total'</otherwise>
+            </choose>)
+        </when>
+        <when test="query.groupBy == 'deal'">single_deal.name</when>
+        <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+        <otherwise>'Total'</otherwise>
+      </choose> AS group_label,
+      <choose>
+        <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+        <otherwise>'count'</otherwise>
+      </choose> AS unit,
+      <choose>
+        <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
+        <otherwise>COUNT(*)</otherwise>
+      </choose> AS value
+    FROM (
+      SELECT d.id, d.name, d.value, d.currency, d.company_id
+      FROM deal d
+      JOIN deal_person single_link ON single_link.deal_id = d.id
+      JOIN person single_person ON single_person.id = single_link.person_id
+        AND single_person.suspended_at IS NULL
+      WHERE d.workspace_id = #{query.workspaceId}
+        AND d.won IS NULL
+        AND d.risk_excluded = FALSE
+      <include refid="dealFilters"/>
+      GROUP BY d.id, d.name, d.value, d.currency, d.company_id
+      HAVING COUNT(DISTINCT single_link.person_id) = 1
+    ) single_deal
+    LEFT JOIN company single_company ON single_company.id = single_deal.company_id
+      AND (
+        single_company.workspace_id = #{query.workspaceId}
+        OR EXISTS (
+          SELECT 1
+          FROM company_share single_company_share
+          JOIN workspace single_company_viewer
+            ON single_company_viewer.id = single_company_share.workspace_id
+            AND single_company_viewer.id = #{query.workspaceId}
+          JOIN workspace single_company_owner
+            ON single_company_owner.id = single_company.workspace_id
+            AND single_company_owner.org_id = single_company_viewer.org_id
+          WHERE single_company_share.company_id = single_company.id
+            AND single_company_share.workspace_id = #{query.workspaceId}
+        )
+      )
+    GROUP BY group_key, group_label, unit
+    ORDER BY value DESC, group_label, group_key
+  </select>
+
+  <select id="getNetworkAccountValues"
+          resultType="ooo.klae.connex.backend.dto.ReportNetworkAccountRow">
+    SELECT network_company.id AS company_id,
+           network_company.name AS company_name,
+           network_deal.currency AS currency,
+           COALESCE(SUM(GREATEST(network_deal.value, 0)), 0) AS account_value
+    FROM deal network_deal
+    JOIN company network_company ON network_company.id = network_deal.company_id
+      AND (
+        network_company.workspace_id = #{query.workspaceId}
+        OR EXISTS (
+          SELECT 1
+          FROM company_share network_company_share
+          JOIN workspace vws ON vws.id = network_company_share.workspace_id
+            AND vws.id = #{query.workspaceId}
+          JOIN workspace ows ON ows.id = network_company.workspace_id
+            AND ows.org_id = vws.org_id
+          WHERE network_company_share.company_id = network_company.id
+            AND network_company_share.workspace_id = #{query.workspaceId}
+        )
+      )
+    WHERE network_deal.workspace_id = #{query.workspaceId}
+      AND network_deal.won IS NULL
+    <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+      AND network_deal.pipeline_id IN
+      <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND network_deal.owner_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.statuses != null and !query.statuses.isEmpty()">
+      AND 'open' IN
+      <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (
+        SELECT 1
+        FROM company_tag network_company_tag
+        JOIN tag network_tag ON network_tag.id = network_company_tag.tag_id
+          AND network_tag.workspace_id = #{query.workspaceId}
+        WHERE network_company_tag.company_id = network_company.id
+          AND network_company_tag.tag_id IN
+          <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    </if>
+    GROUP BY network_company.id, network_company.name, network_deal.currency
+    ORDER BY network_deal.currency, network_company.name, network_company.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getVisiblePersonIdsAt" resultType="int">
+    SELECT p.id
+    FROM person p
+    WHERE p.created_at &lt;= #{asOf}
+      AND (
+        p.workspace_id = #{workspaceId}
+        OR EXISTS (
+          SELECT 1
+          FROM person_share ps
+          JOIN workspace viewer_workspace ON viewer_workspace.id = ps.workspace_id
+            AND viewer_workspace.id = #{workspaceId}
+          JOIN workspace owner_workspace ON owner_workspace.id = p.workspace_id
+            AND owner_workspace.org_id = viewer_workspace.org_id
+          WHERE ps.person_id = p.id
+            AND ps.workspace_id = #{workspaceId}
+            AND ps.created_at &lt;= #{asOf}
+        )
+      )
+    ORDER BY p.id
+  </select>
+
+  <select id="getVisibleCompanyIdsAt" resultType="int">
+    SELECT c.id
+    FROM company c
+    WHERE c.created_at &lt;= #{asOf}
+      AND (
+        c.workspace_id = #{workspaceId}
+        OR EXISTS (
+          SELECT 1
+          FROM company_share cs
+          JOIN workspace viewer_workspace ON viewer_workspace.id = cs.workspace_id
+            AND viewer_workspace.id = #{workspaceId}
+          JOIN workspace owner_workspace ON owner_workspace.id = c.workspace_id
+            AND owner_workspace.org_id = viewer_workspace.org_id
+          WHERE cs.company_id = c.id
+            AND cs.workspace_id = #{workspaceId}
+            AND cs.created_at &lt;= #{asOf}
+        )
+      )
+    ORDER BY c.id
+  </select>
+
+  <update id="clearDefinitionCreatorsAnywhere">
+    UPDATE report_definition SET created_by = NULL WHERE created_by = #{userId}
+  </update>
+
+  <update id="clearSnapshotGeneratorsAnywhere">
+    UPDATE report_snapshot SET generated_by = NULL WHERE generated_by = #{userId}
+  </update>
+
+</mapper>

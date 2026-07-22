@@ -33,28 +33,110 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
+  </select>
+
+  <select id="getTasksPage" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY due_date IS NULL, due_date, id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countTasks" resultType="long">
+    SELECT COUNT(*) FROM task WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <sql id="taskMemberScope">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">AND t.assigned_to_id = #{memberScope.userId}</when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">AND t.assigned_to_id IN <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach></when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">AND t.assigned_to_id IS NULL</when>
+    </choose>
+  </sql>
+
+  <select id="taskSummary" resultType="ooo.klae.connex.backend.dto.TaskSummaryDto">
+    SELECT COALESCE(SUM(CASE WHEN t.status = 'todo' THEN 1 ELSE 0 END), 0) AS todo,
+           COALESCE(SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END), 0) AS in_progress,
+           COALESCE(SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END), 0) AS done,
+           COALESCE(SUM(CASE WHEN t.completed = FALSE AND t.due_date &lt; #{today}
+               THEN 1 ELSE 0 END), 0) AS overdue,
+           COALESCE(SUM(CASE WHEN t.completed = FALSE
+               AND t.due_date &gt;= #{today}
+               AND t.due_date &lt;= DATE_ADD(#{today}, INTERVAL 7 DAY)
+               THEN 1 ELSE 0 END), 0) AS due_soon
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+    <include refid="taskMemberScope"/>
+  </select>
+
+  <select id="getUpcomingOpenTasks" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND completed = FALSE
+    ORDER BY due_date IS NULL, due_date, id
+    LIMIT #{limit}
   </select>
 
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{assignedToId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByPersonId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
+  </select>
+
+  <select id="getTasksByPersonIds" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByDealId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
+  </select>
+
+  <select id="getCompanyTasks" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+    ORDER BY t.updated_at DESC, t.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getTasksByCompanyIds" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = t.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY t.updated_at DESC, t.id DESC
   </select>
 
   <select id="getTaskById" resultMap="TaskResult">
@@ -67,7 +149,7 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND description LIKE #{query}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
     LIMIT 10
   </select>
 
@@ -132,9 +214,20 @@
     WHERE workspace_id = #{workspaceId} AND status = #{status}
   </select>
 
-  <update id="setPosition">
-    UPDATE task SET position = #{position}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  <update id="setPositions">
+    UPDATE task
+    SET position = CASE id
+      <foreach collection="positions" item="entry">
+        WHEN #{entry.id} THEN #{entry.position}
+      </foreach>
+      ELSE position
+    END
+    WHERE workspace_id = #{workspaceId}
+      AND status = #{status}
+      AND id IN
+      <foreach collection="positions" item="entry" open="(" separator="," close=")">
+        #{entry.id}
+      </foreach>
   </update>
 
   <update id="moveTask">
@@ -152,5 +245,14 @@
       SELECT 1 FROM task WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
   </select>
+
+  <update id="unassignMemberTasks">
+    UPDATE task SET assigned_to_id = NULL
+    WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId}
+  </update>
+
+  <update id="unassignAnywhere">
+    UPDATE task SET assigned_to_id = NULL WHERE assigned_to_id = #{userId}
+  </update>
 
 </mapper>

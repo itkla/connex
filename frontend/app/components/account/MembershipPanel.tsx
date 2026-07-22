@@ -29,14 +29,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
-function writeWorkspaceCookie(id: number | null) {
-    if (id == null) {
-        document.cookie = "connex_workspace=;path=/;max-age=0;samesite=lax";
-    } else {
-        document.cookie = `connex_workspace=${id};path=/;max-age=31536000;samesite=lax`;
-    }
-}
-
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
     const router = useRouter();
@@ -99,7 +91,6 @@ export default function MembershipPanel() {
         try {
             await leaveWorkspace(activeWorkspaceId);
             const remaining = workspaces.filter((w) => w.id !== activeWorkspaceId);
-            writeWorkspaceCookie(remaining[0]?.id ?? null);
             toastSuccess(t("left"));
             router.replace(remaining.length > 0 ? "/dashboard" : "/onboarding");
             router.refresh();
@@ -153,9 +144,9 @@ export default function MembershipPanel() {
                                     </Button>
                                     <Button
                                         size="sm"
+                                        variant="brand"
                                         disabled={busy}
                                         onClick={() => accept(workspace)}
-                                        className="bg-brand text-white hover:bg-brand-hover"
                                     >
                                         {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
                                     </Button>

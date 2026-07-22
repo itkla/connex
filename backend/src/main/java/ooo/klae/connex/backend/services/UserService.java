@@ -16,6 +16,10 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import java.util.List;
 import java.util.Set;
@@ -40,10 +44,14 @@ public class UserService implements UserDetailsService {
     private final OrgMemberService orgMemberService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
+    private final UserOffboardingService userOffboardingService;
+    private final ManagedObjectService managedObjectService;
+    private final UserProfilePictureTransaction profilePictureTransaction;
+    private final TenantWorkScope tenantWorkScope;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
-               "employeeId", "phoneNumber", "profilePictureUrl", "timezone");
+               "employeeId", "phoneNumber", "profilePictureUrl", "timezone", "locale");
 
     /**
      * Resolves the authenticating principal by login identifier, which may be either a
@@ -99,6 +107,7 @@ public class UserService implements UserDetailsService {
      * @param user the submitted profile fields
      * @return the updated user
      */
+    @Transactional
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
@@ -107,25 +116,53 @@ public class UserService implements UserDetailsService {
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
             user.setTimezone(before.getTimezone());
         } else {
-            user.setTimezone(TimezoneSupport.validate(user.getTimezone(), null));
+            user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
+        user.setLocale(before.getLocale());
+        user.setProfilePictureUrl(before.getProfilePictureUrl());
         userMapper.update(user);
-        auditService.record("user.update", "user", id, user.getUsername(),
-            "Updated user " + user.getUsername(),
-            auditService.diff(before, user, AUDIT_FIELDS));
-        return user;
+        User after = userMapper.getUserById(id);
+        if (after == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
+        auditService.record("user.update", "user", id, after.getUsername(),
+            "Updated user " + after.getUsername(),
+            auditService.diff(before, after, AUDIT_FIELDS));
+        return after;
     }
 
+    /**
+     * Deletes the caller's own account. Org-data references are guarded and
+     * erased in the service layer ({@link UserOffboardingService}) rather than
+     * by cross-plane foreign keys (#440 increment 3); control-plane rows
+     * (memberships, credentials, sessions) still cascade from {@code app_user}.
+     * The audit record is written while the actor row still exists — recording
+     * after the delete violated the actor foreign key inside the transaction
+     * and the event was silently swallowed, leaving account erasure unaudited.
+     */
     @Transactional
     public void delete(int id) {
         workspaceService.requireSelf(id);
-        workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
+        if (userMapper.lockById(id) == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
+        UserOffboardingService.AccountNotificationLocks notificationLocks =
+            userOffboardingService.snapshotAccountNotificationRecipients(id);
+        List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
+        workspaceService.lockAccountWorkspaceRoots(
+            ownedWorkspaceIds,
+            userOffboardingService.workflowWorkspaceIds(notificationLocks));
+        userOffboardingService.lockAccountNotificationRecipientMemberships(id, notificationLocks);
+        workspaceService.assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
+        userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
-        userMapper.delete(id);
+        managedObjectService.deleteUserImageAfterCommit(id, before.getProfilePictureUrl());
+        userOffboardingService.eraseOrgDataReferences(id, notificationLocks);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),
             auditService.diff(before, null, AUDIT_FIELDS));
+        userMapper.delete(id);
     }
 
     /**
@@ -162,31 +199,46 @@ public class UserService implements UserDetailsService {
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
     }
 
-    /**
-     * Updates the profile picture of a user.
-     * @param userId
-     * @param profilePictureUrl
-     * @return
-     */
-    public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
+    public User updateCurrentProfilePicture(int userId, UploadSource source) {
         workspaceService.requireSelf(userId);
-        User before = getUserById(userId);
-        userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
+        UserProfilePictureTransaction.Result result = tenantWorkScope.unrouted(
+            () -> profilePictureTransaction.update(userId, source));
+        User before = result.before();
+        User after = result.after();
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
             "Updated profile picture for " + before.getUsername(),
-            auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), profilePictureUrl));
-        return userMapper.getUserById(userId);
+            auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), after.getProfilePictureUrl()));
+        return after;
+    }
+
+    public ManagedContent getProfilePictureContent(int userId, String token) {
+        User user = getUserById(userId);
+        return managedObjectService.openUserImage(userId, user.getProfilePictureUrl(), token);
     }
 
     public User updateTimezone(int userId, String timezone) {
         workspaceService.requireSelf(userId);
         User before = getUserById(userId);
-        String validated = TimezoneSupport.validate(timezone, null);
+        String validated = TimezoneSupport.validateIana(timezone, null);
         userMapper.updateTimezone(userId, validated);
         auditService.record("user.updateTimezone", "user", userId, before.getUsername(),
             "Updated timezone for " + before.getUsername(),
             auditService.singleChange("timezone", before.getTimezone(), validated));
         notificationChanges.publish(workspaceService.getCurrentWorkspaceId(), "user", userId);
+        return userMapper.getUserById(userId);
+    }
+
+    public User updateLocale(int userId, String locale) {
+        workspaceService.requireSelf(userId);
+        User before = getUserById(userId);
+        String validated = LocaleSupport.validate(locale, null);
+        if (validated.equals(before.getLocale())) {
+            return before;
+        }
+        userMapper.updateLocale(userId, validated);
+        auditService.record("user.updateLocale", "user", userId, before.getUsername(),
+            "Updated locale for " + before.getUsername(),
+            auditService.singleChange("locale", before.getLocale(), validated));
         return userMapper.getUserById(userId);
     }
 }

@@ -4,9 +4,12 @@ import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -14,6 +17,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -30,7 +34,9 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -46,6 +52,8 @@ abstract class AbstractServiceTest {
     @Autowired protected NoteMapper noteMapper;
     @Autowired protected TaskMapper taskMapper;
     @Autowired protected WorkspaceMapper workspaceMapper;
+    @Autowired protected NotificationMapper notificationMapper;
+    @Autowired protected TenantContext tenantContext;
 
     protected Workspace workspace;
     protected User currentUser;
@@ -60,16 +68,40 @@ abstract class AbstractServiceTest {
             workspaceMapper.insert(workspace);
         }
         currentUser = newUser();
-        // The session user owns the default test workspace so role-gated operations run as owner.
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+    }
+
+    protected void authenticateAs(User user, int workspaceId) {
         SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken(currentUser, null, currentUser.getAuthorities())
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities())
         );
+        int orgId = workspaceServiceOrgId(workspaceId);
+        String role = workspaceMapper.getRole(workspaceId, user.getId());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        long now = System.currentTimeMillis();
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, now);
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, user.getId());
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        tenantContext.set(workspaceId, orgId, user.getId(), role == null ? "member" : role, null);
     }
 
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+        clearRequestContext();
+    }
+
+    protected void clearRequestContext() {
+        RequestContextHolder.resetRequestAttributes();
+        tenantContext.clear();
+    }
+
+    private int workspaceServiceOrgId(int workspaceId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        return orgId == null ? workspaceId : orgId;
     }
 
     protected static String unique() {
@@ -100,6 +132,21 @@ abstract class AbstractServiceTest {
         userMapper.insert(user);
         workspaceMapper.addPendingMember(workspace.getId(), user.getId(), "member");
         return user;
+    }
+
+    protected Notification newNotification(int workspaceId, int recipientId) {
+        Notification notification = new Notification();
+        notification.setWorkspaceId(workspaceId);
+        notification.setRecipientId(recipientId);
+        notification.setType("task.assigned");
+        notification.setCategory("tasks");
+        notification.setSeverity("info");
+        notification.setTemplateVersion(1);
+        notification.setTitle("Notification " + unique());
+        notification.setDedupeKey("fixture-" + unique());
+        notification.setTriggeredAt("2026-07-11 00:00:00");
+        notificationMapper.upsert(notification);
+        return notification;
     }
 
     protected Company newCompany() {

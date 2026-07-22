@@ -8,18 +8,19 @@ import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogTrigger,
+    ResponsiveDialogClose,
+} from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 
 import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -141,9 +142,9 @@ export default function NewTaskDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             {controlled ? null : (
-                <DialogTrigger asChild>
+                <ResponsiveDialogTrigger asChild>
                     <Button
                         type="button"
                         variant="ghost"
@@ -154,18 +155,18 @@ export default function NewTaskDialog({
                         <PlusIcon className="size-4" />
                         <span className="sr-only">{t('triggerSr')}</span>
                     </Button>
-                </DialogTrigger>
+                </ResponsiveDialogTrigger>
             )}
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
-                    <DialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</DialogTitle>
-                    <DialogDescription>
+                <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                    <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription>
                         {t('description', { contactName })}
-                    </DialogDescription>
-                </DialogHeader>
+                    </ResponsiveDialogDescription>
+                </ResponsiveDialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -227,6 +228,7 @@ export default function NewTaskDialog({
                                 onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
@@ -246,19 +248,19 @@ export default function NewTaskDialog({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
-                        <DialogClose asChild>
+                    <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
+                        <ResponsiveDialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
                                 {t('cancel')}
                             </Button>
-                        </DialogClose>
-                        <Button type="submit" disabled={submitting || succeeded} className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md">
+                        </ResponsiveDialogClose>
+                        <Button type="submit" variant="brand" disabled={submitting || succeeded} className="min-w-24 shadow-sm transition hover:shadow-md">
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                         </Button>
-                    </DialogFooter>
+                    </ResponsiveDialogFooter>
                 </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

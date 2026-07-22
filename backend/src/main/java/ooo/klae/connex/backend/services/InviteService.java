@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -37,11 +38,14 @@ public class InviteService {
 
     private final InviteMapper inviteMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserOffboardingService userOffboardingService;
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final AuditService auditService;
     private final InviteEmailService inviteEmailService;
+    private final SessionSecurityService sessionSecurityService;
+    private final NotificationStateVersionService notificationStateVersionService;
 
     /**
      * Invites someone to a workspace by email. An address that already belongs to
@@ -52,6 +56,7 @@ public class InviteService {
     @Transactional
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actor.getId());
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
         requireOrgDomainAllowed(workspaceId, email);
@@ -104,6 +109,7 @@ public class InviteService {
     /** Revokes a pending invite. */
     public void revokeInvite(int workspaceId, int inviteId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (inviteMapper.markRevoked(inviteId, workspaceId) == 0) {
             throw new ResourceNotFoundException("Invite not found");
         }
@@ -121,6 +127,7 @@ public class InviteService {
     }
 
     /** Redeems an invite for the authenticated user whose email it targets. */
+    @Transactional
     public WorkspaceMembershipDto acceptInvite(String token, User user) {
         WorkspaceInvite invite = inviteMapper.findByToken(token);
         if (invite == null) {
@@ -139,7 +146,9 @@ public class InviteService {
         int workspaceId = invite.getWorkspaceId();
         requireOrgDomainAllowed(workspaceId, user.getEmail());
         if (!workspaceMapper.isMember(workspaceId, user.getId())) {
+            userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
             workspaceMapper.addMember(workspaceId, user.getId(), invite.getRole());
+            notificationStateVersionService.markChanged(user.getId());
         }
         inviteMapper.markAccepted(invite.getId(), user.getId());
         auditService.record("workspace.invite.accept", "workspace", workspaceId, user.getDisplayName(),
@@ -151,6 +160,7 @@ public class InviteService {
     /** Invites an existing Connex user to the workspace by email; they join after accepting. */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
         requireOrgDomainAllowed(workspaceId, email);

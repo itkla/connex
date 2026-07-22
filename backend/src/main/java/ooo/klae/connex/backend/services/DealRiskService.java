@@ -28,7 +28,13 @@ import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
+import ooo.klae.connex.backend.dto.DealRiskCurrencySummaryDto;
+import ooo.klae.connex.backend.dto.DashboardDealRiskResult;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
+import ooo.klae.connex.backend.dto.DealRiskFactorCountDto;
+import ooo.klae.connex.backend.dto.DealTouchDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -97,6 +103,8 @@ public class DealRiskService {
     private static final int SCORE_HIGH = 50;
     private static final int SCORE_MEDIUM = 25;
     private static final int SCORE_LOW = 10;
+    private static final int MAX_INTERACTIVE_CANDIDATES = 1_000;
+    private static final int WARMTH_BATCH_SIZE = 1_000;
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -135,6 +143,126 @@ public class DealRiskService {
     }
 
     /**
+     * Assesses only the requested workspace-owned deals with batched, deal-scoped interaction and
+     * stakeholder reads.
+     * @param workspaceId active workspace
+     * @param dealIds bounded deal ids
+     * @return at-risk assessments ordered by descending score
+     */
+    public List<DealRiskDto> assessDeals(int workspaceId, List<Integer> dealIds) {
+        return assessDeals(workspaceId, dealIds, null);
+    }
+
+    /** Assesses requested deals while optionally reusing a complete contact-warmth snapshot. */
+    public List<DealRiskDto> assessDeals(
+            int workspaceId,
+            List<Integer> dealIds,
+            Map<Integer, RelationshipTemperatureDto> knownWarmth) {
+        if (dealIds == null || dealIds.isEmpty()) {
+            return List.of();
+        }
+        Instant now = Instant.now(clock);
+        String assessedAt = utc(now);
+        List<Deal> open = dealMapper.getByIds(workspaceId, dealIds).stream()
+            .filter(deal -> isOpen(deal) && !deal.isRiskExcluded())
+            .toList();
+        if (open.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> openIds = open.stream().map(Deal::getId).toList();
+        Map<Integer, Long> lastTouch = new HashMap<>();
+        for (Deal deal : open) {
+            merge(lastTouch, deal.getId(), notFuture(epoch(deal.getCreatedAt()), now.toEpochMilli()));
+        }
+        for (DealTouchDto touch : dealMapper.getLatestDealTouches(workspaceId, openIds, assessedAt)) {
+            merge(lastTouch, touch.dealId(), epoch(touch.touchedAt()));
+        }
+        Map<Integer, List<DealStakeholder>> stakeholders = new HashMap<>();
+        Set<Integer> personIds = new HashSet<>();
+        for (DealStakeholder stakeholder : dealMapper.getDealStakeholdersByDealIds(workspaceId, openIds)) {
+            stakeholders.computeIfAbsent(stakeholder.getDealId(), key -> new ArrayList<>()).add(stakeholder);
+            personIds.add(stakeholder.getPersonId());
+        }
+        Map<Integer, RelationshipTemperatureDto> warmth = knownWarmth == null
+            ? warmthFor(workspaceId, personIds)
+            : knownWarmth;
+        List<DealRiskDto> assessments = new ArrayList<>();
+        for (Deal deal : open) {
+            DealRiskDto assessment = assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
+            if (!assessment.getFactors().isEmpty()) {
+                assessments.add(assessment);
+            }
+        }
+        assessments.sort(Comparator.comparingInt(DealRiskDto::getScore).reversed());
+        return assessments;
+    }
+
+    /** Returns the highest-risk dashboard deals from a fixed candidate ceiling. */
+    public DashboardDealRiskResult assessDashboard(
+            int workspaceId,
+            Map<Integer, RelationshipTemperatureDto> warmth,
+            int limit) {
+        RiskCandidateBatch candidates = riskCandidates(workspaceId, MemberScope.allTeam());
+        List<DealRiskDto> items = assessDeals(workspaceId, candidates.ids(), warmth)
+            .stream().limit(limit).toList();
+        return new DashboardDealRiskResult(items, candidates.truncated());
+    }
+
+    /** Returns compact per-currency analytics over a fixed interactive candidate ceiling. */
+    public DealRiskAnalyticsDto analytics(int workspaceId, MemberScope memberScope) {
+        RiskCandidateBatch candidates = riskCandidates(workspaceId, memberScope);
+        Map<String, List<DealRiskDto>> byCurrency = new HashMap<>();
+        for (DealRiskDto risk : assessDeals(workspaceId, candidates.ids())) {
+            String currency = risk.getCurrency() == null || risk.getCurrency().isBlank()
+                ? "USD"
+                : risk.getCurrency();
+            byCurrency.computeIfAbsent(currency, key -> new ArrayList<>()).add(risk);
+        }
+        List<DealRiskCurrencySummaryDto> currencies = byCurrency.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(entry -> currencySummary(entry.getKey(), entry.getValue()))
+            .toList();
+        return new DealRiskAnalyticsDto(currencies, candidates.truncated());
+    }
+
+    private RiskCandidateBatch riskCandidates(int workspaceId, MemberScope memberScope) {
+        List<Integer> ids = dealMapper.getRiskCandidateIds(
+            workspaceId, memberScope, MAX_INTERACTIVE_CANDIDATES + 1);
+        boolean truncated = ids.size() > MAX_INTERACTIVE_CANDIDATES;
+        return new RiskCandidateBatch(
+            truncated ? ids.subList(0, MAX_INTERACTIVE_CANDIDATES) : ids,
+            truncated);
+    }
+
+    private static DealRiskCurrencySummaryDto currencySummary(
+            String currency,
+            List<DealRiskDto> risks) {
+        Map<String, Long> factorCounts = new HashMap<>();
+        double value = 0;
+        long high = 0;
+        long medium = 0;
+        long low = 0;
+        for (DealRiskDto risk : risks) {
+            value += risk.getValue();
+            if (HIGH.equals(risk.getLevel())) high++;
+            else if (MEDIUM.equals(risk.getLevel())) medium++;
+            else if (LOW.equals(risk.getLevel())) low++;
+            for (DealRiskFactor factor : risk.getFactors()) {
+                factorCounts.merge(factor.getCode(), 1L, Long::sum);
+            }
+        }
+        List<DealRiskFactorCountDto> factors = factorCounts.entrySet().stream()
+            .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                .thenComparing(Map.Entry.comparingByKey()))
+            .map(entry -> new DealRiskFactorCountDto(entry.getKey(), entry.getValue()))
+            .toList();
+        return new DealRiskCurrencySummaryDto(
+            currency, value, risks.size(), high, medium, low, factors);
+    }
+
+    private record RiskCandidateBatch(List<Integer> ids, boolean truncated) {}
+
+    /**
      * Assesses a single deal. Returns a {@code "none"} assessment when the deal does not exist in the
      * workspace, is already closed, or is opted out of risk evaluation.
      */
@@ -142,8 +270,12 @@ public class DealRiskService {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null || !isOpen(deal) || deal.isRiskExcluded()) {
-            return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
+        if (deal == null) {
+            return new DealRiskDto(dealId, 0.0, null, NONE, 0, List.of(), assessedAt);
+        }
+        if (!isOpen(deal) || deal.isRiskExcluded()) {
+            return new DealRiskDto(
+                dealId, deal.getValue(), deal.getCurrency(), NONE, 0, List.of(), assessedAt);
         }
         List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
         Map<Integer, List<DealStakeholder>> stakeholders = Map.of(dealId, dealStakeholders);
@@ -168,6 +300,7 @@ public class DealRiskService {
             merge(last, id, notFuture(epoch(activity.getTimestamp()), nowMs));
         }
         for (Note note : noteMapper.getNotesByDealId(workspaceId, id)) {
+            if (!isSharedNote(note)) continue;
             merge(last, id, notFuture(epoch(note.getCreatedAt()), nowMs));
         }
         for (Task task : taskMapper.getTasksByDealId(workspaceId, id)) {
@@ -178,8 +311,13 @@ public class DealRiskService {
 
     private Map<Integer, RelationshipTemperatureDto> warmthFor(int workspaceId, Set<Integer> personIds) {
         Map<Integer, RelationshipTemperatureDto> map = new HashMap<>();
-        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId, personIds)) {
-            map.put(temperature.getId(), temperature);
+        List<Integer> ids = personIds.stream().sorted().toList();
+        for (int offset = 0; offset < ids.size(); offset += WARMTH_BATCH_SIZE) {
+            Set<Integer> batch = new HashSet<>(
+                ids.subList(offset, Math.min(ids.size(), offset + WARMTH_BATCH_SIZE)));
+            for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId, batch)) {
+                map.put(temperature.getId(), temperature);
+            }
         }
         return map;
     }
@@ -232,7 +370,9 @@ public class DealRiskService {
         }
 
         factors.sort(Comparator.comparingInt(f -> severityRank(f.getSeverity())));
-        return new DealRiskDto(deal.getId(), overallLevel(factors), score(factors), factors, assessedAt);
+        return new DealRiskDto(
+            deal.getId(), deal.getValue(), deal.getCurrency(),
+            overallLevel(factors), score(factors), factors, assessedAt);
     }
 
     /**
@@ -332,6 +472,7 @@ public class DealRiskService {
             merge(last, dealId(activity.getDeal()), notFuture(epoch(activity.getTimestamp()), nowMs));
         }
         for (Note note : noteMapper.getAllNotes(workspaceId)) {
+            if (!isSharedNote(note)) continue;
             merge(last, dealId(note.getDeal()), notFuture(epoch(note.getCreatedAt()), nowMs));
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
@@ -369,6 +510,10 @@ public class DealRiskService {
 
     private static boolean isOpen(Deal deal) {
         return deal.getClosedAt() == null;
+    }
+
+    private static boolean isSharedNote(Note note) {
+        return "workspace".equals(note.getVisibility());
     }
 
     private static boolean keyRole(String role) {

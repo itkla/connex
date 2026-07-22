@@ -1,8 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
+import { PEEK_PARAM } from './useRecordPeek';
+import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
+import { SAVED_VIEW_URL_KEY } from './listStateUrl';
+
+/** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
+ * deep link, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
+ * ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
+const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, SAVED_VIEW_URL_KEY, ...SERVER_RECORDS_URL_KEYS]);
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -22,7 +30,6 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
 export function useRecordsBrowser<T extends { id: SelectionId }>(
     { items, storageKey, searchFields, initialDisplayMode = 'table' }: UseRecordsBrowserOptions<T>,
 ) {
-    const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
 
@@ -35,7 +42,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
-            if (key !== 'view' && value) state[key] = value.split(',');
+            if (!RESERVED_PARAM_KEYS.has(key) && value) state[key] = value.split(',');
         });
         return state;
     });
@@ -55,18 +62,18 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     useEffect(() => {
         if (!initialized) return;
         window.localStorage.setItem(storageKey, displayMode);
-        const params = new URLSearchParams(searchParams.toString());
+        const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
-            if (key !== 'view') params.delete(key);
+            if (!RESERVED_PARAM_KEYS.has(key)) params.delete(key);
         }
         for (const [key, values] of Object.entries(filterState)) {
             if (values.length) params.set(key, values.join(','));
         }
         const next = params.toString();
-        if (next === searchParams.toString()) return;
-        router.replace(`${pathname}?${next}`, { scroll: false });
-    }, [displayMode, filterState, initialized, pathname, router, searchParams, storageKey]);
+        if (next === window.location.search.replace(/^\?/, '')) return;
+        window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    }, [displayMode, filterState, initialized, pathname, searchParams, storageKey]);
 
     const filteredItems = useMemo(() => {
         const q = query.trim().toLowerCase();

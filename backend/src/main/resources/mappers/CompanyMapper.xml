@@ -4,44 +4,441 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, workspace_id, name, website, industry, phone, address, created_at, updated_at, logo_url
+    id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
-  <resultMap id="CompanyFullResult" type="Company">
-    <id property="id" column="id"/>
-    <result property="workspaceId" column="workspace_id"/>
-    <result property="name" column="name"/>
-    <result property="website" column="website"/>
-    <result property="industry" column="industry"/>
-    <result property="phone" column="phone"/>
-    <result property="address" column="address"/>
-    <result property="logoUrl" column="logo_url"/>
-    <result property="createdAt" column="created_at"/>
-    <result property="updatedAt" column="updated_at"/>
-    <collection property="people" ofType="Person" column="{workspaceId=req_workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
-    <collection property="tags" ofType="Tag" column="{workspaceId=req_workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
-  </resultMap>
+  <sql id="qualifiedCompanyColumns">
+    c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+    c.created_at, c.updated_at, c.logo_url
+  </sql>
 
   <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any
        workspace it has been shared with (company_share). The share branch carries the same-org
        ceiling the write path enforces (owner and grantee workspaces must share an organization),
        so a share row that spans an org boundary grants no read visibility. Writes stay
-       owned-only. -->
+       owned-only. Requires the table aliased `c`. -->
   <sql id="visible">
-    (company.workspace_id = #{workspaceId}
+    (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
         JOIN workspace vws ON vws.id = cs.workspace_id
-        JOIN workspace ows ON ows.id = company.workspace_id AND ows.org_id = vws.org_id
-        WHERE cs.company_id = company.id AND cs.workspace_id = #{workspaceId}))
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visiblePerson">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace pvws ON pvws.id = ps.workspace_id
+        JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
   <select id="getAllCompanies" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company WHERE <include refid="visible"/> ORDER BY name
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    WHERE <include refid="visible"/>
+    ORDER BY c.name, c.id
+  </select>
+
+  <select id="findVisibleNameCandidates" resultType="Company">
+    SELECT c.id, c.workspace_id, c.name
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.name LIKE #{pattern}
+    ORDER BY CASE WHEN LOWER(c.name) = #{normalizedName} THEN 0 ELSE 1 END,
+      CHAR_LENGTH(c.name), c.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getRelationshipScoreAggregates"
+          resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+    SELECT c.id,
+           COALESCE(SUM(touch.weight * POW(2.0, -touch.age_days / 30.0)), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN touch.weight ELSE 0.0 END), 0.0)
+             AS recent_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; 21.0 AND touch.age_days &lt;= 120.0
+                             THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN 1 ELSE 0 END) AS recent_touch_count
+    FROM company c
+    LEFT JOIN (
+      SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference}) / 86400000000.0) AS age_days
+      FROM (
+        SELECT source.touch_kind, source.touch_id, source.company_id, source.touched_at, source.weight
+        FROM (
+          SELECT 'activity' AS touch_kind, a.id AS touch_id, p.company_id,
+                 a.timestamp AS touched_at,
+                 CASE LOWER(a.type)
+                   WHEN 'meeting' THEN 1.0
+                   WHEN 'call' THEN 0.8
+                   WHEN 'email' THEN 0.6
+                   ELSE 0.5
+                 END AS weight
+          FROM activity a
+          JOIN person p ON p.id = a.person_id
+          WHERE a.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+            AND p.suspended_at IS NULL
+            AND <include refid="visiblePerson"/>
+          UNION ALL
+          SELECT 'activity' AS touch_kind, a.id AS touch_id, d.company_id,
+                 a.timestamp AS touched_at,
+                 CASE LOWER(a.type)
+                   WHEN 'meeting' THEN 1.0
+                   WHEN 'call' THEN 0.8
+                   WHEN 'email' THEN 0.6
+                   ELSE 0.5
+                 END AS weight
+          FROM activity a
+          JOIN deal d ON d.id = a.deal_id
+          WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+            AND d.company_id IS NOT NULL
+            AND (a.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = a.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
+          UNION ALL
+          SELECT 'note' AS touch_kind, n.id AS touch_id, p.company_id,
+                 n.created_at AS touched_at, 0.4 AS weight
+          FROM note n
+          JOIN person p ON p.id = n.person_id
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            AND p.company_id IS NOT NULL AND p.suspended_at IS NULL
+            AND <include refid="visiblePerson"/>
+          UNION ALL
+          SELECT 'note' AS touch_kind, n.id AS touch_id, d.company_id,
+                 n.created_at AS touched_at, 0.4 AS weight
+          FROM note n
+          JOIN deal d ON d.id = n.deal_id
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            AND d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+            AND (n.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = n.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
+          UNION ALL
+          SELECT 'task' AS touch_kind, t.id AS touch_id, p.company_id,
+                 t.created_at AS touched_at, 0.3 AS weight
+          FROM task t
+          JOIN person p ON p.id = t.person_id
+          WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+            AND p.suspended_at IS NULL
+            AND <include refid="visiblePerson"/>
+          UNION ALL
+          SELECT 'task' AS touch_kind, t.id AS touch_id, d.company_id,
+                 t.created_at AS touched_at, 0.3 AS weight
+          FROM task t
+          JOIN deal d ON d.id = t.deal_id
+          WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+            AND d.company_id IS NOT NULL
+            AND (t.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = t.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
+        ) source
+        WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+        GROUP BY source.touch_kind, source.touch_id, source.company_id,
+                 source.touched_at, source.weight
+      ) attributed
+    ) touch ON touch.company_id = c.id
+    WHERE <include refid="visible"/>
+    GROUP BY c.id
+    ORDER BY c.id
+  </select>
+
+  <sql id="pageWhere">
+    <where>
+      AND <include refid="visible"/>
+      <if test="query != null">
+        AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
+          OR c.phone LIKE #{query} OR c.address LIKE #{query})
+      </if>
+      <if test="(industry != null and industry.size() > 0) or noIndustry">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="industry != null and industry.size() > 0">
+              c.industry IN
+              <foreach item="value" collection="industry" open="(" separator="," close=")">#{value}</foreach>
+            </if>
+            <if test="noIndustry">OR (c.industry IS NULL OR c.industry = '')</if>
+          </trim>
+        )
+      </if>
+      <if test="ids != null and ids.size() > 0">
+        AND c.id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+    </where>
+  </sql>
+
+  <sql id="memberScopePredicate">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND c.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND c.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND c.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
+  <sql id="pageOrderBy">
+    ORDER BY
+    <choose>
+      <when test="sort == 'name'">c.name</when>
+      <when test="sort == 'website'">c.website</when>
+      <when test="sort == 'industry'">c.industry</when>
+      <when test="sort == 'phone'">c.phone</when>
+      <when test="sort == 'address'">c.address</when>
+      <when test="sort == 'createdAt'">c.created_at</when>
+      <when test="sort == 'updatedAt'">c.updated_at</when>
+      <otherwise>c.name</otherwise>
+    </choose>
+    <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+    , c.id ASC
+  </sql>
+
+  <sql id="segmentPageWhere">
+    <where>
+      AND <include refid="visible"/>
+      <if test="query != null">
+        AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
+          OR c.phone LIKE #{query} OR c.address LIKE #{query})
+      </if>
+      <if test="(industry != null and industry.size() > 0) or noIndustry">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="industry != null and industry.size() > 0">
+              c.industry IN
+              <foreach item="value" collection="industry" open="(" separator="," close=")">#{value}</foreach>
+            </if>
+            <if test="noIndustry">OR (c.industry IS NULL OR c.industry = '')</if>
+          </trim>
+        )
+      </if>
+    </where>
+  </sql>
+
+  <select id="getCompaniesPage" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+    <include refid="pageOrderBy"/>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countCompanies" resultType="long">
+    SELECT COUNT(*)
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+  </select>
+
+  <select id="getCompanyEngagementCounts"
+          resultType="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+    SELECT
+      (SELECT COUNT(*) FROM person p
+       WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}) AS person_count,
+      (SELECT COUNT(*) FROM deal d
+       WHERE d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}) AS num_deals,
+      (SELECT COUNT(*) FROM activity a
+       WHERE a.workspace_id = #{workspaceId}
+         AND (EXISTS (SELECT 1 FROM person p
+             WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+           OR EXISTS (SELECT 1 FROM deal d
+               WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId})))
+        AS num_activities,
+      (SELECT COUNT(*) FROM task t
+       WHERE t.workspace_id = #{workspaceId}
+         AND (EXISTS (SELECT 1 FROM person p
+             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+           OR EXISTS (SELECT 1 FROM deal d
+               WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
+        AS num_tasks,
+      (SELECT COUNT(*) FROM task t
+       WHERE t.workspace_id = #{workspaceId} AND t.completed = FALSE
+         AND (EXISTS (SELECT 1 FROM person p
+             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+           OR EXISTS (SELECT 1 FROM deal d
+               WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
+        AS open_tasks,
+      (SELECT COUNT(*) FROM note n
+       WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+         AND (EXISTS (SELECT 1 FROM person p
+             WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+           OR EXISTS (SELECT 1 FROM deal d
+               WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId})))
+        AS num_notes
+  </select>
+
+  <select id="getCompanyEngagementUsers"
+          resultType="ooo.klae.connex.backend.dto.CompanyEngagementUserDto">
+    SELECT related.user_id, COUNT(*) OVER() AS total_users
+    FROM (
+      SELECT touch.user_id, MAX(touch.touched_at) AS last_touched_at
+      FROM (
+        SELECT a.created_by_id AS user_id, a.timestamp AS touched_at
+        FROM activity a
+        WHERE a.workspace_id = #{workspaceId}
+          AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+            OR EXISTS (SELECT 1 FROM deal d
+                WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+        UNION ALL
+        SELECT t.assigned_to_id AS user_id, t.created_at AS touched_at
+        FROM task t
+        WHERE t.workspace_id = #{workspaceId}
+          AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+            OR EXISTS (SELECT 1 FROM deal d
+                WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+        UNION ALL
+        SELECT n.author_id AS user_id, n.created_at AS touched_at
+        FROM note n
+        WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+          AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+            OR EXISTS (SELECT 1 FROM deal d
+                WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+      ) touch
+      WHERE touch.user_id IS NOT NULL
+      GROUP BY touch.user_id
+    ) related
+    ORDER BY related.last_touched_at DESC, related.user_id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getCompanyEngagementWeeks"
+          resultType="ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto">
+    SELECT FLOOR(TIMESTAMPDIFF(SECOND, #{windowStart}, touch.touched_at) / 604800) AS bucket_index,
+           SUM(touch.kind = 'activities') AS activities,
+           SUM(touch.kind = 'tasks') AS tasks,
+           SUM(touch.kind = 'notes') AS notes
+    FROM (
+      SELECT 'activities' AS kind, a.timestamp AS touched_at
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.timestamp &gt;= #{windowStart} AND a.timestamp &lt;= #{windowEnd}
+        AND (EXISTS (SELECT 1 FROM person p
+            WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+      UNION ALL
+      SELECT 'tasks' AS kind, t.created_at AS touched_at
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND t.created_at &gt;= #{windowStart} AND t.created_at &lt;= #{windowEnd}
+        AND (EXISTS (SELECT 1 FROM person p
+            WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+      UNION ALL
+      SELECT 'notes' AS kind, n.created_at AS touched_at
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+        AND n.created_at &gt;= #{windowStart} AND n.created_at &lt;= #{windowEnd}
+        AND (EXISTS (SELECT 1 FROM person p
+            WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+    ) touch
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  </select>
+
+  <select id="getCompanyRevenueByCurrency"
+          resultType="ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto">
+    SELECT COALESCE(NULLIF(d.currency, ''), 'USD') AS currency,
+           COUNT(*) AS deal_count,
+           COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value ELSE 0 END), 0) AS past_revenue,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value ELSE 0 END), 0) AS projected_revenue
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}
+    GROUP BY COALESCE(NULLIF(d.currency, ''), 'USD')
+    ORDER BY deal_count DESC, currency
+  </select>
+
+  <select id="getSegmentCompaniesPage" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+      ON segment_ids.id = c.id
+    <include refid="segmentPageWhere"/>
+    <include refid="pageOrderBy"/>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countSegmentCompanies" resultType="long">
+    SELECT COUNT(*)
+    FROM company c
+    JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+      ON segment_ids.id = c.id
+    <include refid="segmentPageWhere"/>
+  </select>
+
+  <select id="getSegmentCompanyIdsFiltered" resultType="int">
+    SELECT c.id
+    FROM company c
+    JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+      ON segment_ids.id = c.id
+    <include refid="segmentPageWhere"/>
+    ORDER BY c.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getCompanyIdsFiltered" resultType="int">
+    SELECT c.id
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+    ORDER BY c.id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getCompaniesFiltered" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+    ORDER BY c.name, c.id
+  </select>
+
+  <select id="distinctIndustries" resultType="string">
+    SELECT DISTINCT c.industry
+    FROM company c
+    WHERE <include refid="visible"/> AND c.industry IS NOT NULL AND c.industry &lt;&gt; ''
+    ORDER BY c.industry
+  </select>
+
+  <select id="hasCompanyWithoutIndustry" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM company c
+      WHERE <include refid="visible"/> AND (c.industry IS NULL OR c.industry = '')
+    )
+  </select>
+
+  <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(CAST(c.owner_id AS CHAR), '__empty__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+    GROUP BY c.owner_id
   </select>
 
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
-      c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
+      c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+      c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
     WHERE (c.workspace_id = #{workspaceId}
@@ -50,12 +447,12 @@
               JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
               WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
       AND ct.tag_id = #{tagId}
-    ORDER BY c.name
+    ORDER BY c.name, c.id
   </select>
 
-  <select id="getCompanyById" resultMap="CompanyFullResult">
-    SELECT <include refid="companyColumns"/>, #{workspaceId} AS req_workspace_id
-    FROM company WHERE <include refid="visible"/> AND id = #{id}
+  <select id="getCompanyById" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
   </select>
 
   <select id="getCompaniesWithWebsite" resultType="Company">
@@ -67,15 +464,15 @@
   </select>
 
   <select id="getByIds" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company
-    WHERE workspace_id = #{workspaceId} AND id IN
+    SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
+    WHERE <include refid="visible"/> AND c.id IN
     <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
-    ORDER BY name
+    ORDER BY c.name, c.id
   </select>
 
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM company WHERE <include refid="visible"/> AND id = #{id}
+      SELECT 1 FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
     )
   </select>
   <select id="existsOwned" resultType="boolean">
@@ -83,23 +480,25 @@
   </select>
 
   <select id="search" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company
+    SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
     WHERE <include refid="visible"/>
-      AND (name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query})
-    ORDER BY name
+      AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+    ORDER BY c.name, c.id
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
-    VALUES (#{workspaceId}, #{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
+    VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry},
+      #{phone}, #{address}, #{logoUrl})
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
     VALUES
     <foreach collection="list" item="c" separator=",">
-      (#{c.workspaceId}, #{c.name}, #{c.website}, #{c.industry}, #{c.phone}, #{c.address}, #{c.logoUrl})
+      (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, #{c.name}, #{c.website}, #{c.industry},
+       #{c.phone}, #{c.address}, #{c.logoUrl})
     </foreach>
   </insert>
 
@@ -109,9 +508,35 @@
         website = #{website},
         industry = #{industry},
         phone = #{phone},
-        address = #{address},
-        logo_url = #{logoUrl}
+        address = #{address}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateOwner">
+    UPDATE company
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM company
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <update id="updateLogoUrlIfCurrent">
+    UPDATE company SET logo_url = #{logoUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND logo_url &lt;=&gt; #{currentLogoUrl}
+  </update>
+
+  <update id="clearMemberOwnership">
+    UPDATE company SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>

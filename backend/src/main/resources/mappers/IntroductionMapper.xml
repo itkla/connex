@@ -3,6 +3,14 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.IntroductionMapper">
 
+  <sql id="visibleCandidateCompany">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace vws ON vws.id = cs.workspace_id
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
   <!-- Recording a made intro on an existing pair refreshes it (row-alias upsert; VALUES() is
        removed in MySQL 9). A dismissal of an already-made pair is a no-op, so lineage survives. -->
   <insert id="recordMade">
@@ -74,26 +82,66 @@
     SELECT p.id         AS id,
            p.name       AS name,
            p.title      AS title,
-           p.company_id AS company_id,
+           c.id         AS company_id,
            c.name       AS company_name,
            p.image_url  AS image_url
     FROM person p
-    LEFT JOIN company c ON c.id = p.company_id
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCandidateCompany"/>
     WHERE p.workspace_id = #{workspaceId}
       AND p.intro_excluded = FALSE
+      AND p.suspended_at IS NULL
       AND (
         EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
-        OR EXISTS (SELECT 1 FROM note n WHERE n.workspace_id = #{workspaceId} AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
         OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
       )
+  </select>
+
+  <select id="findCandidatePersonsForReport" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
+    SELECT p.id         AS id,
+           p.name       AS name,
+           p.title      AS title,
+           c.id         AS company_id,
+           c.name       AS company_name,
+           p.image_url  AS image_url
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCandidateCompany"/>
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = FALSE
+      AND p.suspended_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+      )
+    ORDER BY p.id
+    LIMIT #{limit}
   </select>
 
   <select id="findWorkspaceEmployment" resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
     SELECT person_id    AS person_id,
            company_id   AS company_id,
+           company_name AS company_name,
+           started_at   AS started_at,
+           ended_at     AS ended_at
+    FROM person_employment
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY person_id, id
+  </select>
+
+  <select id="findWorkspaceEmploymentForReport"
+          resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
+    SELECT person_id    AS person_id,
+           company_id   AS company_id,
            company_name AS company_name
     FROM person_employment
     WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY person_id, id
+    LIMIT #{limit}
   </select>
 
   <select id="findExistingPairs" resultType="ooo.klae.connex.backend.beans.Introduction">
@@ -102,4 +150,82 @@
     FROM introduction
     WHERE workspace_id = #{workspaceId}
   </select>
+
+  <select id="findExistingPairsForReport" resultType="ooo.klae.connex.backend.beans.Introduction">
+    SELECT person_a_id AS person_a_id,
+           person_b_id AS person_b_id
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findExistingPairsForReverseIntroReport"
+          resultType="ooo.klae.connex.backend.beans.Introduction">
+    SELECT person_a_id AS person_a_id,
+           person_b_id AS person_b_id
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+      AND person_a_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+      AND person_b_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="countIntroducedAnywhere" resultType="int">
+    SELECT COUNT(*) FROM introduction WHERE introducer_user_id = #{userId} FOR UPDATE
+  </select>
+
+  <!-- Workspace-OWNED contacts eligible for the warm-path feed. Deliberately no engagement gate:
+       never-contacted imports are exactly the "reach" targets the feature exists to surface. -->
+  <select id="findWarmPathCandidates" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
+    SELECT p.id         AS id,
+           p.name       AS name,
+           p.title      AS title,
+           c.id         AS company_id,
+           c.name       AS company_name,
+           p.image_url  AS image_url
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCandidateCompany"/>
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = FALSE
+      AND p.suspended_at IS NULL
+  </select>
+
+  <select id="findWarmPathDismissals" resultType="ooo.klae.connex.backend.beans.WarmPathDismissal">
+    SELECT target_person_id AS target_person_id,
+           bridge_person_id AS bridge_person_id
+    FROM warm_path_dismissal
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <!-- Re-dismissing an existing pair refreshes it (row-alias upsert; VALUES() is removed in
+       MySQL 9). An 'accepted' row is never downgraded back to 'dismissed', and its acceptor
+       attribution is preserved against later dismiss attempts. -->
+  <insert id="recordWarmPathDismissal">
+    INSERT INTO warm_path_dismissal (workspace_id, target_person_id, bridge_person_id, status, dismissed_by_user_id)
+    VALUES (#{workspaceId}, #{targetPersonId}, #{bridgePersonId}, #{status}, #{userId}) AS nd
+    ON DUPLICATE KEY UPDATE
+      status = IF(warm_path_dismissal.status = 'accepted', warm_path_dismissal.status, nd.status),
+      dismissed_by_user_id = IF(warm_path_dismissal.status = 'accepted',
+        warm_path_dismissal.dismissed_by_user_id, nd.dismissed_by_user_id)
+  </insert>
+
+  <!-- The unique key treats NULL bridges as distinct, so whole-target rows cannot rely on the
+       upsert; the service deletes the target's rows first, making this a plain insert. -->
+  <insert id="recordWarmPathTargetDismissal">
+    INSERT INTO warm_path_dismissal (workspace_id, target_person_id, bridge_person_id, status, dismissed_by_user_id)
+    VALUES (#{workspaceId}, #{targetPersonId}, NULL, #{status}, #{userId})
+  </insert>
+
+  <!-- Accepted rows are audit lineage and survive; the whole-target NULL row still hides them. -->
+  <delete id="deleteWarmPathDismissals">
+    DELETE FROM warm_path_dismissal
+    WHERE workspace_id = #{workspaceId}
+      AND target_person_id = #{targetPersonId}
+      AND status <![CDATA[<>]]> 'accepted'
+  </delete>
+
 </mapper>

@@ -36,6 +36,9 @@ public class UserDto {
     @Size(max = 64)
     private String timezone;
 
+    @Pattern(regexp = "^(en|ja)$", message = "Locale must be en or ja")
+    private String locale;
+
     private String createdAt;
     private String updatedAt;
     private String lastLoginAt;
@@ -51,6 +54,7 @@ public class UserDto {
         dto.displayName = u.getDisplayName();
         dto.email = u.getEmail();
         dto.timezone = u.getTimezone();
+        dto.locale = u.getLocale();
         dto.createdAt = u.getCreatedAt();
         dto.updatedAt = u.getUpdatedAt();
         dto.lastLoginAt = u.getLastLoginAt();
@@ -66,6 +70,7 @@ public class UserDto {
         u.setDisplayName(displayName);
         u.setEmail(email);
         u.setTimezone(timezone);
+        u.setLocale(locale);
         u.setCreatedAt(createdAt);
         u.setUpdatedAt(updatedAt);
         u.setLastLoginAt(lastLoginAt);

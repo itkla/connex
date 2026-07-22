@@ -7,17 +7,18 @@ import { Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogClose,
+} from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { UserCircleIcon, UserIcon, Bars3BottomLeftIcon, CalendarIcon } from '@heroicons/react/24/outline';
@@ -122,17 +123,17 @@ export default function NewDealTaskDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
-                    <DialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</DialogTitle>
-                    <DialogDescription>
+                <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                    <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription>
                         {t('description', { dealName })}
-                    </DialogDescription>
-                </DialogHeader>
+                    </ResponsiveDialogDescription>
+                </ResponsiveDialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -183,6 +184,7 @@ export default function NewDealTaskDialog({
                                 onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
                                 autoFocus
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
@@ -202,19 +204,19 @@ export default function NewDealTaskDialog({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
-                        <DialogClose asChild>
+                    <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
+                        <ResponsiveDialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
                                 {t('cancel')}
                             </Button>
-                        </DialogClose>
-                        <Button type="submit" disabled={submitting || succeeded} className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md">
+                        </ResponsiveDialogClose>
+                        <Button type="submit" variant="brand" disabled={submitting || succeeded} className="min-w-24 shadow-sm transition hover:shadow-md">
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                         </Button>
-                    </DialogFooter>
+                    </ResponsiveDialogFooter>
                 </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

@@ -20,4 +20,12 @@ final class TimezoneSupport {
             throw new BadRequestException("Invalid IANA timezone: " + value);
         }
     }
+
+    static String validateIana(String timezone, String fallback) {
+        String value = validate(timezone, fallback);
+        if (!ZoneId.getAvailableZoneIds().contains(value)) {
+            throw new BadRequestException("Invalid IANA timezone: " + value);
+        }
+        return value;
+    }
 }

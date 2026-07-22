@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -37,17 +38,21 @@ public class InviteLinkService {
 
     private final InviteLinkMapper inviteLinkMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserOffboardingService userOffboardingService;
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AllowedDomainService allowedDomainService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RegistrationVerificationService registrationVerificationService;
+    private final SessionSecurityService sessionSecurityService;
+    private final NotificationStateVersionService notificationStateVersionService;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
             Integer expiresInDays, Integer maxUses) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actor.getId());
         String role = normalizeRole(roleRaw);
         int days = (expiresInDays == null || expiresInDays <= 0) ? DEFAULT_EXPIRES_IN_DAYS : expiresInDays;
         String token = generateToken();
@@ -66,6 +71,7 @@ public class InviteLinkService {
     /** Revokes a link so it can no longer be redeemed. */
     public void revokeLink(int workspaceId, int linkId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (inviteLinkMapper.markRevoked(linkId, workspaceId) == 0) {
             throw new ResourceNotFoundException("Invite link not found");
         }
@@ -128,7 +134,9 @@ public class InviteLinkService {
         if (!inviteLinkMapper.hasRedeemed(link.getId(), user.getId())) {
             inviteLinkMapper.recordRedemption(link.getId(), user.getId());
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
         workspaceMapper.addMember(workspaceId, user.getId(), link.getRole());
+        notificationStateVersionService.markChanged(user.getId());
         auditService.record("workspace.invite_link.accept", "workspace", workspaceId, user.getDisplayName(),
                 user.getDisplayName() + " joined via an invite link", null);
         return membership(user.getId(), workspaceId);

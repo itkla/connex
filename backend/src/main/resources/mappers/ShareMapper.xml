@@ -37,6 +37,7 @@
     JOIN workspace ow ON ow.id = p.workspace_id
     JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE p.id = #{id} AND p.workspace_id = #{workspaceId}
+      AND p.provision_ceased_at IS NULL
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePipeline">
@@ -83,6 +84,11 @@
     JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
     WHERE s.person_id = #{id} AND s.workspace_id = #{targetWorkspaceId}
   </delete>
+  <delete id="revokePersonShares">
+    DELETE s FROM person_share s
+    JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
+    WHERE s.person_id = #{id}
+  </delete>
   <delete id="unsharePipeline">
     DELETE s FROM pipeline_share s
     JOIN pipeline pl ON pl.id = s.pipeline_id AND pl.workspace_id = #{workspaceId}
@@ -113,4 +119,17 @@
     WHERE s.pipeline_id = #{id}
     ORDER BY w.name
   </select>
+
+  <update id="clearCompanyShareGrantedByAnywhere">
+    UPDATE company_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
+  <update id="clearPersonShareGrantedByAnywhere">
+    UPDATE person_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
+  <update id="clearPipelineShareGrantedByAnywhere">
+    UPDATE pipeline_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
 </mapper>

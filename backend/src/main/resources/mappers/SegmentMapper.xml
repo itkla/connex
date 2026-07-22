@@ -7,6 +7,11 @@
     </select>
 
     <select id="personIdsInWorkspace" resultType="int">
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+    </select>
+
+    <select id="personIdsInWorkspaceIncludingRestricted" resultType="int">
         SELECT id FROM person WHERE workspace_id = #{workspaceId}
     </select>
 
@@ -30,6 +35,22 @@
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
                 AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+                AND (a.person_id IS NULL OR EXISTS (
+                    SELECT 1 FROM person processable
+                    WHERE processable.id = a.person_id
+                      AND processable.suspended_at IS NULL
+                      AND (processable.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                          SELECT 1 FROM person_share processable_share
+                          JOIN workspace viewer_workspace
+                            ON viewer_workspace.id = processable_share.workspace_id
+                          JOIN workspace owner_workspace
+                            ON owner_workspace.id = processable.workspace_id
+                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          WHERE processable_share.person_id = processable.id
+                            AND processable_share.workspace_id = #{workspaceId}
+                        ))
+                ))
                 AND (
                     a.person_id IN (SELECT p.id FROM person p WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
@@ -41,6 +62,7 @@
         SELECT DISTINCT p.company_id
         FROM person p
         WHERE p.workspace_id = #{workspaceId}
+          AND p.suspended_at IS NULL
           AND p.company_id IS NOT NULL
           AND p.id IN
           <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
@@ -48,8 +70,27 @@
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
                 AND a.created_by_id = #{userId}
+                AND (a.person_id IS NULL OR EXISTS (
+                    SELECT 1 FROM person processable
+                    WHERE processable.id = a.person_id
+                      AND processable.suspended_at IS NULL
+                      AND (processable.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                          SELECT 1 FROM person_share processable_share
+                          JOIN workspace viewer_workspace
+                            ON viewer_workspace.id = processable_share.workspace_id
+                          JOIN workspace owner_workspace
+                            ON owner_workspace.id = processable.workspace_id
+                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          WHERE processable_share.person_id = processable.id
+                            AND processable_share.workspace_id = #{workspaceId}
+                        ))
+                ))
                 AND (
-                    a.person_id IN (SELECT p2.id FROM person p2 WHERE p2.workspace_id = #{workspaceId} AND p2.company_id = p.company_id)
+                    a.person_id IN (SELECT p2.id FROM person p2
+                        WHERE p2.workspace_id = #{workspaceId}
+                          AND p2.company_id = p.company_id
+                          AND p2.suspended_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
                 )
           )
@@ -101,18 +142,45 @@
         <choose>
             <when test="field == 'industry'"><include refid="stringOp"><property name="col" value="industry"/></include></when>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'website'"><include refid="stringOp"><property name="col" value="website"/></include></when>
+            <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+            <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+            <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT company_id FROM company_tag WHERE tag_id = #{id})</when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </select>
 
     <select id="personIdsMatching" resultType="int">
-        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+            <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
             <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+            <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+            <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
+            <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </select>
+
+    <select id="personIdsMatchingIncludingRestricted" resultType="int">
+        SELECT id FROM person
+        WHERE workspace_id = #{workspaceId}
+        <choose>
+            <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+            <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+            <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+            <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+            <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+            <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
@@ -123,6 +191,7 @@
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'value'"><include refid="numberOp"><property name="col" value="value"/></include></when>
+            <when test="field == 'actual_value'"><include refid="numberOp"><property name="col" value="actual_value"/></include></when>
             <when test="field == 'stage'"><include refid="idOp"><property name="col" value="stage_id"/></include></when>
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'status'">
@@ -134,9 +203,69 @@
                 </choose>
             </when>
             <when test="field == 'close_date'"><include refid="dateOp"><property name="col" value="expected_close_date"/></include></when>
+            <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+            <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
             <when test="field == 'tag'">AND id IN (SELECT deal_id FROM deal_tag WHERE tag_id = #{id})</when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
+    </select>
+
+    <sql id="existencePredicate">
+        <choose>
+            <when test="predicate == 'has_open_task'">
+                AND EXISTS (SELECT 1 FROM task t
+                    WHERE t.workspace_id = #{workspaceId} AND t.${fk} = ${alias}.id AND t.completed = FALSE)
+            </when>
+            <when test="predicate == 'overdue_task'">
+                AND EXISTS (SELECT 1 FROM task t
+                    WHERE t.workspace_id = #{workspaceId} AND t.${fk} = ${alias}.id AND t.completed = FALSE
+                      AND t.due_date IS NOT NULL AND t.due_date &lt; CURDATE())
+            </when>
+            <when test="predicate == 'recent_meeting'">
+                AND EXISTS (SELECT 1 FROM activity a
+                    WHERE a.workspace_id = #{workspaceId} AND a.${fk} = ${alias}.id
+                      AND a.type = 'meeting' AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY))
+            </when>
+            <when test="predicate == 'has_note'">
+                AND EXISTS (SELECT 1 FROM note n WHERE n.${fk} = ${alias}.id AND n.visibility = 'workspace')
+            </when>
+            <when test="predicate == 'has_attachment'">
+                AND EXISTS (SELECT 1 FROM attachment att
+                    WHERE att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
+            </when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <select id="companyExistence" resultType="int">
+        SELECT c.id FROM company c WHERE c.workspace_id = #{workspaceId}
+        <choose>
+            <when test="predicate == 'has_attachment'">
+                AND EXISTS (SELECT 1 FROM attachment att
+                    WHERE att.entity_type = 'company' AND att.entity_id = c.id)
+            </when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </select>
+
+    <select id="personExistence" resultType="int">
+        SELECT p.id FROM person p
+        WHERE p.workspace_id = #{workspaceId}
+        <if test="!includeRestrictedPeople">AND p.suspended_at IS NULL</if>
+        <include refid="existencePredicate">
+            <property name="alias" value="p"/>
+            <property name="fk" value="person_id"/>
+            <property name="entityType" value="person"/>
+        </include>
+    </select>
+
+    <select id="dealExistence" resultType="int">
+        SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId}
+        <include refid="existencePredicate">
+            <property name="alias" value="d"/>
+            <property name="fk" value="deal_id"/>
+            <property name="entityType" value="deal"/>
+        </include>
     </select>
 
     <select id="companyLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">

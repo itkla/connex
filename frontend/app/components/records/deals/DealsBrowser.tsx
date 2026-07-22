@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -23,31 +23,47 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
+import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
-import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
     createDeal,
     closeDeal,
     reopenDeal,
     updateDeal,
-    getCompanies,
+    updateDealValue,
+    getCompaniesByIds,
+    getDealsPage,
+    getDealMetrics,
+    getDealFacets,
+    exportDealsCsv,
+    getDealRevenueTimeseries,
+    getDealStageDistribution,
     getPipelines,
     getStagesByPipelineId,
-    getDealPeople,
+    getDealPrimaryContacts,
     getDealRisks,
     getTags,
     getActiveWorkspaceMembers,
@@ -56,18 +72,25 @@ import {
     bulkDeleteDeals,
     bulkAssignDealOwner,
     bulkChangeDealStage,
+    ApiError,
     isFieldError,
 } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate, pickDominantCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
     type Deal,
     type DealRisk,
+    type DealMetrics,
+    type DealFacets,
+    type DealFilterParams,
+    type DealRevenueSeries,
+    type DealStageDistribution,
+    type DealsPageParams,
     type Pipeline,
     type Stage,
     type Contact,
@@ -114,13 +137,128 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; savedViews: SavedView[] }) {
+/**
+ * Maps a table column key to the backend {@code sort} token accepted by
+ * {@code GET /api/deals/page}. Columns absent here are not server-sortable.
+ */
+const DEAL_SORT_TOKENS: Record<string, string> = {
+    name: 'name',
+    value: 'value',
+    actualValue: 'actual_value',
+    company: 'company',
+    pipeline: 'pipeline',
+    stage: 'stage',
+    expectedCloseDate: 'expected_close_date',
+    status: 'status',
+    updatedAt: 'updated_at',
+};
+
+const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_DEAL_DRAFT: CreateDealPayload = {
+    name: '',
+    value: 0,
+    actualValue: 0,
+    currency: 'USD',
+    pipeline: 0,
+    stage: 0,
+    company: null,
+    expectedCloseDate: undefined,
+};
+
+const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk', 'owner'] as const;
+
+function resolveNamedFacetIds<T extends { id: number; name: string }>(values: string[] | undefined, items: T[]): number[] | undefined {
+    if (!values?.length) return undefined;
+    const ids = values.flatMap((value) => {
+        if (value === FILTER_EMPTY) return [];
+        const id = Number(value);
+        if (Number.isInteger(id) && id > 0) return [id];
+        return items.flatMap((item) => item.name === value ? [item.id] : []);
+    });
+    if (ids.length > 0) return Array.from(new Set(ids));
+    return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
+}
+
+function resolveCompanyFacetIds(values: string[] | undefined, facets: DealFacets['companies']): number[] | undefined {
+    if (!values?.length) return undefined;
+    const ids = values.flatMap((value) => {
+        if (value === FILTER_EMPTY) return [];
+        const id = Number(value);
+        if (Number.isInteger(id) && id > 0) return [id];
+        return facets.flatMap((facet) => {
+            if (facet.label !== value) return [];
+            const facetId = Number(facet.key);
+            return Number.isInteger(facetId) && facetId > 0 ? [facetId] : [];
+        });
+    });
+    if (ids.length > 0) return Array.from(new Set(ids));
+    return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
+}
+
+function normalizeDealFilters(filters: FilterState): FilterState {
+    const normalized: FilterState = {};
+    for (const key of DEAL_FILTER_KEYS) {
+        const values = filters[key]?.filter(Boolean);
+        if (values?.length) normalized[key] = Array.from(new Set(values));
+    }
+    return normalized;
+}
+
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; timezone: string; currentUserId: number }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
+    const searchParams = useSearchParams();
+    const pathname = usePathname();
+    const { activeWorkspaceId } = useWorkspace();
+    const [deals, setDeals] = useState(initialDeals);
+    const patchDeal = useCallback((id: number, partial: Partial<Deal>) => {
+        setDeals((prev) => prev.map((deal) => (deal.id === id ? { ...deal, ...partial } : deal)));
+    }, []);
+    const inlineEdit = useInlineEdit<Deal>(patchDeal);
+    const [total, setTotal] = useState(initialTotal);
+    const [page, setPage] = useState(() => parseListInt(searchParams.get('page'), 1));
+    const [size, setSize] = useState(() => parseListInt(searchParams.get('size'), 25, MAX_URL_PAGE_SIZE));
+    const [loadingPage, setLoadingPage] = useState(false);
+    const [sortKey, setSortKey] = useState<string | null>(() => searchParams.get('sort') || null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => (searchParams.get('dir') === 'desc' ? 'desc' : 'asc'));
+    const [dealMetrics, setDealMetrics] = useState(initialMetrics);
+    const [dealFacets, setDealFacets] = useState(initialFacets);
+    const [dataRevision, setDataRevision] = useState(0);
+    const [pageRequestError, setPageRequestError] = useState<string | null>(null);
+    const [metricsRequestError, setMetricsRequestError] = useState<string | null>(null);
+    const requestError = pageRequestError ?? metricsRequestError;
+    const loadErrorMessage = useCallback((error: unknown, riskActive: boolean) =>
+        error instanceof ApiError && error.status === 400 && riskActive
+            ? t('riskFilterTooBroad')
+            : t('loadFailed'), [t]);
+    const requestIdRef = useRef(0);
+    const loadDealsPage = useCallback(async (params: DealsPageParams) => {
+        const requestId = requestIdRef.current + 1;
+        requestIdRef.current = requestId;
+        setLoadingPage(true);
+        try {
+            const response = await getDealsPage(params);
+            if (requestId !== requestIdRef.current) return;
+            setDeals(response.items);
+            setTotal(response.total);
+            setPageRequestError(null);
+            const maxPage = Math.max(1, Math.ceil(response.total / (params.size ?? 25)));
+            if ((params.page ?? 1) > maxPage) setPage(maxPage);
+        } catch (error: unknown) {
+            if (requestId !== requestIdRef.current) return;
+            const message = loadErrorMessage(error, (params.risk?.length ?? 0) > 0);
+            setPageRequestError(message);
+            toastError(message);
+        } finally {
+            if (requestId === requestIdRef.current) setLoadingPage(false);
+        }
+    }, [loadErrorMessage]);
+    const refreshData = useCallback(() => setDataRevision((revision) => revision + 1), []);
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -129,7 +267,6 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
     useEffect(() => {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
         getPipelines().then(async (ps) => {
             setPipelines(ps);
             const entries = await Promise.all(
@@ -140,22 +277,44 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     }, []);
 
     useEffect(() => {
-        const freelancerDeals = deals.filter((d) => d.company == null);
-        const request = freelancerDeals.length === 0
-            ? Promise.resolve([] as readonly (readonly [number, Contact | undefined])[])
-            : Promise.all(
-                freelancerDeals.map(async (d) => {
-                    const people = await getDealPeople(d.id).catch(() => [] as Contact[]);
-                    return [d.id, people[0]] as const;
-                }),
-            );
-        request.then((entries) => {
+        let cancelled = false;
+        getCompaniesByIds(deals.flatMap((deal) => deal.company == null ? [] : [deal.company]))
+            .then((loaded) => {
+                if (!cancelled) setCompanies(loaded);
+            })
+            .catch(() => {
+                if (!cancelled) setCompanies([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [deals]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const freelancerDealIds = deals.flatMap((deal) => deal.company == null ? [deal.id] : []);
+        getDealPrimaryContacts(freelancerDealIds).then((entries) => {
+            if (cancelled) return;
             const m = new Map<number, Contact>();
-            for (const [id, contact] of entries) {
-                if (contact) m.set(id, contact);
+            for (const entry of entries) {
+                m.set(entry.dealId, {
+                    id: entry.personId,
+                    name: entry.name,
+                    imageUrl: entry.imageUrl,
+                    email: '',
+                    phone: '',
+                    title: '',
+                    createdAt: '',
+                    updatedAt: '',
+                });
             }
             setContactByDealId(m);
+        }).catch(() => {
+            if (!cancelled) setContactByDealId(new Map());
         });
+        return () => {
+            cancelled = true;
+        };
     }, [deals]);
 
     const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
@@ -170,22 +329,44 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
 
     const currencyCounts = useMemo(() => {
         const counts = new Map<string, number>();
-        for (const d of deals) {
-            const c = d.currency || 'USD';
-            counts.set(c, (counts.get(c) ?? 0) + 1);
-        }
+        for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
-    }, [deals]);
-    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
+    }, [dealMetrics]);
+    const dominantCurrency = useMemo(() => {
+        let best: string | null = null;
+        let bestCount = -1;
+        for (const c of dealMetrics.byCurrency) {
+            const n = c.openCount + c.closedCount;
+            if (n > bestCount) {
+                bestCount = n;
+                best = c.currency;
+            }
+        }
+        return best;
+    }, [dealMetrics]);
     const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
     const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
         ? selectedCurrency
         : dominantCurrency;
-    const dealsInCurrency = useMemo(
-        () => deals.filter((d) => (d.currency || 'USD') === activeCurrency),
-        [deals, activeCurrency],
-    );
-    
+    const displayCurrency = activeCurrency ?? 'USD';
+    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
+    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        if (!activeCurrency) {
+            return () => {
+                cancelled = true;
+            };
+        }
+        getDealRevenueTimeseries(activeCurrency, timezone)
+            .then((series) => { if (!cancelled) setRevenueSeries(series); })
+            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+        getDealStageDistribution(activeCurrency)
+            .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
+            .catch(() => { if (!cancelled) setStageDistribution([]); });
+        return () => { cancelled = true; };
+    }, [activeCurrency, dataRevision, timezone]);
+
     const searchFields = useCallback((d: Deal) => [
         d.name,
         d.currency,
@@ -203,40 +384,161 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
         setFilterState,
         selectedIds,
         setSelectedIds,
-        filteredItems: filteredDeals,
-        selectedItems: selectedDeals,
+        selectedItems: pageSelectedDeals,
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Deal>({
-        items: dealsInCurrency,
+        items: deals,
         storageKey: 'deals:view',
         searchFields,
     });
+    const [selectedBoardDeal, setSelectedBoardDeal] = useState<Deal | null>(null);
+    const selectedDeals = useMemo(() => {
+        if (pageSelectedDeals.length > 0) return pageSelectedDeals;
+        return selectedBoardDeal != null && selectedIds.has(selectedBoardDeal.id)
+            ? [selectedBoardDeal]
+            : [];
+    }, [pageSelectedDeals, selectedBoardDeal, selectedIds]);
+
+    const allStages = useMemo(() => Object.values(stagesByPipeline).flat(), [stagesByPipeline]);
+    const activeFilterState = useMemo(() => normalizeDealFilters(filterState), [filterState]);
+    const ownerScope = useMemo(() => interpretMemberScope(activeFilterState.owner), [activeFilterState.owner]);
+    const serverFilters = useMemo<DealFilterParams>(() => {
+        const status = activeFilterState.status?.filter(
+            (value): value is 'open' | 'closed' | 'won' | 'lost' =>
+                value === 'open' || value === 'closed' || value === 'won' || value === 'lost',
+        );
+        const risk = activeFilterState.risk?.filter(
+            (value): value is 'high' | 'medium' | 'low' | 'none' =>
+                value === 'high' || value === 'medium' || value === 'low' || value === 'none',
+        );
+        return {
+            status: status?.length ? status : undefined,
+            risk: risk?.length ? risk : undefined,
+            companyId: resolveCompanyFacetIds(activeFilterState.company, dealFacets.companies),
+            noCompany: activeFilterState.company?.includes(FILTER_EMPTY) || undefined,
+            pipelineId: resolveNamedFacetIds(activeFilterState.pipeline, pipelines),
+            stageId: resolveNamedFacetIds(activeFilterState.stage, allStages),
+            scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
+            memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
+        };
+    }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
+    const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
+    const deferredQuery = useDeferredValue(query.trim());
+    const exportDeals = useCallback(
+        (signal: AbortSignal, workspaceId: number) => exportDealsCsv(
+            { ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined },
+            { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
+        ),
+        [activeCurrency, deferredQuery, serverFilters],
+    );
+
+    useEffect(() => {
+        let active = true;
+        getDealMetrics({ ...serverFilters, q: deferredQuery || undefined })
+            .then((nextMetrics) => {
+                if (!active) return;
+                setDealMetrics(nextMetrics);
+                setMetricsRequestError(null);
+            })
+            .catch((error: unknown) => {
+                if (!active) return;
+                const message = loadErrorMessage(error, (serverFilters.risk?.length ?? 0) > 0);
+                setMetricsRequestError(message);
+            });
+        return () => { active = false; };
+    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, loadErrorMessage]);
+
+    useEffect(() => {
+        let active = true;
+        getDealFacets()
+            .then((nextFacets) => { if (active) setDealFacets(nextFacets); })
+            .catch(() => undefined);
+        return () => { active = false; };
+    }, [dataRevision]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            loadDealsPage({
+                page,
+                size,
+                q: deferredQuery || undefined,
+                ...serverFilters,
+                currency: activeCurrency ?? undefined,
+                sort: sortKey ? DEAL_SORT_TOKENS[sortKey] : undefined,
+                dir: sortKey ? sortDir : undefined,
+            });
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [page, size, deferredQuery, serverFilterKey, activeCurrency, sortKey, sortDir, dataRevision, serverFilters, loadDealsPage]);
+
+    useEffect(() => {
+        writeListStateToUrl(pathname, { sort: sortKey, dir: sortDir, page, size }, 25);
+    }, [pathname, sortKey, sortDir, page, size]);
+
+    const workspaceRef = useRef(activeWorkspaceId);
+    useEffect(() => {
+        if (workspaceRef.current === activeWorkspaceId) return;
+        workspaceRef.current = activeWorkspaceId;
+        setPage(1); setSize(25); setSortKey(null); setSortDir('asc');
+    }, [activeWorkspaceId]);
+
+    const changePage = useCallback((nextPage: number) => {
+        setSelectedIds(new Set());
+        setPage(nextPage);
+    }, [setSelectedIds]);
+    const changePageSize = useCallback((nextSize: number) => {
+        setSelectedIds(new Set());
+        setSize(nextSize);
+        setPage(1);
+    }, [setSelectedIds]);
+    const changeQuery = useCallback((nextQuery: string) => {
+        setSelectedIds(new Set());
+        setQuery(nextQuery);
+        setPage(1);
+    }, [setQuery, setSelectedIds]);
+    const changeFilters = useCallback((nextFilters: FilterState) => {
+        setSelectedIds(new Set());
+        setFilterState(normalizeDealFilters(nextFilters));
+        setPage(1);
+    }, [setFilterState, setSelectedIds]);
+    const handleSortChange = useCallback((columnKey: string) => {
+        if (!DEAL_SORT_TOKENS[columnKey]) return;
+        const nextDir: 'asc' | 'desc' = sortKey === columnKey && sortDir === 'asc' ? 'desc' : 'asc';
+        setSelectedIds(new Set());
+        setSortKey(columnKey);
+        setSortDir(nextDir);
+        setPage(1);
+    }, [sortKey, sortDir, setSelectedIds]);
+    const changeCurrency = useCallback((currency: string) => {
+        setSelectedIds(new Set());
+        setRevenueSeries({ closed: [], projected: [] });
+        setStageDistribution([]);
+        setSelectedCurrency(currency);
+        setPage(1);
+    }, [setSelectedIds]);
+    const refreshRecords = useCallback(() => {
+        setSelectedIds(new Set());
+        setDealMetrics(EMPTY_DEAL_METRICS);
+        setRevenueSeries({ closed: [], projected: [] });
+        setStageDistribution([]);
+        refreshData();
+    }, [setSelectedIds, refreshData]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [drafts, setDrafts] = useState<Record<number, DealDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const emptyDraft: CreateDealPayload = {
-        name: '',
-        value: 0,
-        actualValue: 0,
-        currency: 'USD',
-        pipeline: 0,
-        stage: 0,
-        company: null,
-        expectedCloseDate: undefined,
-    };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPayload, setNewPayload] = useState<CreateDealPayload>(emptyDraft);
+    const [newPayload, setNewPayload] = useState<CreateDealPayload>(EMPTY_DEAL_DRAFT);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
         if (!open) {
-            setNewPayload(emptyDraft);
+            setNewPayload(EMPTY_DEAL_DRAFT);
             setCreationSucceeded(false);
         }
     };
@@ -260,7 +562,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             setCreationSucceeded(true);
             setTimeout(() => {
                 closeNewDialog(false);
-                router.refresh();
+                refreshRecords();
             }, 900);
         } catch (err) {
             if (isFieldError(err)) {
@@ -329,7 +631,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
-            router.refresh();
+            refreshRecords();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
@@ -338,12 +640,14 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     };
 
     const quickEditOne = useCallback((deal: Deal) => {
+        setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
         setDrafts({ [deal.id]: toDraft(deal) });
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
     const deleteOne = useCallback((deal: Deal) => {
+        setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
@@ -362,8 +666,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             });
             setDeleteDialogOpen(false);
             if (anySucceeded) {
-                setSelectedIds(new Set());
-                router.refresh();
+                refreshRecords();
             }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToDelete'));
@@ -375,10 +678,20 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
     useEffect(() => {
-        getDealRisks()
-            .then((risks) => setRiskByDealId(new Map(risks.map((r) => [r.dealId, r]))))
-            .catch(() => setRiskByDealId(new Map()));
-    }, []);
+        let cancelled = false;
+        const dealIds = deals.map((deal) => deal.id);
+        const request = dealIds.length === 0 ? Promise.resolve([] as DealRisk[]) : getDealRisks(dealIds);
+        request
+            .then((risks) => {
+                if (!cancelled) setRiskByDealId(new Map(risks.map((r) => [r.dealId, r])));
+            })
+            .catch(() => {
+                if (!cancelled) setRiskByDealId(new Map());
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [dataRevision, deals]);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
 
@@ -399,7 +712,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             ? bulkAddTagToDeals(selectedDealIds, tagId)
             : bulkRemoveTagFromDeals(selectedDealIds, tagId);
     }, [bulkTag.mode, selectedDealIds]);
-    const onBulkSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
+    const onBulkSuccess = refreshRecords;
 
     const viewSelected = () => {
         if (selectedDeals.length === 1) {
@@ -414,29 +727,21 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             if (won === null) await reopenDeal(deal.id);
             else await closeDeal(deal.id, { won });
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
-            router.refresh();
+            refreshRecords();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
-    }, [router, t]);
+    }, [refreshRecords, t]);
 
     const summary = useMemo(() => {
-        let openCount = 0;
-        let openValue = 0;
-        let closedActualValue = 0;
-        let closedForecastValue = 0;
-        for (const d of dealsInCurrency) {
-            if (isDealClosed(d)) {
-                closedActualValue += d.actualValue ?? 0;
-                closedForecastValue += d.value ?? 0;
-            } else {
-                openCount++;
-                openValue += d.value ?? 0;
-            }
-        }
+        const m = dealMetrics.byCurrency.find((c) => c.currency === activeCurrency);
+        const openCount = m?.openCount ?? 0;
+        const openValue = m?.openValue ?? 0;
+        const closedActualValue = m?.closedRevenue ?? 0;
+        const closedForecastValue = m?.closedForecast ?? 0;
         const forecastAccuracy = closedForecastValue > 0 ? closedActualValue / closedForecastValue : null;
         return { openCount, openValue, closedActualValue, closedForecastValue, forecastAccuracy };
-    }, [dealsInCurrency]);
+    }, [dealMetrics, activeCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null, widthClass: 'min-w-48' },
@@ -445,6 +750,14 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             label: t('columnValue'),
             getSortValue: (d) => d.value ?? null,
             render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD', locale),
+            editable: {
+                getValue: (d) => (d.value != null ? String(d.value) : ''),
+                save: (d, v) =>
+                    inlineEdit.commit(d, 'value', Number(v), async (full) => {
+                        await updateDealValue(full.id, full.value ?? 0);
+                    }),
+                validate: (v) => (v !== '' && /^\d+(\.\d{1,2})?$/.test(v) ? null : t('valueInvalid')),
+            },
         },
         {
             key: 'actualValue',
@@ -456,7 +769,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             key: 'company',
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
-            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
             filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
@@ -482,7 +795,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
         {
             key: 'risk',
             label: t('columnRisk'),
-            getSortValue: (d) => riskByDealId.get(d.id)?.score ?? null,
+            sortable: false,
             render: (d) => <DealRiskPill risk={riskByDealId.get(d.id)} />,
             filter: {
                 getValue: (d) => {
@@ -545,21 +858,101 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit]);
 
-    const visibleDeals = useMemo(
-        () => applyRecordFilters(filteredDeals, columns, filterState),
-        [filteredDeals, columns, filterState],
+    const visibleDeals = deals;
+
+    const { density, setDensity } = useRecordDensity();
+    const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
+
+    const recordRef = useCallback(
+        (deal: Deal): ActiveRecordRef => ({ type: 'deal', id: deal.id, label: deal.name }),
+        [],
     );
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
+    const mergedColumns = useMemo(
+        () => [...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))],
+        [columns, customColumns],
+    );
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('deal', mergedColumns, { lockedKey: sortKey });
 
-    const facets = useMemo(() => deriveFilterOptions(columns, filteredDeals), [columns, filteredDeals]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
-    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const facets = useMemo<ColumnFilterFacet[]>(() => {
+        const result: ColumnFilterFacet[] = [];
+        const openCount = dealFacets.status.find((facet) => facet.key === 'open')?.count ?? 0;
+        const closedCount = dealFacets.status
+            .filter((s) => s.key === 'won' || s.key === 'lost')
+            .reduce((sum, s) => sum + s.count, 0);
+        const statusOptions: { key: string; label: string }[] = [];
+        if (openCount > 0) statusOptions.push({ key: 'open', label: t('statusOpen') });
+        if (closedCount > 0) statusOptions.push({ key: 'closed', label: t('statusClosed') });
+        if (statusOptions.length > 0) result.push({ key: 'status', label: t('columnStatus'), options: statusOptions });
+
+        const companyOptions = dealFacets.companies.flatMap((facet) => {
+            if (facet.key === FILTER_EMPTY) return [{ key: FILTER_EMPTY, label: t('freelancer') }];
+            const label = facet.label ?? companyById.get(Number(facet.key))?.name;
+            return label ? [{ key: facet.key, label }] : [];
+        });
+        if (companyOptions.length > 0) result.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
+
+        const pipelineOptions = dealFacets.pipelines.flatMap((facet) => {
+            const pipeline = pipelineById.get(Number(facet.key));
+            return pipeline ? [{ key: facet.key, label: pipeline.name }] : [];
+        });
+        if (pipelineOptions.length > 0) result.push({ key: 'pipeline', label: t('columnPipeline'), options: pipelineOptions });
+
+        const stageOptions = dealFacets.stages.flatMap((facet) => {
+            const stage = stageById.get(Number(facet.key));
+            return stage ? [{ key: facet.key, label: stage.name }] : [];
+        });
+        if (stageOptions.length > 0) result.push({ key: 'stage', label: t('columnStage'), options: stageOptions });
+        result.push({
+            key: 'risk',
+            label: t('columnRisk'),
+            options: [
+                { key: 'high', label: levelLabel('high') },
+                { key: 'medium', label: levelLabel('medium') },
+                { key: 'low', label: levelLabel('low') },
+                { key: 'none', label: t('riskNone') },
+            ],
+        });
+        return result;
+    }, [dealFacets, companyById, pipelineById, stageById, levelLabel, t]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(activeFilterState) > 0;
+    const clearAll = useCallback(() => {
+        changeQuery('');
+        changeFilters({});
+    }, [changeQuery, changeFilters]);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const ownerCounts = useMemo(
+        () => new Map(dealFacets.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [dealFacets.owners],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        changeFilters({ ...activeFilterState, owner: values });
+    }, [activeFilterState, changeFilters]);
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
-        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
-        ...facetChips(facets, filterState, setFilterState),
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => changeQuery('') }] : []),
+        ...ownerChips,
+        ...facetChips(facets, activeFilterState, changeFilters),
     ];
 
     const selectionActions = (
@@ -606,15 +999,20 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query }),
-        [filterState, query],
+        () => ({ filters: activeFilterState, query, sortKey, sortDirection: sortDir }),
+        [activeFilterState, query, sortKey, sortDir],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
-            setFilterState(config.filters ?? {});
-            setQuery(config.query ?? '');
+            changeFilters(config.filters ?? {});
+            changeQuery(config.query ?? '');
+            const nextSortKey = config.sortKey && DEAL_SORT_TOKENS[config.sortKey] ? config.sortKey : null;
+            setSortKey(nextSortKey);
+            setSortDir(config.sortDirection ?? 'asc');
+            setSelectedIds(new Set());
+            setPage(1);
         },
-        [setFilterState, setQuery],
+        [changeFilters, changeQuery, setSelectedIds],
     );
 
     return (
@@ -632,7 +1030,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                             aria-label={t('currency')}
                                             className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
                                         >
-                                            {activeCurrency}
+                                            {displayCurrency}
                                             <ChevronDownIcon className="size-3.5 text-muted-foreground" />
                                         </button>
                                     </DropdownMenuTrigger>
@@ -640,7 +1038,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                         {Array.from(currencyCounts.entries())
                                             .sort((a, b) => b[1] - a[1])
                                             .map(([c, n]) => (
-                                                <DropdownMenuItem key={c} onSelect={() => setSelectedCurrency(c)}>
+                                                <DropdownMenuItem key={c} onSelect={() => changeCurrency(c)}>
                                                     <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
                                                     <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
                                                 </DropdownMenuItem>
@@ -653,8 +1051,8 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                 onNew={() => setNewDialogOpen(true)}
                                 newLabel={t('newButton')}
                                 newAriaLabel={t('addDeal')}
-                                onImported={() => router.refresh()}
-                                exportIds={visibleDeals.map((d) => d.id)}
+                                onImported={refreshRecords}
+                                onExport={exportDeals}
                             />
                         </div>
                     </div>
@@ -664,8 +1062,8 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
-                            <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
+                            <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
                         </div>
                     </section>
                 </Rise>
@@ -677,7 +1075,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             <SummaryTile
                                 label={t('openPipeline')}
                                 tooltip={t('openPipelineTooltip')}
-                                value={formatCompactCurrency(summary.openValue, activeCurrency, locale)}
+                                value={formatCompactCurrency(summary.openValue, displayCurrency, locale)}
                             />
                             <SummaryTile
                                 label={t('openDeals')}
@@ -687,12 +1085,12 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             <SummaryTile
                                 label={t('closedForecast')}
                                 tooltip={t('closedForecastTooltip')}
-                                value={formatCompactCurrency(summary.closedForecastValue, activeCurrency, locale)}
+                                value={formatCompactCurrency(summary.closedForecastValue, displayCurrency, locale)}
                             />
                             <SummaryTile
                                 label={t('closedRevenue')}
                                 tooltip={t('closedRevenueTooltip')}
-                                value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)}
+                                value={formatCompactCurrency(summary.closedActualValue, displayCurrency, locale)}
                             />
                             <SummaryTile
                                 label={t('forecastAccuracy')}
@@ -709,6 +1107,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        defaultView={defaultView}
                     />
                 </Rise>
 
@@ -722,14 +1121,15 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                         search={
                             <SearchField
                                 value={query}
-                                onChange={setQuery}
-                                onClear={() => setQuery('')}
+                                onChange={changeQuery}
+                                onClear={() => changeQuery('')}
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
                             />
                         }
                         trailing={
+                            <div className="flex items-center gap-2">
                             <div
                                 role="group"
                                 aria-label={t('displayMode')}
@@ -763,15 +1163,40 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                     <ViewColumnsIcon className="size-4" />
                                 </button>
                             </div>
+                            {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                            {displayMode === 'table' && (
+                                <ColumnVisibilityMenu
+                                    toggles={toggles}
+                                    onColumnVisibleChange={setColumnVisible}
+                                    onReset={resetColumns}
+                                    hiddenCount={hiddenCount}
+                                />
+                            )}
+                            </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={activeFilterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Deal>
                             facets={facets}
-                            filterState={filterState}
-                            onChange={setFilterState}
+                            filterState={activeFilterState}
+                            onChange={changeFilters}
                         />
                     </FilterBar>
                 </Rise>
+
+                {requestError && (
+                    <div
+                        role="alert"
+                        className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+                    >
+                        {requestError}
+                    </div>
+                )}
 
                 <Rise delay={0.3}>
                     {displayMode === 'kanban' ? (
@@ -785,13 +1210,20 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             riskByDealId={riskByDealId}
                             onQuickEdit={quickEditOne}
                             onDelete={deleteOne}
-                            onMoved={() => router.refresh()}
+                            onMoved={refreshRecords}
+                            query={deferredQuery}
+                            currency={activeCurrency ?? undefined}
+                            filters={serverFilters}
+                            currentUserId={currentUserId}
+                            revision={dataRevision}
                             reduce={reduce}
                         />
                     ) : (
                         <RecordsRenderView<Deal>
                             data={visibleDeals}
-                            columns={[...columns, ...customColumns]}
+                            loading={loadingPage}
+                            columns={visibleColumns}
+                            sortState={{ key: sortKey, direction: sortDir, onSortChange: handleSortChange }}
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete }) => (
                                 <DealCard
@@ -816,7 +1248,11 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                 );
                             }}
                             detailPath={(item) => `/records/deals/${item.id}`}
+                            onRowClick={(item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
+                            recordRef={recordRef}
                             displayMode={displayMode}
+                            density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={setSelectedIds}
                             onQuickEdit={quickEditOne}
@@ -824,9 +1260,18 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}
+                            pagination={{
+                                page,
+                                pageSize: size,
+                                total,
+                                onPageChange: changePage,
+                                onPageSizeChange: changePageSize,
+                            }}
                         />
                     )}
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditDealSheet
                     open={editSheetOpen}
@@ -835,7 +1280,6 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     selectedDeals={selectedDeals}
                     drafts={drafts}
                     updateDraft={updateDraft}
-                    companies={companies}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
                     isSaving={isSaving}
@@ -847,11 +1291,11 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     onOpenChange={closeNewDialog}
                     payload={newPayload}
                     setPayload={setNewPayload}
-                    companies={companies}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
+                    isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, EMPTY_DEAL_DRAFT)}
                     createNewDeal={createNewDeal}
                 />
 

@@ -24,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
@@ -35,8 +37,9 @@ import lombok.RequiredArgsConstructor;
  * Orchestrates the WebAuthn ceremonies over Spring Security's {@code WebAuthnRelyingPartyOperations}
  * (which performs attestation/assertion verification) and owns the durable handle&harr;{@code app_user}
  * link plus credential-ownership enforcement. Passkeys are additive: enrollment requires an
- * authenticated session; authentication resolves the account from the credential's user handle and
- * hands a verified {@link User} back to the controller, which finishes the shared login ceremony.
+ * authenticated session and proof through the account's existing authentication method;
+ * authentication resolves the account from the credential's user handle and hands a verified
+ * {@link User} back to the controller, which finishes the shared login ceremony.
  */
 @Service
 @RequiredArgsConstructor
@@ -64,14 +67,22 @@ public class WebAuthnService {
 
     /**
      * Verifies an attestation response and persists the new credential.
+     * @param expectedUserId the authenticated account completing the ceremony
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
      * @param label the user-supplied nickname
      * @return the stored credential record
      */
     @Transactional
-    public CredentialRecord finishRegistration(PublicKeyCredentialCreationOptions options,
+    public CredentialRecord finishRegistration(int expectedUserId, PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential, String label) {
+        PublicKeyCredentialUserEntity optionUser = options.getUser();
+        Integer optionUserId = optionUser == null
+            ? null
+            : userEntityMapper.findUserIdByHandle(optionUser.getId().toBase64UrlString());
+        if (optionUserId == null || optionUserId != expectedUserId) {
+            throw new BadCredentialsException("Passkey registration is not bound to the current account");
+        }
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         userCredentials.save(record);
@@ -86,6 +97,20 @@ public class WebAuthnService {
     public PublicKeyCredentialRequestOptions createLoginOptions() {
         return rpOperations.createCredentialRequestOptions(
             new ImmutablePublicKeyCredentialRequestOptionsRequest(null));
+    }
+
+    /**
+     * Issues assertion options for the authenticated account's own enrolled passkeys.
+     * @param auth the current authenticated principal
+     * @return request options restricted to the caller's credentials
+     */
+    public PublicKeyCredentialRequestOptions createStepUpOptions(Authentication auth) {
+        User user = (User) auth.getPrincipal();
+        if (listForUser(user.getId()).isEmpty()) {
+            throw new PasskeyEnrollmentRequiredException();
+        }
+        return rpOperations.createCredentialRequestOptions(
+            new ImmutablePublicKeyCredentialRequestOptionsRequest(auth));
     }
 
     /**
@@ -112,6 +137,22 @@ public class WebAuthnService {
     }
 
     /**
+     * Verifies a step-up assertion and ensures the credential belongs to the authenticated caller.
+     * @param auth the current authenticated principal
+     * @param options the options issued in {@link #createStepUpOptions}
+     * @param assertion the client's assertion response
+     */
+    @Transactional
+    public void finishStepUp(Authentication auth, PublicKeyCredentialRequestOptions options,
+            PublicKeyCredential<AuthenticatorAssertionResponse> assertion) {
+        User currentUser = (User) auth.getPrincipal();
+        User assertedUser = finishLogin(options, assertion);
+        if (assertedUser.getId() != currentUser.getId()) {
+            throw new BadCredentialsException("Passkey authentication failed");
+        }
+    }
+
+    /**
      * Lists the enrolled passkeys owned by the given account.
      * @param userId the owning account
      * @return the account's passkeys (empty if none)
@@ -126,6 +167,10 @@ public class WebAuthnService {
             .toList();
     }
 
+    public boolean hasPasskey(int userId) {
+        return !listForUser(userId).isEmpty();
+    }
+
     /**
      * Renames a passkey the caller owns.
      * @param callerUserId the authenticated account
@@ -133,9 +178,10 @@ public class WebAuthnService {
      * @param label the new nickname
      */
     @Transactional
-    public void rename(int callerUserId, String credentialId, String label) {
-        byte[] id = requireOwned(callerUserId, credentialId);
-        credentialMapper.updateLabel(id, label);
+    public String rename(int callerUserId, String credentialId, String label) {
+        WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
+        credentialMapper.updateLabel(row.getCredentialId(), label);
+        return row.getLabel();
     }
 
     /**
@@ -144,9 +190,10 @@ public class WebAuthnService {
      * @param credentialId the target credential (base64url)
      */
     @Transactional
-    public void delete(int callerUserId, String credentialId) {
-        requireOwned(callerUserId, credentialId);
+    public String delete(int callerUserId, String credentialId) {
+        WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
         userCredentials.delete(Bytes.fromBase64(credentialId));
+        return row.getLabel();
     }
 
     private void ensureUserEntity(User user) {
@@ -160,7 +207,7 @@ public class WebAuthnService {
         }
     }
 
-    private byte[] requireOwned(int callerUserId, String credentialId) {
+    private WebauthnCredentialRow requireOwned(int callerUserId, String credentialId) {
         byte[] id = Bytes.fromBase64(credentialId).getBytes();
         WebauthnCredentialRow row = credentialMapper.findByCredentialId(id);
         if (row == null) {
@@ -170,7 +217,7 @@ public class WebAuthnService {
         if (owner == null || owner != callerUserId) {
             throw new ResourceNotFoundException("Passkey not found");
         }
-        return id;
+        return row;
     }
 
     private PasskeyDto toDto(WebauthnCredentialRow row) {

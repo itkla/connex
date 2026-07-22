@@ -1,0 +1,116 @@
+{
+  "Actions": {
+    "quickCreate": {
+      "trigger": "New",
+      "title": "Create",
+      "description": "Create a record",
+      "close": "Close",
+      "back": "Back to types"
+    },
+    "palette": {
+      "trigger": "Search & commands",
+      "placeholder": "Search or jump to…",
+      "loading": "Searching…",
+      "noResults": "No results for “{query}”"
+    },
+    "group": {
+      "create": "Create",
+      "navigate": "Go to",
+      "record": "This record",
+      "workspace": "Workspace",
+      "utility": "Utilities"
+    },
+    "navigate": {
+      "dashboard": "Dashboard",
+      "companies": "Companies",
+      "contacts": "Contacts",
+      "deals": "Deals",
+      "pipelines": "Pipelines",
+      "analytics": "Analytics",
+      "calendar": "Calendar",
+      "settings": "Settings",
+      "organization": "Organization",
+      "savedView": "Saved view",
+      "recentRecord": "Recent record"
+    },
+    "create": {
+      "company": "New company",
+      "person": "New contact",
+      "deal": "New deal",
+      "task": "New task",
+      "note": "New note",
+      "activity": "Log activity"
+    },
+    "record": {
+      "open": "Open record",
+      "openNewTab": "Open in new tab",
+      "copyLink": "Copy link to this record"
+    },
+    "workspace": {
+      "themeLight": "Light theme",
+      "themeDark": "Dark theme",
+      "themeSystem": "System theme",
+      "languageEnglish": "Language: English",
+      "languageJapanese": "Language: 日本語"
+    },
+    "utility": {
+      "copyPageLink": "Copy link to this page",
+      "markAllNotificationsRead": "Mark all notifications read",
+      "importCompanies": "Import companies",
+      "importContacts": "Import contacts",
+      "importDeals": "Import deals",
+      "exportCurrentCompanies": "Export current company view",
+      "exportCurrentContacts": "Export current contact view",
+      "exportCurrentDeals": "Export current deal view"
+    },
+    "description": {
+      "utility": {
+        "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
+        "exportCurrentContacts": "Download all contacts matching this view's search and filters.",
+        "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency."
+      }
+    },
+    "feedback": {
+      "linkCopied": "Link copied to clipboard",
+      "recordLinkCopied": "Link to {label} copied",
+      "allNotificationsRead": "All notifications marked as read",
+      "runFailed": "Something went wrong. Please try again.",
+      "companyCreated": "Company created",
+      "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
+      "personCreated": "Contact created",
+      "dealCreated": "Deal created",
+      "createFailed": "Couldn't create. Please try again.",
+      "linkedRecordLoadFailed": "Couldn't load the linked record. Please try again.",
+      "companyContactsAllFailed": "Company created, but its {count} contacts couldn't be added.",
+      "companyContactsPartial": "Added {succeeded} of {total} contacts.",
+      "taskCreated": "Task created",
+      "noteCreated": "Note created",
+      "activityCreated": "Activity logged"
+    },
+    "keywords": {
+      "navigate": {
+        "contacts": "contacts, people, persons"
+      },
+      "create": {
+        "company": "company, org, organization, account",
+        "person": "person, contact, people, lead",
+        "deal": "deal, opportunity, sale",
+        "task": "task, todo, to-do, reminder",
+        "note": "note, memo",
+        "activity": "activity, log, call, meeting, email"
+      },
+      "workspace": {
+        "theme": "theme, appearance, dark, light, mode",
+        "language": "language, locale, translation, english, japanese, 日本語, 言語"
+      },
+      "utility": {
+        "importCompanies": "import companies, csv, upload, bulk",
+        "importContacts": "import contacts, people, persons, csv, upload, bulk",
+        "importDeals": "import deals, opportunities, csv, upload, bulk",
+        "exportCurrentCompanies": "export companies, download companies, csv, current view, filtered companies, segment",
+        "exportCurrentContacts": "export contacts, download contacts, people, persons, csv, current view, filtered contacts",
+        "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals"
+      }
+    }
+  }
+}

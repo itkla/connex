@@ -13,9 +13,9 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -32,20 +32,21 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 public class ExportService {
 
     private final WorkspaceService workspaceService;
+    private final DealService dealService;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
-    private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldValueService customFieldValueService;
 
     /**
-     * CSV of contacts matching the given list filters (all contacts when no filter is given).
+     * CSV of contacts matching the given list filters and member scope (all contacts when unfiltered).
      */
-    public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
+    public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Person> people = personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany);
+        List<Person> people = personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany, memberScope);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -69,14 +70,13 @@ public class ExportService {
     }
 
     /**
-     * CSV of companies (optionally filtered by tag).
+     * CSV of companies matching the given list filters and member scope (all companies when unfiltered).
      */
-    public String exportCompanies(Integer tagId, List<Integer> ids) {
+    public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
+            MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Company> companies;
-        if (ids != null && !ids.isEmpty()) companies = companyMapper.getByIds(workspaceId, ids);
-        else if (tagId != null) companies = companyMapper.getCompaniesByTagId(workspaceId, tagId);
-        else companies = companyMapper.getAllCompanies(workspaceId);
+        List<Company> companies =
+            companyMapper.getCompaniesFiltered(workspaceId, query, industry, noIndustry, ids, memberScope);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());
@@ -100,11 +100,14 @@ public class ExportService {
     }
 
     /**
-     * CSV of deals matching the given list filter (all deals when no filter is given).
+     * CSV of deals matching the given list filters and member scope (all deals when unfiltered).
      */
-    public String exportDeals(List<Integer> ids, Integer pipelineId, Integer stageId, Integer companyId, Integer personId, Integer tagId) {
+    public String exportDeals(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
+            List<Integer> companyIds, boolean noCompany, List<String> statuses, List<String> risks,
+            MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Deal> deals = dealsFor(workspaceId, ids, pipelineId, stageId, companyId, personId, tagId);
+        List<Deal> deals = dealService.queryDealsForExport(
+            query, currency, pipelineIds, stageIds, companyIds, noCompany, statuses, risks, memberScope);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "deal");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("deal", deals.stream().map(Deal::getId).toList());
@@ -141,17 +144,6 @@ public class ExportService {
             writeRow(sb, row);
         }
         return sb.toString();
-    }
-
-    private List<Deal> dealsFor(int workspaceId, List<Integer> ids, Integer pipelineId, Integer stageId, Integer companyId,
-            Integer personId, Integer tagId) {
-        if (ids != null && !ids.isEmpty()) return dealMapper.getByIds(workspaceId, ids);
-        if (pipelineId != null) return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
-        if (stageId != null) return dealMapper.getDealsByStageId(workspaceId, stageId);
-        if (companyId != null) return dealMapper.getDealsByCompanyId(workspaceId, companyId);
-        if (personId != null) return dealMapper.getDealsByPersonId(workspaceId, personId);
-        if (tagId != null) return dealMapper.getDealsByTagId(workspaceId, tagId);
-        return dealMapper.getAllDeals(workspaceId);
     }
 
     private List<CustomFieldDefinition> activeDefinitions(int workspaceId, String entityType) {

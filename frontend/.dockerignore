@@ -1,0 +1,14 @@
+.git
+node_modules
+.next
+out
+build
+*.log
+.env
+.env.*
+.playwright-mcp
+Dockerfile
+.dockerignore
+AGENTS.md
+CLAUDE.md
+README.md

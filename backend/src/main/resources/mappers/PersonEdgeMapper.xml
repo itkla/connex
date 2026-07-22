@@ -14,6 +14,30 @@
     <result property="createdAt"      column="created_at"/>
   </resultMap>
 
+  <sql id="visibleSourcePerson">
+    (source_person.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = source_person.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = source_person.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleTargetPerson">
+    (target_person.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = target_person.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = target_person.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleCompanyJoin">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace vws ON vws.id = cs.workspace_id
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
   <!-- Re-adding an existing pair edits it (row-alias upsert; VALUES() is removed in MySQL 9). -->
   <insert id="upsert">
     INSERT INTO person_edge (workspace_id, source_person_id, target_person_id, type, strength, note)
@@ -36,27 +60,96 @@
       AND target_person_id = #{targetPersonId}
   </delete>
 
-  <!-- A contact's connections from its own point of view: the other endpoint's display details. -->
-  <select id="getConnections" resultType="ooo.klae.connex.backend.dto.PersonConnectionDto">
+  <sql id="connectionSelect">
     SELECT e.id AS id,
            IF(e.source_person_id = #{personId}, e.target_person_id, e.source_person_id) AS person_id,
-           op.name       AS person_name,
-           op.company_id AS company_id,
+           IF(e.source_person_id = #{personId}, target_person.name, source_person.name) AS person_name,
+           c.id          AS company_id,
            c.name        AS company_name,
            e.type        AS type,
            e.strength    AS strength,
-           e.note        AS note
+           e.note        AS note,
+           IF(e.source_person_id = #{personId},
+              target_person.suspended_at, source_person.suspended_at) AS suspended_at,
+           IF(e.source_person_id = #{personId},
+              target_person.provision_ceased_at, source_person.provision_ceased_at) AS provision_ceased_at
     FROM person_edge e
-    JOIN person op ON op.id = IF(e.source_person_id = #{personId}, e.target_person_id, e.source_person_id)
-    LEFT JOIN company c ON c.id = op.company_id
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    LEFT JOIN company c
+      ON c.id = IF(e.source_person_id = #{personId}, target_person.company_id, source_person.company_id)
+     AND <include refid="visibleCompanyJoin"/>
     WHERE e.workspace_id = #{workspaceId}
       AND (e.source_person_id = #{personId} OR e.target_person_id = #{personId})
-    ORDER BY e.strength DESC, op.name
+  </sql>
+
+  <!-- A contact's connections from its own point of view: the other endpoint's display details. -->
+  <select id="getConnections" resultType="ooo.klae.connex.backend.dto.PersonConnectionDto">
+    <include refid="connectionSelect"/>
+    ORDER BY e.strength DESC, person_name
+  </select>
+
+  <select id="getTopConnections" resultType="ooo.klae.connex.backend.dto.PersonConnectionDto">
+    <include refid="connectionSelect"/>
+      AND IF(e.source_person_id = #{personId},
+             target_person.suspended_at, source_person.suspended_at) IS NULL
+      AND IF(e.source_person_id = #{personId},
+             target_person.provision_ceased_at, source_person.provision_ceased_at) IS NULL
+      AND IF(e.source_person_id = #{personId},
+             target_person.name, source_person.name)
+          REGEXP '[^[:space:]\\x{001C}-\\x{001F}]'
+    ORDER BY e.strength DESC, person_name, person_id
+    LIMIT #{limit}
   </select>
 
   <select id="getAllEdges" resultMap="PersonEdgeResult">
-    SELECT id, workspace_id, source_person_id, target_person_id, type, strength, note, created_at
-    FROM person_edge
-    WHERE workspace_id = #{workspaceId}
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           e.type, e.strength, e.note, e.created_at
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
+  </select>
+
+  <select id="getEdgesForNetworkReport" resultMap="PersonEdgeResult">
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           e.type, e.strength, e.note, e.created_at
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
+    ORDER BY e.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getEdgesForReverseIntroReport" resultMap="PersonEdgeResult">
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           e.type, e.strength, e.note, e.created_at
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
+      AND (
+        e.source_person_id IN
+        <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+        OR e.target_person_id IN
+        <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    ORDER BY e.id
+    LIMIT #{limit}
   </select>
 </mapper>

@@ -32,22 +32,30 @@
 
   <select id="getAllNotes" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE workspace_id = #{workspaceId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getNotesByPersonId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getNotesByPersonIds" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getNotesByDealId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getNotesByAuthorId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE workspace_id = #{workspaceId} AND author_id = #{authorId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND author_id = #{authorId} ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getNoteById" resultMap="NoteResult">
@@ -68,7 +76,7 @@
       OR u.username LIKE #{query}
       OR p.name LIKE #{query}
       OR d.name LIKE #{query})
-    ORDER BY n.created_at DESC
+    ORDER BY n.created_at DESC, n.id DESC
     LIMIT 10
   </select>
 
@@ -76,28 +84,85 @@
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId}
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getVisibleNotesPage" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY created_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countVisibleNotes" resultType="long">
+    SELECT COUNT(*) FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+  </select>
+
+  <select id="getWorkspaceNotesPage" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND visibility = 'workspace'
+    ORDER BY created_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countWorkspaceNotes" resultType="long">
+    SELECT COUNT(*) FROM note
+    WHERE workspace_id = #{workspaceId} AND visibility = 'workspace'
   </select>
 
   <select id="getVisibleNotesByPersonId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getVisibleNotesByDealId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, id DESC
   </select>
 
   <select id="getVisibleNotesByAuthorId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND author_id = #{authorId}
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getVisibleCompanyNotes" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId}
+      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+    ORDER BY n.updated_at DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getWorkspaceNotesByCompanyIds" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = n.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY n.created_at DESC, n.id DESC
   </select>
 
   <select id="getNotesReferencing" resultMap="NoteResult">
@@ -108,7 +173,7 @@
     WHERE er.workspace_id = #{workspaceId}
       AND er.ref_type = #{refType} AND er.ref_id = #{refId}
       AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
-    ORDER BY n.updated_at DESC
+    ORDER BY n.updated_at DESC, n.id DESC
   </select>
 
   <select id="getVisibleNoteIdsIn" resultType="int">
@@ -138,7 +203,7 @@
       OR u.username LIKE #{query}
       OR p.name LIKE #{query}
       OR d.name LIKE #{query})
-    ORDER BY n.created_at DESC
+    ORDER BY n.created_at DESC, n.id DESC
     LIMIT 10
   </select>
 
@@ -182,4 +247,9 @@
   </update>
 
   <delete id="delete">DELETE FROM note WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+  <select id="countAuthoredAnywhere" resultType="int">
+    SELECT COUNT(*) FROM note WHERE author_id = #{userId} FOR UPDATE
+  </select>
+
 </mapper>

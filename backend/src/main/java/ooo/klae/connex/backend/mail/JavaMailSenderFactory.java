@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mail;
 
+import java.net.InetAddress;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,10 +24,28 @@ public class JavaMailSenderFactory {
      * @return a configured mail sender
      */
     public JavaMailSender forConfig(ResolvedMailConfig config) {
-        return cache.computeIfAbsent(fingerprint(config), key -> build(config));
+        return forConfig(config, null);
     }
 
-    private static JavaMailSender build(ResolvedMailConfig config) {
+    /**
+     * Returns a sender that connects to the supplied prevalidated address while retaining the
+     * configured hostname for SMTP TLS identity verification.
+     *
+     * @param config the resolved SMTP settings
+     * @param pinnedAddress the approved destination address, or null for an unpinned trusted transport
+     * @return a configured mail sender
+     */
+    public JavaMailSender forConfig(ResolvedMailConfig config, InetAddress pinnedAddress) {
+        if (pinnedAddress != null) {
+            return build(config, pinnedAddress);
+        }
+        if (config.password() != null) {
+            return build(config, null);
+        }
+        return cache.computeIfAbsent(fingerprint(config), key -> build(config, null));
+    }
+
+    private static JavaMailSender build(ResolvedMailConfig config, InetAddress pinnedAddress) {
         JavaMailSenderImpl sender = new JavaMailSenderImpl();
         sender.setHost(config.host());
         sender.setPort(config.port());
@@ -42,10 +61,16 @@ public class JavaMailSenderFactory {
         props.put("mail.transport.protocol", "smtp");
         props.put("mail.smtp.auth", String.valueOf(config.auth()));
         props.put("mail.smtp.starttls.enable", String.valueOf(config.starttls()));
+        props.put("mail.smtp.starttls.required", String.valueOf(config.starttls()));
         props.put("mail.smtp.ssl.enable", String.valueOf(config.ssl()));
+        props.put("mail.smtp.ssl.checkserveridentity", String.valueOf(config.starttls() || config.ssl()));
         props.put("mail.smtp.connectiontimeout", String.valueOf(config.connectionTimeoutMs()));
         props.put("mail.smtp.timeout", String.valueOf(config.timeoutMs()));
         props.put("mail.smtp.writetimeout", String.valueOf(config.writeTimeoutMs()));
+        if (pinnedAddress != null) {
+            props.put("mail.smtp.socketFactory", new PinnedSocketFactory(pinnedAddress, config.port()));
+            props.put("mail.smtp.socketFactory.fallback", "false");
+        }
         return sender;
     }
 
@@ -54,7 +79,6 @@ public class JavaMailSenderFactory {
                 config.host(),
                 String.valueOf(config.port()),
                 String.valueOf(config.username()),
-                String.valueOf(config.password()),
                 config.starttls() + ":" + config.ssl() + ":" + config.auth());
     }
 }

@@ -29,7 +29,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import CustomFieldDialog from "./CustomFieldDialog";
 
 const ENTITY_TYPES: CustomFieldEntityType[] = ["company", "person", "deal"];
@@ -164,8 +164,8 @@ export default function CustomFieldsPanel() {
     return (
         <div className="space-y-10">
             {ENTITY_TYPES.map((entityType, index) => (
-                <Rise key={entityType} index={index} className="space-y-3">
-                    <SectionHeader
+                <Rise key={entityType} index={index} className="space-y-4">
+                    <SettingsSection
                         title={entityLabels[entityType]}
                         action={
                             !loading && (

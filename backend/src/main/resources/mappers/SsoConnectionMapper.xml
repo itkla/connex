@@ -23,6 +23,17 @@
     WHERE id = #{id}
   </select>
 
+  <select id="listLegacySecretConnections" resultType="SsoConnection">
+    SELECT <include refid="columns"/>
+    FROM sso_connection
+    WHERE (oidc_client_secret_enc IS NOT NULL
+        AND oidc_client_secret_enc != ''
+        AND oidc_client_secret_enc NOT LIKE 'secret:v1:%')
+       OR (saml_sp_private_key_enc IS NOT NULL
+        AND saml_sp_private_key_enc != ''
+        AND saml_sp_private_key_enc NOT LIKE 'secret:v1:%')
+  </select>
+
   <insert id="upsert">
     INSERT INTO sso_connection
       (org_id, protocol, enabled, enforce_sso, jit_workspace_id, default_role,
@@ -42,15 +53,27 @@
       default_role = VALUES(default_role),
       oidc_issuer = VALUES(oidc_issuer),
       oidc_client_id = VALUES(oidc_client_id),
-      oidc_client_secret_enc = COALESCE(#{oidcClientSecretEnc}, oidc_client_secret_enc),
+      oidc_client_secret_enc = VALUES(oidc_client_secret_enc),
       oidc_scopes = VALUES(oidc_scopes),
       saml_idp_entity_id = VALUES(saml_idp_entity_id),
       saml_sso_url = VALUES(saml_sso_url),
       saml_idp_metadata_xml = VALUES(saml_idp_metadata_xml),
       saml_idp_x509 = VALUES(saml_idp_x509),
-      saml_sp_private_key_enc = COALESCE(#{samlSpPrivateKeyEnc}, saml_sp_private_key_enc),
-      saml_sp_certificate = COALESCE(#{samlSpCertificate}, saml_sp_certificate)
+      saml_sp_private_key_enc = VALUES(saml_sp_private_key_enc),
+      saml_sp_certificate = VALUES(saml_sp_certificate)
   </insert>
+
+  <update id="updateOidcClientSecretReference">
+    UPDATE sso_connection
+    SET oidc_client_secret_enc = #{oidcClientSecretEnc}
+    WHERE org_id = #{orgId}
+  </update>
+
+  <update id="updateSamlSpPrivateKeyReference">
+    UPDATE sso_connection
+    SET saml_sp_private_key_enc = #{samlSpPrivateKeyEnc}
+    WHERE org_id = #{orgId}
+  </update>
 
   <delete id="deleteByOrg">
     DELETE FROM sso_connection WHERE org_id = #{orgId}

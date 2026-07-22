@@ -4,8 +4,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +23,7 @@ import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
@@ -26,8 +31,11 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -42,21 +50,26 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @RequiredArgsConstructor
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
+    private final UserMapper userMapper;
     private final OrganizationMapper organizationMapper;
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
+    private final NotificationMapper notificationMapper;
+    private final UserOffboardingService userOffboardingService;
     private final NotificationDelivery notificationDelivery;
+    private final NotificationStateVersionService notificationStateVersionService;
     private final TenantContext tenantContext;
     private final AuditService auditService;
     private final SystemActor systemActor;
+    private final SessionSecurityService sessionSecurityService;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** Built-in role permission bundles. Owner gets the full catalog. */
     private static final Set<Permission> MEMBER_PERMISSIONS = memberPermissions();
     private static final Set<Permission> ADMIN_PERMISSIONS = adminPermissions();
-    private static final Set<Permission> OWNER_PERMISSIONS = EnumSet.allOf(Permission.class);
+    private static final Set<Permission> OWNER_PERMISSIONS = Permission.grantableSet();
 
     private static EnumSet<Permission> memberPermissions() {
         return EnumSet.of(
@@ -66,15 +79,20 @@ public class WorkspaceService {
             Permission.ACTIVITY_CREATE, Permission.ACTIVITY_UPDATE, Permission.ACTIVITY_DELETE,
             Permission.NOTE_CREATE, Permission.NOTE_UPDATE, Permission.NOTE_DELETE,
             Permission.TASK_CREATE, Permission.TASK_UPDATE, Permission.TASK_DELETE,
-            Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE);
+            Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE,
+            Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_UPDATE,
+            Permission.REPORT_DELETE, Permission.GOAL_READ, Permission.CAMPAIGN_VIEW);
     }
 
     private static EnumSet<Permission> adminPermissions() {
         EnumSet<Permission> permissions = memberPermissions();
         permissions.addAll(EnumSet.of(
             Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
+            Permission.PRODUCT_MANAGE, Permission.DOCUMENT_MANAGE, Permission.DOCUMENT_APPROVE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
-            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE));
+            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE,
+            Permission.AI_USE, Permission.GOAL_MANAGE, Permission.CAMPAIGN_MANAGE,
+            Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE));
         return permissions;
     }
 
@@ -189,7 +207,11 @@ public class WorkspaceService {
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
+        userOffboardingService.prepareFreshMembership(workspace.getId(), ownerUserId);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
+        notificationStateVersionService.markChanged(ownerUserId);
+        auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
+                "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
         WorkspaceMembershipDto membership =
                 new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
         membership.setOrgId(orgId);
@@ -219,6 +241,10 @@ public class WorkspaceService {
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
         orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
+        auditService.record("org.create", "organization", organization.getId(), organization.getName(),
+                "Organization created", Map.of("ownerUserId", ownerUserId));
+        auditService.record("org.member.founding_owner", "organization", organization.getId(), organization.getName(),
+                "Founding organization owner granted", Map.of("userId", ownerUserId));
         return organization.getId();
     }
 
@@ -260,6 +286,25 @@ public class WorkspaceService {
         }
     }
 
+    /**
+     * Verifies the user is an active member of the workspace while holding a {@code FOR UPDATE} lock on
+     * their membership row until the surrounding transaction commits. Unlike {@link #requireMember}, this
+     * closes the time-of-check/time-of-use gap against concurrent offboarding: a caller must invoke it
+     * inside its own transaction (e.g. {@code updateOwner}) so the assignment and the membership check
+     * cannot straddle {@code UserOffboardingService}'s membership lock, preventing a dangling owner id
+     * pointing at a just-removed member.
+     */
+    public void lockAndRequireMember(int workspaceId, int userId) {
+        if (workspaceMapper.lockActiveMembership(workspaceId, userId) == null) {
+            throw new ForbiddenException("User " + userId + " is not a member of this workspace");
+        }
+    }
+
+    /** Returns whether every requested id is an active member of the workspace. */
+    public boolean areActiveMembers(int workspaceId, List<Integer> memberIds) {
+        return workspaceMapper.countActiveMembers(workspaceId, memberIds) == memberIds.size();
+    }
+
     public void requireRole(int workspaceId, int userId, Role min) {
         Role actual = Role.of(workspaceMapper.getRole(workspaceId, userId));
         if (actual == null || actual.ordinal() < min.ordinal()) {
@@ -289,6 +334,11 @@ public class WorkspaceService {
             return EnumSet.noneOf(Permission.class);
         }
         return builtInPermissions(role);
+    }
+
+    /** Returns the current member's effective permissions in the active workspace. */
+    public Set<Permission> getCurrentPermissions() {
+        return permissionsFor(getCurrentWorkspaceId(), currentUser().getId());
     }
 
     /** The fixed permission bundle backing a built-in role. */
@@ -327,12 +377,50 @@ public class WorkspaceService {
     /**
      * Refuses when the user is the only active owner of any workspace — deleting the account would
      * leave that workspace ownerless (workspace_member is {@code ON DELETE CASCADE}, bypassing the
-     * last-owner safeguards on the member operations). Each owned workspace's owner rows are read
-     * under a lock so concurrent co-owner deletions serialize; must run in a transaction. They must
-     * transfer ownership first.
+     * last-owner safeguards on the member operations). Owned workspace roots are locked in id
+     * order to serialize owner-sensitive operations, then all of the user's membership rows are
+     * locked in workspace order before the owner rows are read. This matches notification mark-all
+     * ordering while preserving the concurrent co-owner deletion guard; must run in a transaction.
+     * They must transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyWorkspace(int userId) {
-        for (int workspaceId : workspaceMapper.workspaceIdsOwnedBy(userId)) {
+        List<Integer> ownedWorkspaceIds = lockOwnedWorkspaceRoots(userId);
+        notificationMapper.lockRecipientMemberships(userId);
+        assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
+    }
+
+    List<Integer> lockOwnedWorkspaceRoots(int userId) {
+        List<Integer> ownedWorkspaceIds = discoverOwnedWorkspaceIds(userId);
+        lockAccountWorkspaceRoots(ownedWorkspaceIds, List.of());
+        return List.copyOf(ownedWorkspaceIds);
+    }
+
+    List<Integer> discoverOwnedWorkspaceIds(int userId) {
+        return List.copyOf(workspaceMapper.workspaceIdsOwnedBy(userId));
+    }
+
+    void lockAccountWorkspaceRoots(
+            List<Integer> ownedWorkspaceIds, List<Integer> sharedWorkspaceIds) {
+        Set<Integer> owned = new HashSet<>(ownedWorkspaceIds);
+        TreeSet<Integer> ordered = new TreeSet<>(ownedWorkspaceIds);
+        ordered.addAll(sharedWorkspaceIds);
+        for (int workspaceId : ordered) {
+            if (owned.contains(workspaceId)) {
+                workspaceMapper.lockWorkspace(workspaceId);
+            } else {
+                workspaceMapper.lockWorkspaceForShare(workspaceId);
+            }
+        }
+    }
+
+    private void lockWorkspaceMutationRoot(int workspaceId) {
+        if (workspaceMapper.lockWorkspace(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+    }
+
+    void assertNotSoleOwnerOfWorkspaces(List<Integer> ownedWorkspaceIds) {
+        for (int workspaceId : ownedWorkspaceIds) {
             if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("Transfer workspace ownership before deleting your account");
             }
@@ -358,9 +446,11 @@ public class WorkspaceService {
         EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
         for (String value : raw) {
             try {
-                permissions.add(Permission.valueOf(value));
-            } catch (IllegalArgumentException ignored) {
-                // Unknown catalog key (e.g. a removed permission); skip it.
+                Permission permission = Permission.valueOf(value);
+                if (Permission.isGrantable(permission)) {
+                    permissions.add(permission);
+                }
+            } catch (IllegalArgumentException | NullPointerException ignored) {
             }
         }
         return permissions;
@@ -378,7 +468,10 @@ public class WorkspaceService {
      * @param requested the permissions being conferred
      */
     public void requireGrantable(int workspaceId, int actorId, Set<Permission> requested) {
-        Set<Permission> held = permissionsFor(workspaceId, actorId);
+        requireGrantable(permissionsFor(workspaceId, actorId), requested);
+    }
+
+    private static void requireGrantable(Set<Permission> held, Set<Permission> requested) {
         for (Permission permission : requested) {
             if (!held.contains(permission)) {
                 throw new ForbiddenException("You cannot grant the " + permission
@@ -388,16 +481,19 @@ public class WorkspaceService {
     }
 
     /** Assigns a custom role to a member; managing roles requires the ROLE_MANAGE permission. */
+    @Transactional
     public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
         requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
-        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
-        if (target == null) {
-            throw new ResourceNotFoundException("User is not a member of this workspace");
-        }
-        if (!roleMapper.roleExists(workspaceId, roleId)) {
-            throw new ResourceNotFoundException("Role not found in this workspace");
-        }
-        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(workspaceId, roleId)));
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId,
+            actorId,
+            targetUserId,
+            Permission.ROLE_MANAGE,
+            roleId,
+            "Role not found in this workspace");
+        requireGrantable(locks.actorPermissions(), locks.permissionsForRole(roleId));
+        MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
         workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Assigned a custom role to " + target.getDisplayName(), null);
@@ -443,25 +539,169 @@ public class WorkspaceService {
     @Transactional
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         Role newRole = parseAssignableRole(roleRaw);
-        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
-        if (target == null) {
-            throw new ResourceNotFoundException("User is not a member of this workspace");
-        }
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId,
+            actorId,
+            targetUserId,
+            Permission.MEMBER_MANAGE,
+            null,
+            null);
+        WorkspaceMember actorMembership = locks.actorMembership();
+        WorkspaceMember targetMembership = locks.targetMembership();
         if (newRole == Role.OWNER) {
-            requireRole(workspaceId, actorId, Role.OWNER);
+            requireLockedRole(actorMembership, Role.OWNER);
         }
-        if ("owner".equals(target.getRole()) && newRole != Role.OWNER) {
-            requireRole(workspaceId, actorId, Role.OWNER);
-            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
+        if ("owner".equals(targetMembership.getRole()) && newRole != Role.OWNER) {
+            requireLockedRole(actorMembership, Role.OWNER);
+            if ("active".equals(targetMembership.getStatus())
+                    && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
-        requireGrantable(workspaceId, actorId, builtInPermissions(newRole));
+        requireGrantable(locks.actorPermissions(), builtInPermissions(newRole));
+        MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
         workspaceMapper.updateMemberRole(workspaceId, targetUserId, newRole.name().toLowerCase());
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Changed " + target.getDisplayName() + " to " + newRole.name().toLowerCase(), null);
         return workspaceMapper.getMember(workspaceId, targetUserId);
+    }
+
+    /** Locks current authorization and the exact custom-role root before deletion. */
+    public void lockRoleDeletionAuthorization(int workspaceId, int actorId, int roleId) {
+        lockRoleMutationAuthorization(workspaceId, actorId, roleId, Set.of());
+    }
+
+    void lockRoleMutationAuthorization(
+            int workspaceId,
+            int actorId,
+            Integer roleId,
+            Set<Permission> requestedPermissions) {
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId,
+            actorId,
+            null,
+            Permission.ROLE_MANAGE,
+            roleId,
+            "Role not found");
+        requireGrantable(locks.actorPermissions(), requestedPermissions);
+    }
+
+    private LockedRoleMutation lockRoleMutation(
+            int workspaceId,
+            int actorId,
+            Integer targetUserId,
+            Permission requiredPermission,
+            Integer requestedRoleId,
+            String missingRequestedRoleMessage) {
+        TreeSet<Integer> userIds = new TreeSet<>();
+        userIds.add(actorId);
+        if (targetUserId != null) {
+            userIds.add(targetUserId);
+        }
+        for (int userId : userIds) {
+            if (userMapper.lockById(userId) == null) {
+                if (userId == actorId) {
+                    throw new ForbiddenException(
+                        "Requires the " + requiredPermission + " permission in this workspace");
+                }
+                throw roleMutationTargetNotFound();
+            }
+        }
+
+        lockWorkspaceMutationRoot(workspaceId);
+        Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
+        for (int userId : userIds) {
+            WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
+            memberships.put(userId, membership);
+        }
+
+        WorkspaceMember actorMembership = memberships.get(actorId);
+        if (!isExactMembership(actorMembership, workspaceId, actorId)
+                || !"active".equals(actorMembership.getStatus())) {
+            throw new ForbiddenException(
+                "Requires the " + requiredPermission + " permission in this workspace");
+        }
+        WorkspaceMember targetMembership = targetUserId == null
+            ? null
+            : memberships.get(targetUserId);
+        if (targetUserId != null
+                && (!isExactMembership(targetMembership, workspaceId, targetUserId)
+                    || !("active".equals(targetMembership.getStatus())
+                        || "pending".equals(targetMembership.getStatus())))) {
+            throw roleMutationTargetNotFound();
+        }
+
+        TreeSet<Integer> roleIds = new TreeSet<>();
+        if (actorMembership.getRoleId() != null) {
+            roleIds.add(actorMembership.getRoleId());
+        }
+        if (requestedRoleId != null) {
+            roleIds.add(requestedRoleId);
+        }
+        for (int roleId : roleIds) {
+            if (roleMapper.lockRole(workspaceId, roleId) == null) {
+                if (requestedRoleId != null && roleId == requestedRoleId) {
+                    throw new ResourceNotFoundException(missingRequestedRoleMessage);
+                }
+                throw new ForbiddenException(
+                    "Requires the " + requiredPermission + " permission in this workspace");
+            }
+        }
+
+        Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        for (int roleId : roleIds) {
+            rolePermissions.put(
+                roleId,
+                parsePermissions(roleMapper.lockPermissions(workspaceId, roleId)));
+        }
+        Set<Permission> actorPermissions;
+        if (actorMembership.getRoleId() == null) {
+            Role actorRole = Role.of(actorMembership.getRole());
+            if (actorRole == null) {
+                throw new ForbiddenException(
+                    "Requires the " + requiredPermission + " permission in this workspace");
+            }
+            actorPermissions = builtInPermissions(actorRole);
+        } else {
+            actorPermissions = rolePermissions.get(actorMembership.getRoleId());
+        }
+        if (actorPermissions == null || !actorPermissions.contains(requiredPermission)) {
+            throw new ForbiddenException(
+                "Requires the " + requiredPermission + " permission in this workspace");
+        }
+        return new LockedRoleMutation(
+            actorMembership,
+            targetMembership,
+            Set.copyOf(actorPermissions),
+            Map.copyOf(rolePermissions));
+    }
+
+    private static boolean isExactMembership(
+            WorkspaceMember membership, int workspaceId, int userId) {
+        return membership != null
+            && membership.getWorkspaceId() == workspaceId
+            && membership.getUserId() == userId;
+    }
+
+    private static void requireLockedRole(WorkspaceMember membership, Role minimum) {
+        Role actual = Role.of(membership.getRole());
+        if (actual == null || actual.ordinal() < minimum.ordinal()) {
+            throw new ForbiddenException("Requires " + minimum + " role in this workspace");
+        }
+    }
+
+    private static ResourceNotFoundException roleMutationTargetNotFound() {
+        return new ResourceNotFoundException("User is not a member of this workspace");
+    }
+
+    private MemberDto getLockedRoleMutationTarget(int workspaceId, int targetUserId) {
+        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
+        if (target == null) {
+            throw new ResourceNotFoundException("User is not a member of this workspace");
+        }
+        return target;
     }
 
     /**
@@ -472,26 +712,38 @@ public class WorkspaceService {
     @Transactional
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User is not a member of this workspace");
         }
         if ("owner".equals(target.getRole())) {
             requireRole(workspaceId, actorId, Role.OWNER);
+            lockOwnedWorkspaceRoots(targetUserId);
+            notificationMapper.lockRecipientMemberships(targetUserId);
             if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, targetUserId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, targetUserId);
+        userOffboardingService.detachMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
+        notificationStateVersionService.markChanged(targetUserId);
         auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
                 "Removed " + target.getDisplayName() + " from the workspace", null);
     }
 
-    /** Adds a user as a PENDING member and notifies them to accept; they aren't a real member until they do. */
+    /**
+     * Adds a user as a PENDING member and notifies them to accept; they aren't a
+     * real member until they do. Any notification rows left over from an earlier
+     * membership are cleaned first — with the cross-plane cascades gone (#440
+     * increment 3) a row inserted while a removal was committing could otherwise
+     * resurface in the re-invited member's inbox.
+     */
+    @Transactional
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        userOffboardingService.prepareFreshMembership(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
+        notificationStateVersionService.markChanged(target.getId());
         notifyJoinRequest(workspaceId, target.getId(), actor);
         auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
                 "Invited " + target.getDisplayName() + " to join", null);
@@ -507,13 +759,18 @@ public class WorkspaceService {
      * @param userId the user to add
      * @param role the role to grant on a fresh join
      */
+    @Transactional
     public void ensureActiveMember(int workspaceId, int userId, String role) {
         if (isMember(workspaceId, userId)) {
             return;
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, userId);
         workspaceMapper.addMember(workspaceId, userId, role);
-        auditService.record("workspace.member.sso_provision", "workspace", workspaceId, null,
-                "Provisioned an SSO member into the workspace", null);
+        notificationStateVersionService.markChanged(userId);
+        int orgId = workspaceMapper.getOrgId(workspaceId);
+        auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,
+                "Provisioned an SSO member into a workspace",
+                Map.of("workspaceId", workspaceId, "userId", userId, "role", role));
     }
 
     /** Workspaces the user has been added to but not yet accepted. */
@@ -526,14 +783,28 @@ public class WorkspaceService {
      * email-domain ceiling (#316) is re-applied at activation, so a pending row that predates a
      * later-tightened org policy cannot slip an out-of-policy member into the workspace.
      */
+    @Transactional
     public WorkspaceMembershipDto approveMembership(int workspaceId, int userId) {
+        if (userMapper.lockById(userId) == null
+                || workspaceMapper.lockWorkspace(workspaceId) == null) {
+            throw pendingMembershipNotFound();
+        }
+        WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
+        if (!isExactMembership(membership, workspaceId, userId)
+                || !"pending".equals(membership.getStatus())) {
+            throw pendingMembershipNotFound();
+        }
         MemberDto pending = workspaceMapper.getMember(workspaceId, userId);
-        if (pending != null && !orgAllowedDomainService.isJoinAllowed(getOrgId(workspaceId), pending.getEmail())) {
+        if (pending == null) {
+            throw pendingMembershipNotFound();
+        }
+        if (!orgAllowedDomainService.isJoinAllowed(getOrgId(workspaceId), pending.getEmail())) {
             throw new ForbiddenException("This organization only allows members from approved email domains");
         }
         if (workspaceMapper.activateMember(workspaceId, userId) == 0) {
-            throw new ResourceNotFoundException("No pending invitation for this workspace");
+            throw pendingMembershipNotFound();
         }
+        notificationStateVersionService.markChanged(userId);
         auditService.record("workspace.member.join", "workspace", workspaceId, null, "Accepted invitation", null);
         return workspaceMapper.getMembershipsForUser(userId).stream()
             .filter(m -> m.getId() == workspaceId)
@@ -541,13 +812,21 @@ public class WorkspaceService {
             .orElseThrow(() -> new ResourceNotFoundException("Membership not found"));
     }
 
-    /** The user declines a pending invitation; the row (and its notification) is removed. */
+    private static ResourceNotFoundException pendingMembershipNotFound() {
+        return new ResourceNotFoundException("No pending invitation for this workspace");
+    }
+
+    /** The user declines a pending invitation; the row and its notifications are removed. */
+    @Transactional
     public void declineMembership(int workspaceId, int userId) {
         MemberDto member = workspaceMapper.getMember(workspaceId, userId);
         if (member == null || !"pending".equals(member.getStatus())) {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }
+        notificationMapper.lockRecipientMemberships(userId);
+        notificationMapper.deleteAllForRecipient(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
+        notificationStateVersionService.markChanged(userId);
         auditService.record("workspace.member.decline", "workspace", workspaceId, null, "Declined invitation", null);
     }
 
@@ -558,13 +837,33 @@ public class WorkspaceService {
         if (role == null) {
             throw new ResourceNotFoundException("You are not a member of this workspace");
         }
-        if ("owner".equals(role) && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
-            throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
+        if ("owner".equals(role)) {
+            lockOwnedWorkspaceRoots(userId);
+            notificationMapper.lockRecipientMemberships(userId);
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
+                throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
+            }
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, userId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, userId);
+        userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
+        notificationStateVersionService.markChanged(userId);
         auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
+    }
+
+    /**
+     * Leaves a workspace and atomically persists the caller's next active workspace.
+     * @param workspaceId the workspace being left
+     * @param userId the departing member
+     * @return the next active workspace id, or null when no membership remains
+     */
+    @Transactional
+    public Integer leaveWorkspaceAndSelectNext(int workspaceId, int userId) {
+        leaveWorkspace(workspaceId, userId);
+        Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
+        if (nextWorkspaceId != null) {
+            rememberActive(userId, nextWorkspaceId);
+        }
+        return nextWorkspaceId;
     }
 
     private void notifyJoinRequest(int workspaceId, int recipientId, User actor) {
@@ -607,5 +906,17 @@ public class WorkspaceService {
             throw new ForbiddenException("Authentication is required to resolve a workspace");
         }
         return user;
+    }
+
+    private record LockedRoleMutation(
+        WorkspaceMember actorMembership,
+        WorkspaceMember targetMembership,
+        Set<Permission> actorPermissions,
+        Map<Integer, Set<Permission>> rolePermissions) {
+
+        private Set<Permission> permissionsForRole(int roleId) {
+            Set<Permission> permissions = rolePermissions.get(roleId);
+            return permissions == null ? Set.of() : permissions;
+        }
     }
 }

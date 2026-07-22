@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
@@ -30,6 +31,9 @@ public class PersonDto {
 
     private Integer workspaceId;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer ownerId;
+
     @NotBlank
     @Size(max = 255)
     private String name;
@@ -58,6 +62,7 @@ public class PersonDto {
     private String createdAt;
     private String updatedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String imageUrl;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
@@ -65,6 +70,12 @@ public class PersonDto {
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Boolean introExcluded;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime suspendedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime provisionCeasedAt;
 
     public static PersonDto from(Person p) {
         if (p == null) return null;
@@ -75,6 +86,7 @@ public class PersonDto {
     protected static <T extends PersonDto> T populate(T dto, Person p) {
         dto.setId(p.getId());
         dto.setWorkspaceId(p.getWorkspaceId());
+        dto.setOwnerId(p.getOwnerId());
         dto.setName(p.getName());
         dto.setEmail(p.getEmail());
         dto.setPhone(p.getPhone());
@@ -91,6 +103,8 @@ public class PersonDto {
         dto.setImageUrl(p.getImageUrl());
         dto.setRiskExcluded(p.isRiskExcluded());
         dto.setIntroExcluded(p.isIntroExcluded());
+        dto.setSuspendedAt(p.getSuspendedAt());
+        dto.setProvisionCeasedAt(p.getProvisionCeasedAt());
         return dto;
     }
 

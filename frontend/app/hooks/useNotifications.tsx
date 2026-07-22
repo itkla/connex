@@ -3,10 +3,16 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
+import {
+    emitNotificationStateChanged,
+    onAllNotificationsRead,
+    onNotificationStateChanged,
+} from "@/app/components/notifications/notificationEvents";
 import { getNotificationCounts } from "@/app/lib/api";
 import {
     createNotificationSocket,
@@ -20,11 +26,14 @@ const POLL_SAFETY_INTERVAL_MS = 300_000;
 const SEEN_LIMIT = 200;
 
 type NotificationContextValue = {
+    recipientId: number;
     unread: number;
+    snoozed: number;
+    quietHoursActive: boolean;
     refreshUnread: () => Promise<void>;
-    adjustUnread: (delta: number) => void;
-    setUnread: (value: number) => void;
 };
+
+const MAX_TIMEOUT_DELAY_MS = 2_147_483_647;
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
@@ -35,17 +44,30 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
  * fallback — every 45s when the socket is down, and a slow 5-minute safety net
  * while it is connected.
  */
-export function NotificationProvider({ children }: { children: React.ReactNode }) {
+export function NotificationProvider({
+    children,
+    recipientId,
+}: {
+    children: React.ReactNode;
+    recipientId: number;
+}) {
     const [unread, setUnread] = useState(0);
+    const [snoozed, setSnoozed] = useState(0);
+    const [quietHoursActive, setQuietHoursActive] = useState(false);
     const [connected, setConnected] = useState(false);
     const requestRef = useRef<AbortController | null>(null);
     const loadingRef = useRef(false);
     const pendingRef = useRef(false);
+    const mutationGenerationRef = useRef(0);
+    const observedStateVersionRef = useRef(0);
+    const unreadRef = useRef(0);
+    const snoozeExpiryTimerRef = useRef<number | null>(null);
+    const snoozeExpiryDueRef = useRef(false);
     const seenRef = useRef<Set<string>>(new Set());
 
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
+    const { openNotification } = useNotificationWorkspaceActions();
 
     const refreshUnread = useCallback(async () => {
         if (document.hidden) return;
@@ -54,15 +76,59 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             return;
         }
         loadingRef.current = true;
+        let staleRetryAvailable = true;
         try {
             do {
                 pendingRef.current = false;
                 requestRef.current?.abort();
                 const controller = new AbortController();
+                const generation = mutationGenerationRef.current;
                 requestRef.current = controller;
                 try {
+                    const requestStartedAt = performance.now();
                     const counts = await getNotificationCounts({ signal: controller.signal });
-                    setUnread(counts.unread);
+                    const roundTripMs = performance.now() - requestStartedAt;
+                    if (generation === mutationGenerationRef.current) {
+                        if (counts.stateVersion < observedStateVersionRef.current && staleRetryAvailable) {
+                            staleRetryAvailable = false;
+                            pendingRef.current = true;
+                        } else if (counts.stateVersion >= observedStateVersionRef.current) {
+                            const previousVersion = observedStateVersionRef.current;
+                            const previousUnread = unreadRef.current;
+                            const snoozeExpiryDue = snoozeExpiryDueRef.current;
+                            snoozeExpiryDueRef.current = false;
+                            observedStateVersionRef.current = counts.stateVersion;
+                            unreadRef.current = counts.unread;
+                            setUnread(counts.unread);
+                            setSnoozed(counts.snoozed);
+                            setQuietHoursActive(counts.quietHoursActive);
+                            if (snoozeExpiryTimerRef.current != null) {
+                                window.clearTimeout(snoozeExpiryTimerRef.current);
+                                snoozeExpiryTimerRef.current = null;
+                            }
+                            if (counts.nextSnoozeExpiry) {
+                                const delay = notificationSnoozeDelayMs(
+                                    counts.nextSnoozeExpiry,
+                                    counts.asOf,
+                                    roundTripMs,
+                                );
+                                if (delay != null) {
+                                    snoozeExpiryTimerRef.current = window.setTimeout(
+                                        () => {
+                                            snoozeExpiryDueRef.current = true;
+                                            void refreshUnread();
+                                        },
+                                        Math.min(MAX_TIMEOUT_DELAY_MS, Math.max(0, delay + 100)),
+                                    );
+                                }
+                            }
+                            if (counts.stateVersion > previousVersion) {
+                                emitNotificationStateChanged(recipientId, counts.stateVersion);
+                            } else if (counts.unread !== previousUnread || snoozeExpiryDue) {
+                                emitNotificationStateChanged(recipientId, counts.stateVersion, true);
+                            }
+                        }
+                    }
                 } catch (error) {
                     if (!(error instanceof DOMException && error.name === "AbortError")) {
                         console.error("Failed to refresh notification count", error);
@@ -74,7 +140,36 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         } finally {
             loadingRef.current = false;
         }
-    }, []);
+    }, [recipientId]);
+
+    useEffect(() => {
+        const invalidateRequest = () => {
+            mutationGenerationRef.current += 1;
+            pendingRef.current = false;
+            requestRef.current?.abort();
+        };
+        const stopAllRead = onAllNotificationsRead(
+            recipientId,
+            ({ stateVersion, unread: nextUnread }) => {
+                invalidateRequest();
+                if (stateVersion >= observedStateVersionRef.current) {
+                    observedStateVersionRef.current = stateVersion;
+                    unreadRef.current = nextUnread;
+                    setUnread(nextUnread);
+                }
+            },
+        );
+        const stopStateChanged = onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
+            if (!forceRefresh && stateVersion <= observedStateVersionRef.current) return;
+            observedStateVersionRef.current = Math.max(observedStateVersionRef.current, stateVersion);
+            invalidateRequest();
+            void refreshUnread();
+        });
+        return () => {
+            stopAllRead();
+            stopStateChanged();
+        };
+    }, [recipientId, refreshUnread]);
 
     const toastNotification = useCallback(
         (notification: Notification) => {
@@ -82,22 +177,31 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             const url = safeNotificationUrl(notification.actionUrl);
             const options: ExternalToast = {
                 description: content.body,
-                ...(url ? { action: { label: t("viewAction"), onClick: () => router.push(url) } } : {}),
+                ...(url ? {
+                    action: {
+                        label: t("viewAction"),
+                        onClick: () => {
+                            void openNotification(notification)
+                                .then((opened) => {
+                                    if (!opened) toastError(t("actionError"));
+                                })
+                                .catch(() => toastError(t("actionError")));
+                        },
+                    },
+                } : {}),
             };
             if (notification.severity === "critical") toastError(content.title, options);
             else if (notification.severity === "warning") toastWarn(content.title, options);
             else toastInfo(content.title, options);
         },
-        [t, locale, router],
+        [t, locale, openNotification],
     );
 
     const handleFrame = useCallback(
         (frame: RealtimeNotificationFrame) => {
-            if (frame.kind === "updated") {
-                void refreshUnread();
-                return;
-            }
+            emitNotificationStateChanged(recipientId, frame.stateVersion);
             const notification = frame.notification ?? null;
+            if (frame.kind !== "created") return;
             const key = frame.dedupeKey ?? (notification ? `${notification.id}:${notification.triggeredAt}` : null);
             if (key) {
                 if (seenRef.current.has(key)) return;
@@ -107,10 +211,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                     if (oldest !== undefined) seenRef.current.delete(oldest);
                 }
             }
-            void refreshUnread();
             if (notification && !document.hidden) toastNotification(notification);
         },
-        [refreshUnread, toastNotification],
+        [recipientId, toastNotification],
     );
 
     const handleFrameRef = useRef(handleFrame);
@@ -129,6 +232,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             window.clearTimeout(initial);
             document.removeEventListener("visibilitychange", onVisibilityChange);
             requestRef.current?.abort();
+            if (snoozeExpiryTimerRef.current != null) {
+                window.clearTimeout(snoozeExpiryTimerRef.current);
+                snoozeExpiryTimerRef.current = null;
+            }
         };
     }, [refreshUnread]);
 
@@ -151,12 +258,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         return () => socket.deactivate();
     }, [refreshUnread]);
 
-    const adjustUnread = useCallback((delta: number) => {
-        setUnread((value) => Math.max(0, value + delta));
-    }, []);
-
     return (
-        <NotificationContext.Provider value={{ unread, refreshUnread, adjustUnread, setUnread }}>
+        <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread }}>
             {children}
         </NotificationContext.Provider>
     );

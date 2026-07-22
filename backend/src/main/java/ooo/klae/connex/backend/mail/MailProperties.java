@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * Instance-wide SMTP transport configuration, the default sender used for
@@ -13,12 +14,16 @@ import lombok.Data;
  * built and delivery falls back to the logging seams.
  */
 @Data
+@ToString(exclude = { "password", "secretKey" })
 @Component
 @ConfigurationProperties(prefix = "connex.mail")
 public class MailProperties {
 
     /** Master switch: when false, no SMTP transport is built and real sending is disabled. */
     private boolean enabled = false;
+
+    /** Managed mode: when true, workspace SMTP overrides are disabled. */
+    private boolean managed = false;
 
     private String host;
     private int port = 587;
@@ -38,9 +43,8 @@ public class MailProperties {
     private int writeTimeoutMs = 10_000;
 
     /**
-     * Base64-encoded AES key (128/192/256-bit) used to encrypt per-workspace SMTP
-     * passwords at rest. Required only once a workspace stores its own SMTP password;
-     * rotating it invalidates previously stored passwords.
+     * Legacy Base64-encoded AES key (128/192/256-bit) for pre-secret-store
+     * workspace SMTP password blobs.
      */
     private String secretKey;
 

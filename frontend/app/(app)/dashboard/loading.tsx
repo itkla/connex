@@ -7,7 +7,7 @@ function SectionLabel() {
 export default function DashboardLoading() {
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
                 <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between md:gap-8">
                     <div className="space-y-3">
                         <Skeleton className="h-6 w-32" />

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.Optional;
+
 import org.springframework.stereotype.Component;
 
 /**
@@ -7,16 +9,25 @@ import org.springframework.stereotype.Component;
  * once per request by {@link TenantResolutionInterceptor} and read by
  * {@code WorkspaceService.getCurrentWorkspaceId()}. Off the request thread (tests,
  * scheduled jobs) it stays unresolved and callers fall back to membership lookup.
+ * The optional catalog pins the org's placement-routed database for the whole
+ * request span; {@code null} means the default (shared) catalog.
  */
 @Component
 public class TenantContext {
 
-    private record Scope(int workspaceId, int orgId, int userId, String role) {}
+    private record Scope(int workspaceId, int orgId, int userId, String role, String catalog) {}
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<Optional<String>> CATALOG_OVERRIDE = new ThreadLocal<>();
 
-    public void set(int workspaceId, int orgId, int userId, String role) {
-        CURRENT.set(new Scope(workspaceId, orgId, userId, role));
+    /**
+     * Installs the scope for the current thread. The catalog must come from
+     * {@link TenantCatalogResolver} (or be an explicit {@code null} for the
+     * default/shared catalog) — there is deliberately no catalog-less overload,
+     * so every installer decides routing explicitly.
+     */
+    public void set(int workspaceId, int orgId, int userId, String role, String catalog) {
+        CURRENT.set(new Scope(workspaceId, orgId, userId, role, catalog));
     }
 
     public boolean isResolved() {
@@ -41,6 +52,53 @@ public class TenantContext {
     public String getRole() {
         Scope s = CURRENT.get();
         return s == null ? null : s.role();
+    }
+
+    /**
+     * The identity scope's own catalog, ignoring any {@code TenantWorkScope}
+     * override — the value save/restore code must snapshot, since restoring an
+     * override value into the scope would corrupt it once the override pops.
+     */
+    public String getScopeCatalog() {
+        Scope s = CURRENT.get();
+        return s == null ? null : s.catalog();
+    }
+
+    /** Whether a {@code TenantWorkScope} catalog override is active on the thread. */
+    boolean hasCatalogOverride() {
+        return CATALOG_OVERRIDE.get() != null;
+    }
+
+    public String getCatalog() {
+        Optional<String> override = CATALOG_OVERRIDE.get();
+        if (override != null) {
+            return override.orElse(null);
+        }
+        Scope s = CURRENT.get();
+        return s == null ? null : s.catalog();
+    }
+
+    /**
+     * Swaps the thread's catalog override and returns the previous one so the
+     * caller can restore it in a {@code finally}. An override takes precedence
+     * over the identity scope's catalog: {@code Optional.empty()} forces the
+     * default (unrouted) catalog — how control-plane reads such as placement
+     * resolution stay off tenant catalogs — while a present value pins a
+     * routed catalog for background work that has no principal to install.
+     * {@code null} clears the override. Only {@link TenantWorkScope} should
+     * call this; everything else uses its structured runners.
+     *
+     * @param override the new override, or {@code null} for none
+     * @return the previous override, or {@code null} when there was none
+     */
+    Optional<String> swapCatalogOverride(Optional<String> override) {
+        Optional<String> previous = CATALOG_OVERRIDE.get();
+        if (override == null) {
+            CATALOG_OVERRIDE.remove();
+        } else {
+            CATALOG_OVERRIDE.set(override);
+        }
+        return previous;
     }
 
     public void clear() {

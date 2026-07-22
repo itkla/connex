@@ -11,17 +11,21 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
 class RbacTest extends AbstractServiceTest {
 
     @Autowired WorkspaceService workspaceService;
     @Autowired RoleService roleService;
+    @Autowired RoleMapper roleMapper;
 
     @Test
     void builtInRolesMapToExpectedPermissions() {
@@ -31,11 +35,22 @@ class RbacTest extends AbstractServiceTest {
 
         Set<Permission> ownerPerms = workspaceService.permissionsFor(ws.getId(), currentUser.getId());
         assertTrue(ownerPerms.contains(Permission.ROLE_MANAGE));
-        assertTrue(ownerPerms.contains(Permission.WORKSPACE_DELETE));
+        assertTrue(ownerPerms.contains(Permission.CAMPAIGN_MANAGE));
+        assertTrue(ownerPerms.contains(Permission.CONSENT_MANAGE));
+        assertFalse(ownerPerms.contains(Permission.WORKSPACE_DELETE));
+        assertFalse(ownerPerms.contains(Permission.SSO_MANAGE));
 
         Set<Permission> memberPerms = workspaceService.permissionsFor(ws.getId(), member.getId());
         assertTrue(memberPerms.contains(Permission.DEAL_DELETE));
         assertTrue(memberPerms.contains(Permission.PERSON_CREATE));
+        assertTrue(memberPerms.containsAll(Set.of(
+            Permission.REPORT_READ,
+            Permission.REPORT_CREATE,
+            Permission.REPORT_UPDATE,
+            Permission.REPORT_DELETE,
+            Permission.CAMPAIGN_VIEW)));
+        assertFalse(memberPerms.contains(Permission.CAMPAIGN_MANAGE));
+        assertFalse(memberPerms.contains(Permission.CONSENT_MANAGE));
         assertFalse(memberPerms.contains(Permission.COMPANY_DELETE));
         assertFalse(memberPerms.contains(Permission.TAG_MANAGE));
         assertFalse(memberPerms.contains(Permission.MEMBER_MANAGE));
@@ -86,6 +101,46 @@ class RbacTest extends AbstractServiceTest {
     }
 
     @Test
+    void customRolesCannotGrantInertPermissions() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Inert Permission WS", currentUser.getId());
+
+        assertThrows(BadRequestException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "Delete Workspace",
+                List.of("WORKSPACE_DELETE")));
+        assertThrows(BadRequestException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "SSO Manager",
+                List.of("SSO_MANAGE")));
+    }
+
+    @Test
+    void inertPermissionRowsDoNotReadBackOrAuthorize() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Stale Inert Permission WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        WorkspaceRole role = roleService.createRole(ws.getId(), currentUser.getId(), "Stale",
+            List.of("COMPANY_CREATE"));
+
+        roleMapper.insertPermissions(ws.getId(), role.getId(), List.of("SSO_MANAGE", "WORKSPACE_DELETE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), member.getId(), role.getId());
+
+        WorkspaceRole readBack = roleService.listRoles(ws.getId(), currentUser.getId()).stream()
+            .filter(candidate -> candidate.getId() == role.getId())
+            .findFirst()
+            .orElseThrow();
+        assertEquals(List.of("COMPANY_CREATE"), readBack.getPermissions());
+        assertEquals(Set.of(Permission.COMPANY_CREATE), workspaceService.permissionsFor(ws.getId(), member.getId()));
+    }
+
+    @Test
+    void roleManagementRequiresRecentWebAuthnStepUp() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Step Up WS", currentUser.getId());
+        RequestContextHolder.resetRequestAttributes();
+
+        assertThrows(ForbiddenException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "No Step Up", List.of()));
+    }
+
+    @Test
     void adminCannotDemoteAnOwnerWithoutOwnerRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner Guard WS", currentUser.getId());
         User coOwner = newUser();
@@ -108,6 +163,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE", "PERSON_CREATE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), delegate.getId(), "SuperRole", List.of("MEMBER_MANAGE")));
@@ -125,6 +181,7 @@ class RbacTest extends AbstractServiceTest {
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
         WorkspaceRole superRole = roleService.createRole(ws.getId(), currentUser.getId(), "Super",
             List.of("MEMBER_MANAGE", "WORKSPACE_SETTINGS"));
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
@@ -138,6 +195,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole hrRole = roleService.createRole(ws.getId(), currentUser.getId(), "HR",
             List.of("MEMBER_MANAGE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), hrRole.getId());
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.changeMemberRole(ws.getId(), delegate.getId(), delegate.getId(), "admin"));

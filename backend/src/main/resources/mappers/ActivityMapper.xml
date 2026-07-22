@@ -30,19 +30,171 @@
     WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC
   </select>
 
+  <select id="getActivitiesPage" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY timestamp DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getActivitiesFilteredPage" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+    <if test="personId != null">
+      AND person_id = #{personId}
+    </if>
+    <if test="dealId != null">
+      AND deal_id = #{dealId}
+    </if>
+    <if test="createdById != null">
+      AND created_by_id = #{createdById}
+    </if>
+    ORDER BY timestamp DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countActivities" resultType="long">
+    SELECT COUNT(*) FROM activity
+    WHERE workspace_id = #{workspaceId}
+    <if test="personId != null">
+      AND person_id = #{personId}
+    </if>
+    <if test="dealId != null">
+      AND deal_id = #{dealId}
+    </if>
+    <if test="createdById != null">
+      AND created_by_id = #{createdById}
+    </if>
+  </select>
+
+  <sql id="activityMemberScope">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">AND a.created_by_id = #{memberScope.userId}</when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">AND a.created_by_id IN <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach></when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">AND a.created_by_id IS NULL</when>
+    </choose>
+  </sql>
+
+  <select id="activityVolume" resultType="ooo.klae.connex.backend.dto.ActivityVolumeBucketDto">
+    SELECT
+      <choose>
+        <when test="days == 365">
+          (#{buckets} - 1) - LEAST(#{buckets} - 1, GREATEST(0,
+            PERIOD_DIFF(DATE_FORMAT(NOW(), '%Y%m'), DATE_FORMAT(a.timestamp, '%Y%m'))))
+        </when>
+        <otherwise>
+          (#{buckets} - 1) - LEAST(#{buckets} - 1, GREATEST(0,
+            FLOOR(DATEDIFF(NOW(), a.timestamp) / #{spanDays})))
+        </otherwise>
+      </choose> AS bucket_index,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'call' THEN 1 ELSE 0 END), 0) AS `call`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'email' THEN 1 ELSE 0 END), 0) AS `email`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'note' THEN 1 ELSE 0 END), 0) AS `note`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+    <include refid="activityMemberScope"/>
+      AND a.timestamp &lt;= NOW()
+    <choose>
+      <when test="days == 365">
+        AND a.timestamp &gt;= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 11 MONTH)
+      </when>
+      <otherwise>
+        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+      </otherwise>
+    </choose>
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  </select>
+
+  <select id="teamLeaderboard" resultType="ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto">
+    SELECT touch.user_id, COUNT(*) AS touches
+    FROM (
+      SELECT a.created_by_id AS user_id
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND a.timestamp &lt;= NOW()
+      UNION ALL
+      SELECT t.assigned_to_id AS user_id
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND t.assigned_to_id IS NOT NULL
+        AND t.completed = TRUE
+        AND t.updated_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND t.updated_at &lt;= NOW()
+      UNION ALL
+      SELECT n.author_id AS user_id
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.visibility != 'private'
+        AND n.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND n.created_at &lt;= NOW()
+    ) touch
+    GROUP BY touch.user_id
+    ORDER BY touches DESC, touch.user_id
+  </select>
+
+  <select id="upcomingCount" resultType="long">
+    SELECT COUNT(*)
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.timestamp &gt; NOW()
+      AND a.timestamp &lt;= DATE_ADD(NOW(), INTERVAL #{days} DAY)
+  </select>
+
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
+  </select>
+
+  <select id="getActivitiesByPersonIds" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY timestamp DESC, id DESC
   </select>
 
   <select id="getActivitiesByDealId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC, id DESC
   </select>
 
   <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC, id DESC
+  </select>
+
+  <select id="getCompanyActivities" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getActivitiesByCompanyIds" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = a.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY a.timestamp DESC, a.id DESC
   </select>
 
   <select id="getActivityById" resultMap="ActivityResult">
@@ -53,7 +205,7 @@
   <select id="search" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, id DESC
     LIMIT 10
   </select>
 
@@ -99,6 +251,10 @@
     SELECT EXISTS(
       SELECT 1 FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
+  </select>
+
+  <select id="countCreatedAnywhere" resultType="int">
+    SELECT COUNT(*) FROM activity WHERE created_by_id = #{userId} FOR UPDATE
   </select>
 
 </mapper>

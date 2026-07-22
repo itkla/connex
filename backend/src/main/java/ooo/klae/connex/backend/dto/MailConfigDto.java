@@ -45,7 +45,7 @@ public class MailConfigDto {
         dto.setStarttls(config.isStarttls());
         dto.setSsl(config.isSsl());
         dto.setAuth(config.isAuth());
-        dto.setHasPassword(config.getPasswordEnc() != null && !config.getPasswordEnc().isBlank());
+        dto.setHasPassword(config.isAuth() && config.getPasswordEnc() != null && !config.getPasswordEnc().isBlank());
         dto.setConfigured(true);
         dto.setUpdatedAt(config.getUpdatedAt());
         return dto;

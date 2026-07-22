@@ -12,6 +12,7 @@ Connex is a multi-tenant relationship-intelligence CRM. Monorepo:
 
 - **`frontend/`** — Next.js 16 (App Router, RSC), React 19, TypeScript (strict), Tailwind v4, shadcn/ui on Base UI + Radix, `motion`, `recharts`/`d3`/`@xyflow/react`, `next-intl` (i18n), `next-themes`.
 - **`backend/`** — Spring Boot 4 on **Java 26**, MyBatis, Flyway + MySQL, Spring Security (WebAuthn), Lombok. Tenant-scoped, RBAC-enforced.
+- **`ocr/`** — private, CPU-only PaddleOCR sidecar for English/Japanese business-card recognition. It is built and run through Docker with pre-fetched, read-only models; see `ocr/AGENTS.md`.
 
 The product centers on relationship signals — temperature/warmth scoring, decay prediction, warm-intro paths, employment history. Treat tenant isolation and RBAC as load-bearing, not incidental.
 
@@ -19,9 +20,10 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 
 The verify loops require a running stack. **Prerequisites:** Node 20+, Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
-1. **Database** — from `backend/`: `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`). Credentials in `docker-compose.yml` are **dev-only**.
-2. **Backend** — from `backend/`: `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start. The `dev` profile disables the session cookie's `Secure` flag so login works over plain-HTTP `localhost`; production runs without it (fail-closed `Secure=true`).
-3. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
+1. **Database** — from `backend/`: create `backend/.env` from `backend/.env.example`, fill local-only database passwords, then run `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`).
+2. **OCR (when testing card scanning)** — set a unique local `CONNEX_OCR_SERVICE_TOKEN` of at least 32 characters in `backend/.env`, then from `backend/` run `docker compose --profile ocr up -d ocr` (private service exposed to the host on `127.0.0.1:8090`). The image build pre-fetches its models; runtime model downloads are forbidden.
+3. **Backend** — from `backend/`: load the same `CONNEX_DB_*` values into your shell, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). To enable card scanning locally, also export `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true`, `CONNEX_OCR_BASE_URL=http://127.0.0.1:8090`, and the same OCR token. Flyway runs migrations on start. The `dev` profile disables the session and workspace cookie `Secure` flags so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret; production runs without it (fail-closed `Secure=true`) and must set `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with verified MySQL TLS. The systemd-controlled local staging checkout at `/opt/connex-staging/backend` is the only non-dev exception: it gets `localhost:3001` HTTP auth defaults and may use an explicit loopback MySQL URL with `sslMode=DISABLED`.
+4. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
 
 Auth is cookie/session based; workspace selection drives tenant context. See `frontend/proxy.ts` for the route-protection rules.
 
@@ -60,6 +62,13 @@ This repo favors **aggressive parallel fan-out**. Reach for subagents and workfl
 - **Review** → fan out independent reviewers adversarially (see [Review](#review)).
 
 **Workflows** (the `Workflow` tool) — for larger, multi-phase, or structured work where you want deterministic orchestration: understand → design → implement → review, broad audits, migrations across many files, or adversarial verify panels. **This AGENTS.md is your standing opt-in** — you don't need to ask before running a workflow when the task warrants it. Run one phase at a time, read the result, then decide the next.
+
+**Model routing:**
+
+- **Backend work → codex.** Defer backend work to a **gpt-5.6** agent at **xhigh** reasoning effort spawned via the **codex** CLI. Claude handles the frontend and gap-filling where necessary.
+- **Fundamental changes → Fable 5 advisor.** For high-level work that involves fundamental changes, consult a **Fable 5** subagent as an advisor before acting.
+
+**Plan-first dispatch (non-negotiable).** Every subagent dispatched to *implement* something — Claude or codex — must produce a short plan **before** writing code: scope and approach, files to touch, API/data contracts, migration versions (pre-assigned by the orchestrator to avoid Flyway collisions), and a test plan. The orchestrator reviews that plan against the codebase and these guides, corrects it if needed, and only then lets implementation proceed — for codex this means a read-only planning run first, then an implementation run with the approved plan embedded. Pure discovery, review, and verification agents are exempt.
 
 Default to delegating discovery, review, and any wide sweep. Keep synthesis and the actual edits coherent in one place. If you're the fork/subagent, execute directly — don't re-delegate.
 
@@ -115,7 +124,7 @@ A change is done only when **all** of these pass:
 2. If you touched a `*Controller`, fire real `curl` requests at `http://localhost:8080/api/...` and confirm responses (status, body, auth/tenant behavior). Protected endpoints need a session + CSRF token — see `backend/AGENTS.md` for how to authenticate, and test an other-tenant caller to prove isolation.
 3. Write automated tests and make them pass (`./gradlew test`).
 4. Scrutinize intensely for bugs and future failure modes — tenant leakage, RBAC gaps, null/edge cases, N+1 queries, migration safety.
-5. Spawn an **opencode** subagent on **gpt-5.5** at **xhigh** effort to independently hunt security bugs and logic flaws, then triage its findings (see `backend/AGENTS.md` for the exact command).
+5. Use the **codex** CLI to spawn a **gpt-5.6** agent at **xhigh** effort to independently hunt security bugs and logic flaws, then triage its findings (see `backend/AGENTS.md` for the exact command).
 
 ### Frontend verify loop (required for frontend work)
 
@@ -142,7 +151,8 @@ Treat GitHub as the system of record. For any tracked piece of work:
 2. **Advance the project board.** If the repo has a GitHub Project board configured, move the related issue down its pipeline as work progresses (e.g. Todo → In Progress → In Review → Done) using `gh project` / `gh issue edit`. If `gh project` reports none, skip this step rather than erroring.
 3. **Commit convention.** Follow Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`, …). Keep messages **short and brief** — a single clear subject line, no body unless essential. **Do not self-sign** — no `Co-Authored-By`, no "Generated with" trailers, no sign-off lines.
 4. **Branch → push → merge → close.** Never commit straight to `main`. Work on a branch named `type/short-description` (e.g. `feat/employment-history`, `fix/tenant-leak` — matching the existing branch style), push it, open/merge the PR, and close the related issues on merge (link them with `Closes #N` so they auto-close).
-5. **Work in a dedicated git worktree — several agents share this clone.** Multiple agents run concurrently against the same checkout (`/home/dev/Projects/connex`), so they share one HEAD and one index: another agent's `git checkout`/`git switch` can move HEAD out from under you mid-task (your commits then land on *its* branch), and a broad `git add -A` can sweep its uncommitted files into your commit. Before starting a unit of work, branch into your own worktree off the latest `main` and do all edits/commits/builds/pushes there:
+5. **Ship autonomously — but sweep the PR before merging.** Agents may open **and merge** their own PRs on their own volition; shipping verified, reviewed work does not require asking. However, **before merging — always** — the agent MUST check the PR itself for outstanding feedback: human comments, review threads, requested changes, and bot/CI annotations (`gh pr view <n> --comments`, `gh pr checks <n>`). Resolve or explicitly answer every item first; never merge over an unaddressed comment or a red/pending required check.
+6. **Work in a dedicated git worktree — several agents share this clone.** Multiple agents run concurrently against the same checkout (`/home/dev/Projects/connex`), so they share one HEAD and one index: another agent's `git checkout`/`git switch` can move HEAD out from under you mid-task (your commits then land on *its* branch), and a broad `git add -A` can sweep its uncommitted files into your commit. Before starting a unit of work, branch into your own worktree off the latest `main` and do all edits/commits/builds/pushes there:
 
    ```bash
    git fetch origin
@@ -152,13 +162,15 @@ Treat GitHub as the system of record. For any tracked piece of work:
 
    The shared MySQL is fine across worktrees (Flyway just migrates it). Always prefer explicit `git add <paths>` over `git add -A`, and never assume the shared clone's current branch is yours — run `git branch --show-current` in your worktree. If you spawn agents that mutate files in parallel, give them `isolation: "worktree"`. **Recovery if commits tangled anyway:** create a fresh worktree at your branch's last good commit and `git cherry-pick` your stranded commits onto it (verify each with `git show --stat`); don't rewrite a sibling's branch to fix it.
 
-**Plans live in issues, not the repo.** Prefer capturing implementation plans, design notes, and task breakdowns as a GitHub issue (`gh issue create`) over committing `*_PLAN.md` or scratch markdown to the tree. Put the plan in the issue body, refine it with `gh issue comment` / `gh issue edit` as it evolves, and close it on completion — this keeps plans linked to the work, reviewable/commentable, and out of the code diff. Transient working notes can stay in your scratchpad, but never commit them. (Long-lived architecture/reference docs that genuinely belong in the repo — like `MULTITENANCY_PLAN.md` — are the exception.)
+**Plans live in issues, not the repo.** Prefer capturing implementation plans, design notes, and task breakdowns as a GitHub issue (`gh issue create`) over committing `*_PLAN.md` or scratch markdown to the tree. Put the plan in the issue body, refine it with `gh issue comment` / `gh issue edit` as it evolves, and close it on completion — this keeps plans linked to the work, reviewable/commentable, and out of the code diff. Transient working notes can stay in your scratchpad, but never commit them. (Long-lived architecture/reference docs that genuinely belong in the repo — like [`docs/MULTITENANCY_PLAN.md`](docs/MULTITENANCY_PLAN.md) — are the exception.)
+
+**Repo docs live in `docs/`, never at the tree root.** When a document *does* belong in the repo (a long-lived architecture, reference, runbook, or compliance doc — the exception above), create it under the top-level [`docs/`](docs/) folder, not at the repo root or scattered beside code. The only Markdown that belongs outside `docs/` is the `AGENTS.md` / `CLAUDE.md` guide files (which must sit next to the code they govern) and package-level `README.md`s. Cross-link docs with relative paths so they resolve from inside `docs/`.
 
 ## Guardrails — don't do this
 
 - **No unjustified dependencies.** Prefer the libraries already in `package.json` / `build.gradle`. If a new dep is truly needed, call it out and say why before adding it.
 - **Audit new packages.** Whenever you install a frontend package, **always run `pnpm audit`** afterward and resolve or explicitly flag what it reports before continuing — don't introduce known-vulnerable dependencies. Check new backend (Gradle) deps for known CVEs the same way.
-- **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. (The throwaway dev creds in `backend/docker-compose.yml` are the only exception.) On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
+- **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
 - **Don't leak code or secrets externally.** Look things up in docs/online, but never paste Connex source, data, or secrets into web searches or third-party tools.
 - **Confirm irreversible actions.** No `git push --force`, no resetting or rewriting history on `main` or shared branches, no destructive database operations against shared/dev data — confirm with the user first.
 - **Don't weaken the toolchain.** No disabling/ignoring lint rules, no loosening `tsconfig` `strict`, no `// eslint-disable`, no `@SuppressWarnings` to dodge a real problem. Fix the cause.

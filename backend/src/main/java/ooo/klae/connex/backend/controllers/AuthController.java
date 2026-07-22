@@ -9,12 +9,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.dto.ForgotPasswordRequest;
 import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.ResetPasswordRequest;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.PasswordResetService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +40,7 @@ public class AuthController {
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
     private final ClientIpResolver clientIpResolver;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * POST endpoint for user registration.
@@ -72,11 +75,11 @@ public class AuthController {
 
     /**
      * Exposes the CSRF token so the SPA can echo it in the configured header on
-     * state-changing requests. Returns null when CSRF protection is disabled.
+     * state-changing requests, together with an opaque authenticated-session generation.
      */
     @GetMapping("/csrf")
-    public CsrfToken csrf(CsrfToken token) {
-        return token;
+    public CsrfBootstrapDto csrf(CsrfToken token, HttpServletRequest request) {
+        return CsrfBootstrapDto.of(token, sessionSecurityService.requestIdentity(request));
     }
 
     /**

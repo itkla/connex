@@ -15,8 +15,8 @@ export type InferredType = 'text' | 'number' | 'date' | 'boolean' | 'url';
 
 /** Standard Connex fields that a column can map to, per entity. Keys mirror the backend exactly. */
 export const STANDARD_FIELDS: Record<ImportEntity, readonly string[]> = {
-    persons: ['name', 'email', 'phone', 'title', 'company', 'imageUrl'],
-    companies: ['name', 'website', 'industry', 'phone', 'address', 'logoUrl'],
+    persons: ['name', 'email', 'phone', 'title', 'company'],
+    companies: ['name', 'website', 'industry', 'phone', 'address'],
     deals: ['name', 'value', 'currency', 'pipeline', 'stage', 'company', 'expectedCloseDate', 'people'],
 };
 
@@ -29,8 +29,6 @@ const SYNONYMS: Record<string, readonly string[]> = {
     website: ['website', 'url', 'web', 'site', 'domain', 'homepage'],
     industry: ['industry', 'sector', 'vertical'],
     address: ['address', 'location'],
-    imageUrl: ['imageurl', 'image', 'avatar', 'photo', 'picture'],
-    logoUrl: ['logourl', 'logo'],
     tags: ['tags', 'tag', 'labels', 'label'],
     value: ['value', 'amount', 'dealvalue', 'revenue', 'price', 'worth'],
     currency: ['currency', 'ccy'],

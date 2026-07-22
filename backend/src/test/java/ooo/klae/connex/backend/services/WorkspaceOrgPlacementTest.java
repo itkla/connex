@@ -34,7 +34,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
 
     @AfterEach
     void clearTenantContext() {
-        tenantContext.clear();
+        clearRequestContext();
     }
 
     private void assignCustomRole(User member, String roleName, String permission) {
@@ -49,7 +49,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     @Test
     void ownerCreatingWorkspace_staysInTheActiveOrg() {
         int activeOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "owner");
+        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "owner", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Team " + unique(), currentUser.getId());
 
@@ -60,7 +60,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     @Test
     void adminCreatingWorkspace_staysInTheActiveOrg() {
         int activeOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "admin");
+        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "admin", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Team " + unique(), currentUser.getId());
 
@@ -71,7 +71,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     void plainMemberCreatingWorkspace_getsAFreshOrg() {
         User consultant = newUser();
         int hostOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), hostOrg, consultant.getId(), "member");
+        tenantContext.set(workspace.getId(), hostOrg, consultant.getId(), "member", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Personal " + unique(), consultant.getId());
 
@@ -82,6 +82,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     @Test
     void unresolvedContext_getsAFreshOrg() {
         int existingOrg = workspaceService.getOrgId(workspace.getId());
+        clearRequestContext();
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Fresh " + unique(), currentUser.getId());
 
@@ -94,7 +95,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
         User delegate = newUser();
         int activeOrg = workspaceService.getOrgId(workspace.getId());
         assignCustomRole(delegate, "Org Delegate", "WORKSPACE_SETTINGS");
-        tenantContext.set(workspace.getId(), activeOrg, delegate.getId(), "member");
+        tenantContext.set(workspace.getId(), activeOrg, delegate.getId(), "member", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Delegated " + unique(), delegate.getId());
 
@@ -107,7 +108,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
         User collaborator = newUser();
         int activeOrg = workspaceService.getOrgId(workspace.getId());
         assignCustomRole(collaborator, "Sharing Only", "SHARE_MANAGE");
-        tenantContext.set(workspace.getId(), activeOrg, collaborator.getId(), "member");
+        tenantContext.set(workspace.getId(), activeOrg, collaborator.getId(), "member", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Solo " + unique(), collaborator.getId());
 
@@ -118,7 +119,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     void contextBelongingToAnotherUser_getsAFreshOrg() {
         User other = newUser();
         int activeOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "owner");
+        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "owner", null);
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Other " + unique(), other.getId());
 

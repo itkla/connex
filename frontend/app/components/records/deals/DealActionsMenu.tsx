@@ -40,12 +40,11 @@ import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog'
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
-import { type Company, type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
+import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 
 export default function DealActionsMenu({
     deal,
-    companies,
     pipelines,
     stagesByPipeline,
     currentUserId,
@@ -55,7 +54,6 @@ export default function DealActionsMenu({
     collaborators = [],
 }: {
     deal: Deal;
-    companies: Company[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
@@ -251,7 +249,6 @@ export default function DealActionsMenu({
                 deal={deal}
                 open={editOpen}
                 onOpenChange={setEditOpen}
-                companies={companies}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
             />

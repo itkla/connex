@@ -16,7 +16,9 @@ import HeroVisual from "@/app/components/landing/HeroVisual";
 import Reveal from "@/app/components/landing/Reveal";
 
 const btnPrimary =
-    "inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3 text-base font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]";
+    "inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]";
+const FEATURE_RECORD_PEOPLE = ["MD", "TA", "JR", "SO"];
+const FEATURE_ANALYTICS_BARS = [38, 56, 46, 72, 90];
 
 export default async function Home() {
     const cookie = (await headers()).get("cookie");
@@ -242,7 +244,7 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
                         key={stage.label}
                         style={{ width: stage.width }}
                         className={`flex items-center justify-between rounded-lg px-3 py-1.5 ${stage.accent
-                                ? "bg-brand text-neutral-950"
+                                ? "bg-brand text-brand-foreground"
                                 : "border border-border bg-muted text-foreground"
                             }`}
                     >
@@ -261,11 +263,10 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
 
     // TODO: turn this into a switch statement
     if (featureKey === "records") {
-        const people = ["MD", "TA", "JR", "SO"];
         return (
             <div className="mt-6 flex grow items-end">
                 <div className="flex -space-x-2.5">
-                    {people.map((p, idx) => (
+                    {FEATURE_RECORD_PEOPLE.map((p, idx) => (
                         <span
                             key={p}
                             className={`flex size-9 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-card ${idx % 2 === 0 ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900" : "bg-brand-light text-brand-dark"
@@ -283,10 +284,9 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
     }
 
     if (featureKey === "analytics") {
-        const bars = [38, 56, 46, 72, 90];
         return (
             <div className="mt-6 flex h-20 grow items-end gap-1.5">
-                {bars.map((h, idx) => (
+                {FEATURE_ANALYTICS_BARS.map((h, idx) => (
                     <div
                         key={idx}
                         style={{ height: `${h}%` }}

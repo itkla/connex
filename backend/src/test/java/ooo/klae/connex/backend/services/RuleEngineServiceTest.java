@@ -291,6 +291,17 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void entityChange_suspendedPerson_doesNotFire() {
+        Person person = newPerson(newCompany());
+        RuleDto rule = entityChangeRule("person", notifyAction(), null, "person.updated");
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
+
+        ruleEngineService.onEntityChange(workspace.getId(), "person", person.getId(), "person.updated");
+
+        assertEquals(0, matchedExecutions(rule.getId()));
+    }
+
+    @Test
     void entityChange_task_fires() {
         Task task = newTask(currentUser, newPerson(newCompany()), null);
         RuleDto rule = entityChangeRule("task", notifyAction(), null, "task.completed");

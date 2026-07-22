@@ -8,5 +8,5 @@ import ooo.klae.connex.backend.beans.Notification;
 public interface NotificationDispatcher {
     String channel();
 
-    void dispatch(Notification notification);
+    int dispatch(Notification notification);
 }

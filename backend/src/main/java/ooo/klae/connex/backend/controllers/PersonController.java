@@ -8,13 +8,21 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -23,6 +31,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.JobMoveDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
@@ -31,12 +40,17 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonOwnerDto;
+import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
 import java.util.Map;
@@ -57,6 +71,9 @@ public class PersonController {
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
     private final BulkOperationService bulkOperationService;
+    private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
+    private static final String WARMTH_SORT = "warmth";
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -84,7 +101,7 @@ public class PersonController {
         if (companyId != null) persons = personService.getPersonsByCompanyId(companyId);
         else if (tagId != null) persons = personService.getPersonsByTagId(tagId);
         else if (dealId != null) persons = personService.getPersonsByDealId(dealId);
-        else persons = personService.getAllPersons();
+        else throw new BadRequestException("A filter is required; use /api/persons/page for workspace-wide lists");
         return persons.stream().map(PersonDto::from).toList();
     }
 
@@ -100,7 +117,6 @@ public class PersonController {
      * @param titles
      * @param noCompany
      * @return
-     * @throws IllegalArgumentException if the page or size is less than 1.
      */
     @GetMapping("/page")
     public PageResponse<PersonDto> getPersonsPage(
@@ -111,15 +127,21 @@ public class PersonController {
         @RequestParam(required = false) String dir,
         @RequestParam(required = false) List<String> companies,
         @RequestParam(required = false) List<String> titles,
-        @RequestParam(defaultValue = "false") boolean noCompany
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
-        size = Math.min(Math.max(size, 1), 100);
-        page = Math.max(page, 1);
+        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
+            throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
+        }
+        PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
-        int offset = Math.max(0, (page - 1) * size);
-        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany, size, offset)
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
+            memberScope, bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items, personService.countPersons(query, companies, titles, noCompany));
+        return new PageResponse<>(items,
+            personService.countPersons(query, companies, titles, noCompany, memberScope));
     }
 
     /**
@@ -137,10 +159,20 @@ public class PersonController {
         @RequestParam(required = false) String q,
         @RequestParam(required = false) List<String> companies,
         @RequestParam(required = false) List<String> titles,
-        @RequestParam(defaultValue = "false") boolean noCompany
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
-        return personService.getMatchingPersonIds(query, companies, titles, noCompany);
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        if (query == null
+            && (companies == null || companies.isEmpty())
+            && (titles == null || titles.isEmpty())
+            && !noCompany
+            && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
+            throw new BadRequestException("At least one filter is required before selecting matching contact ids");
+        }
+        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope);
     }
 
     /**
@@ -153,7 +185,8 @@ public class PersonController {
         return new PersonFacets(
             personService.distinctCompanies(),
             personService.distinctTitles(),
-            personService.hasPersonWithoutCompany()
+            personService.hasPersonWithoutCompany(),
+            personService.countsByOwner()
         );
     }
 
@@ -167,6 +200,26 @@ public class PersonController {
     @GetMapping("/{id:\\d+}")
     public PersonDetailDto getPersonById(@PathVariable int id) {
         return PersonDetailDto.from(personService.getPersonById(id));
+    }
+
+    /**
+     * Stores and assigns a private contact picture.
+     */
+    @PutMapping(value = "/{id}/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public PersonDto updateProfilePicture(
+            @PathVariable int id,
+            @RequestPart("file") MultipartFile file) {
+        return PersonDto.from(personService.updateProfilePicture(id, UploadSource.from(file)));
+    }
+
+    /**
+     * Streams the currently assigned contact picture after tenant authorization.
+     */
+    @GetMapping("/{id}/profile-picture/{token:.+}")
+    public ResponseEntity<StreamingResponseBody> getProfilePicture(
+            @PathVariable int id,
+            @PathVariable String token) {
+        return ManagedContentResponse.inline(personService.getProfilePictureContent(id, token));
     }
 
     /**
@@ -190,6 +243,11 @@ public class PersonController {
         return PersonDto.from(personService.update(id, dto.toBean()));
     }
 
+    @PutMapping("/{id}/owner")
+    public PersonDto updateOwner(@PathVariable int id, @Valid @RequestBody PersonOwnerDto dto) {
+        return PersonDto.from(personService.updateOwner(id, dto.getOwnerId()));
+    }
+
     /**
      * PUT endpoint to set the contact's engine-evaluation opt-outs (issue #358).
      * @param id
@@ -200,6 +258,18 @@ public class PersonController {
     public PersonDto updateEvaluation(@PathVariable int id, @Valid @RequestBody PersonEvaluationDto dto) {
         return PersonDto.from(
             personService.updateEvaluationExclusions(id, dto.getRiskExcluded(), dto.getIntroExcluded()));
+    }
+
+    /**
+     * PUT endpoint to set the contact's processing and third-party-provision restrictions.
+     * @param id contact id
+     * @param dto requested restriction state
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/restrictions")
+    public PersonDto updateRestrictions(@PathVariable int id, @Valid @RequestBody PersonRestrictionsDto dto) {
+        return PersonDto.from(personService.updateProcessingRestrictions(
+            id, dto.getSuspended(), dto.getProvisionCeased()));
     }
 
     /**
@@ -280,6 +350,11 @@ public class PersonController {
     @PostMapping("/bulk/delete")
     public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
         return bulkOperationService.deletePersons(request.getIds());
+    }
+
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToPersons(request.getIds(), request.getOwnerId());
     }
 
     /**
@@ -405,5 +480,9 @@ public class PersonController {
     @GetMapping("/custom-field-values")
     public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForPersons(@RequestParam List<Integer> ids) {
         return personService.getCustomFieldValues(ids);
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
     }
 }

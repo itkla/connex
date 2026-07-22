@@ -1,0 +1,116 @@
+{
+  "Actions": {
+    "quickCreate": {
+      "trigger": "新規作成",
+      "title": "作成",
+      "description": "レコードを作成",
+      "close": "閉じる",
+      "back": "種類に戻る"
+    },
+    "palette": {
+      "trigger": "検索とコマンド",
+      "placeholder": "検索・移動…",
+      "loading": "検索中…",
+      "noResults": "「{query}」に一致する結果がありません"
+    },
+    "group": {
+      "create": "作成",
+      "navigate": "移動",
+      "record": "このレコード",
+      "workspace": "ワークスペース",
+      "utility": "ユーティリティ"
+    },
+    "navigate": {
+      "dashboard": "ダッシュボード",
+      "companies": "会社",
+      "contacts": "連絡先",
+      "deals": "取引",
+      "pipelines": "パイプライン",
+      "analytics": "分析",
+      "calendar": "カレンダー",
+      "settings": "設定",
+      "organization": "組織",
+      "savedView": "保存済みビュー",
+      "recentRecord": "最近のレコード"
+    },
+    "create": {
+      "company": "新しい会社",
+      "person": "新しい連絡先",
+      "deal": "新しい取引",
+      "task": "新しいタスク",
+      "note": "新しいノート",
+      "activity": "アクティビティを記録"
+    },
+    "record": {
+      "open": "レコードを開く",
+      "openNewTab": "新しいタブで開く",
+      "copyLink": "このレコードのリンクをコピー"
+    },
+    "workspace": {
+      "themeLight": "ライトテーマ",
+      "themeDark": "ダークテーマ",
+      "themeSystem": "システムテーマ",
+      "languageEnglish": "言語: English",
+      "languageJapanese": "言語: 日本語"
+    },
+    "utility": {
+      "copyPageLink": "このページのリンクをコピー",
+      "markAllNotificationsRead": "すべての通知を既読にする",
+      "importCompanies": "会社をインポート",
+      "importContacts": "連絡先をインポート",
+      "importDeals": "取引をインポート",
+      "exportCurrentCompanies": "現在の会社ビューをエクスポート",
+      "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
+      "exportCurrentDeals": "現在の取引ビューをエクスポート"
+    },
+    "description": {
+      "utility": {
+        "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
+        "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
+        "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する取引をすべてダウンロードします。"
+      }
+    },
+    "feedback": {
+      "linkCopied": "リンクをクリップボードにコピーしました",
+      "recordLinkCopied": "{label} のリンクをコピーしました",
+      "allNotificationsRead": "すべての通知を既読にしました",
+      "runFailed": "問題が発生しました。もう一度お試しください。",
+      "companyCreated": "会社を作成しました",
+      "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
+      "personCreated": "連絡先を作成しました",
+      "dealCreated": "取引を作成しました",
+      "createFailed": "作成できませんでした。もう一度お試しください。",
+      "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
+      "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
+      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
+      "taskCreated": "タスクを作成しました",
+      "noteCreated": "ノートを作成しました",
+      "activityCreated": "アクティビティを記録しました"
+    },
+    "keywords": {
+      "navigate": {
+        "contacts": "連絡先, 人, 担当者, コンタクト"
+      },
+      "create": {
+        "company": "会社, 組織, 取引先, アカウント",
+        "person": "連絡先, 人, 担当者, リード",
+        "deal": "取引, 商談, 案件",
+        "task": "タスク, todo, やること, リマインダー",
+        "note": "ノート, メモ",
+        "activity": "アクティビティ, ログ, 通話, 会議, メール"
+      },
+      "workspace": {
+        "theme": "テーマ, 外観, ダーク, ライト, モード",
+        "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
+      },
+      "utility": {
+        "importCompanies": "会社をインポート, csv, アップロード, 一括",
+        "importContacts": "連絡先をインポート, 人, 担当者, csv, アップロード, 一括",
+        "importDeals": "取引をインポート, 商談, 案件, csv, アップロード, 一括",
+        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, csv, 現在のビュー, 絞り込み, セグメント",
+        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, 人, 担当者, csv, 現在のビュー, 絞り込み",
+        "exportCurrentDeals": "取引をエクスポート, 商談をダウンロード, 案件, csv, 現在のビュー, 絞り込み"
+      }
+    }
+  }
+}

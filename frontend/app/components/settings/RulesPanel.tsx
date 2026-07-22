@@ -56,7 +56,8 @@ export function ruleToRequest(rule: Rule): RuleRequest {
     };
 }
 
-function ruleSummary(rule: Rule, t: (key: string, values?: Record<string, string>) => string): string {
+/** Human summary line for a rule, built from the shared WorkspaceRules vocabulary labels. */
+export function ruleSummary(rule: Rule, t: (key: string, values?: Record<string, string>) => string): string {
     const trigger =
         rule.trigger.type === "schedule"
             ? t("summarySchedule", { cadence: t(`cadence.${rule.trigger.cadence ?? "daily"}`) })
@@ -70,7 +71,8 @@ function ruleSummary(rule: Rule, t: (key: string, values?: Record<string, string
 
 export default function RulesPanel() {
     const t = useTranslations("WorkspaceRules");
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
 
     const [rules, setRules] = useState<Rule[]>([]);
     const [fields, setFields] = useState<SegmentFields | null>(null);
@@ -205,7 +207,7 @@ export default function RulesPanel() {
                     title={t("title")}
                     action={
                         !loading && (
-                            <Button onClick={openCreate} className="bg-brand text-white hover:bg-brand-hover">
+                            <Button onClick={openCreate} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {t("newRule")}
                             </Button>
@@ -236,7 +238,13 @@ export default function RulesPanel() {
                             <Switch
                                 checked={rule.enabled}
                                 onCheckedChange={() => toggleEnabled(rule)}
+                                disabled={rule.executionMode === "system" && !canRunAsSystem}
                                 aria-label={t("toggleEnabled", { name: rule.name })}
+                                aria-describedby={
+                                    rule.executionMode === "system" && !canRunAsSystem
+                                        ? `system-toggle-restriction-${rule.id}`
+                                        : undefined
+                                }
                             />
                             <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex items-center gap-2">
@@ -254,6 +262,11 @@ export default function RulesPanel() {
                                     )}
                                 </div>
                                 <p className="truncate text-xs text-muted-foreground">{ruleSummary(rule, t)}</p>
+                                {rule.executionMode === "system" && !canRunAsSystem ? (
+                                    <p id={`system-toggle-restriction-${rule.id}`} className="text-xs text-muted-foreground">
+                                        {t("systemToggleRestricted")}
+                                    </p>
+                                ) : null}
                             </div>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -283,6 +296,7 @@ export default function RulesPanel() {
                 editing={editing}
                 fields={fields}
                 options={options}
+                canRunAsSystem={canRunAsSystem}
                 onSubmit={submitRule}
             />
 

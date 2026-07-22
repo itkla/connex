@@ -25,6 +25,7 @@ public class RoleService {
     private final RoleMapper roleMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final SessionSecurityService sessionSecurityService;
 
     public List<WorkspaceRole> listRoles(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
@@ -39,8 +40,10 @@ public class RoleService {
     @Transactional
     public WorkspaceRole createRole(int workspaceId, int actorId, String name, List<String> permissions) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
+        workspaceService.lockRoleMutationAuthorization(
+            workspaceId, actorId, null, toEnumSet(valid));
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(workspaceId);
         role.setName(name.trim());
@@ -54,8 +57,10 @@ public class RoleService {
     @Transactional
     public WorkspaceRole updateRole(int workspaceId, int actorId, int roleId, String name, List<String> permissions) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
+        workspaceService.lockRoleMutationAuthorization(
+            workspaceId, actorId, roleId, toEnumSet(valid));
         if (roleMapper.updateRoleName(workspaceId, roleId, name.trim()) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
@@ -65,8 +70,11 @@ public class RoleService {
         return roleMapper.findRole(workspaceId, roleId);
     }
 
+    @Transactional
     public void deleteRole(int workspaceId, int actorId, int roleId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        workspaceService.lockRoleDeletionAuthorization(workspaceId, actorId, roleId);
         if (roleMapper.deleteRole(workspaceId, roleId) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
@@ -88,11 +96,15 @@ public class RoleService {
         List<String> valid = new ArrayList<>();
         for (String value : raw) {
             try {
-                String name = Permission.valueOf(value).name();
+                Permission permission = Permission.valueOf(value);
+                if (!Permission.isGrantable(permission)) {
+                    throw new BadRequestException("Permission is not grantable: " + value);
+                }
+                String name = permission.name();
                 if (!valid.contains(name)) {
                     valid.add(name);
                 }
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException | NullPointerException e) {
                 throw new BadRequestException("Unknown permission: " + value);
             }
         }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
-import { BuildingOffice2Icon, NoSymbolIcon, TagIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
     TableCellsIcon,
@@ -18,11 +18,18 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DensityToggle from '@/app/components/records/DensityToggle';
+import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { useInlineEdit } from '@/app/hooks/useInlineEdit';
+import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -36,13 +43,15 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getCompanies, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
-import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
+import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 const NO_ITEMS: Contact[] = [];
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
+const EMPTY_CONTACT_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
 function toDraft(c: Contact): ContactDraft {
     return {
@@ -62,10 +71,11 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
-export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[] }) {
+export default function ContactsBrowser({ savedViews, defaultView }: { savedViews: SavedView[]; defaultView: SavedView | null }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
     const tf = useTranslations('Filters');
+    const ts = useTranslations('MemberScope');
     const reduce = useReducedMotion() ?? false;
 
     const {
@@ -79,16 +89,19 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
 
+    const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo(() => {
         const company = filterState.company ?? [];
         const titles = filterState.title ?? [];
         const companies = company.filter((k) => k !== FILTER_EMPTY);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean } = {};
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
+        if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
+        if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         return params;
-    }, [filterState]);
+    }, [filterState, ownerScope]);
 
     const {
         items: contacts,
@@ -103,21 +116,50 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         applyQuery,
         sortKey,
         sortDirection,
-        onSortChange,
-        applySort,
+        onSortChange: changeServerSort,
+        applySort: applyServerSort,
+        revision,
         reload,
-    } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams);
+        patchItem,
+    } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
 
     const filterSignature = useMemo(() => JSON.stringify([filterParams, query]), [filterParams, query]);
+    const filterSignatureRef = useRef(filterSignature);
+    useEffect(() => {
+        filterSignatureRef.current = filterSignature;
+    }, [filterSignature]);
     const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
-    const allMatchingActive = matchedSignature === filterSignature;
-    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
-        if (ids.size === 0) setMatchedSignature(null);
-        setSelectedIds(ids);
+    const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const selectAllRequestRef = useRef(0);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const clearSelection = useCallback(() => {
+        selectAllRequestRef.current += 1;
+        setSelectingAll(false);
+        setMatchedSignature(null);
+        setSelectedIds(new Set());
     }, [setSelectedIds]);
-    useEffect(() => { if (!allMatchingActive) setSelectedIds(new Set()); }, [contacts, allMatchingActive, setSelectedIds]);
+    const onSortChange = useCallback((key: string) => {
+        clearSelection();
+        changeServerSort(key);
+    }, [clearSelection, changeServerSort]);
+    const applySort = useCallback((key: string | null, direction: 'asc' | 'desc') => {
+        clearSelection();
+        applyServerSort(key, direction);
+    }, [clearSelection, applyServerSort]);
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        selectAllRequestRef.current += 1;
+        setMatchedSignature(null);
+        setSelectedIds(allMatchingActive ? new Set() : ids);
+    }, [allMatchingActive, setSelectedIds]);
+    const selectionScope = `${page}:${size}:${sortKey ?? ''}:${sortDirection}:${revision}:${filterSignature}`;
+    const previousSelectionScopeRef = useRef(selectionScope);
+    useEffect(() => {
+        const scopeChanged = previousSelectionScopeRef.current !== selectionScope;
+        previousSelectionScopeRef.current = selectionScope;
+        if (scopeChanged && !allMatchingActive) clearSelection();
+    }, [selectionScope, allMatchingActive, clearSelection]);
 
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
@@ -125,7 +167,24 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
 
-    const refresh = useCallback(() => { reload(); loadFacets(); }, [reload, loadFacets]);
+    const refresh = useCallback(() => {
+        clearSelection();
+        reload();
+        loadFacets();
+    }, [clearSelection, reload, loadFacets]);
+
+    const exportContacts = useCallback(
+        (signal: AbortSignal, workspaceId: number) =>
+            exportContactsCsv(
+                { ...filterParams, q: query.trim() || undefined },
+                { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
+            ),
+        [filterParams, query],
+    );
+
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'contact') refresh();
+    }), [refresh]);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!personFacets) return [];
@@ -138,10 +197,40 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         return out;
     }, [personFacets, t]);
 
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const ownerCounts = useMemo(
+        () => new Map(personFacets?.owners?.map((facet) => [facet.key, facet.count]) ?? []),
+        [personFacets],
+    );
+    const changeOwnerScope = useCallback((values: string[]) => {
+        setFilterState({ ...filterState, owner: values });
+    }, [filterState, setFilterState]);
+
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const effectiveOwnerValues = ownerScope.mode === 'me'
+        ? [MEMBER_SCOPE_ME]
+        : ownerScope.mode === 'unassigned'
+            ? [FILTER_EMPTY]
+            : ownerScope.memberIds.map(String);
+    const ownerChips: FilterChipData[] = effectiveOwnerValues.map((value) => {
+        const label = value === MEMBER_SCOPE_ME
+            ? ts('me')
+            : value === FILTER_EMPTY
+                ? ts('unassigned')
+                : memberById.get(Number(value))?.displayName ?? value;
+        return {
+            id: `owner:${value}`,
+            label: `${ts('label')}: ${label}`,
+            onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
+        };
+    });
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
     ];
 
@@ -152,81 +241,123 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [isClearingCompany, setIsClearingCompany] = useState(false);
 
-    const [companies, setCompanies] = useState<Company[]>([]);
-    useEffect(() => {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
-    }, []);
-
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
-    const [selectingAll, setSelectingAll] = useState(false);
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const selectAllMatching = useCallback(async () => {
+        const requestId = selectAllRequestRef.current + 1;
+        selectAllRequestRef.current = requestId;
+        const requestSignature = filterSignature;
         setSelectingAll(true);
         try {
             const ids = await getContactIds({ ...filterParams, q: query || undefined });
+            if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
             setSelectedIds(new Set(ids));
-            setMatchedSignature(filterSignature);
+            setMatchedSignature(requestSignature);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            if (requestId === selectAllRequestRef.current) {
+                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            }
         } finally {
-            setSelectingAll(false);
+            if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
     }, [filterParams, query, filterSignature, setSelectedIds, t]);
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
-        getContactTemperatures()
-            .then((temps) => setTempByContactId(new Map(temps.map((temp) => [temp.id, temp]))))
-            .catch(() => setTempByContactId(new Map()));
-    }, []);
+        let cancelled = false;
+        getContactTemperatures(contacts.map((contact) => contact.id))
+            .then((temps) => {
+                if (!cancelled) setTempByContactId(new Map(temps.map((temp) => [temp.id, temp])));
+            })
+            .catch(() => {
+                if (!cancelled) setTempByContactId(new Map());
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [contacts]);
 
-    const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(emptyContactDraft);
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(EMPTY_CONTACT_DRAFT);
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const selectedCompany = useMemo(
-        () => companies.find((c) => c.id === newContactPayload.companyId) ?? null,
-        [companies, newContactPayload.companyId],
-    );
-
+    const newContactCloseTimerRef = useRef<number | null>(null);
+    const newContactGenerationRef = useRef(0);
+    const invalidateNewContactClose = useCallback(() => {
+        newContactGenerationRef.current += 1;
+        if (newContactCloseTimerRef.current == null) return;
+        window.clearTimeout(newContactCloseTimerRef.current);
+        newContactCloseTimerRef.current = null;
+    }, []);
+    useEffect(() => () => invalidateNewContactClose(), [invalidateNewContactClose]);
+    const openNewContactDialog = () => {
+        invalidateNewContactClose();
+        setNewContactDialogOpen(true);
+    };
     const closeNewContactDialog = (open: boolean) => {
+        invalidateNewContactClose();
         setNewContactDialogOpen(open);
         if (!open) {
-            setNewContactPayload(emptyContactDraft);
+            setNewContactPayload(EMPTY_CONTACT_DRAFT);
             setImageFile(null);
             setCreationSucceeded(false);
         }
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidateNewContactClose();
+        const operationGeneration = newContactGenerationRef.current;
+        const isCurrent = () => newContactGenerationRef.current === operationGeneration;
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const newContact = await createContact(newContactPayload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(newContactPayload);
+            if (!isCurrent()) return;
+            let avatarUploadFailed = false;
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch {
+                    avatarUploadFailed = true;
+                }
+                if (!isCurrent()) return;
             }
-            toastSuccess(t('toastContactCreated'));
-            setIsCreating(false);
-            setCreationSucceeded(true);
-            setTimeout(() => {
-                closeNewContactDialog(false);
-                refresh();
-            }, 900);
+            if (isCurrent()) setIsCreating(false);
+            let finalized = false;
+            return {
+                avatarUploadFailed,
+                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                finalize: () => {
+                    if (finalized || !isCurrent()) return;
+                    finalized = true;
+                    toastSuccess(t('toastContactCreated'));
+                    setCreationSucceeded(true);
+                    invalidateNewContactClose();
+                    const closeGeneration = newContactGenerationRef.current;
+                    newContactCloseTimerRef.current = window.setTimeout(() => {
+                        if (newContactGenerationRef.current !== closeGeneration) return;
+                        newContactCloseTimerRef.current = null;
+                        closeNewContactDialog(false);
+                        refresh();
+                    }, 900);
+                },
+            };
         } catch (err) {
-            if (isFieldError(err)) {
+            if (!isCurrent()) return;
+            if (isFieldError(err) || businessCard) {
                 throw err;
             }
             toastError(t('toastFailedCreate'));
         } finally {
-            setIsCreating(false);
+            if (isCurrent()) setIsCreating(false);
         }
     };
 
@@ -270,7 +401,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         phone: d.phone.trim() || undefined,
                         title: d.title.trim() || undefined,
                         companyId: c.companyId ?? c.company?.id ?? null,
-                        imageUrl: c.imageUrl || undefined,
                     };
                     return updateContact(c.id, payload);
                 }),
@@ -300,7 +430,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 title: c.title || undefined,
-                imageUrl: c.imageUrl || undefined,
                 companyId: null,
             })));
             toastSuccess(
@@ -317,12 +446,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     };
 
     const quickEditOne = useCallback((contact: Contact) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
         setDrafts({ [contact.id]: toDraft(contact) });
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
     const deleteOne = useCallback((contact: Contact) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
@@ -365,25 +496,39 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         }
     };
 
+    const inlineEdit = useInlineEdit<Contact>(patchItem);
+    const saveContact = useCallback(
+        (full: Contact) =>
+            updateContact(full.id, {
+                name: full.name,
+                email: full.email,
+                phone: full.phone,
+                title: full.title,
+                companyId: full.companyId ?? full.company?.id,
+            }).then(() => {}),
+        [],
+    );
+
     const columns: ColumnDef<Contact>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'warmth',
             label: t('columnWarmth'),
             getSortValue: (c) => tempByContactId.get(c.id)?.score ?? null,
+            sortable: false,
             render: (c) => <TemperaturePill temp={tempByContactId.get(c.id)} />,
         },
         {
             key: 'email',
             label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
-            copyable: { label: t('copyableEmail'), getValue: (c) => c.email },
+            editable: { getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: t('copyablePhone'), getValue: (c) => c.phone },
+            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
         },
         {
             key: 'company',
@@ -396,6 +541,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
+            editable: { getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
+        },
+        {
+            key: 'owner',
+            label: t('columnOwner'),
+            sortable: false,
+            render: (c) => (c.ownerId != null ? memberById.get(c.ownerId)?.displayName ?? '' : ''),
         },
         {
             key: 'createdAt',
@@ -409,20 +561,24 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={viewSelected}>
-                <EyeIcon className="size-4" />
-                {t('view')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                <PencilIcon className="size-4" />
-                {t('quickEdit')}
-            </Button>
+            {!allMatchingActive && (
+                <>
+                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                        <EyeIcon className="size-4" />
+                        {t('view')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                        <PencilIcon className="size-4" />
+                        {t('quickEdit')}
+                    </Button>
+                </>
+            )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -438,18 +594,26 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         <TagIcon />
                         {t('removeTag')}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
-                        <BuildingOffice2Icon />
-                        {t('changeCompany')}
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                        disabled={isClearingCompany}
-                        onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
-                    >
-                        <NoSymbolIcon />
-                        {t('removeFromCompany')}
-                    </DropdownMenuItem>
+                    {!allMatchingActive && (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
+                                <BuildingOffice2Icon />
+                                {t('changeCompany')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                disabled={isClearingCompany}
+                                onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
+                            >
+                                <NoSymbolIcon />
+                                {t('removeFromCompany')}
+                            </DropdownMenuItem>
+                        </>
+                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
@@ -461,16 +625,26 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey, sortDirection }),
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection }),
         [filterState, query, sortKey, sortDirection],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
             applyQuery(config.query ?? '');
-            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
         },
         [setFilterState, applyQuery, applySort],
+    );
+
+    const { density, setDensity } = useRecordDensity();
+    const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
+    const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns, { lockedKey: sortKey });
+    const peek = useRecordPeekController('person', contacts, displayMode === 'table');
+
+    const recordRef = useCallback(
+        (contact: Contact): ActiveRecordRef => ({ type: 'person', id: contact.id, label: contact.name }),
+        [],
     );
 
     return (
@@ -482,11 +656,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         <div className="flex items-center gap-2">
                             <RecordsActions
                                 entity="persons"
-                                onNew={() => setNewContactDialogOpen(true)}
+                                onNew={openNewContactDialog}
                                 newLabel={t('new')}
                                 newAriaLabel={t('newAria')}
                                 onImported={refresh}
-                                contactsFilter={{ ...filterParams, q: query || undefined }}
+                                onExport={exportContacts}
                             />
                         </div>
                     </div>
@@ -498,6 +672,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        defaultView={defaultView}
                     />
                 </Rise>
 
@@ -537,9 +712,24 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
                                     ]}
                                 />
+                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {displayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >
+                        <MemberScopeFilter
+                            values={filterState.owner}
+                            onChange={changeOwnerScope}
+                            members={activeMembers}
+                            counts={ownerCounts}
+                        />
                         <RecordsFilterPills<Contact>
                             facets={facets}
                             filterState={filterState}
@@ -549,9 +739,9 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 </Rise>
 
                 {(() => {
-                    const pageFullySelected = contacts.length > 0 && selectedContactIds.length >= contacts.length;
-                    const allMatchingSelected = total > contacts.length && selectedContactIds.length >= total;
-                    const canSelectAllMatching = pageFullySelected && total > contacts.length && selectedContactIds.length < total;
+                    const pageFullySelected = contacts.length > 0 && contacts.every((contact) => selectedIds.has(contact.id));
+                    const allMatchingSelected = allMatchingActive && total > contacts.length && selectedIds.size >= total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > contacts.length && selectedIds.size < total;
                     if (!canSelectAllMatching && !allMatchingSelected) return null;
                     return (
                         <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
@@ -582,7 +772,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 <Rise delay={0.18}>
                     <RecordsRenderView<Contact>
                         data={contacts}
-                        columns={[...columns, ...customColumns]}
+                        columns={visibleColumns}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <ContactCard
@@ -593,13 +783,18 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                 email={item.email}
                                 phone={item.phone}
                                 imageUrl={item.imageUrl}
+                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
                         detailPath={(item) => `/records/contacts/${item.id}`}
+                        onRowClick={(item) => peek.openPeek(item.id)}
+                        activeId={peek.activeId}
+                        recordRef={recordRef}
                         displayMode={displayMode}
+                        density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}
@@ -611,6 +806,8 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                     />
                 </Rise>
+
+                {peek.drawer}
 
                 <QuickEditSheet
                     editSheetOpen={editSheetOpen}
@@ -630,11 +827,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     setNewContactPayload={setNewContactPayload}
                     imageFile={imageFile}
                     setImageFile={setImageFile}
-                    companies={companies}
-                    selectedCompany={selectedCompany}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     createNewContact={createNewContact}
+                    onRecoveredImport={refresh}
                 />
 
                 <DeleteRecordDialog
@@ -652,7 +848,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     open={changeCompanyOpen}
                     onOpenChange={setChangeCompanyOpen}
                     contacts={selectedContacts}
-                    companies={companies}
                 />
 
                 <BulkTagDialog
@@ -667,6 +862,20 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         failure: (failed) => t('toastTagFailed', { failed }),
                     }}
                     onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedContactIds.length}
+                    members={activeMembers}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignPersonOwner(selectedContactIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
             </div>

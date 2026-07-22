@@ -27,15 +27,16 @@ import EmptyState from "@/app/components/me/EmptyState";
 import Attachments from "@/app/components/attachments/Attachments";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import UserPerformance from "@/app/components/users/UserPerformance";
 
 export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const t = await getTranslations("UsersPage");
-    const locale = await getLocale();
 
-    const [user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+    const [t, locale, user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+        getTranslations("UsersPage"),
+        getLocale(),
         getUserById(id, init).catch(() => null),
         getCurrentUserFromCookie(cookie),
         getUserTasksFromCookie(id, cookie),
@@ -111,6 +112,8 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                     </Rise>
 
                     <Rise delay={0.12}>
+                        <div className="flex flex-col gap-8">
+                        <UserPerformance userId={user.id} />
                         <section>
                             <SectionHeader title={t("theirActivity")} />
 
@@ -143,6 +146,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                 </div>
                             </div>
                         </section>
+                        </div>
                     </Rise>
                 </div>
             </div>

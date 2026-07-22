@@ -3,43 +3,124 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.SavedViewMapper">
 
-  <sql id="columns">
-    id, workspace_id, user_id, record_type, name, config_json, position, created_at, updated_at
+  <resultMap id="savedViewResult" type="SavedView">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="userId" column="user_id"/>
+    <result property="recordType" column="record_type"/>
+    <result property="name" column="name"/>
+    <result property="config" column="config_json"
+            typeHandler="ooo.klae.connex.backend.mappers.JsonNodeTypeHandler"/>
+    <result property="visibility" column="visibility"/>
+    <result property="position" column="position"/>
+    <result property="ownedByCurrentUser" column="owned_by_current_user"/>
+    <result property="pinned" column="pinned"/>
+    <result property="pinPosition" column="pin_position"/>
+    <result property="defaultView" column="is_default"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="projectedColumns">
+    sv.id, sv.workspace_id, sv.user_id, sv.record_type, sv.name, sv.config_json,
+    sv.visibility, sv.position,
+    CASE WHEN sv.user_id = #{userId} THEN TRUE ELSE FALSE END AS owned_by_current_user,
+    CASE WHEN pin.saved_view_id IS NULL THEN FALSE ELSE TRUE END AS pinned,
+    pin.position AS pin_position,
+    CASE WHEN def.saved_view_id IS NULL THEN FALSE ELSE TRUE END AS is_default,
+    sv.created_at, sv.updated_at
   </sql>
 
-  <select id="getByUser" resultType="SavedView">
-    SELECT <include refid="columns"/> FROM saved_view
-    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
-    ORDER BY record_type, position, id
+  <sql id="projectionJoins">
+    LEFT JOIN saved_view_pin pin
+      ON pin.workspace_id = sv.workspace_id
+     AND pin.user_id = #{userId}
+     AND pin.saved_view_id = sv.id
+    LEFT JOIN saved_view_default def
+      ON def.workspace_id = sv.workspace_id
+     AND def.user_id = #{userId}
+     AND def.record_type = sv.record_type
+     AND def.saved_view_id = sv.id
+  </sql>
+
+  <sql id="plainColumns">
+    sv.id, sv.workspace_id, sv.user_id, sv.record_type, sv.name, sv.config_json,
+    sv.visibility, sv.position, sv.created_at, sv.updated_at
+  </sql>
+
+  <select id="getAccessibleByRecordType" resultMap="savedViewResult">
+    SELECT <include refid="projectedColumns"/>
+    FROM saved_view sv
+    <include refid="projectionJoins"/>
+    WHERE sv.workspace_id = #{workspaceId}
+      AND sv.record_type = #{recordType}
+      AND (sv.user_id = #{userId} OR sv.visibility = 'workspace')
+    ORDER BY
+      CASE WHEN sv.user_id = #{userId} THEN 0 ELSE 1 END,
+      CASE WHEN sv.user_id = #{userId} THEN 0 ELSE sv.user_id END,
+      sv.position,
+      sv.id
   </select>
 
-  <select id="getByRecordType" resultType="SavedView">
-    SELECT <include refid="columns"/> FROM saved_view
-    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND record_type = #{recordType}
-    ORDER BY position, id
+  <select id="getAccessibleById" resultMap="savedViewResult">
+    SELECT <include refid="projectedColumns"/>
+    FROM saved_view sv
+    <include refid="projectionJoins"/>
+    WHERE sv.workspace_id = #{workspaceId}
+      AND sv.id = #{id}
+      AND (sv.user_id = #{userId} OR sv.visibility = 'workspace')
   </select>
 
-  <select id="getById" resultType="SavedView">
-    SELECT <include refid="columns"/> FROM saved_view
-    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
+  <select id="getAccessibleByIdForUpdate" resultMap="savedViewResult">
+    SELECT <include refid="plainColumns"/>
+    FROM saved_view sv
+    WHERE sv.workspace_id = #{workspaceId}
+      AND sv.id = #{id}
+      AND (sv.user_id = #{userId} OR sv.visibility = 'workspace')
+    FOR UPDATE
   </select>
 
-  <select id="getByName" resultType="SavedView">
-    SELECT <include refid="columns"/> FROM saved_view
-    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
-      AND record_type = #{recordType} AND name = #{name}
+  <select id="getOwnedByIdForUpdate" resultMap="savedViewResult">
+    SELECT <include refid="plainColumns"/>
+    FROM saved_view sv
+    WHERE sv.workspace_id = #{workspaceId}
+      AND sv.user_id = #{userId}
+      AND sv.id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getByName" resultMap="savedViewResult">
+    SELECT <include refid="plainColumns"/>
+    FROM saved_view sv
+    WHERE sv.workspace_id = #{workspaceId}
+      AND sv.user_id = #{userId}
+      AND sv.record_type = #{recordType}
+      AND sv.name = #{name}
+  </select>
+
+  <select id="countOwnedByRecordType" resultType="int">
+    SELECT COUNT(*)
+    FROM saved_view
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND record_type = #{recordType}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO saved_view
-      (workspace_id, user_id, record_type, name, config_json, position)
+      (workspace_id, user_id, record_type, name, config_json, visibility, position)
     VALUES
-      (#{workspaceId}, #{userId}, #{recordType}, #{name}, #{configJson}, #{position})
+      (#{workspaceId}, #{userId}, #{recordType}, #{name},
+       #{config,typeHandler=ooo.klae.connex.backend.mappers.JsonNodeTypeHandler},
+       #{visibility}, #{position})
   </insert>
 
   <update id="update">
     UPDATE saved_view
-    SET name = #{name}, config_json = #{configJson}, position = #{position}
+    SET name = #{name},
+        config_json = #{config,typeHandler=ooo.klae.connex.backend.mappers.JsonNodeTypeHandler},
+        visibility = #{visibility},
+        position = #{position}
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
   </update>
 
@@ -47,4 +128,19 @@
     DELETE FROM saved_view
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
   </delete>
+
+  <delete id="deleteForUser">
+    DELETE FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteForFreshMembership">
+    DELETE FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteForUserAnywhere">
+    DELETE FROM saved_view WHERE user_id = #{userId}
+  </delete>
+
 </mapper>

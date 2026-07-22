@@ -19,12 +19,10 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 // import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
-import { updateContact } from '@/app/lib/api';
-import { uploadContactPicture } from '@/app/lib/utils';
-import type { Company, Contact, UpdateContactPayload } from '@/app/lib/types';
-import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
+import { updateContact, uploadContactPicture } from '@/app/lib/api';
+import type { Contact, UpdateContactPayload } from '@/app/lib/types';
+import { BuildingOffice2Icon, NoSymbolIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
-import { getCompanies } from '@/app/lib/api';
 
 function initialsOf(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -60,6 +58,7 @@ interface ContactCardProps {
     email?: string;
     phone?: string;
     imageUrl?: string;
+    ownerName?: string;
     tags?: Tag[];
     onQuickEdit?: () => void;
     onDelete?: () => void;
@@ -70,6 +69,7 @@ export default function ContactCard({
     name = 'Tahm Kench',
     title = 'CTO',
     company = '',
+    ownerName,
     companyId,
     email,
     phone,
@@ -84,7 +84,6 @@ export default function ContactCard({
     const [draft, setDraft] = useState<ContactDraft>({ name: '', email: '', phone: '', title: '' });
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [companies, setCompanies] = useState<Company[]>([]);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [removeFromCompanyOpen, setRemoveFromCompanyOpen] = useState(false);
 
@@ -103,9 +102,7 @@ export default function ContactCard({
         setEditSheetOpen(true);
     }
 
-    // open the change company dialog so the user can select a new company for the contact
     function openChangeCompanyDialog() {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
         setChangeCompanyOpen(true);
     }
 
@@ -119,6 +116,7 @@ export default function ContactCard({
             return;
         }
         setIsSaving(true);
+        let detailsSaved = false;
         try {
             const payload: UpdateContactPayload = {
                 name: trimmedName,
@@ -126,18 +124,17 @@ export default function ContactCard({
                 phone: draft.phone.trim() || undefined,
                 title: draft.title.trim() || undefined,
                 companyId: companyId ?? null,
-                imageUrl: imageUrl || undefined,
             };
-            if (imageFile) {
-                payload.imageUrl = await uploadContactPicture(id, imageFile);
-            }
             await updateContact(id, payload);
+            detailsSaved = true;
+            if (imageFile) await uploadContactPicture(id, imageFile);
             toastSuccess(t('toastContactUpdated'));
             setEditSheetOpen(false);
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            toastError(detailsSaved && imageFile ? t('toastPartiallySaved') : err instanceof Error ? err.message : t('toastFailedSave'));
+            if (detailsSaved) router.refresh();
         } finally {
             setIsSaving(false);
         }
@@ -252,6 +249,13 @@ export default function ContactCard({
                     </span>
                 )}
 
+                {ownerName && (
+                    <span className="inline-flex max-w-full items-center gap-1.5 self-start text-xs text-muted-foreground">
+                        <UserCircleIcon className="size-3.5 shrink-0" />
+                        <span className="truncate">{t('ownerLabel', { name: ownerName })}</span>
+                    </span>
+                )}
+
                 {/* // TODO: fix this bug (not showing) */}
                 {tags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
@@ -287,7 +291,6 @@ export default function ContactCard({
             open={changeCompanyOpen}
             onOpenChange={setChangeCompanyOpen}
             contacts={[syntheticContact]}
-            companies={companies}
             onSuccess={() => {
                 toastSuccess(t('toastCompanyChanged'));
                 router.refresh();

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -18,4 +20,6 @@ public class PersonConnectionDto {
     private String type;
     private int strength;
     private String note;
+    private LocalDateTime suspendedAt;
+    private LocalDateTime provisionCeasedAt;
 }

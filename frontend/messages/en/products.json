@@ -1,0 +1,51 @@
+{
+  "RecordsProductsLayout": {
+    "title": "Products",
+    "description": "Your product and service catalog"
+  },
+  "ProductsBrowser": {
+    "title": "Products",
+    "newButton": "New product",
+    "sectionCatalog": "Catalog",
+    "searchPlaceholder": "Search products",
+    "empty": "No products yet. Add your first catalog item.",
+    "noMatches": "No products match your search.",
+    "columnName": "Name",
+    "columnSku": "SKU",
+    "columnPrice": "Unit price",
+    "columnBilling": "Billing",
+    "columnStatus": "Status",
+    "perUnit": "per {unit}",
+    "oneTime": "One-time",
+    "recurring": "Recurring",
+    "active": "Active",
+    "inactive": "Inactive",
+    "actions": "Actions",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleted": "Product deleted",
+    "deleteFailed": "Couldn't delete the product",
+    "entityLabel": "product"
+  },
+  "ProductDialog": {
+    "createTitle": "New product",
+    "editTitle": "Edit product",
+    "description": "Catalog items can be added to deals as line items.",
+    "name": "Name",
+    "sku": "SKU",
+    "unit": "Unit",
+    "unitPlaceholder": "e.g. seat, hour",
+    "unitPrice": "Unit price",
+    "currency": "Currency",
+    "taxRate": "Tax rate %",
+    "billingFrequency": "Billing",
+    "oneTime": "One-time",
+    "recurring": "Recurring",
+    "descriptionLabel": "Description",
+    "active": "Active (offered on new line items)",
+    "nameRequired": "Name is required",
+    "saveFailed": "Couldn't save the product",
+    "cancel": "Cancel",
+    "save": "Save"
+  }
+}

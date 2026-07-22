@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +21,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.IntroOverviewDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -56,6 +60,26 @@ class IntroductionServiceTest extends AbstractServiceTest {
         assertTrue(lineageHasPair(p1.getId(), p2.getId()));
         assertTrue(edgeExists(p1.getId(), p2.getId()));
         assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
+    }
+
+    @Test
+    void overviewServesBothFeedsFromOneWarmthPass() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+
+        Person bridge = recentlyEngagedPerson(newCompany());
+        Person target = newPerson(newCompany());
+        connect(bridge.getId(), target.getId());
+
+        IntroOverviewDto overview = introductionService.getOverview(50, 50);
+
+        assertTrue(hasPair(overview.getSuggestions(), p1.getId(), p2.getId()),
+            "the overview must carry the give-side suggestions");
+        assertTrue(overview.getPaths().stream().anyMatch(row -> row.getTargetId() == target.getId()),
+            "the overview must carry the receive-side warm paths");
     }
 
     @Test
@@ -108,6 +132,18 @@ class IntroductionServiceTest extends AbstractServiceTest {
         IntroSuggestionDto pair = find(suggestions, p1.getId(), p2.getId());
         assertEquals(1, pair.getMutualConnections());
         assertTrue(pair.getReasons().contains("mutual_connections"));
+    }
+
+    @Test
+    void suspendedMutualConnectorDoesNotCreateSuggestion() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+        personMapper.updateProcessingRestrictions(workspace.getId(), hub.getId(), true, false);
+
+        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
     }
 
     @Test
@@ -199,6 +235,22 @@ class IntroductionServiceTest extends AbstractServiceTest {
         Person p1 = engagedPerson(newCompany());
         assertThrows(BadRequestException.class,
             () -> introductionService.createIntroduction(p1.getId(), p1.getId(), null));
+    }
+
+    /** A contact touched today, so it scores warm/hot and qualifies as a warm-path bridge. */
+    private Person recentlyEngagedPerson(Company company) {
+        Person person = newPerson(company);
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("call");
+        activity.setSubject("subj_" + unique());
+        activity.setNotes("notes_" + unique());
+        activity.setPerson(person);
+        activity.setCreatedBy(currentUser);
+        activity.setTimestamp(LocalDateTime.now(ZoneOffset.UTC)
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        activityMapper.insert(activity);
+        return person;
     }
 
     private Person engagedPerson(Company company) {

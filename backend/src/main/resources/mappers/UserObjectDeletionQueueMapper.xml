@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper">
+
+  <insert id="enqueue">
+    INSERT INTO user_object_deletion_queue (
+      object_key, attempts, delete_passes_remaining, next_attempt_at
+    )
+    VALUES (#{objectKey}, 1, #{deletePassesRemaining}, #{nextAttemptAt})
+    ON DUPLICATE KEY UPDATE
+      attempts = LEAST(user_object_deletion_queue.attempts + 1, 2147483647),
+      next_attempt_at = IF(
+        VALUES(delete_passes_remaining) &gt; user_object_deletion_queue.delete_passes_remaining,
+        GREATEST(user_object_deletion_queue.next_attempt_at, VALUES(next_attempt_at)),
+        LEAST(user_object_deletion_queue.next_attempt_at, VALUES(next_attempt_at))
+      ),
+      delete_passes_remaining = GREATEST(
+        user_object_deletion_queue.delete_passes_remaining,
+        VALUES(delete_passes_remaining)
+      )
+  </insert>
+
+  <select id="countPending" resultType="long">
+    SELECT COUNT(*) FROM user_object_deletion_queue
+  </select>
+
+  <select id="countPendingForPrefix" resultType="long">
+    SELECT COUNT(*)
+    FROM user_object_deletion_queue
+    WHERE object_key LIKE CONCAT(#{objectKeyPrefix}, '%')
+  </select>
+
+  <select id="findDue" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE next_attempt_at &lt;= #{now}
+    ORDER BY next_attempt_at, id
+    LIMIT #{limit}
+  </select>
+
+  <select id="lockByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE id = #{id} AND object_key = #{objectKey}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByKey" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE object_key = #{objectKey} AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <select id="lockDueByIdentity" resultType="ooo.klae.connex.backend.storage.ObjectDeletionTask">
+    SELECT id, 0 AS workspaceId, object_key AS objectKey, attempts,
+           delete_passes_remaining AS deletePassesRemaining
+    FROM user_object_deletion_queue
+    WHERE id = #{id} AND object_key = #{objectKey} AND next_attempt_at &lt;= #{now}
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteById">
+    DELETE FROM user_object_deletion_queue WHERE id = #{id}
+  </delete>
+
+  <delete id="deleteByKey">
+    DELETE FROM user_object_deletion_queue WHERE object_key = #{objectKey}
+  </delete>
+
+  <delete id="deleteByIdentity">
+    DELETE FROM user_object_deletion_queue WHERE id = #{id} AND object_key = #{objectKey}
+  </delete>
+
+  <update id="reschedule">
+    UPDATE user_object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647), next_attempt_at = #{nextAttemptAt}
+    WHERE id = #{id}
+  </update>
+
+  <update id="rescheduleByKey">
+    UPDATE user_object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647), next_attempt_at = #{nextAttemptAt}
+    WHERE object_key = #{objectKey}
+  </update>
+
+  <update id="confirmDeletePass">
+    UPDATE user_object_deletion_queue
+    SET attempts = LEAST(attempts + 1, 2147483647),
+        delete_passes_remaining = delete_passes_remaining - 1,
+        next_attempt_at = #{nextAttemptAt}
+    WHERE id = #{id} AND delete_passes_remaining &gt; 1
+  </update>
+
+</mapper>

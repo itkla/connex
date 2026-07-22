@@ -5,10 +5,12 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -25,6 +27,7 @@ public class ShareService {
     private enum Type { COMPANY, PERSON, PIPELINE }
 
     private final ShareMapper shareMapper;
+    private final PersonMapper personMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
@@ -48,6 +51,9 @@ public class ShareService {
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         requireOwned(type, workspaceId, entityId);
+        if (type == Type.PERSON) {
+            requirePersonProvisionAllowed(workspaceId, entityId);
+        }
         if (targetWorkspaceId == workspaceId) {
             throw new BadRequestException("A record cannot be shared with its own workspace");
         }
@@ -60,6 +66,9 @@ public class ShareService {
             case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
             case PIPELINE -> shareMapper.sharePipeline(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
         };
+        if (granted == 0 && type == Type.PERSON) {
+            requirePersonProvisionAllowed(workspaceId, entityId);
+        }
         if (granted == 0 && !shareExists(type, entityId, workspaceId, targetWorkspaceId)) {
             throw new ForbiddenException("A record can only be shared by its owning workspace within its organization");
         }
@@ -103,6 +112,16 @@ public class ShareService {
         };
         if (!owned) {
             throw new ResourceNotFoundException("Record not found in this workspace");
+        }
+    }
+
+    private void requirePersonProvisionAllowed(int workspaceId, int entityId) {
+        Person person = personMapper.getPersonById(workspaceId, entityId);
+        if (person == null) {
+            throw new ResourceNotFoundException("Record not found in this workspace");
+        }
+        if (person.getProvisionCeasedAt() != null) {
+            throw new BadRequestException("Third-party provision has been ceased for this contact");
         }
     }
 

@@ -18,11 +18,24 @@ export interface ColumnDef<T> {
     key: string;
     label: string;
     getSortValue?: (item: T) => SortValue;
+    sortable?: boolean;
     render?: (item: T) => ReactNode;
     renderHeader?: () => ReactNode;
     copyable?: {
         label: string;
         getValue: (item: T) => string | undefined | null;
+    };
+    /**
+     * Makes the cell editable in place: double-click (or keyboard-activate) shows an input that saves the
+     * single field via {@link editable.save}, optimistically reflected and reverted on failure. Takes
+     * precedence over {@link copyable}; the record identity/name column is intentionally left non-editable
+     * so its cell keeps opening the record.
+     */
+    editable?: {
+        getValue: (item: T) => string | undefined | null;
+        save: (item: T, next: string) => Promise<void>;
+        inputType?: 'text' | 'url' | 'tel';
+        validate?: (next: string) => string | null;
     };
     filter?: FilterDef<T>;
     widthClass?: string;

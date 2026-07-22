@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -29,6 +30,7 @@ public class PipelineService {
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> PIPELINE_AUDIT_FIELDS =
         Set.of("name");
@@ -60,7 +62,7 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public Pipeline updatePipeline(int id, Pipeline pipeline) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline before = requirePipeline(workspaceId, id);
+        Pipeline before = requireOwnedPipeline(workspaceId, id);
         pipeline.setId(id);
         pipeline.setWorkspaceId(workspaceId);
         pipelineMapper.updatePipeline(pipeline);
@@ -73,7 +75,7 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public void deletePipeline(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline before = requirePipeline(workspaceId, id);
+        Pipeline before = requireOwnedPipeline(workspaceId, id);
         pipelineMapper.deletePipeline(workspaceId, id);
         auditService.record("pipeline.delete", "pipeline", id, before.getName(),
             "Deleted pipeline " + before.getName(),
@@ -90,18 +92,23 @@ public class PipelineService {
         return stages;
     }
 
+    public List<Stage> getAllStages() {
+        return pipelineMapper.getAllStages(workspaceService.getCurrentWorkspaceId());
+    }
+
     public Stage getStageById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Stage stage = pipelineMapper.getStageById(workspaceId, id);
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, id);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
-        stage.setDeals(dealMapper.getDealsByStageId(workspaceId, id).toArray(Deal[]::new));
+        stage.setDeals(referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByStageId(workspaceId, id)).toArray(Deal[]::new));
         return stage;
     }
 
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public Stage createStage(int pipelineId, Stage stage) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline pipeline = requirePipeline(workspaceId, pipelineId);
+        Pipeline pipeline = requireOwnedPipeline(workspaceId, pipelineId);
         stage.setPipeline(pipeline);
         stage.setWorkspaceId(workspaceId);
         assertSingleTerminalOfType(workspaceId, pipelineId, stage);
@@ -168,7 +175,8 @@ public class PipelineService {
     public List<Deal> getDealsByPipelineId(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePipeline(workspaceId, pipelineId);
-        return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByPipelineId(workspaceId, pipelineId));
     }
 
     /**
@@ -176,8 +184,10 @@ public class PipelineService {
      */
     public List<Deal> getDealsByStageId(int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (pipelineMapper.getStageById(workspaceId, stageId) == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
-        return dealMapper.getDealsByStageId(workspaceId, stageId);
+        if (pipelineMapper.getVisibleStageById(workspaceId, stageId) == null)
+            throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByStageId(workspaceId, stageId));
     }
 
     private Pipeline requirePipeline(int workspaceId, int pipelineId) {
@@ -186,11 +196,21 @@ public class PipelineService {
         return pipeline;
     }
 
+    private Pipeline requireOwnedPipeline(int workspaceId, int pipelineId) {
+        Pipeline pipeline = pipelineMapper.getOwnedPipelineById(workspaceId, pipelineId);
+        if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
+        return pipeline;
+    }
+
     private void hydrateStageDeals(Stage[] stages) {
         if (stages == null) return;
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Deal> deals = new ArrayList<>();
         for (Stage stage : stages) {
-            stage.setDeals(dealMapper.getDealsByStageId(workspaceId, stage.getId()).toArray(Deal[]::new));
+            List<Deal> stageDeals = dealMapper.getDealsByStageId(workspaceId, stage.getId());
+            stage.setDeals(stageDeals.toArray(Deal[]::new));
+            deals.addAll(stageDeals);
         }
+        referenceService.hydrateDeals(workspaceId, deals);
     }
 }

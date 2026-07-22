@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,8 +14,10 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
@@ -36,10 +39,14 @@ import ooo.klae.connex.backend.util.LikePattern;
  *
  * <p>Field conditions are validated against a kind-typed catalog (string / number / id / enum / tag /
  * date) before any SQL runs, and dispatched to the per-record-type {@code *IdsMatching} statements;
- * negatives are expressed as a positive operator plus {@code negate}. Predicates
- * ({@code warm_intro_available}, {@code open_deal}, {@code cooling}, {@code no_activity}) remain
- * company-only, since they are graph- and temperature-derived; {@code cooling} reuses
- * {@link ScoringService}. This shared model is the rule engine's {@code WHEN}.
+ * negatives are expressed as a positive operator plus {@code negate}. Predicates declare their
+ * applicable record types in {@link SegmentCatalog} and dispatch per type: the graph/temperature
+ * signals ({@code warm_intro_available}, {@code open_deal}, {@code cooling}) are company-only, the
+ * existence signals ({@code has_open_task}, {@code recent_meeting}, …) apply to person/deal, the
+ * warmth signals ({@code warmth_hot}…{@code going_cold}) apply to company/person via
+ * {@link ScoringService}, and the deal-risk signals ({@code at_risk}, {@code risk_stalled}, …) apply
+ * to deals via {@link DealRiskService}. Each computed signal is evaluated once per evaluation and
+ * reused across sibling conditions. This shared model is the rule engine's {@code WHEN}.
  */
 @Service
 @RequiredArgsConstructor
@@ -48,51 +55,14 @@ public class SegmentService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final ScoringService scoringService;
+    private final DealRiskService dealRiskService;
     private final SegmentMapper segmentMapper;
     private final PersonEdgeMapper edgeMapper;
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
+    private final SegmentCatalog catalog;
 
-    private static final int DEFAULT_DAYS = 30;
-    private static final int MAX_DAYS = 3650;
     private static final int STRONG_EDGE = 2;
-    private static final int MAX_CONDITIONS = 32;
-    private static final int MAX_DEPTH = 4;
-
-    private static final Set<String> SUPPORTED_RECORD_TYPES = Set.of("company", "person", "deal");
-    private static final Set<String> PREDICATE_KEYS =
-        Set.of("warm_intro_available", "open_deal", "cooling", "no_activity");
-    private static final Set<String> STATUS_VALUES = Set.of("open", "won", "lost");
-
-    private enum Kind { STRING, NUMBER, ID, ENUM, TAG, DATE }
-
-    private static final Map<String, Map<String, Kind>> FIELDS = Map.of(
-        "company", Map.of(
-            "industry", Kind.STRING,
-            "name", Kind.STRING,
-            "tag", Kind.TAG),
-        "person", Map.of(
-            "name", Kind.STRING,
-            "title", Kind.STRING,
-            "email", Kind.STRING,
-            "company", Kind.ID,
-            "tag", Kind.TAG),
-        "deal", Map.of(
-            "name", Kind.STRING,
-            "value", Kind.NUMBER,
-            "stage", Kind.ID,
-            "owner", Kind.ID,
-            "status", Kind.ENUM,
-            "close_date", Kind.DATE,
-            "tag", Kind.TAG));
-
-    private static final Map<Kind, Set<String>> OPS = Map.of(
-        Kind.STRING, Set.of("equals", "contains", "starts_with", "is_set"),
-        Kind.NUMBER, Set.of("equals", "gt", "gte", "lt", "lte"),
-        Kind.ID, Set.of("is", "in"),
-        Kind.ENUM, Set.of("is"),
-        Kind.TAG, Set.of("has"),
-        Kind.DATE, Set.of("before", "after", "within_days", "is_set"));
 
     /**
      * Returns the ids of records matching the definition, scoped to the active session's workspace
@@ -107,22 +77,89 @@ public class SegmentService {
      * user are supplied explicitly rather than resolved from the security/tenant context.
      */
     public List<Integer> evaluate(int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return evaluate(workspaceId, userId, recordType, definition, false);
+    }
+
+    /**
+     * Session-free campaign evaluation that includes processing-restricted people in the candidate
+     * set so the caller can classify them explicitly. Normal smart-segment and rule evaluation
+     * continues to exclude suspended people through {@link #evaluate(int, int, String, SegmentDefinition)}.
+     */
+    public List<Integer> evaluateIncludingRestrictedPeople(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return evaluate(workspaceId, userId, recordType, definition, true);
+    }
+
+    private List<Integer> evaluate(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition,
+            boolean includeRestrictedPeople) {
         String type = requireSupported(recordType);
         if (definition == null) {
             return List.of();
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
-        EvalContext ctx = new EvalContext(workspaceId, userId, type);
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople, null);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
         return new ArrayList<>(result);
     }
 
+    /**
+     * Whether a single record matches the definition, evaluated for that record alone. Field and
+     * graph conditions run as usual and are tested for membership, while the temperature- and
+     * risk-based signals score only this record (via {@link ScoringService}/{@link DealRiskService}
+     * scoped overloads) rather than the whole workspace. Semantically equal to
+     * {@code evaluate(...).contains(entityId)} but bounded to the one record — the rule engine uses it
+     * for its after-commit per-entity check so a computed {@code WHEN} does not score the workspace on
+     * every event.
+     */
+    public boolean matchesEntity(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition, int entityId) {
+        String type = requireSupported(recordType);
+        if (definition == null) {
+            return false;
+        }
+        countConditions(definition, 1);
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, false, Set.of(entityId));
+        return matchesGroup(definition, ctx, entityId, 1);
+    }
+
+    private boolean matchesGroup(SegmentDefinition group, EvalContext ctx, int entityId, int depth) {
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
+        }
+        String match = normalize(group.getMatch());
+        boolean any = "any".equals(match);
+        if (!any && !"all".equals(match)) {
+            throw new BadRequestException("Invalid match (expected 'all' or 'any'): " + group.getMatch());
+        }
+        List<SegmentCondition> conditions = group.getConditions() == null ? List.of() : group.getConditions();
+        List<SegmentDefinition> groups = group.getGroups() == null ? List.of() : group.getGroups();
+        if (conditions.isEmpty() && groups.isEmpty()) {
+            throw new BadRequestException("A condition group requires at least one condition or nested group");
+        }
+        boolean matched = !any;
+        for (SegmentCondition condition : conditions) {
+            boolean hit = conditionMatchesEntity(condition, ctx, entityId);
+            matched = any ? matched || hit : matched && hit;
+        }
+        for (SegmentDefinition nested : groups) {
+            boolean hit = matchesGroup(nested, ctx, entityId, depth + 1);
+            matched = any ? matched || hit : matched && hit;
+        }
+        return group.isNegate() != matched;
+    }
+
+    private boolean conditionMatchesEntity(SegmentCondition condition, EvalContext ctx, int entityId) {
+        boolean matched = evaluateCondition(condition, ctx).contains(entityId);
+        return condition.isNegate() != matched;
+    }
+
     private int countConditions(SegmentDefinition group, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         int count = group.getConditions() == null ? 0 : group.getConditions().size();
         if (group.getGroups() != null) {
@@ -143,6 +180,44 @@ public class SegmentService {
         List<TagDto> tags = tagMapper.getAllTags(workspaceId).stream().map(TagDto::from).toList();
         List<String> industries = "company".equals(type) ? segmentMapper.distinctIndustries(workspaceId) : List.of();
         return new SegmentFieldsDto(industries, tags);
+    }
+
+    /**
+     * The static, workspace-independent shape of the builder for a record type: its fields (kind,
+     * value source, legal operators), the predicates that apply to it, the enum option sets, and the
+     * definition shape limits. Carries no workspace data, so it is safe to cache; the client renders
+     * the builder generically from it and pairs it with the workspace value options from
+     * {@link #fields(String)}.
+     */
+    public SegmentCatalogDto catalog(String recordType) {
+        String type = requireSupported(recordType);
+        List<SegmentCatalogDto.CatalogField> fields = new ArrayList<>();
+        Map<String, List<String>> enums = new LinkedHashMap<>();
+        for (SegmentCatalog.FieldSpec spec : catalog.fields(type)) {
+            fields.add(new SegmentCatalogDto.CatalogField(
+                spec.field(),
+                spec.kind().name().toLowerCase(),
+                spec.valueSource().name().toLowerCase(),
+                catalog.operatorsFor(spec.kind())));
+            if (spec.kind() == SegmentCatalog.Kind.ENUM) {
+                enums.put(spec.field(), catalog.enumOptions(spec.field()));
+            }
+        }
+        List<SegmentCatalogDto.CatalogPredicate> predicates = new ArrayList<>();
+        for (SegmentCatalog.PredicateSpec spec : catalog.predicates()) {
+            if (spec.recordTypes().contains(type)) {
+                predicates.add(new SegmentCatalogDto.CatalogPredicate(
+                    spec.key(),
+                    List.copyOf(spec.recordTypes()),
+                    spec.acceptsDays(),
+                    spec.acceptsDays() ? spec.defaultDays() : null,
+                    spec.acceptsDays() ? spec.minDays() : null,
+                    spec.acceptsDays() ? spec.maxDays() : null));
+            }
+        }
+        SegmentCatalogDto.CatalogLimits limits = new SegmentCatalogDto.CatalogLimits(
+            catalog.maxConditions(), catalog.maxGroupConditions(), catalog.maxGroups(), catalog.maxDepth());
+        return new SegmentCatalogDto(type, fields, predicates, enums, limits);
     }
 
     /** id + display label for a bounded set of records of {@code recordType}, for a preview sample. */
@@ -170,8 +245,8 @@ public class SegmentService {
             return;
         }
         int total = countConditions(definition, 1);
-        if (total > MAX_CONDITIONS) {
-            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
         validateGroup(definition, type);
     }
@@ -197,12 +272,13 @@ public class SegmentService {
     private void validateCondition(SegmentCondition condition, String recordType) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(recordType)) {
-                throw new BadRequestException("Predicates are only available for company records");
-            }
             String key = normalize(condition.getKey());
-            if (key == null || !PREDICATE_KEYS.contains(key)) {
+            if (key == null || !catalog.isPredicate(key)) {
                 throw new BadRequestException("Unknown predicate: " + condition.getKey());
+            }
+            if (!catalog.predicateAppliesTo(key, recordType)) {
+                throw new BadRequestException(
+                    "Predicate '" + condition.getKey() + "' is not available for " + recordType + " records");
             }
             return;
         }
@@ -212,8 +288,8 @@ public class SegmentService {
             if (field == null || op == null) {
                 throw new BadRequestException("Field condition requires 'field' and 'op'");
             }
-            Kind kind = fieldKind(recordType, field);
-            if (!OPS.get(kind).contains(op)) {
+            SegmentCatalog.Kind kind = fieldKind(recordType, field);
+            if (!catalog.operatorsFor(kind).contains(op)) {
                 throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
             }
             bindValue(kind, op, condition, new HashMap<>());
@@ -228,8 +304,8 @@ public class SegmentService {
     }
 
     private Set<Integer> combineMembers(SegmentDefinition group, EvalContext ctx, int depth) {
-        if (depth > MAX_DEPTH) {
-            throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
+        if (depth > catalog.maxDepth()) {
+            throw new BadRequestException("Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)");
         }
         String match = normalize(group.getMatch());
         boolean any = "any".equals(match);
@@ -281,10 +357,7 @@ public class SegmentService {
     private Set<Integer> evaluateCondition(SegmentCondition condition, EvalContext ctx) {
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
-            if (!"company".equals(ctx.recordType())) {
-                throw new BadRequestException("Predicates are only available for company records");
-            }
-            return evaluatePredicate(condition, ctx.workspaceId(), ctx.userId());
+            return evaluatePredicate(condition, ctx);
         }
         if ("field".equals(type)) {
             return evaluateField(condition, ctx);
@@ -292,18 +365,111 @@ public class SegmentService {
         throw new BadRequestException("Unknown condition type (expected 'predicate' or 'field'): " + condition.getType());
     }
 
-    private Set<Integer> evaluatePredicate(SegmentCondition condition, int workspaceId, int userId) {
+    private Set<Integer> evaluatePredicate(SegmentCondition condition, EvalContext ctx) {
         String key = normalize(condition.getKey());
-        if (key == null || !PREDICATE_KEYS.contains(key)) {
+        if (key == null || !catalog.isPredicate(key)) {
             throw new BadRequestException("Unknown predicate: " + condition.getKey());
         }
+        if (!catalog.predicateAppliesTo(key, ctx.recordType())) {
+            throw new BadRequestException(
+                "Predicate '" + condition.getKey() + "' is not available for " + ctx.recordType() + " records");
+        }
+        int workspaceId = ctx.workspaceId();
         return switch (key) {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
-            case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(workspaceId, resolveDays(condition.getDays())));
-            case "cooling" -> coolingCompanyIds(workspaceId);
-            case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, userId);
+            case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
+                workspaceId, catalog.clampDays(condition.getDays())));
+            case "cooling" -> coolingCompanyIds(ctx);
+            case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, ctx.userId());
+            case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
+                existencePredicate(key, condition, ctx);
+            case "warmth_hot" -> warmthBand(ctx, "hot");
+            case "warmth_warm" -> warmthBand(ctx, "warm");
+            case "warmth_cool" -> warmthBand(ctx, "cool");
+            case "warmth_cold" -> warmthBand(ctx, "cold");
+            case "warmth_rising" -> warmthTrend(ctx, "rising");
+            case "going_cold" -> goingCold(ctx, catalog.clampDays(condition.getDays()));
+            case "at_risk" -> dealRiskLevel(ctx, Set.of("high", "medium"));
+            case "risk_high" -> dealRiskLevel(ctx, Set.of("high"));
+            case "risk_close_overdue" -> dealRiskFactor(ctx, "close_overdue");
+            case "risk_closing_soon" -> dealRiskFactor(ctx, "closing_soon_quiet");
+            case "risk_stalled" -> dealRiskFactor(ctx, "stalled");
+            case "risk_stakeholder_cold" -> dealRiskFactor(ctx, "stakeholder_cold");
+            case "risk_no_stakeholders" -> dealRiskFactor(ctx, "no_stakeholders");
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());
         };
+    }
+
+    private Set<Integer> dealRiskLevel(EvalContext ctx, Set<String> levels) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (DealRiskDto risk : ctx.dealRisks(dealRiskService)) {
+            if (levels.contains(risk.getLevel()) && universe.contains(risk.getDealId())) {
+                ids.add(risk.getDealId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> dealRiskFactor(EvalContext ctx, String code) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (DealRiskDto risk : ctx.dealRisks(dealRiskService)) {
+            if (risk.getFactors() != null
+                    && risk.getFactors().stream().anyMatch(factor -> code.equals(factor.getCode()))
+                    && universe.contains(risk.getDealId())) {
+                ids.add(risk.getDealId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> warmthBand(EvalContext ctx, String band) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (band.equals(temperature.getBand()) && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> warmthTrend(EvalContext ctx, String trend) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (trend.equals(temperature.getTrend()) && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> goingCold(EvalContext ctx, int days) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
+        Set<Integer> ids = new HashSet<>();
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            Integer daysUntilCold = temperature.getDaysUntilCold();
+            if (daysUntilCold != null && daysUntilCold <= days && universe.contains(temperature.getId())) {
+                ids.add(temperature.getId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<Integer> existencePredicate(String key, SegmentCondition condition, EvalContext ctx) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("workspaceId", ctx.workspaceId());
+        params.put("predicate", key);
+        params.put("days", catalog.clampDays(condition.getDays()));
+        params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
+        return new HashSet<>(switch (ctx.recordType()) {
+            case "person" -> segmentMapper.personExistence(params);
+            case "deal" -> segmentMapper.dealExistence(params);
+            case "company" -> segmentMapper.companyExistence(params);
+            default -> List.<Integer>of();
+        });
     }
 
     private Set<Integer> evaluateField(SegmentCondition condition, EvalContext ctx) {
@@ -312,14 +478,15 @@ public class SegmentService {
         if (field == null || op == null) {
             throw new BadRequestException("Field condition requires 'field' and 'op'");
         }
-        Kind kind = fieldKind(ctx.recordType(), field);
-        if (!OPS.get(kind).contains(op)) {
+        SegmentCatalog.Kind kind = fieldKind(ctx.recordType(), field);
+        if (!catalog.operatorsFor(kind).contains(op)) {
             throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
         }
         Map<String, Object> params = new HashMap<>();
         params.put("workspaceId", ctx.workspaceId());
         params.put("field", field);
         params.put("op", op);
+        params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
         bindValue(kind, op, condition, params);
         return new HashSet<>(runFieldQuery(ctx.recordType(), params));
     }
@@ -327,13 +494,15 @@ public class SegmentService {
     private List<Integer> runFieldQuery(String recordType, Map<String, Object> params) {
         return switch (recordType) {
             case "company" -> segmentMapper.companyIdsMatching(params);
-            case "person" -> segmentMapper.personIdsMatching(params);
+            case "person" -> Boolean.TRUE.equals(params.get("includeRestrictedPeople"))
+                    ? segmentMapper.personIdsMatchingIncludingRestricted(params)
+                    : segmentMapper.personIdsMatching(params);
             case "deal" -> segmentMapper.dealIdsMatching(params);
             default -> throw new BadRequestException("Fields are not available for record type: " + recordType);
         };
     }
 
-    private void bindValue(Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
+    private void bindValue(SegmentCatalog.Kind kind, String op, SegmentCondition condition, Map<String, Object> params) {
         switch (kind) {
             case STRING -> {
                 switch (op) {
@@ -359,7 +528,7 @@ public class SegmentService {
                     case "within_days" -> {
                         LocalDate today = LocalDate.now();
                         params.put("dateFrom", today.toString());
-                        params.put("dateTo", today.plusDays(resolveDays(condition.getDays())).toString());
+                        params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
                     }
                     default -> { }
                 }
@@ -373,20 +542,19 @@ public class SegmentService {
         return complement;
     }
 
-    private static Kind fieldKind(String recordType, String field) {
-        Map<String, Kind> catalog = FIELDS.get(recordType);
-        Kind kind = catalog == null ? null : catalog.get(field);
+    private SegmentCatalog.Kind fieldKind(String recordType, String field) {
+        SegmentCatalog.Kind kind = catalog.fieldKind(recordType, field);
         if (kind == null) {
             throw new BadRequestException("Unknown field for " + recordType + ": " + field);
         }
         return kind;
     }
 
-    private Set<Integer> coolingCompanyIds(int workspaceId) {
-        Set<Integer> owned = new HashSet<>(segmentMapper.companyIdsInWorkspace(workspaceId));
+    private Set<Integer> coolingCompanyIds(EvalContext ctx) {
+        Set<Integer> universe = ctx.universe(segmentMapper);
         Set<Integer> ids = new HashSet<>();
-        for (RelationshipTemperatureDto temperature : scoringService.scoreCompanies(workspaceId)) {
-            if (owned.contains(temperature.getId())
+        for (RelationshipTemperatureDto temperature : ctx.temperatures(scoringService)) {
+            if (universe.contains(temperature.getId())
                     && ("cool".equals(temperature.getBand())
                         || "cold".equals(temperature.getBand())
                         || "cooling".equals(temperature.getTrend()))) {
@@ -420,19 +588,12 @@ public class SegmentService {
             workspaceId, userId, new ArrayList<>(warmlyConnected)));
     }
 
-    private static String requireSupported(String recordType) {
+    private String requireSupported(String recordType) {
         String type = normalize(recordType);
-        if (type == null || !SUPPORTED_RECORD_TYPES.contains(type)) {
+        if (type == null || !catalog.supportsRecordType(type)) {
             throw new BadRequestException("Smart segments are not available for record type: " + recordType);
         }
         return type;
-    }
-
-    private static int resolveDays(Integer days) {
-        if (days == null) {
-            return DEFAULT_DAYS;
-        }
-        return Math.min(Math.max(days, 1), MAX_DAYS);
     }
 
     private static String requireValue(SegmentCondition condition) {
@@ -475,9 +636,9 @@ public class SegmentService {
         return ids;
     }
 
-    private static String requireStatus(SegmentCondition condition) {
+    private String requireStatus(SegmentCondition condition) {
         String value = normalize(requireValue(condition));
-        if (!STATUS_VALUES.contains(value)) {
+        if (!catalog.statusValues().contains(value)) {
             throw new BadRequestException("Status must be one of open, won, lost");
         }
         return value;
@@ -506,12 +667,19 @@ public class SegmentService {
         private final int workspaceId;
         private final int userId;
         private final String recordType;
+        private final boolean includeRestrictedPeople;
+        private final Set<Integer> candidateIds;
         private Set<Integer> universe;
+        private List<RelationshipTemperatureDto> temperatures;
+        private List<DealRiskDto> dealRisks;
 
-        private EvalContext(int workspaceId, int userId, String recordType) {
+        private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople,
+                Set<Integer> candidateIds) {
             this.workspaceId = workspaceId;
             this.userId = userId;
             this.recordType = recordType;
+            this.includeRestrictedPeople = includeRestrictedPeople;
+            this.candidateIds = candidateIds;
         }
 
         private int workspaceId() {
@@ -526,16 +694,60 @@ public class SegmentService {
             return recordType;
         }
 
+        private boolean includeRestrictedPeople() {
+            return includeRestrictedPeople;
+        }
+
         private Set<Integer> universe(SegmentMapper mapper) {
             if (universe == null) {
                 universe = new HashSet<>(switch (recordType) {
                     case "company" -> mapper.companyIdsInWorkspace(workspaceId);
-                    case "person" -> mapper.personIdsInWorkspace(workspaceId);
+                    case "person" -> includeRestrictedPeople
+                            ? mapper.personIdsInWorkspaceIncludingRestricted(workspaceId)
+                            : mapper.personIdsInWorkspace(workspaceId);
                     case "deal" -> mapper.dealIdsInWorkspace(workspaceId);
                     default -> List.<Integer>of();
                 });
             }
             return universe;
+        }
+
+        /**
+         * The relationship temperatures for this record type, computed once per evaluation and reused
+         * across every warmth predicate in the definition. Company and person are scored via
+         * {@link ScoringService}; other record types have no temperature.
+         */
+        private List<RelationshipTemperatureDto> temperatures(ScoringService scoring) {
+            if (temperatures == null) {
+                temperatures = switch (recordType) {
+                    case "company" -> candidateIds == null
+                            ? scoring.scoreCompanies(workspaceId)
+                            : scoring.scoreCompanies(workspaceId, candidateIds);
+                    case "person" -> candidateIds == null
+                            ? scoring.scoreContacts(workspaceId)
+                            : scoring.scoreContacts(workspaceId, candidateIds);
+                    default -> List.of();
+                };
+            }
+            return temperatures;
+        }
+
+        /**
+         * The risk assessments for the workspace's open deals, computed once per evaluation and reused
+         * across every deal-risk predicate. Only the {@code deal} record type has risk assessments;
+         * when scoped to a candidate set, only those deals are assessed.
+         */
+        private List<DealRiskDto> dealRisks(DealRiskService riskService) {
+            if (dealRisks == null) {
+                if (!"deal".equals(recordType)) {
+                    dealRisks = List.of();
+                } else {
+                    dealRisks = candidateIds == null
+                            ? riskService.assessWorkspace(workspaceId)
+                            : riskService.assessDeals(workspaceId, new ArrayList<>(candidateIds));
+                }
+            }
+            return dealRisks;
         }
     }
 }

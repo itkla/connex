@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * A workspace's own SMTP transport, overriding the instance default for
@@ -8,6 +9,7 @@ import lombok.Data;
  * ({@code password_enc}); the raw value never leaves the service layer.
  */
 @Data
+@ToString(exclude = "passwordEnc")
 public class WorkspaceMailConfig {
     private int workspaceId;
     private boolean enabled;

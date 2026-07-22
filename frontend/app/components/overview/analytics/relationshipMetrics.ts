@@ -2,8 +2,6 @@ import {
     type DealRisk,
     type DealRiskFactorCode,
     type DealRiskSeverity,
-    type RelationshipTemperature,
-    type Task,
     type TaskStatus,
     type TemperatureBand,
     type TemperatureTrend,
@@ -41,55 +39,6 @@ export const DECAY_BUCKETS: readonly { key: DecayBucketKey; maxDays: number }[] 
     { key: 'later', maxDays: 90 },
 ];
 
-/** Count of relationships in each warmth band. */
-export function bandCounts(temps: RelationshipTemperature[]): Record<TemperatureBand, number> {
-    const out: Record<TemperatureBand, number> = { hot: 0, warm: 0, cool: 0, cold: 0 };
-    for (const temp of temps) {
-        if (temp.band in out) out[temp.band] += 1;
-    }
-    return out;
-}
-
-/** Count of relationships in each warmth trend. */
-export function trendCounts(temps: RelationshipTemperature[]): Record<TemperatureTrend, number> {
-    const out: Record<TemperatureTrend, number> = { rising: 0, steady: 0, cooling: 0 };
-    for (const temp of temps) {
-        if (temp.trend in out) out[temp.trend] += 1;
-    }
-    return out;
-}
-
-/** Headline warmth figures: how many are tracked, warm (hot+warm), and cooling. */
-export function warmSummary(temps: RelationshipTemperature[]): {
-    tracked: number;
-    warm: number;
-    cooling: number;
-    share: number;
-} {
-    let tracked = 0;
-    let warm = 0;
-    let cooling = 0;
-    for (const temp of temps) {
-        tracked += 1;
-        if (temp.band === 'hot' || temp.band === 'warm') warm += 1;
-        if (temp.trend === 'cooling') cooling += 1;
-    }
-    return { tracked, warm, cooling, share: tracked > 0 ? warm / tracked : 0 };
-}
-
-/** Relationships predicted to go cold within each decay horizon bucket. */
-export function decayCounts(temps: RelationshipTemperature[]): Record<DecayBucketKey, number> {
-    const out: Record<DecayBucketKey, number> = { soon: 0, mid: 0, later: 0 };
-    for (const temp of temps) {
-        const days = temp.daysUntilCold;
-        if (days == null || days < 0) continue;
-        if (days <= 30) out.soon += 1;
-        else if (days <= 60) out.mid += 1;
-        else if (days <= 90) out.later += 1;
-    }
-    return out;
-}
-
 /** The set of deal ids the risk engine currently flags as at risk. */
 export function atRiskDealIds(risks: DealRisk[]): Set<number> {
     const out = new Set<number>();
@@ -119,13 +68,4 @@ export function riskFactorCounts(risks: DealRisk[]): { code: DealRiskFactorCode;
     return Array.from(counts.entries())
         .map(([code, count]) => ({ code, count }))
         .sort((a, b) => b.count - a.count);
-}
-
-/** Count of tasks in each Kanban status column. */
-export function taskStatusCounts(tasks: Task[]): Record<TaskStatus, number> {
-    const out: Record<TaskStatus, number> = { todo: 0, in_progress: 0, done: 0 };
-    for (const task of tasks) {
-        if (task.status in out) out[task.status] += 1;
-    }
-    return out;
 }

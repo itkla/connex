@@ -11,6 +11,8 @@ const TABS = [
     { key: "tabMembers", href: "/organization/members" },
     { key: "tabDomains", href: "/organization/allowed-domains" },
     { key: "tabSso", href: "/organization/sso" },
+    { key: "tabAi", href: "/organization/ai" },
+    { key: "tabDataRequests", href: "/organization/data-requests" },
     { key: "tabAudit", href: "/organization/audit" },
 ] as const;
 

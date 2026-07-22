@@ -1,6 +1,6 @@
 "use client";
 
-import { type ComponentType, type ReactNode, type SVGProps, useState } from "react";
+import { type ComponentType, type SVGProps, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { PlusIcon } from "@heroicons/react/24/solid";
@@ -13,15 +13,15 @@ import {
 import { Loader2Icon } from "lucide-react";
 
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
+    ResponsiveDialog,
+    ResponsiveDialogClose,
+    ResponsiveDialogContent,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogTrigger,
+} from "@/components/ui/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog-status-cover";
 import { cn } from "@/lib/utils";
 import { ApiError, createUser } from "@/app/lib/api";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { type RegisterPayload } from "@/app/lib/types";
 
@@ -91,6 +92,7 @@ function Field({
 
 export default function NewUserDialog() {
     const t = useTranslations("UsersNewUserDialog");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [payload, setPayload] = useState<RegisterPayload>(EMPTY);
@@ -131,6 +133,9 @@ export default function NewUserDialog() {
             setTimeout(() => onOpenChange(false), 900);
             router.refresh();
         } catch (err) {
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
             if (err instanceof ApiError && err.fieldErrors) {
                 const fieldErrors = err.fieldErrors;
                 setErrors(fieldErrors);
@@ -153,21 +158,21 @@ export default function NewUserDialog() {
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogTrigger asChild>
-                <Button className="bg-brand text-white" aria-label={t("newAria")}>
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogTrigger asChild>
+                <Button variant="brand" aria-label={t("newAria")}>
                     <PlusIcon strokeWidth={2.5} />
                     {t("new")}
                 </Button>
-            </DialogTrigger>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+            </ResponsiveDialogTrigger>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                    <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: "40ms" }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t("dialogTitle")}</DialogTitle>
-                        <DialogDescription>{t("description")}</DialogDescription>
-                    </DialogHeader>
+                    <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: "40ms" }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t("dialogTitle")}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t("description")}</ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
 
                     <form
                         onSubmit={(e) => {
@@ -227,23 +232,24 @@ export default function NewUserDialog() {
                             />
                         </div>
 
-                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: "290ms" }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: "290ms" }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={isCreating}>
                                     {t("cancel")}
                                 </Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={isCreating || succeeded || !canSubmit}
-                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                className="min-w-24 shadow-sm transition hover:shadow-md"
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t("create")}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

@@ -1,218 +1,69 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import type { ComponentType } from 'react';
 import { useTranslations } from 'next-intl';
 import { PlusIcon } from '@heroicons/react/16/solid';
 import { CheckCircleIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import MentionEditor from '@/app/components/activity/notes/MentionEditor';
-import { createNote, createTask } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import type { ActionId } from '@/app/lib/actions/types';
+import { useActions } from '@/app/hooks/useActions';
 
-type Which = 'task' | 'note' | null;
+type QuickItem = { id: ActionId; label: string; Icon: ComponentType<{ className?: string }> };
 
-const inputClass =
-    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
-
-export default function QuickCreate({ currentUserId }: { currentUserId: number }) {
-    const router = useRouter();
+/**
+ * Dashboard "New" launcher. It dispatches to the shared action registry so the task and note flows
+ * are identical to every other surface (the global actions menu, the command palette) rather than
+ * carrying their own duplicated create logic.
+ */
+export default function QuickCreate() {
     const t = useTranslations('DashboardQuickCreate');
-    const [which, setWhich] = useState<Which>(null);
-    const [submitting, setSubmitting] = useState(false);
-    const [description, setDescription] = useState('');
-    const [dueDate, setDueDate] = useState('');
-    const [content, setContent] = useState('');
+    const { run, pendingIds } = useActions();
 
-    const reset = () => {
-        setDescription('');
-        setDueDate('');
-        setContent('');
-    };
-    const close = () => {
-        setWhich(null);
-        reset();
-    };
-
-    async function submitTask(e: React.FormEvent<HTMLFormElement>) {
-        e.preventDefault();
-        if (!description.trim()) {
-            toastError(t('descriptionRequired'));
-            return;
-        }
-        setSubmitting(true);
-        try {
-            await createTask({
-                description: description.trim(),
-                dueDate: dueDate || undefined,
-                assignedToId: currentUserId,
-            });
-            toastSuccess(t('taskCreated'), {
-                action: { label: t('view'), onClick: () => router.push('/activity/tasks') },
-            });
-            close();
-            router.refresh();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failed'));
-        } finally {
-            setSubmitting(false);
-        }
-    }
-
-    async function submitNote(e: React.FormEvent<HTMLFormElement>) {
-        e.preventDefault();
-        if (!content.trim()) {
-            toastError(t('contentRequired'));
-            return;
-        }
-        setSubmitting(true);
-        try {
-            await createNote({ content: content.trim(), author: currentUserId });
-            toastSuccess(t('noteCreated'), {
-                action: { label: t('view'), onClick: () => router.push('/activity/notes') },
-            });
-            close();
-            router.refresh();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failed'));
-        } finally {
-            setSubmitting(false);
-        }
-    }
+    const items: QuickItem[] = [
+        { id: 'create.task', label: t('newTask'), Icon: CheckCircleIcon },
+        { id: 'create.note', label: t('newNote'), Icon: DocumentTextIcon },
+    ];
 
     return (
-        <>
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
-                    >
-                        <PlusIcon className="size-4" />
-                        {t('new')}
-                    </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem
-                        onSelect={(e) => {
-                            e.preventDefault();
-                            setWhich('task');
-                        }}
-                    >
-                        <CheckCircleIcon className="size-4 text-muted-foreground" />
-                        {t('newTask')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                        onSelect={(e) => {
-                            e.preventDefault();
-                            setWhich('note');
-                        }}
-                    >
-                        <DocumentTextIcon className="size-4 text-muted-foreground" />
-                        {t('newNote')}
-                    </DropdownMenuItem>
-                </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Dialog open={which === 'task'} onOpenChange={(open) => !open && close()}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('taskTitle')}</DialogTitle>
-                        <DialogDescription>{t('taskDescription')}</DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={submitTask} className="grid gap-4">
-                        <div className="grid gap-2">
-                            <Label htmlFor="qc-task-desc">{t('descriptionField')}</Label>
-                            <MentionEditor
-                                id="qc-task-desc"
-                                value={description}
-                                onChange={setDescription}
-                                placeholder={t('descriptionPlaceholder')}
-                                autoFocus
-                                className="min-h-32 rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
-                            />
-                        </div>
-                        <div className="grid gap-2">
-                            <Label htmlFor="qc-task-due">{t('dueDate')}</Label>
-                            <input
-                                id="qc-task-due"
-                                type="date"
-                                value={dueDate}
-                                onChange={(e) => setDueDate(e.target.value)}
-                                className={inputClass}
-                            />
-                        </div>
-                        <DialogFooter>
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline" disabled={submitting}>
-                                    {t('cancel')}
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                disabled={submitting}
-                                className="bg-brand text-white hover:bg-brand-dark"
-                            >
-                                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={which === 'note'} onOpenChange={(open) => !open && close()}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('noteTitle')}</DialogTitle>
-                        <DialogDescription>{t('noteDescription')}</DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={submitNote} className="grid gap-4">
-                        <div className="grid gap-2">
-                            <Label htmlFor="qc-note-content">{t('contentField')}</Label>
-                            <MentionEditor
-                                id="qc-note-content"
-                                value={content}
-                                onChange={setContent}
-                                placeholder={t('contentPlaceholder')}
-                                autoFocus
-                                className="min-h-32 rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
-                            />
-                        </div>
-                        <DialogFooter>
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline" disabled={submitting}>
-                                    {t('cancel')}
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                disabled={submitting}
-                                className="bg-brand text-white hover:bg-brand-dark"
-                            >
-                                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
-        </>
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
+                >
+                    <PlusIcon className="size-4" />
+                    {t('new')}
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+                {items.map(({ id, label, Icon }) => {
+                    const pending = pendingIds.has(id);
+                    return (
+                        <DropdownMenuItem
+                            key={id}
+                            disabled={pending}
+                            onSelect={(event) => {
+                                event.preventDefault();
+                                void run(id, { source: 'menu' });
+                            }}
+                        >
+                            {pending ? (
+                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                            ) : (
+                                <Icon className="size-4 text-muted-foreground" />
+                            )}
+                            {label}
+                        </DropdownMenuItem>
+                    );
+                })}
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }

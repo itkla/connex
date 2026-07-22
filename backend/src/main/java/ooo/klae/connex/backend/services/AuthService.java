@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
@@ -26,6 +28,7 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 
 import lombok.RequiredArgsConstructor;
 
@@ -46,6 +49,8 @@ public class AuthService {
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
     private final SsoConnectionService ssoConnectionService;
+    private final SessionSecurityService sessionSecurityService;
+    private final WorkspaceCookie workspaceCookie;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -93,7 +98,7 @@ public class AuthService {
             user.setDisplayName(request.getDisplayName());
             user.setEmail(request.getEmail());
             user.setEmailVerified(emailVerified);
-            user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
+            user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
             userMapper.insert(user);
             // New users get their own owned workspace unless the instance restricts creation
@@ -122,7 +127,7 @@ public class AuthService {
         user.setDisplayName(request.getDisplayName());
         user.setEmail(request.getEmail());
         user.setEmailVerified(true);
-        user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
+        user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         userMapper.insert(user);
         workspaceService.createWorkspaceForBootstrap(user.getDisplayName() + "'s Workspace", user.getId());
@@ -153,7 +158,7 @@ public class AuthService {
             loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login_sso_enforced", "user", candidate.getId(), request.getUsername(),
                     "Password login refused; SSO enforced for " + request.getUsername(), null);
-            throw new ForbiddenException("This account must sign in with SSO");
+            throw new SsoEnforcedException();
         }
         Authentication authentication;
         try {
@@ -190,8 +195,15 @@ public class AuthService {
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
 
-        if (httpRequest.getSession(false) != null) {
-            httpRequest.changeSessionId();
+        HttpSession existingSession = httpRequest.getSession(false);
+        if (existingSession != null) {
+            Object boundUserId = existingSession.getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR);
+            if (boundUserId instanceof Number number && number.intValue() != refreshedUser.getId()) {
+                existingSession.invalidate();
+                SecurityContextHolder.clearContext();
+            } else {
+                httpRequest.changeSessionId();
+            }
         }
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
@@ -202,13 +214,81 @@ public class AuthService {
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
+        sessionSecurityService.markAuthenticated(httpRequest, refreshedUser.getId());
 
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {
             workspaceService.rememberActive(refreshedUser.getId(), activeWorkspaceId);
-            WorkspaceCookie.set(httpResponse, activeWorkspaceId);
+            workspaceCookie.set(httpResponse, activeWorkspaceId);
+        } else {
+            workspaceCookie.clear(httpResponse);
         }
         return refreshedUser;
+    }
+
+    public void requireCurrentPassword(int userId, String password, String clientIp) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new BadCredentialsException("Incorrect password");
+        }
+        long now = System.currentTimeMillis();
+        String username = user.getUsername();
+        if (loginRateLimiter.isBlocked(clientIp, username, now)) {
+            throw new TooManyRequestsException("Too many login attempts. Please try again later.");
+        }
+        if (password == null || user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
+            loginRateLimiter.recordFailure(clientIp, username, now);
+            throw new BadCredentialsException("Incorrect password");
+        }
+        loginRateLimiter.recordSuccess(username);
+    }
+
+    /**
+     * Authorizes first-passkey enrollment using the account's existing authentication method.
+     * Password-backed accounts must confirm their password; passwordless accounts must have a
+     * freshly established, same-user federated session.
+     * @param userId the authenticated account
+     * @param password the submitted current password, when the account has one
+     * @param httpRequest the current request carrying the authenticated session
+     */
+    public void requireFirstPasskeyBootstrapAuthentication(int userId, String password,
+            HttpServletRequest httpRequest) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new BadCredentialsException("Incorrect password");
+        }
+        if (user.getPassword() == null) {
+            sessionSecurityService.requireFreshAuthenticatedSession(httpRequest, userId);
+            return;
+        }
+        requireCurrentPassword(userId, password, clientIpResolver.resolve(httpRequest));
+    }
+
+    /**
+     * Reports whether an account has a password credential that must be confirmed for bootstrap.
+     * @param userId the authenticated account
+     * @return true when the account has a password hash
+     */
+    public boolean hasPasswordCredential(int userId) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return user.getPassword() != null;
+    }
+
+    /**
+     * Retrieves the authenticated session principal without refreshing it from persistence.
+     *
+     * @return the authenticated user principal
+     */
+    public User getCurrentPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof User principal)) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return principal;
     }
 
     /**
@@ -216,11 +296,7 @@ public class AuthService {
      * @return
      */
     public User getCurrentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()
-                || !(authentication.getPrincipal() instanceof User principal)) {
-            throw new ResourceNotFoundException("Not authenticated");
-        }
+        User principal = getCurrentPrincipal();
 
         // handles cases where the user updates their info but is not returned
         // reduntant if the user is not updated; just returns the same value

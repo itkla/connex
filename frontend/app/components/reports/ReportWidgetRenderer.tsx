@@ -1,0 +1,282 @@
+'use client';
+
+import { useMemo } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
+import {
+    Area,
+    AreaChart,
+    Bar,
+    BarChart,
+    CartesianGrid,
+    Cell,
+    Funnel,
+    FunnelChart,
+    LabelList,
+    Pie,
+    PieChart,
+    XAxis,
+    YAxis,
+} from 'recharts';
+
+import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
+import { useReportLabels } from '@/app/components/reports/reportLabels';
+import type { ReportWidgetData } from '@/app/lib/types';
+import {
+    ChartContainer,
+    ChartLegend,
+    ChartLegendContent,
+    ChartTooltip,
+    ChartTooltipContent,
+    type ChartConfig,
+} from '@/components/ui/chart';
+
+const CHART_COLORS = [
+    'var(--chart-1)',
+    'var(--chart-2)',
+    'var(--chart-3)',
+    'var(--chart-4)',
+    'var(--chart-5)',
+];
+
+export function formatReportValue(value: number | null, unit: string | null, locale: string): string {
+    if (value == null) return '-';
+    if (unit && /^[A-Z]{3}$/.test(unit)) {
+        return new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: unit,
+            maximumFractionDigits: 0,
+            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+        }).format(value);
+    }
+    if (unit && /^[A-Z]{4,8}$/.test(unit)) {
+        const formatted = new Intl.NumberFormat(locale, {
+            maximumFractionDigits: 1,
+            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+        }).format(value);
+        return `${formatted} ${unit}`;
+    }
+    if (unit === 'percent' || unit === '%') {
+        return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%';
+    }
+    return new Intl.NumberFormat(locale, {
+        maximumFractionDigits: 1,
+        notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+    }).format(value);
+}
+
+function pointUnit(key: string, widgetUnit: string | null): string | null {
+    if (widgetUnit !== 'mixed') return widgetUnit;
+    const separator = key.indexOf(':');
+    if (separator < 1) return null;
+    const currency = key.slice(0, separator).trim().toUpperCase();
+    return /^[A-Z]{3,8}$/.test(currency) ? currency : null;
+}
+
+export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetData }) {
+    const t = useTranslations('Reports');
+    const locale = useLocale();
+    const { localizeLabel } = useReportLabels();
+    const data = useMemo(
+        () => widget.points.map((point) => ({
+            ...point,
+            label: localizeLabel(point.label),
+            current: point.value,
+            prior: point.priorValue,
+        })),
+        [widget.points, localizeLabel],
+    );
+    const isAttainment = widget.measure === 'attainment';
+    const isCurrentState = CURRENT_STATE_REPORT_MEASURES.has(widget.measure);
+    const config = {
+        current: {
+            label: isAttainment
+                ? t('document.actual')
+                : isCurrentState ? t('document.value') : t('document.currentPeriod'),
+            color: 'var(--chart-1)',
+        },
+        prior: { label: isAttainment ? t('document.target') : t('document.priorPeriod'), color: 'var(--chart-2)' },
+    } satisfies ChartConfig;
+
+    if (isAttainment && data.length === 0) {
+        return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t('document.noData')}</div>;
+    }
+
+    if (widget.chartType === 'kpi' && widget.unit === 'mixed' && data.length > 0) {
+        return (
+            <ul className="flex min-h-48 flex-col justify-center divide-y divide-border">
+                {data.map((point) => (
+                    <li key={point.key} className="flex items-baseline justify-between gap-4 py-3">
+                        <span className="text-sm text-muted-foreground">{point.label}</span>
+                        <span className="text-right">
+                            <span className="block text-xl font-semibold tabular-nums text-foreground">
+                                {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
+                            </span>
+                            {isAttainment && point.prior != null ? (
+                                <span className="mt-1 block text-xs tabular-nums text-muted-foreground">
+                                    {t('document.targetValue', {
+                                        value: formatReportValue(point.prior, pointUnit(point.key, widget.unit), locale),
+                                    })}
+                                </span>
+                            ) : null}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        );
+    }
+
+    if (widget.chartType === 'kpi') {
+        return (
+            <div className="flex min-h-48 flex-col justify-center">
+                <p className="text-4xl font-semibold tracking-tight text-foreground tabular-nums">
+                    {formatReportValue(widget.total, widget.unit, locale)}
+                </p>
+                {widget.priorTotal != null ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <span>
+                            {isAttainment
+                                ? t('document.targetValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })
+                                : t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}
+                        </span>
+                        {widget.changePercent != null ? (
+                            <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
+                                {isAttainment
+                                    ? t('document.attainmentValue', {
+                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                    })
+                                    : t('document.changeValue', {
+                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                    })}
+                            </span>
+                        ) : null}
+                    </div>
+                ) : null}
+            </div>
+        );
+    }
+
+    if (data.length === 0) {
+        return (
+            <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+                {t(isCurrentState ? 'document.noCurrentStateData' : 'document.noData')}
+            </div>
+        );
+    }
+
+    if (widget.chartType === 'table' || widget.unit === 'mixed') {
+        const showPrior = data.some((point) => point.prior != null);
+        return (
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                    <thead className="border-b border-border text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                        <tr>
+                            <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
+                            <th className="px-3 py-2 text-right font-medium">
+                                {isAttainment
+                                    ? t('document.actual')
+                                    : isCurrentState ? t('document.value') : t('document.currentPeriod')}
+                            </th>
+                            {showPrior ? (
+                                <th className="px-3 py-2 text-right font-medium">
+                                    {isAttainment ? t('document.target') : t('document.priorPeriod')}
+                                </th>
+                            ) : null}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                        {data.map((point) => (
+                            <tr key={point.key}>
+                                <td className="px-3 py-2.5 text-foreground">{point.label}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-foreground">
+                                    {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
+                                </td>
+                                {showPrior ? (
+                                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                                        {formatReportValue(point.prior, pointUnit(point.key, widget.unit), locale)}
+                                    </td>
+                                ) : null}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    if (widget.chartType === 'donut') {
+        return (
+            <div>
+                <ChartContainer config={config} className="mx-auto aspect-square h-56 max-h-56">
+                    <PieChart accessibilityLayer>
+                        <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                        <Pie data={data} dataKey="current" nameKey="label" innerRadius="52%" outerRadius="78%" paddingAngle={2}>
+                            {data.map((point, index) => (
+                                <Cell key={point.key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                        </Pie>
+                    </PieChart>
+                </ChartContainer>
+                <ul className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                    {data.map((point, index) => (
+                        <li key={point.key} className="flex items-center gap-1.5">
+                            <span
+                                aria-hidden
+                                className="size-2 rounded-full"
+                                style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                            />
+                            <span>{point.label}</span>
+                            <span className="tabular-nums text-foreground">
+                                {formatReportValue(point.current, widget.unit, locale)}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        );
+    }
+
+    if (widget.chartType === 'funnel') {
+        return (
+            <ChartContainer config={config} className="aspect-auto h-64 w-full">
+                <FunnelChart accessibilityLayer>
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Funnel data={data} dataKey="current" nameKey="label" stroke="var(--card)">
+                        {data.map((point, index) => (
+                            <Cell key={point.key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                        ))}
+                        <LabelList dataKey="label" position="right" fill="var(--foreground)" fontSize={11} />
+                    </Funnel>
+                </FunnelChart>
+            </ChartContainer>
+        );
+    }
+
+    if (widget.chartType === 'line-area') {
+        return (
+            <ChartContainer config={config} className="aspect-auto h-64 w-full">
+                <AreaChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Area dataKey="prior" type="monotone" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.08} strokeWidth={1.5} />
+                    <Area dataKey="current" type="monotone" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.18} strokeWidth={2} />
+                </AreaChart>
+            </ChartContainer>
+        );
+    }
+
+    return (
+        <ChartContainer config={config} className="aspect-auto h-64 w-full">
+            <BarChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
+                <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
+                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                {isAttainment ? <ChartLegend content={<ChartLegendContent />} /> : null}
+                {isAttainment ? <Bar dataKey="prior" fill="var(--chart-2)" radius={[6, 6, 0, 0]} /> : null}
+                <Bar dataKey="current" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
+            </BarChart>
+        </ChartContainer>
+    );
+}

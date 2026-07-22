@@ -1,21 +1,21 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+} from '@/components/ui/responsive-dialog';
 import {
     Combobox,
     ComboboxContent,
@@ -26,12 +26,13 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import MentionEditor from './MentionEditor';
+import RichNoteEditor from './RichNoteEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
-import { DialogStatusCover, resolveDialogStatus, fieldInputClass } from '@/components/ui/dialog-status-cover';
+import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, Note } from '@/app/lib/types';
 
@@ -44,6 +45,9 @@ type Props = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
+    defaultContent?: string;
+    requestInit?: RequestInit;
 };
 
 export default function NoteDialog({
@@ -55,31 +59,54 @@ export default function NoteDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    defaultContent = '',
+    requestInit,
 }: Props) {
+    const t = useTranslations('ActivityNotesDialog');
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
+    }
+
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <NoteDialogForm
-                    note={note}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onClose={() => onOpenChange(false)}
-                />
-            </DialogContent>
-        </Dialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <NoteDialogForm
+                        key={openCount}
+                        note={note}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultContent={defaultContent}
+                        requestInit={requestInit}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
+        </>
     );
 }
 
@@ -90,29 +117,41 @@ type FormProps = {
     currentUserId: number;
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
+    defaultContent: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (value: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
+    /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
+    onCancel: () => void;
+    /** Invoked once the save succeeds (after the success beat), to dismiss the surface. */
     onClose: () => void;
 };
 
 /**
- * The note form. It lives inside {@code DialogContent} — which unmounts on close —
- * so its state initializes fresh from props on each open, with no reset effect.
+ * The note form body — free of any dialog/drawer shell so it can render inside the standalone
+ * {@link NoteDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
+ * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
  */
-function NoteDialogForm({
+export function NoteDialogForm({
     note,
     persons,
     deals,
     currentUserId,
     defaultPerson,
     defaultDeal,
+    defaultContent,
+    requestInit,
     onSubmittingChange,
+    onDirtyChange,
+    onCancel,
     onClose,
 }: FormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityNotesDialog');
     const isEdit = note !== null;
 
-    const [content, setContent] = useState(() => note?.content ?? '');
+    const [content, setContent] = useState(() => note?.content ?? defaultContent);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() =>
         note ? persons.find((p) => p.id === note.person) ?? null : defaultPerson,
     );
@@ -122,6 +161,21 @@ function NoteDialogForm({
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const [initial] = useState(() => ({
+        content,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        (content !== initial.content ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -137,27 +191,37 @@ function NoteDialogForm({
         onSubmittingChange(true);
         try {
             if (isEdit && note) {
-                await updateNote(note.id, {
-                    content: trimmed,
-                    title: note.title ?? null,
-                    author: note.author,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await updateNote(
+                    note.id,
+                    {
+                        content: trimmed,
+                        title: note.title ?? null,
+                        author: note.author,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastUpdated'));
             } else {
-                await createNote({
-                    content: trimmed,
-                    author: currentUserId,
-                    person: selectedPerson?.id ?? null,
-                    deal: selectedDeal?.id ?? null,
-                });
+                await createNote(
+                    {
+                        content: trimmed,
+                        author: currentUserId,
+                        person: selectedPerson?.id ?? null,
+                        deal: selectedDeal?.id ?? null,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -173,8 +237,10 @@ function NoteDialogForm({
                 isEdit ? t('toastFailedSave') : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
@@ -186,28 +252,44 @@ function NoteDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
-                    <DialogTitle className="text-xl font-semibold tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</DialogTitle>
-                    <DialogDescription>{t('description')}</DialogDescription>
-                </DialogHeader>
+                <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
+                    <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('description')}</p>
+                </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && content.trim()) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
-                        <div className="group relative">
-                            <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <MentionEditor
-                                id="note-content"
+                        <div
+                            id="note-content"
+                            tabIndex={-1}
+                            aria-invalid={fieldErrors.content ? true : undefined}
+                            aria-describedby={fieldErrors.content ? 'note-content-error' : undefined}
+                            className={cn(
+                                'overflow-hidden rounded-xl border bg-background transition-[box-shadow,border-color] focus-within:ring-2 focus-within:ring-brand/60',
+                                fieldErrors.content
+                                    ? 'border-destructive focus-within:ring-destructive/50'
+                                    : 'border-border focus-within:border-brand',
+                            )}
+                        >
+                            <RichNoteEditor
+                                compact
                                 value={content}
                                 onChange={(next) => {
                                     setContent(next);
                                     clearError('content');
                                 }}
-                                placeholder={t('contentPlaceholder')}
-                                ariaInvalid={Boolean(fieldErrors.content)}
-                                ariaDescribedby={fieldErrors.content ? 'note-content-error' : undefined}
-                                autoFocus
-                                className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
+                                excludeUserId={currentUserId}
+                                autofocus
                             />
                         </div>
                         {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}
@@ -275,16 +357,15 @@ function NoteDialogForm({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise" style={{ animationDelay: '190ms' }}>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={submitting}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
+                    <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '190ms' }}>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
+                            {t('cancel')}
+                        </Button>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={submitting || succeeded || !content.trim()}
-                            className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {submitting ? (
                                 <Loader2Icon className="size-4 animate-spin" />
@@ -294,7 +375,7 @@ function NoteDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </DialogFooter>
+                    </div>
                 </form>
             </div>
         </>

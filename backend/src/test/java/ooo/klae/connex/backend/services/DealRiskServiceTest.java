@@ -8,10 +8,13 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -39,6 +42,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
     private Pipeline pipeline;
     private Stage stage;
     private Company company;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUpService() {
@@ -63,6 +67,17 @@ class DealRiskServiceTest extends AbstractServiceTest {
         activity.setType("email");
         activity.setSubject("subj_" + unique());
         activity.setDeal(deal);
+        activity.setCreatedBy(currentUser);
+        activity.setTimestamp(timestamp);
+        activityMapper.insert(activity);
+    }
+
+    private void touch(Person person, String timestamp) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("subj_" + unique());
+        activity.setPerson(person);
         activity.setCreatedBy(currentUser);
         activity.setTimestamp(timestamp);
         activityMapper.insert(activity);
@@ -141,6 +156,22 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void assessDealsScopesBatchedInputsToRequestedWorkspaceDeals() {
+        Deal requested = openDeal();
+        closeDateOf(requested, "2126-06-01");
+        Deal omitted = openDeal();
+        closeDateOf(omitted, "2126-06-01");
+        Deal foreign = overdueDealInWorkspace(newWorkspace().getId());
+
+        List<DealRiskDto> risks = service.assessDeals(
+            workspace.getId(), List.of(requested.getId(), foreign.getId()));
+
+        assertThat(risks).extracting(DealRiskDto::getDealId)
+            .containsExactly(requested.getId())
+            .doesNotContain(omitted.getId(), foreign.getId());
+    }
+
+    @Test
     void closingSoonWhileQuietFlagsHigh() {
         Deal deal = openDeal();
         closeDateOf(deal, "2126-06-30");
@@ -162,6 +193,28 @@ class DealRiskServiceTest extends AbstractServiceTest {
         assertThat(factor(risk, "stalled")).isNotNull();
         assertThat(factor(risk, "stalled").getParams()).containsKey("daysSinceTouch");
         assertThat(risk.getLevel()).isEqualTo("medium");
+    }
+
+    @Test
+    void privateDealNoteDoesNotRefreshSharedRiskRecency() {
+        Deal deal = openDeal();
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Private touch");
+        note.setVisibility("private");
+        note.setAuthor(currentUser);
+        note.setDeal(deal);
+        noteMapper.insert(note);
+        jdbcTemplate.update(
+            "UPDATE note SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.valueOf("2126-06-22 10:00:00"),
+            note.getId());
+
+        DealRiskDto single = service.assessDeal(workspace.getId(), deal.getId());
+        DealRiskDto batched = service.assessDeals(workspace.getId(), List.of(deal.getId())).getFirst();
+
+        assertThat(factor(single, "stalled")).isNotNull();
+        assertThat(factor(batched, "stalled")).isNotNull();
     }
 
     @Test
@@ -205,6 +258,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
 
         assertThat(risk.getLevel()).isEqualTo("low");
+        assertThat(risk.getValue()).isEqualTo(deal.getValue());
+        assertThat(risk.getCurrency()).isEqualTo(deal.getCurrency());
         assertThat(factor(risk, "no_stakeholders")).isNotNull();
     }
 
@@ -218,6 +273,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         DealRiskDto single = service.assessDeal(workspace.getId(), deal.getId());
         assertThat(single.getLevel()).isEqualTo("none");
+        assertThat(single.getValue()).isEqualTo(deal.getValue());
+        assertThat(single.getCurrency()).isEqualTo(deal.getCurrency());
 
         assertThat(service.assessWorkspace(workspace.getId()))
             .noneMatch(risk -> risk.getDealId() == deal.getId());
@@ -242,6 +299,9 @@ class DealRiskServiceTest extends AbstractServiceTest {
         assertThat(risks.get(0).getScore())
             .isGreaterThanOrEqualTo(risks.get(risks.size() - 1).getScore());
         assertThat(risks).anyMatch(risk -> risk.getDealId() == overdue.getId());
+        assertThat(risks).filteredOn(risk -> risk.getDealId() == overdue.getId())
+            .allMatch(risk -> risk.getValue() == overdue.getValue()
+                && overdue.getCurrency().equals(risk.getCurrency()));
         assertThat(risks).noneMatch(risk -> risk.getDealId() == healthy.getId());
     }
 
@@ -355,6 +415,40 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void futureStakeholderTouchLeavesColdRiskWhileExactBoundaryTouchClearsIt() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person stakeholder = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "Champion");
+        touch(stakeholder, "2126-06-23 15:30:01");
+        ScoringService actualScoring = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK);
+        DealRiskService actualService = new DealRiskService(
+            dealMapper, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
+
+        RelationshipTemperatureDto futureOnly = actualScoring
+            .scoreContacts(workspace.getId(), java.util.Set.of(stakeholder.getId()))
+            .getFirst();
+        DealRiskDto futureRisk = actualService.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(futureOnly.getBand()).isEqualTo("cold");
+        assertThat(futureOnly.getTouchCount()).isZero();
+        assertThat(factor(futureRisk, "stakeholder_cold")).isNotNull();
+
+        touch(stakeholder, "2126-06-23 15:30:00");
+
+        RelationshipTemperatureDto boundary = actualScoring
+            .scoreContacts(workspace.getId(), java.util.Set.of(stakeholder.getId()))
+            .getFirst();
+        DealRiskDto boundaryRisk = actualService.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(boundary.getBand()).isNotEqualTo("cold");
+        assertThat(boundary.getTouchCount()).isEqualTo(1);
+        assertThat(factor(boundaryRisk, "stakeholder_cold")).isNull();
+    }
+
+    @Test
     void assessWorkspaceIncludesLowOnlyDealBelowHigh() {
         Deal overdue = openDeal();
         closeDateOf(overdue, "2126-06-01");
@@ -383,7 +477,10 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         assertThat(service.assessWorkspace(workspace.getId()))
             .noneMatch(risk -> risk.getDealId() == foreign.getId());
-        assertThat(service.assessDeal(workspace.getId(), foreign.getId()).getLevel()).isEqualTo("none");
+        DealRiskDto hidden = service.assessDeal(workspace.getId(), foreign.getId());
+        assertThat(hidden.getLevel()).isEqualTo("none");
+        assertThat(hidden.getValue()).isZero();
+        assertThat(hidden.getCurrency()).isNull();
     }
 
     private static int indexOfDeal(List<DealRiskDto> risks, int dealId) {

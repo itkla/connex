@@ -1,67 +1,52 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 
-import { type Deal, type Pipeline } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { type DealPipelineValue, type Pipeline } from '@/app/lib/types';
+import { formatCompactCurrency } from '@/app/lib/utils';
 
 const WON_COLOR = 'var(--color-brand)';
 const OPEN_COLOR = 'color-mix(in oklch, var(--color-brand) 30%, var(--card))';
 
 type Row = { id: number; name: string; won: number; open: number; openCount: number; total: number };
 
+/**
+ * Per-pipeline value breakdown (won-in-range vs open) from the server-computed
+ * {@link DealPipelineValue} rollup. Pipeline names are joined from the loaded {@code pipelines}.
+ */
 export default function PipelineValue({
-    deals,
+    values,
     pipelines,
-    range,
     currency,
 }: {
-    deals: Deal[];
+    values: DealPipelineValue[];
     pipelines: Pipeline[];
-    range: RangeKey;
     currency: string;
 }) {
     const t = useTranslations('AnalyticsPipelines');
     const locale = useLocale();
-    const [now] = useState(() => Date.now());
 
     const rows = useMemo<Row[]>(() => {
-        const start = now - RANGE_DAYS[range] * 86400000; // 1 day in milliseconds
-        const totals = new Map<number, { won: number; open: number; openCount: number }>();
-        for (const deal of deals) {
-            if (deal.pipeline == null) continue;
-            const entry = totals.get(deal.pipeline) ?? { won: 0, open: 0, openCount: 0 };
-            if (!isClosed(deal)) {
-                entry.open += deal.value ?? 0;
-                entry.openCount += 1;
-            } else {
-                const closed = parseMysqlDateTime(deal.closedAt);
-                if (closed >= start && closed <= now && deal.won === true) {
-                    entry.won += deal.actualValue ?? 0;
-                }
-            }
-            totals.set(deal.pipeline, entry);
+        const nameById = new Map(pipelines.map((p) => [p.id, p.name]));
+        const rows: Row[] = [];
+        for (const value of values) {
+            if (value.pipelineId == null) continue;
+            const name = nameById.get(value.pipelineId) ?? '';
+            const total = value.wonValue + value.openValue;
+            if (!name || total <= 0) continue;
+            rows.push({
+                id: value.pipelineId,
+                name,
+                won: value.wonValue,
+                open: value.openValue,
+                openCount: value.openCount,
+                total,
+            });
         }
-        return pipelines
-            .filter((p) => totals.has(p.id))
-            .map((p) => {
-                const entry = totals.get(p.id)!;
-                return {
-                    id: p.id,
-                    name: p.name,
-                    won: entry.won,
-                    open: entry.open,
-                    openCount: entry.openCount,
-                    total: entry.won + entry.open,
-                };
-            })
-            // sort by total descending
-            .filter((r) => r.total > 0)
-            .sort((a, b) => b.total - a.total);
-    }, [deals, pipelines, range, now]);
+        return rows.sort((a, b) => b.total - a.total);
+    }, [values, pipelines]);
 
     if (rows.length === 0) {
         return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;

@@ -3,12 +3,27 @@ title = "Connex gitleaks configuration"
 [extend]
 useDefault = true
 
-# Scope the exception to the file that holds the documented throwaway docker-compose
-# credentials (AGENTS.md permits them; rotation is tracked in #88). Using a path
-# allowlist rather than repo-wide value regexes keeps the scanner able to flag the
-# same strings — or any genuine secret — anywhere else in the tree.
 [allowlist]
-description = "Documented dev-only credential file"
-paths = [
-  '''backend/docker-compose\.yml''',
+description = "Non-secret placeholders, test identifiers, and generated CI credentials"
+regexTarget = "line"
+regexes = [
+  '''= "-----BEGIN PRIVATE KEY-----";''',
+  '''CONNEX_DB_ROOT_PASSWORD=''',
+  '''CONNEX_DB_PASSWORD=''',
+  '''CONNEX_DB_PASSWORD: ci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
+  '''MYSQL_ROOT_PASSWORD: ci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
+  '''-pci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
+  '''MYSQL_ROOT_PASSWORD: \$\{CONNEX_DB_ROOT_PASSWORD:\?Set CONNEX_DB_ROOT_PASSWORD in backend/\.env\}''',
+  '''MYSQL_PASSWORD: \$\{CONNEX_DB_PASSWORD:\?Set CONNEX_DB_PASSWORD in backend/\.env\}''',
+  '''password: \$\{CONNEX_DB_PASSWORD\}''',
+  '''spring\.datasource\.password=\$\{CONNEX_DB_PASSWORD\}''',
+  '''spring\.datasource\.password", "x"''',
+  '''TOKEN="(0123456789abcdef){4}"''',
+  '''IDEMPOTENCY_KEY = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"''',
+  '''String token = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.[a-z]{3,4}";''',
+  '''API_KEY = "esp_api_key_secret_1234"''',
+  '''API_KEY = "esp_api_key_123456"''',
+  '''API_KEY = "sms_api_key_123456"''',
+  '''SMS_API_KEY = "sms_api_key_secret_1234"''',
+  '''WEBHOOK_SECRET = "whsec_abcdef0123456789"'''
 ]

@@ -34,6 +34,7 @@ public class TagService {
     private final CompanyMapper companyMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "color");
@@ -129,7 +130,7 @@ public class TagService {
     public List<Deal> getDealsByTagId(int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return dealMapper.getDealsByTagId(workspaceId, tagId);
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getDealsByTagId(workspaceId, tagId));
     }
 
     /**

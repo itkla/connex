@@ -3,38 +3,40 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import {
-    getActivitiesFromCookie,
-    getCompaniesFromCookie,
-    getCompanyTemperaturesFromCookie,
-    getContactTemperaturesFromCookie,
+    getAllStagesFromCookie,
     getCurrentUserFromCookie,
-    getDealRisksFromCookie,
-    getDealsFromCookie,
+    getDealMetricsFromCookie,
+    getDealRiskAnalyticsFromCookie,
     getIntroSuggestionsFromCookie,
     getIntroductions,
-    getNotesFromCookie,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
-    getStagesByPipelineId,
-    getTasksFromCookie,
+    getTaskSummaryFromCookie,
     getUsers,
+    getWarmthSummaryFromCookie,
 } from '@/app/lib/api';
 import type {
-    Activity,
-    Company,
-    Deal,
-    DealRisk,
+    DealMetrics,
+    DealRiskAnalytics,
     IntroSuggestion,
     IntroductionRecord,
     JobMove,
-    Note,
     Pipeline,
-    RelationshipTemperature,
-    Stage,
-    Task,
+    TaskSummary,
     User,
+    WarmthSummary,
 } from '@/app/lib/types';
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
+
+const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_DEAL_RISK_ANALYTICS: DealRiskAnalytics = { currencies: [], truncated: false };
+const EMPTY_TASK_SUMMARY: TaskSummary = { todo: 0, inProgress: 0, done: 0, overdue: 0, dueSoon: 0 };
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
 
 export const metadata: Metadata = {
     title: 'Analytics',
@@ -51,58 +53,44 @@ export default async function AnalyticsPage() {
     const init = { headers: { cookie: cookie ?? '' } } as const;
 
     const [
-        companies,
-        deals,
+        dealMetrics,
         pipelines,
-        tasks,
-        activities,
-        notes,
+        stages,
         users,
-        contactTemps,
-        companyTemps,
-        dealRisks,
+        dealRiskAnalytics,
         introSuggestions,
         recentMoves,
         introLineage,
+        taskSummary,
+        warmth,
     ] = await Promise.all([
-        getCompaniesFromCookie(cookie).catch(() => [] as Company[]),
-        getDealsFromCookie(cookie).catch(() => [] as Deal[]),
+        getDealMetricsFromCookie(cookie).catch(() => EMPTY_DEAL_METRICS),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
-        getTasksFromCookie(cookie).catch(() => [] as Task[]),
-        getActivitiesFromCookie(cookie).catch(() => [] as Activity[]),
-        getNotesFromCookie(cookie).catch(() => [] as Note[]),
+        getAllStagesFromCookie(cookie),
         getUsers(init).catch(() => [] as User[]),
-        getContactTemperaturesFromCookie(cookie).catch(() => [] as RelationshipTemperature[]),
-        getCompanyTemperaturesFromCookie(cookie).catch(() => [] as RelationshipTemperature[]),
-        getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
+        getDealRiskAnalyticsFromCookie(cookie).catch(() => EMPTY_DEAL_RISK_ANALYTICS),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
         getRecentMovesFromCookie(cookie).catch(() => [] as JobMove[]),
         getIntroductions({ size: 500 }, init)
             .then((page) => page.items)
             .catch(() => [] as IntroductionRecord[]),
+        getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
+        getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
     ]);
-
-    const stageLists = await Promise.all(
-        pipelines.map((p) => getStagesByPipelineId(p.id, init).catch(() => [] as Stage[])),
-    );
-    const stages = stageLists.flat();
 
     return (
         <AnalyticsBoard
-            deals={deals}
-            companies={companies}
+            dealMetrics={dealMetrics}
+            timezone={user.timezone}
             pipelines={pipelines}
             stages={stages}
-            activities={activities}
-            tasks={tasks}
-            notes={notes}
             users={users}
-            contactTemps={contactTemps}
-            companyTemps={companyTemps}
-            dealRisks={dealRisks}
+            dealRiskAnalytics={dealRiskAnalytics}
             introSuggestions={introSuggestions}
             introLineage={introLineage}
             recentMoves={recentMoves}
+            taskSummary={taskSummary}
+            warmth={warmth}
         />
     );
 }

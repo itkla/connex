@@ -8,9 +8,8 @@ import lombok.ToString;
 
 /**
  * Instance-wide SSO configuration, bound from {@code connex.sso.*} /
- * {@code CONNEX_SSO_*}. Currently just the encryption key used to protect
- * per-organization IdP client secrets at rest. Required only once an organization
- * stores an OIDC client secret; rotating it invalidates previously stored secrets.
+ * {@code CONNEX_SSO_*}. The legacy secret key is retained only to decrypt SSO
+ * secrets written before the central secret store existed.
  */
 @Data
 @ToString(exclude = "secretKey")
@@ -27,8 +26,8 @@ public class SsoProperties {
     private boolean enabled = false;
 
     /**
-     * Base64-encoded AES key (128/192/256-bit) used to encrypt per-organization
-     * OIDC client secrets at rest.
+     * Legacy Base64-encoded AES key (128/192/256-bit) for pre-secret-store SSO
+     * encrypted blobs.
      */
     private String secretKey;
 
