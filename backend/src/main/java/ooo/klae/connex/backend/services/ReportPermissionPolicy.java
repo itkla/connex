@@ -28,7 +28,8 @@ public class ReportPermissionPolicy {
             "forecast_best", "forecast_weighted", "forecast_worst",
             "coverage_gap_count", "coverage_gap_open_pipeline_value", "company_count",
             "warm_intro_opportunity_value", "warm_intro_reachable_account_count",
-            "reverse_intro_weighted_opportunities");
+            "reverse_intro_weighted_opportunities", "employment_departure_count",
+            "employment_arrival_count");
     private static final Set<String> MAPPED_MEASURES = mappedMeasureCatalog();
 
     private final ObjectMapper objectMapper;

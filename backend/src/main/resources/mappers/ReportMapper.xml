@@ -447,6 +447,90 @@
     ORDER BY group_key
   </select>
 
+  <sql id="employmentEventDate">
+    <choose>
+      <when test="query.measure == 'employment_departure_count'">employment.ended_at</when>
+      <otherwise>employment.started_at</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="localizedEmploymentDate">
+    CASE
+      <foreach item="segment" collection="query.offsets">
+        WHEN <include refid="employmentEventDate"/> &gt;= #{segment.startUtc}
+          AND <include refid="employmentEventDate"/> &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, <include refid="employmentEventDate"/>)
+      </foreach>
+      ELSE <include refid="employmentEventDate"/>
+    END
+  </sql>
+
+  <sql id="employmentGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">
+        <choose>
+          <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedEmploymentDate"/>, '%Y-%m-%d')</when>
+          <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedEmploymentDate"/>), INTERVAL WEEKDAY(<include refid="localizedEmploymentDate"/>) DAY), '%Y-%m-%d')</when>
+          <otherwise>DATE_FORMAT(<include refid="localizedEmploymentDate"/>, '%Y-%m')</otherwise>
+        </choose>
+      </when>
+      <when test="query.groupBy == 'company'">CONCAT(COALESCE(CAST(employment.company_id AS CHAR), 'snapshot'), ':', COALESCE(NULLIF(employment.company_name, ''), 'unassigned'))</when>
+      <when test="query.groupBy == 'person'">CAST(person.id AS CHAR)</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="employmentGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="employmentGroupKey"/></when>
+      <when test="query.groupBy == 'company'">COALESCE(NULLIF(employment.company_name, ''), 'Unassigned')</when>
+      <when test="query.groupBy == 'person'">person.name</when>
+      <otherwise>'Total'</otherwise>
+    </choose>
+  </sql>
+
+  <select id="aggregateEmployment" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="employmentGroupKey"/> AS group_key,
+           <include refid="employmentGroupLabel"/> AS group_label,
+           'count' AS unit,
+           COUNT(*) AS value
+    FROM person_employment employment
+    JOIN person ON person.id = employment.person_id
+      AND person.workspace_id = #{query.workspaceId}
+    WHERE employment.workspace_id = #{query.workspaceId}
+      AND person.suspended_at IS NULL
+      AND <include refid="employmentEventDate"/> &gt;= #{query.startUtc}
+      AND <include refid="employmentEventDate"/> &lt; #{query.endUtc}
+    <if test="query.measure == 'employment_arrival_count'">
+      AND EXISTS (
+        SELECT 1
+        FROM person_employment prior_employment
+        WHERE prior_employment.workspace_id = #{query.workspaceId}
+          AND prior_employment.person_id = employment.person_id
+          AND prior_employment.id &lt;&gt; employment.id
+          AND prior_employment.ended_at IS NOT NULL
+          AND prior_employment.ended_at &lt;= employment.started_at
+      )
+    </if>
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND person.owner_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (
+        SELECT 1
+        FROM person_tag employment_person_tag
+        JOIN tag employment_tag ON employment_tag.id = employment_person_tag.tag_id
+          AND employment_tag.workspace_id = #{query.workspaceId}
+        WHERE employment_person_tag.person_id = person.id
+          AND employment_person_tag.tag_id IN
+          <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    </if>
+    GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
   <select id="aggregateCompanies" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
       <choose>

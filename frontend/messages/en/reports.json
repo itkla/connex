@@ -82,6 +82,10 @@
         "name": "Network & Warm Introductions",
         "description": "Reachable pipeline, unactivated paths, connector coverage, and reverse-intro potential."
       },
+      "employment-moves": {
+        "name": "Employment Moves",
+        "description": "Track contact departures and arrivals to surface relationship risk and new-account opportunities."
+      },
       "activity-team": {
         "name": "Activity & Team",
         "description": "Team activity and task execution."
@@ -235,6 +239,8 @@
       "warm_intro_opportunity_value": "Warm-intro opportunity value",
       "warm_intro_reachable_account_count": "Warm-intro reachable accounts",
       "reverse_intro_weighted_opportunities": "Weighted reverse-intro opportunities",
+      "employment_departure_count": "Employment departures",
+      "employment_arrival_count": "Employment arrivals",
       "forecast_best": "Best-case forecast",
       "forecast_weighted": "Likely forecast (weighted)",
       "forecast_worst": "Commit forecast",
@@ -255,7 +261,8 @@
       "warmth_band": "Warmth band",
       "trend": "Trend",
       "connector": "Connector",
-      "pair": "Suggested pair"
+      "pair": "Suggested pair",
+      "person": "Contact"
     },
     "chart": {
       "bar": "Bar chart",

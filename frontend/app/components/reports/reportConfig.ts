@@ -20,7 +20,10 @@ export type ReportTemplateGroupId = 'pipeline' | 'relationships' | 'other';
  */
 const REPORT_TEMPLATE_GROUPS: { id: Exclude<ReportTemplateGroupId, 'other'>; keys: string[] }[] = [
     { id: 'pipeline', keys: ['sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment'] },
-    { id: 'relationships', keys: ['relationship-coverage', 'relationship-health', 'network-warm-intros', 'activity-team'] },
+    {
+        id: 'relationships',
+        keys: ['relationship-coverage', 'relationship-health', 'network-warm-intros', 'employment-moves', 'activity-team'],
+    },
 ];
 
 export function groupReportTemplates(
@@ -91,7 +94,7 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'single_threaded_deal_count',
         'single_threaded_deal_value',
     ],
-    people: ['count'],
+    people: ['count', 'employment_departure_count', 'employment_arrival_count'],
     companies: [
         'count',
         'coverage_gap_count',
@@ -127,6 +130,9 @@ export function reportGroupsForMeasure(
     if (measure === 'warm_intro_opportunity_value') return ['none', 'company', 'connector'];
     if (measure === 'warm_intro_reachable_account_count') return ['none', 'connector'];
     if (measure === 'reverse_intro_weighted_opportunities') return ['none', 'pair'];
+    if (measure === 'employment_departure_count' || measure === 'employment_arrival_count') {
+        return ['none', 'date', 'company', 'person'];
+    }
     if (measure === 'forecast_best' || measure === 'forecast_weighted' || measure === 'forecast_worst') {
         return ['none', 'date', 'pipeline', 'stage'];
     }

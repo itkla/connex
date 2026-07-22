@@ -68,6 +68,8 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregatePeople(@Param("query") ReportAggregateQuery query);
 
+    List<ReportAggregateRow> aggregateEmployment(@Param("query") ReportAggregateQuery query);
+
     List<ReportAggregateRow> aggregateCompanies(@Param("query") ReportAggregateQuery query);
 
     List<ReportAggregateRow> aggregateCoverageGaps(@Param("query") ReportAggregateQuery query);
