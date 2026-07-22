@@ -516,9 +516,7 @@ export function NewContactForm({
         || recoveryDecisionRequired;
     const cardEntryAvailable = businessCard.available
         && !manualRecoveryOverride
-        && businessCard.recoveryStatus !== 'checking'
-        && businessCard.recoveryStatus !== 'acknowledging'
-        && !recoveryDecisionRequired;
+        && !recoveryBlocked;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
     const nameMatches = useDuplicateNameCheck('person', newContactPayload.name);
@@ -531,37 +529,37 @@ export function NewContactForm({
             <div className="px-6 pb-6">
                 <div className="mb-4 flex items-end justify-between gap-3">
                     <div className="ncd-pop relative -mt-12 w-fit">
-                    <label
-                        htmlFor="imageUrl"
-                        className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
-                    >
-                        {visibleImagePreview ? (
-                            <Image src={visibleImagePreview} alt="" fill sizes="80px" unoptimized className="object-cover" />
-                        ) : contactInitial ? (
-                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
-                                {contactInitial}
-                            </div>
-                        ) : (
-                            <div className="flex size-full items-center justify-center bg-brand-light">
-                                <UserIcon className="size-7 text-brand-dark/70 transition group-hover:text-brand-dark" />
-                            </div>
-                        )}
+                        <label
+                            htmlFor="imageUrl"
+                            className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
+                        >
+                            {visibleImagePreview ? (
+                                <Image src={visibleImagePreview} alt="" fill sizes="80px" unoptimized className="object-cover" />
+                            ) : contactInitial ? (
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
+                                    {contactInitial}
+                                </div>
+                            ) : (
+                                <div className="flex size-full items-center justify-center bg-brand-light">
+                                    <UserIcon className="size-7 text-brand-dark/70 transition group-hover:text-brand-dark" />
+                                </div>
+                            )}
 
-                        {(visibleImagePreview || contactInitial) && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
-                                <CameraIcon className="size-5 text-white" />
-                            </div>
-                        )}
+                            {(visibleImagePreview || contactInitial) && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
+                                    <CameraIcon className="size-5 text-white" />
+                                </div>
+                            )}
 
-                        <input
-                            id="imageUrl"
-                            type="file"
-                            accept={MANAGED_IMAGE_ACCEPT}
-                            disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
-                            onChange={handleImageChange}
-                            className="sr-only"
-                        />
-                    </label>
+                            <input
+                                id="imageUrl"
+                                type="file"
+                                accept={MANAGED_IMAGE_ACCEPT}
+                                disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
+                                onChange={handleImageChange}
+                                className="sr-only"
+                            />
+                        </label>
                     </div>
                     {cardEntryAvailable && (
                         <div className="ncd-rise" style={{ animationDelay: '20ms' }}>
