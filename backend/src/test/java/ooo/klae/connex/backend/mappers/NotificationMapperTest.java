@@ -8,10 +8,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -95,6 +102,54 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void emailDeliveryClaimCanOnlyBeWonOnceWithinItsDedupeScope() {
+        User recipient = newUser();
+        User otherRecipient = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        Notification otherNotification = reminder(otherRecipient, "warning", "2026-06-23 00:00:00");
+        notificationMapper.upsert(notification);
+        notificationMapper.upsert(otherNotification);
+
+        assertEquals(1, notificationMapper.claimEmailDelivery(
+            workspace.getId(), recipient.getId(), notification.getDedupeKey()));
+        assertEquals(0, notificationMapper.claimEmailDelivery(
+            workspace.getId(), recipient.getId(), notification.getDedupeKey()));
+        assertEquals(1, notificationMapper.claimEmailDelivery(
+            workspace.getId(), otherRecipient.getId(), otherNotification.getDedupeKey()));
+        assertEquals(0, notificationMapper.claimEmailDelivery(
+            workspace.getId() + 1, recipient.getId(), notification.getDedupeKey()));
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentEmailDeliveryClaimHasSingleWinner() throws Exception {
+        User recipient = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        notificationMapper.upsert(notification);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> first = executor.submit(() -> claimAfterStart(notification, ready, start));
+            Future<Integer> second = executor.submit(() -> claimAfterStart(notification, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+
+            List<Integer> outcomes = List.of(
+                first.get(10, TimeUnit.SECONDS),
+                second.get(10, TimeUnit.SECONDS)
+            ).stream().sorted().toList();
+
+            assertEquals(List.of(0, 1), outcomes);
+        } finally {
+            start.countDown();
+            notificationMapper.deleteAllForRecipient(workspace.getId(), recipient.getId());
+            workspaceMapper.removeMember(workspace.getId(), recipient.getId());
+            userMapper.delete(recipient.getId());
+        }
+    }
+
+    @Test
     void upsertClearsAnActorThatNoLongerExists() {
         User recipient = newUser();
         User deletedActor = newUser();
@@ -105,6 +160,18 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.upsert(notification);
 
         assertNull(onlyReminder(recipient).getActorId());
+    }
+
+    private int claimAfterStart(
+            Notification notification,
+            CountDownLatch ready,
+            CountDownLatch start) throws InterruptedException {
+        ready.countDown();
+        if (!start.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Concurrent email claims did not start");
+        }
+        return notificationMapper.claimEmailDelivery(
+            notification.getWorkspaceId(), notification.getRecipientId(), notification.getDedupeKey());
     }
 
     @Test
