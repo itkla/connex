@@ -43,10 +43,14 @@
     )
   </select>
 
-  <update id="markAccepted">
+  <update id="claimAcceptance">
     UPDATE workspace_invite
     SET status = 'accepted', accepted_by_id = #{userId}, accepted_at = UTC_TIMESTAMP()
-    WHERE id = #{id} AND status = 'pending'
+    WHERE id = #{id}
+      AND token = #{token}
+      AND workspace_id = #{workspaceId}
+      AND status = 'pending'
+      AND expires_at &gt; UTC_TIMESTAMP()
   </update>
 
   <update id="markRevoked">

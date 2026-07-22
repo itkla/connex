@@ -144,17 +144,31 @@ public class InviteService {
         }
 
         int workspaceId = invite.getWorkspaceId();
-        requireOrgDomainAllowed(workspaceId, user.getEmail());
-        if (!workspaceMapper.isMember(workspaceId, user.getId())) {
-            userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
-            workspaceMapper.addMember(workspaceId, user.getId(), invite.getRole());
-            notificationStateVersionService.markChanged(user.getId());
+        int orgId = requireOrgDomainAllowed(workspaceId, user.getEmail());
+        User lockedUser = userMapper.getUserByIdForShare(user.getId());
+        if (lockedUser == null) {
+            throw new ResourceNotFoundException("User not found: " + user.getId());
         }
-        inviteMapper.markAccepted(invite.getId(), user.getId());
-        auditService.record("workspace.invite.accept", "workspace", workspaceId, user.getDisplayName(),
-                user.getDisplayName() + " joined via invite", null);
+        if (!lockedUser.getEmail().equalsIgnoreCase(invite.getEmail())) {
+            throw new ForbiddenException("This invite was sent to a different email address");
+        }
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        if (inviteMapper.claimAcceptance(
+                invite.getId(), token, workspaceId, lockedUser.getId()) != 1) {
+            throw new BadRequestException("This invite is no longer available");
+        }
+        if (!workspaceMapper.isMember(workspaceId, lockedUser.getId())) {
+            userOffboardingService.prepareFreshMembership(workspaceId, lockedUser.getId());
+            workspaceMapper.addMember(workspaceId, lockedUser.getId(), invite.getRole());
+            notificationStateVersionService.markChanged(lockedUser.getId());
+        }
+        auditService.recordScoped(
+                "workspace.invite.accept", "workspace", workspaceId, workspaceId, orgId,
+                lockedUser.getDisplayName(), lockedUser.getDisplayName() + " joined via invite", null);
 
-        return membership(user.getId(), workspaceId);
+        return membership(lockedUser.getId(), workspaceId);
     }
 
     /** Invites an existing Connex user to the workspace by email; they join after accepting. */
@@ -181,11 +195,12 @@ public class InviteService {
      * change. When the workspace's org restricts invite domains, {@code email} must be on the org
      * allowlist; an org with no allowlist is unrestricted, so existing workspaces are unaffected.
      */
-    private void requireOrgDomainAllowed(int workspaceId, String email) {
+    private int requireOrgDomainAllowed(int workspaceId, String email) {
         int orgId = workspaceService.getOrgId(workspaceId);
         if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
             throw new ForbiddenException("This organization only allows members from approved email domains");
         }
+        return orgId;
     }
 
     private String workspaceNameFor(User actor, int workspaceId) {

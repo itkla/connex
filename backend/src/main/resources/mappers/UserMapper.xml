@@ -17,6 +17,12 @@
     FROM app_user WHERE id = #{id}
   </select>
 
+  <select id="getUserByIdForShare" resultType="User">
+    SELECT <include refid="userColumns"/>
+    FROM app_user WHERE id = #{id}
+    FOR SHARE
+  </select>
+
   <select id="lockById" resultType="java.lang.Integer">
     SELECT id FROM app_user WHERE id = #{id} FOR UPDATE
   </select>

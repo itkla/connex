@@ -19,7 +19,12 @@ public interface InviteMapper {
     InvitePreviewDto findPreviewByToken(String token);
     List<InviteDto> findPendingByWorkspace(int workspaceId);
     boolean isRedeemable(String token);
-    int markAccepted(@Param("id") int id, @Param("userId") int userId);
+    /** Atomically claims a pending, unexpired invite for its authenticated recipient. */
+    int claimAcceptance(
+        @Param("id") int id,
+        @Param("token") String token,
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     int markRevoked(@Param("id") int id, @Param("workspaceId") int workspaceId);
     int revokePendingForEmail(@Param("workspaceId") int workspaceId, @Param("email") String email);
 }
