@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
@@ -290,6 +291,49 @@ class TaskMapperTest extends AbstractMapperTest {
         assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
         assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId(), 0));
         assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
+    }
+
+    @Test
+    void setPositionsUpdatesOnlyExpectedWorkspaceStatus() {
+        User user = newUser();
+        Task first = build("first", user, null, null);
+        Task second = build("second", user, null, null);
+        Task unlisted = build("unlisted", user, null, null);
+        Task wrongStatus = build("wrong-status", user, null, null);
+        taskMapper.insert(first);
+        taskMapper.insert(second);
+        taskMapper.insert(unlisted);
+        taskMapper.insert(wrongStatus);
+        taskMapper.moveTask(workspace.getId(), wrongStatus.getId(), "in_progress", false, 9);
+        Workspace foreignWorkspace = newWorkspace();
+        Task foreign = build("foreign", user, null, null);
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        taskMapper.insert(foreign);
+        int unlistedPosition = taskMapper.getTaskById(workspace.getId(), unlisted.getId()).getPosition();
+        int wrongStatusPosition = taskMapper.getTaskById(workspace.getId(), wrongStatus.getId()).getPosition();
+        int foreignPosition = taskMapper.getTaskById(foreignWorkspace.getId(), foreign.getId()).getPosition();
+
+        taskMapper.setPositions(workspace.getId(), "todo", List.of(
+            new BoardPositionUpdate(first.getId(), 7),
+            new BoardPositionUpdate(second.getId(), 2),
+            new BoardPositionUpdate(wrongStatus.getId(), 1),
+            new BoardPositionUpdate(foreign.getId(), 0)
+        ));
+
+        Task movedFirst = taskMapper.getTaskById(workspace.getId(), first.getId());
+        Task movedSecond = taskMapper.getTaskById(workspace.getId(), second.getId());
+        assertEquals(7, movedFirst.getPosition());
+        assertEquals(2, movedSecond.getPosition());
+        assertEquals("todo", movedFirst.getStatus());
+        assertFalse(movedFirst.isCompleted());
+        assertEquals("todo", movedSecond.getStatus());
+        assertFalse(movedSecond.isCompleted());
+        assertEquals(unlistedPosition,
+            taskMapper.getTaskById(workspace.getId(), unlisted.getId()).getPosition());
+        assertEquals(wrongStatusPosition,
+            taskMapper.getTaskById(workspace.getId(), wrongStatus.getId()).getPosition());
+        assertEquals(foreignPosition,
+            taskMapper.getTaskById(foreignWorkspace.getId(), foreign.getId()).getPosition());
     }
 
     @Test

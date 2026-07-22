@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
@@ -152,10 +153,14 @@ class DealMapperTest extends AbstractMapperTest {
         Deal firstTie = newDealIn(pageWorkspace, pipeline, earlierStage);
         Deal secondTie = newDealIn(pageWorkspace, pipeline, earlierStage);
         Deal afterTies = newDealIn(pageWorkspace, pipeline, earlierStage);
-        dealMapper.setPosition(pageWorkspace.getId(), laterStageDeal.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), firstTie.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), secondTie.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), afterTies.getId(), 1);
+        dealMapper.setPositions(pageWorkspace.getId(), laterStage.getId(), List.of(
+            new BoardPositionUpdate(laterStageDeal.getId(), 0)
+        ));
+        dealMapper.setPositions(pageWorkspace.getId(), earlierStage.getId(), List.of(
+            new BoardPositionUpdate(firstTie.getId(), 0),
+            new BoardPositionUpdate(secondTie.getId(), 0),
+            new BoardPositionUpdate(afterTies.getId(), 1)
+        ));
         Pipeline foreignPipeline = newPipeline();
         Stage foreignStage = newStage(foreignPipeline, 0);
         Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
@@ -169,6 +174,41 @@ class DealMapperTest extends AbstractMapperTest {
         assertTrue(page.stream().noneMatch(deal -> deal.getId() == foreign.getId()));
         assertEquals(List.of(firstTie.getId(), secondTie.getId(), afterTies.getId()),
             page.stream().map(Deal::getId).toList());
+    }
+
+    @Test
+    void setPositionsUpdatesOnlyExpectedWorkspaceStage() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Stage otherStage = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal first = newDeal(pipeline, stage, company);
+        Deal second = newDeal(pipeline, stage, company);
+        Deal unlisted = newDeal(pipeline, stage, company);
+        Deal wrongStage = newDeal(pipeline, otherStage, company);
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        Deal foreign = newDealIn(foreignWorkspace, foreignPipeline, foreignStage);
+        int unlistedPosition = dealMapper.getDealById(workspace.getId(), unlisted.getId()).getPosition();
+        int wrongStagePosition = dealMapper.getDealById(workspace.getId(), wrongStage.getId()).getPosition();
+        int foreignPosition = dealMapper.getDealById(foreignWorkspace.getId(), foreign.getId()).getPosition();
+
+        dealMapper.setPositions(workspace.getId(), stage.getId(), List.of(
+            new BoardPositionUpdate(first.getId(), 7),
+            new BoardPositionUpdate(second.getId(), 2),
+            new BoardPositionUpdate(wrongStage.getId(), 1),
+            new BoardPositionUpdate(foreign.getId(), 0)
+        ));
+
+        assertEquals(7, dealMapper.getDealById(workspace.getId(), first.getId()).getPosition());
+        assertEquals(2, dealMapper.getDealById(workspace.getId(), second.getId()).getPosition());
+        assertEquals(unlistedPosition,
+            dealMapper.getDealById(workspace.getId(), unlisted.getId()).getPosition());
+        assertEquals(wrongStagePosition,
+            dealMapper.getDealById(workspace.getId(), wrongStage.getId()).getPosition());
+        assertEquals(foreignPosition,
+            dealMapper.getDealById(foreignWorkspace.getId(), foreign.getId()).getPosition());
     }
 
     @Test
