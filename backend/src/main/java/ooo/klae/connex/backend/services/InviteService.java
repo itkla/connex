@@ -220,10 +220,12 @@ public class InviteService {
     }
 
     private WorkspaceMembershipDto membership(int userId, int workspaceId) {
-        return workspaceMapper.getMembershipsForUser(userId).stream()
-            .filter(m -> m.getId() == workspaceId)
-            .findFirst()
-            .orElseThrow(() -> new ResourceNotFoundException("Membership not found"));
+        WorkspaceMembershipDto membership =
+            workspaceMapper.getMembershipForUserForShare(workspaceId, userId);
+        if (membership == null) {
+            throw new ResourceNotFoundException("Membership not found");
+        }
+        return membership;
     }
 
     private static String normalizeEmail(String email) {

@@ -249,6 +249,46 @@ class InviteAcceptanceConcurrencyIntegrationTest {
     }
 
     @Test
+    void membershipAddedAfterSnapshotIsReturnedAfterClaim() throws Exception {
+        InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
+        CountDownLatch claimReached = new CountDownLatch(1);
+        CountDownLatch releaseClaim = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            claimReached.countDown();
+            if (!releaseClaim.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Acceptance claim was not released");
+            }
+            return realMapper.claimAcceptance(
+                invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+        }).when(inviteMapper).claimAcceptance(
+            invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<WorkspaceMembershipDto> acceptance = executor.submit(
+                () -> inviteService.acceptInvite(invite.getToken(), recipient));
+            assertTrue(claimReached.await(10, TimeUnit.SECONDS));
+
+            assertEquals(1, workspaceMapper.addMember(workspace.getId(), recipient.getId(), "member"));
+            releaseClaim.countDown();
+
+            assertEquals(workspace.getId(), acceptance.get(20, TimeUnit.SECONDS).getId());
+        } finally {
+            releaseClaim.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        WorkspaceInvite accepted = realMapper.findByToken(invite.getToken());
+        assertEquals("accepted", accepted.getStatus());
+        assertEquals(recipient.getId(), accepted.getAcceptedById());
+        assertTrue(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
+        verify(userOffboardingService, never())
+            .prepareFreshMembership(workspace.getId(), recipient.getId());
+        verify(notificationStateVersionService, never()).markChanged(recipient.getId());
+    }
+
+    @Test
     void failureAfterClaimRollsAcceptanceBackToPending() {
         doThrow(new IllegalStateException("cleanup failed"))
             .when(userOffboardingService)

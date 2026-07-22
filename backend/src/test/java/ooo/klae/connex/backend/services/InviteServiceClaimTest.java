@@ -65,7 +65,8 @@ class InviteServiceClaimTest {
             invite.getId(), invite.getToken(), invite.getWorkspaceId(), user.getId());
         verify(workspaceMapper, never()).lockAuthorizationMembership(invite.getWorkspaceId(), user.getId());
         verify(workspaceMapper, never()).addMember(invite.getWorkspaceId(), user.getId(), invite.getRole());
-        verify(workspaceMapper, never()).getMembershipsForUser(user.getId());
+        verify(workspaceMapper, never())
+            .getMembershipForUserForShare(invite.getWorkspaceId(), user.getId());
         verifyNoInteractions(userOffboardingService, notificationStateVersionService, auditService);
     }
 

@@ -121,16 +121,17 @@ public class UserOffboardingService {
      * Clears personal workspace data for a user who is about to receive a
      * brand-new membership. This removes saved views and preferences left by
      * legacy removal flows, notifications inserted while an earlier removal
-     * was committing, and stale deal-collaborator seats. Guarded on the absence
-     * of any membership row so a pending invitee's legitimate data is never
-     * touched. Called by every fresh-membership path: invites, invite links,
-     * and SSO JIT provisioning.
+     * was committing, and stale deal-collaborator seats. Guarded by a current
+     * locking read that proves no membership row exists, so a pending invitee's
+     * legitimate data is never touched and a stale repeatable-read snapshot
+     * cannot skip cleanup. Called by every fresh-membership path: invites,
+     * invite links, and SSO JIT provisioning.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
-        if (!workspaceMapper.isMemberIncludingPending(workspaceId, userId)) {
+        if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);

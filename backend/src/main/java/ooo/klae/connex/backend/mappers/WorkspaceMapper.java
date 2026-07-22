@@ -16,6 +16,10 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 public interface WorkspaceMapper {
     List<Workspace> getWorkspacesForUser(int userId);
     List<WorkspaceMembershipDto> getMembershipsForUser(int userId);
+    /** Returns the exact active membership through a current shared-locking read. */
+    WorkspaceMembershipDto getMembershipForUserForShare(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     Workspace getDefaultWorkspace();
     boolean isMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /**
