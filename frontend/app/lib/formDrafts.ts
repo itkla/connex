@@ -1,7 +1,7 @@
 const DRAFT_PREFIX = 'connex:draft:';
 let draftStoreGeneration = 0;
 const draftKeyGenerations = new Map<string, number>();
-const draftChangeListeners = new Set<(key: string) => void>();
+const draftChangeListeners = new Set<(key: string | null) => void>();
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -53,16 +53,17 @@ export function getDraftKeyGeneration(key: string): number {
 export function advanceDraftKeyGeneration(key: string): number {
     const next = getDraftKeyGeneration(key) + 1;
     draftKeyGenerations.set(key, next);
+    notifyDraftChange(key);
     return next;
 }
 
-/** Subscribes to committed writes and clears for composer draft keys. */
-export function subscribeDraftChanges(listener: (key: string) => void): () => void {
+/** Subscribes to draft-key ownership and storage changes; `null` invalidates the whole store. */
+export function subscribeDraftChanges(listener: (key: string | null) => void): () => void {
     draftChangeListeners.add(listener);
     return () => draftChangeListeners.delete(listener);
 }
 
-function notifyDraftChange(key: string): void {
+function notifyDraftChange(key: string | null): void {
     for (const listener of draftChangeListeners) listener(key);
 }
 
@@ -251,6 +252,7 @@ export function listFreshDrafts(opts: {
 export function clearAllDrafts(): void {
     draftStoreGeneration += 1;
     draftKeyGenerations.clear();
+    notifyDraftChange(null);
     const store = safeSession();
     if (!store) return;
     let keys: string[] = [];

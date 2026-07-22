@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
@@ -10,7 +10,7 @@ import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
 import { toastError, toastWarn } from "@/app/lib/toast";
-import { draftKey, getDraftKeyGeneration } from "@/app/lib/formDrafts";
+import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -25,6 +25,25 @@ const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-note",
     "create-activity",
 ]);
+
+type RestoredDraftMount = {
+    accept: (overlayGeneration: number) => void;
+    isAccepted: (overlayGeneration: number | undefined) => boolean;
+};
+
+function createRestoredDraftMount(): RestoredDraftMount {
+    let acceptedOverlayGeneration: number | null = null;
+    return {
+        accept: (overlayGeneration) => {
+            acceptedOverlayGeneration = overlayGeneration;
+        },
+        isAccepted: (overlayGeneration) => acceptedOverlayGeneration === overlayGeneration,
+    };
+}
+
+function getServerDraftGeneration(): number {
+    return -1;
+}
 
 /** Resolves the person the context refers to from the loaded roster, so the full dialog can preselect it. */
 function resolvePerson(persons: Contact[], defaults: CreateDefaults | undefined): Contact | null {
@@ -180,6 +199,50 @@ export default function ActionOverlayHost({
         ? [rendered?.generation, kind, defaultPersonId, defaultDealId, rosterOnly].join(":")
         : null;
     const usersKey = needsUsers ? [rendered?.generation, kind].join(":") : null;
+    const [restoredDraftMount] = useState(createRestoredDraftMount);
+    const referencesReady = !needsReference || loadedReferences?.key === referenceKey;
+    const usersReady = !needsUsers || loadedUsers?.key === usersKey;
+    const getRestoredDraftGeneration = useCallback(
+        () => restoredDraftMount.isAccepted(rendered?.generation)
+            ? restoredDraftGeneration ?? -1
+            : restoredDraftKey === null
+                ? -1
+                : getDraftKeyGeneration(restoredDraftKey),
+        [rendered?.generation, restoredDraftGeneration, restoredDraftKey, restoredDraftMount],
+    );
+    const subscribeToRestoredDraftGeneration = useCallback(
+        (onStoreChange: () => void) => {
+            const unsubscribe = subscribeDraftChanges(onStoreChange);
+            if (
+                rosterOnly &&
+                referencesReady &&
+                usersReady &&
+                rendered !== null &&
+                restoredDraftGeneration !== undefined &&
+                restoredDraftKey !== null &&
+                getDraftKeyGeneration(restoredDraftKey) === restoredDraftGeneration
+            ) {
+                restoredDraftMount.accept(rendered.generation);
+            }
+            return unsubscribe;
+        },
+        [
+            referencesReady,
+            rendered,
+            restoredDraftGeneration,
+            restoredDraftKey,
+            restoredDraftMount,
+            rosterOnly,
+            usersReady,
+        ],
+    );
+    const observedRestoredDraftGeneration = useSyncExternalStore(
+        subscribeToRestoredDraftGeneration,
+        getRestoredDraftGeneration,
+        getServerDraftGeneration,
+    );
+    const restoredDraftCanMount = !rosterOnly ||
+        observedRestoredDraftGeneration === restoredDraftGeneration;
 
     useEffect(() => {
         if (!referenceKey) return;
@@ -268,6 +331,34 @@ export default function ActionOverlayHost({
         usersKey,
     ]);
 
+    useLayoutEffect(() => {
+        if (
+            !rosterOnly ||
+            rendered === null ||
+            restoredDraftGeneration === undefined ||
+            !referencesReady ||
+            !usersReady ||
+            restoredDraftMount.isAccepted(rendered.generation)
+        ) {
+            return;
+        }
+        if (
+            restoredDraftKey === null ||
+            getDraftKeyGeneration(restoredDraftKey) !== restoredDraftGeneration
+        ) {
+            onClose();
+        }
+    }, [
+        onClose,
+        referencesReady,
+        rendered,
+        restoredDraftGeneration,
+        restoredDraftKey,
+        restoredDraftMount,
+        rosterOnly,
+        usersReady,
+    ]);
+
     if (!user) return null;
 
     const handleOpenChange = (open: boolean) => {
@@ -306,7 +397,7 @@ export default function ActionOverlayHost({
     return (
         <>
             <Fragment key={rendered?.generation}>
-                {rendered?.request.kind === "create-task" && users && references ? (
+                {rendered?.request.kind === "create-task" && users && references && restoredDraftCanMount ? (
                     <TaskDialog
                         open={visible}
                         onOpenChange={handleOpenChange}
@@ -323,7 +414,7 @@ export default function ActionOverlayHost({
                         requestInit={requestInit}
                     />
                 ) : null}
-                {rendered?.request.kind === "create-note" && references ? (
+                {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (
                     <NoteDialog
                         open={visible}
                         onOpenChange={handleOpenChange}
@@ -338,7 +429,7 @@ export default function ActionOverlayHost({
                         requestInit={requestInit}
                     />
                 ) : null}
-                {rendered?.request.kind === "create-activity" && references ? (
+                {rendered?.request.kind === "create-activity" && references && restoredDraftCanMount ? (
                     <ActivityDialog
                         open={visible}
                         onOpenChange={handleOpenChange}

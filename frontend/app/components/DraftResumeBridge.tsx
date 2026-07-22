@@ -237,8 +237,15 @@ export default function DraftResumeBridge() {
         const refreshTimers = new Set<number>();
         const changedKeys = new Set<string>();
         const unsubscribe = subscribeDraftChanges((key) => {
-            changedKeys.add(key);
-            toast.dismiss(key);
+            if (key === null) {
+                for (const draft of drafts) {
+                    changedKeys.add(draft.stored.key);
+                    toast.dismiss(draft.stored.key);
+                }
+            } else {
+                changedKeys.add(key);
+                toast.dismiss(key);
+            }
         });
 
         function deferRefresh(refresh: () => void, delay: number) {
