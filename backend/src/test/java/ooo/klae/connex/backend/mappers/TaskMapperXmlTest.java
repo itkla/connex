@@ -3,8 +3,11 @@ package ooo.klae.connex.backend.mappers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.io.InputStream;
+import java.sql.PreparedStatement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +43,21 @@ class TaskMapperXmlTest {
         assertTrue(sql.contains("WHERE workspace_id = ? AND status = ?"));
         assertTrue(sql.endsWith("AND id IN ( ? , ? )"));
         assertEquals(8, boundSql.getParameterMappings().size());
+
+        PreparedStatement statement = mock(PreparedStatement.class);
+        configuration.newParameterHandler(
+            configuration.getMappedStatement(TaskMapper.class.getName() + ".setPositions"),
+            parameters,
+            boundSql
+        ).setParameters(statement);
+        verify(statement).setInt(1, 23);
+        verify(statement).setInt(2, 0);
+        verify(statement).setInt(3, 29);
+        verify(statement).setInt(4, 1);
+        verify(statement).setInt(5, 11);
+        verify(statement).setString(6, "todo");
+        verify(statement).setInt(7, 23);
+        verify(statement).setInt(8, 29);
     }
 
     private static Configuration configuration() throws Exception {
