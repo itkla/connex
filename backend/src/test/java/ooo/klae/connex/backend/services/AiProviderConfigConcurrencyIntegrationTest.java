@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -261,44 +262,44 @@ class AiProviderConfigConcurrencyIntegrationTest {
     }
 
     @Test
-    void roleChangeWaitsForAiMutationWithoutReversingOrganizationMembershipLocks() throws Exception {
-        CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
-        CountDownLatch releaseRevoke = new CountDownLatch(1);
-        CountDownLatch roleChangeAttempted = new CountDownLatch(1);
+    void roleChangeFirstMakesAiMutationWaitWithoutReversingOrganizationMembershipLocks() throws Exception {
+        CountDownLatch ownerRowsLocked = new CountDownLatch(1);
+        CountDownLatch releaseRoleChange = new CountDownLatch(1);
+        CountDownLatch aiOrganizationLockAttempted = new CountDownLatch(1);
         AtomicInteger organizationLockCalls = new AtomicInteger();
         OrganizationMapper realOrganizationMapper = sqlSessionTemplate.getMapper(OrganizationMapper.class);
         OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
         doAnswer(invocation -> {
             if (organizationLockCalls.incrementAndGet() == 2) {
-                roleChangeAttempted.countDown();
+                aiOrganizationLockAttempted.countDown();
             }
             return realOrganizationMapper.lockById(organization.getId());
         }).when(organizationMapper).lockById(organization.getId());
         doAnswer(invocation -> {
-            String role = realOrgMemberMapper.getRoleForUpdate(organization.getId(), actor.getId());
-            currentAuthorizationLocked.countDown();
-            if (!releaseRevoke.await(10, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Authorized AI config mutation did not resume");
+            List<Integer> ownerIds = realOrgMemberMapper.lockOwnerIds(organization.getId());
+            ownerRowsLocked.countDown();
+            if (!releaseRoleChange.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Organization role change did not resume");
             }
-            return role;
-        }).when(orgMemberMapper).getRoleForUpdate(organization.getId(), actor.getId());
+            return ownerIds;
+        }).when(orgMemberMapper).lockOwnerIds(organization.getId());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> revoke = executor.submit(
-                    () -> service.revoke(firstWorkspace.getId(), actor.getId()));
-            assertTrue(currentAuthorizationLocked.await(10, TimeUnit.SECONDS));
-
             Future<?> roleChange = executor.submit(() -> orgMemberService.setMember(
                     organization.getId(), secondOwner.getId(), actor.getId(), "admin"));
-            assertTrue(roleChangeAttempted.await(10, TimeUnit.SECONDS));
-            assertThrows(TimeoutException.class, () -> roleChange.get(500, TimeUnit.MILLISECONDS));
-            releaseRevoke.countDown();
+            assertTrue(ownerRowsLocked.await(10, TimeUnit.SECONDS));
 
-            revoke.get(20, TimeUnit.SECONDS);
+            Future<?> revoke = executor.submit(
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId()));
+            assertTrue(aiOrganizationLockAttempted.await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
+            releaseRoleChange.countDown();
+
             roleChange.get(20, TimeUnit.SECONDS);
+            revoke.get(20, TimeUnit.SECONDS);
         } finally {
-            releaseRevoke.countDown();
+            releaseRoleChange.countDown();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
