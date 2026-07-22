@@ -77,13 +77,19 @@ export type CreateDefaults = {
 };
 
 /** Values typed into a quick-create form, carried into the full dialog when the user asks for more detail. */
-export type TaskDraft = { description?: string; dueDate?: string };
+export type TaskDraft = {
+    description?: string;
+    dueDate?: string;
+    assigneeId?: number | null;
+    personId?: number | null;
+    dealId?: number | null;
+};
 export type NoteDraft = { content?: string };
 export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft }
+    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraft?: boolean }
     | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft }
     | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
     | { kind: "create-company"; defaults?: CreateDefaults }

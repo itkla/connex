@@ -3,14 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+    advanceDraftKeyGeneration,
     clearDraft,
     draftKey,
+    getDraftKeyGeneration,
     getDraftStoreGeneration,
     writeDraft,
     type DraftKeyParts,
 } from '@/app/lib/formDrafts';
 
-const DRAFT_DEBOUNCE_MS = 400;
+/** Delay used to coalesce draft writes while a composer is changing. */
+export const DRAFT_DEBOUNCE_MS = 400;
 
 type UseFormDraftOptions = {
     keyParts: DraftKeyParts;
@@ -19,6 +22,7 @@ type UseFormDraftOptions = {
 
 type PendingDraft<T> = {
     generation: number;
+    keyGeneration: number;
     key: string;
     version: number;
     scope: string;
@@ -69,7 +73,12 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
         if (pendingRef.current !== null) {
             const pending = pendingRef.current;
             pendingRef.current = null;
-            if (pending.generation === getDraftStoreGeneration()) writeDraft(pending.key, pending);
+            if (
+                pending.generation === getDraftStoreGeneration() &&
+                pending.keyGeneration === getDraftKeyGeneration(pending.key)
+            ) {
+                writeDraft(pending.key, pending);
+            }
         }
     }, []);
 
@@ -77,6 +86,7 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
         (snapshot: T) => {
             pendingRef.current = {
                 generation: getDraftStoreGeneration(),
+                keyGeneration: advanceDraftKeyGeneration(origin.key),
                 key: origin.key,
                 version: origin.version,
                 scope: origin.scope,
@@ -89,7 +99,12 @@ export function useFormDraft<T>({ keyParts, version }: UseFormDraftOptions): For
                 if (pendingRef.current === null) return;
                 const pending = pendingRef.current;
                 pendingRef.current = null;
-                if (pending.generation === getDraftStoreGeneration()) writeDraft(pending.key, pending);
+                if (
+                    pending.generation === getDraftStoreGeneration() &&
+                    pending.keyGeneration === getDraftKeyGeneration(pending.key)
+                ) {
+                    writeDraft(pending.key, pending);
+                }
             }, DRAFT_DEBOUNCE_MS);
         },
         [origin],
