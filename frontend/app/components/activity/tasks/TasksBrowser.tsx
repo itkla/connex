@@ -207,26 +207,52 @@ export default function TasksBrowser({
     const pendingFocusRef = useRef<number | null>(null);
     const timers = useRef<number[]>([]);
     const deleteControllerRef = useRef<AbortController | null>(null);
-    const liveScopeRef = useRef({ active: true, activeWorkspaceId, pathname, switching });
+    const toggleControllersRef = useRef(new Map<number, AbortController>());
+    const liveScopeRef = useRef({
+        active: true,
+        activeWorkspaceId,
+        originWorkspaceId,
+        pathname,
+        switching,
+    });
     const pageCurrent = !switching
         && originWorkspaceId !== null
         && activeWorkspaceId === originWorkspaceId
         && pathname === originPathname;
 
     useLayoutEffect(() => {
-        liveScopeRef.current = { active: true, activeWorkspaceId, pathname, switching };
+        const toggleControllers = toggleControllersRef.current;
+        liveScopeRef.current = {
+            active: true,
+            activeWorkspaceId,
+            originWorkspaceId,
+            pathname,
+            switching,
+        };
         return () => {
-            liveScopeRef.current = { active: false, activeWorkspaceId, pathname, switching };
+            liveScopeRef.current = {
+                active: false,
+                activeWorkspaceId,
+                originWorkspaceId,
+                pathname,
+                switching,
+            };
             deleteControllerRef.current?.abort();
             deleteControllerRef.current = null;
+            toggleControllers.forEach((controller) => controller.abort());
+            toggleControllers.clear();
         };
-    }, [activeWorkspaceId, pathname, switching]);
+    }, [activeWorkspaceId, originWorkspaceId, pathname, switching]);
 
     useEffect(() => {
         if (pageCurrent) return;
         const timer = window.setTimeout(() => {
+            timers.current.forEach((id) => window.clearTimeout(id));
+            timers.current = [];
             setDeletingTask(null);
             setDeleting(false);
+            setPendingToggle(new Set());
+            setCompleting(new Set());
         }, 0);
         return () => window.clearTimeout(timer);
     }, [pageCurrent]);
@@ -467,10 +493,32 @@ export default function TasksBrowser({
         setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
 
     const handleToggleComplete = async (task: Task, next: boolean) => {
-        if (!pageCurrent || task.workspaceId !== originWorkspaceId || pendingToggle.has(task.id)) return;
+        const operationWorkspaceId = originWorkspaceId;
+        if (
+            !pageCurrent
+            || operationWorkspaceId === null
+            || task.workspaceId !== operationWorkspaceId
+            || pendingToggle.has(task.id)
+        ) return;
+        const controller = new AbortController();
+        toggleControllersRef.current.set(task.id, controller);
+        const scopeCurrent = () => {
+            const scope = liveScopeRef.current;
+            return scope.active
+                && !scope.switching
+                && scope.activeWorkspaceId === operationWorkspaceId
+                && scope.originWorkspaceId === operationWorkspaceId
+                && scope.pathname === originPathname;
+        };
         setPendingToggle((prev) => new Set(prev).add(task.id));
+        let optimisticTimerId: number | null = null;
 
         const commitOptimistic = () => {
+            if (optimisticTimerId !== null) {
+                timers.current = timers.current.filter((id) => id !== optimisticTimerId);
+                optimisticTimerId = null;
+            }
+            if (controller.signal.aborted || !scopeCurrent()) return;
             setTaskCompleted(task.id, next);
             setCompleting((prev) => {
                 const n = new Set(prev);
@@ -482,6 +530,7 @@ export default function TasksBrowser({
         if (next && !reduce) {
             setCompleting((prev) => new Set(prev).add(task.id));
             const id = window.setTimeout(commitOptimistic, COMPLETE_LINGER_MS);
+            optimisticTimerId = id;
             timers.current.push(id);
         } else {
             commitOptimistic();
@@ -498,9 +547,18 @@ export default function TasksBrowser({
                     dealId: task.dealId ?? undefined,
                     completed: next,
                 },
-                { headers: { 'X-Workspace-Id': String(originWorkspaceId) } },
+                {
+                    headers: { 'X-Workspace-Id': String(operationWorkspaceId) },
+                    signal: controller.signal,
+                },
             );
         } catch (err) {
+            if (controller.signal.aborted || !scopeCurrent()) return;
+            if (optimisticTimerId !== null) {
+                window.clearTimeout(optimisticTimerId);
+                timers.current = timers.current.filter((id) => id !== optimisticTimerId);
+                optimisticTimerId = null;
+            }
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
             setTaskCompleted(task.id, !next);
             setCompleting((prev) => {
@@ -509,20 +567,27 @@ export default function TasksBrowser({
                 return n;
             });
         } finally {
-            setPendingToggle((prev) => {
-                const n = new Set(prev);
-                n.delete(task.id);
-                return n;
-            });
+            if (toggleControllersRef.current.get(task.id) === controller) {
+                toggleControllersRef.current.delete(task.id);
+                if (scopeCurrent()) {
+                    setPendingToggle((prev) => {
+                        const n = new Set(prev);
+                        n.delete(task.id);
+                        return n;
+                    });
+                }
+            }
         }
     };
 
     const handleDeleteTask = async () => {
+        const operationWorkspaceId = originWorkspaceId;
         if (
             !deletingTask
             || deleting
             || !pageCurrent
-            || deletingTask.workspaceId !== originWorkspaceId
+            || operationWorkspaceId === null
+            || deletingTask.workspaceId !== operationWorkspaceId
             || pendingToggle.has(deletingTask.id)
             || completing.has(deletingTask.id)
         ) return;
@@ -539,12 +604,13 @@ export default function TasksBrowser({
             const scope = liveScopeRef.current;
             return scope.active
                 && !scope.switching
-                && scope.activeWorkspaceId === originWorkspaceId
+                && scope.activeWorkspaceId === operationWorkspaceId
+                && scope.originWorkspaceId === operationWorkspaceId
                 && scope.pathname === originPathname;
         };
         try {
             await deleteTask(deletingTask.id, {
-                headers: { 'X-Workspace-Id': String(originWorkspaceId) },
+                headers: { 'X-Workspace-Id': String(operationWorkspaceId) },
                 signal: controller.signal,
             });
             if (controller.signal.aborted || !scopeCurrent()) return;
@@ -1094,12 +1160,29 @@ function TaskRow({
     const isCompletedRow = bucket === 'completed';
     const touchContextRef = useRef(false);
     const suppressNextOpenRef = useRef(false);
+    const handleRowPointerDown = (pointerType: string) => {
+        suppressNextOpenRef.current = false;
+        touchContextRef.current = pointerType !== 'mouse';
+    };
+    const handleRowOpen = () => {
+        touchContextRef.current = false;
+        if (suppressNextOpenRef.current) {
+            suppressNextOpenRef.current = false;
+            return;
+        }
+        onOpen();
+    };
 
     return (
         <RecordContextMenu
             model={menuModel}
             onOpenChange={(open) => {
-                if (open && touchContextRef.current) suppressNextOpenRef.current = true;
+                if (open && touchContextRef.current) {
+                    suppressNextOpenRef.current = true;
+                } else if (!open) {
+                    touchContextRef.current = false;
+                    suppressNextOpenRef.current = false;
+                }
             }}
         >
             <motion.li
@@ -1121,21 +1204,11 @@ function TaskRow({
                     className="absolute inset-0 z-0 outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand"
                     onFocus={onFocus}
                     onKeyDown={onKeyDown}
-                    onPointerDown={(event) => {
-                        suppressNextOpenRef.current = false;
-                        touchContextRef.current = event.pointerType !== 'mouse';
-                    }}
+                    onPointerDown={(event) => handleRowPointerDown(event.pointerType)}
                     onPointerCancel={() => {
                         touchContextRef.current = false;
                     }}
-                    onClick={() => {
-                        touchContextRef.current = false;
-                        if (suppressNextOpenRef.current) {
-                            suppressNextOpenRef.current = false;
-                            return;
-                        }
-                        onOpen();
-                    }}
+                    onClick={handleRowOpen}
                 />
 
                 <div
@@ -1206,7 +1279,17 @@ function TaskRow({
                     ) : null}
                 </div>
 
-                <div className="relative z-10 shrink-0">
+                <div
+                    className="relative z-10 shrink-0"
+                    onPointerDown={(event) => handleRowPointerDown(event.pointerType)}
+                    onPointerCancel={() => {
+                        touchContextRef.current = false;
+                    }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleRowOpen();
+                    }}
+                >
                     {assignee ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
