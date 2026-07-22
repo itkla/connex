@@ -19,6 +19,26 @@
         SELECT id FROM deal WHERE workspace_id = #{workspaceId}
     </select>
 
+    <select id="entityIdInWorkspace" resultType="boolean">
+        SELECT EXISTS (
+            <choose>
+                <when test="recordType == 'company'">
+                    SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{entityId}
+                </when>
+                <when test="recordType == 'person'">
+                    SELECT 1 FROM person
+                    WHERE workspace_id = #{workspaceId} AND id = #{entityId} AND suspended_at IS NULL
+                </when>
+                <when test="recordType == 'deal'">
+                    SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{entityId}
+                </when>
+                <otherwise>
+                    SELECT 1 WHERE 1 = 0
+                </otherwise>
+            </choose>
+        )
+    </select>
+
     <select id="companyIdsWithOpenDeal" resultType="int">
         SELECT DISTINCT company_id
         FROM deal
@@ -165,7 +185,16 @@
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
-            <when test="field == 'tag'">AND id IN (SELECT company_id FROM company_tag WHERE tag_id = #{id})</when>
+            <when test="field == 'tag'">
+                AND id IN (
+                    SELECT company_tag.company_id
+                    FROM company_tag
+                    JOIN tag segment_tag
+                      ON segment_tag.id = company_tag.tag_id
+                     AND segment_tag.workspace_id = #{workspaceId}
+                    WHERE company_tag.tag_id = #{id}
+                )
+            </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </select>
@@ -182,7 +211,16 @@
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
-            <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
+            <when test="field == 'tag'">
+                AND id IN (
+                    SELECT person_tag.person_id
+                    FROM person_tag
+                    JOIN tag segment_tag
+                      ON segment_tag.id = person_tag.tag_id
+                     AND segment_tag.workspace_id = #{workspaceId}
+                    WHERE person_tag.tag_id = #{id}
+                )
+            </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </select>
@@ -199,7 +237,16 @@
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
-            <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
+            <when test="field == 'tag'">
+                AND id IN (
+                    SELECT person_tag.person_id
+                    FROM person_tag
+                    JOIN tag segment_tag
+                      ON segment_tag.id = person_tag.tag_id
+                     AND segment_tag.workspace_id = #{workspaceId}
+                    WHERE person_tag.tag_id = #{id}
+                )
+            </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </select>
@@ -223,7 +270,16 @@
             <when test="field == 'close_date'"><include refid="dateOp"><property name="col" value="expected_close_date"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
-            <when test="field == 'tag'">AND id IN (SELECT deal_id FROM deal_tag WHERE tag_id = #{id})</when>
+            <when test="field == 'tag'">
+                AND id IN (
+                    SELECT deal_tag.deal_id
+                    FROM deal_tag
+                    JOIN tag segment_tag
+                      ON segment_tag.id = deal_tag.tag_id
+                     AND segment_tag.workspace_id = #{workspaceId}
+                    WHERE deal_tag.tag_id = #{id}
+                )
+            </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </select>

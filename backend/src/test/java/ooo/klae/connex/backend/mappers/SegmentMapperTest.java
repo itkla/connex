@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Attachment;
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
@@ -27,6 +29,7 @@ class SegmentMapperTest extends AbstractMapperTest {
     @Autowired private AttachmentMapper attachmentMapper;
     @Autowired private NoteMapper noteMapper;
     @Autowired private ShareMapper shareMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
     void ownerFieldConditionMatchesCurrentOwnerForCompanyAndPerson() {
@@ -238,6 +241,47 @@ class SegmentMapperTest extends AbstractMapperTest {
             .contains(ownedCompanyPerson.getId()));
     }
 
+    @Test
+    void tagFieldConditionsIgnoreForeignWorkspaceAssociationsAcrossRecordTypes() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Person suspended = newPerson(company);
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), company);
+        Tag ownTag = newTag();
+        companyMapper.addTag(workspace.getId(), company.getId(), ownTag.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), ownTag.getId());
+        personMapper.addTag(workspace.getId(), suspended.getId(), ownTag.getId());
+        dealMapper.addTag(workspace.getId(), deal.getId(), ownTag.getId());
+
+        Workspace sibling = newSiblingWorkspace();
+        Tag foreignTag = newTag(sibling);
+        jdbcTemplate.update(
+            "INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)", company.getId(), foreignTag.getId());
+        jdbcTemplate.update(
+            "INSERT INTO person_tag (person_id, tag_id) VALUES (?, ?)", person.getId(), foreignTag.getId());
+        jdbcTemplate.update(
+            "INSERT INTO person_tag (person_id, tag_id) VALUES (?, ?)", suspended.getId(), foreignTag.getId());
+        jdbcTemplate.update(
+            "INSERT INTO deal_tag (deal_id, tag_id) VALUES (?, ?)", deal.getId(), foreignTag.getId());
+
+        assertTrue(segmentMapper.companyIdsMatching(tagParams(ownTag)).contains(company.getId()));
+        assertTrue(segmentMapper.personIdsMatching(tagParams(ownTag)).contains(person.getId()));
+        assertFalse(segmentMapper.personIdsMatching(tagParams(ownTag)).contains(suspended.getId()));
+        assertTrue(segmentMapper.personIdsMatchingIncludingRestricted(tagParams(ownTag)).contains(person.getId()));
+        assertTrue(segmentMapper.personIdsMatchingIncludingRestricted(tagParams(ownTag)).contains(suspended.getId()));
+        assertTrue(segmentMapper.dealIdsMatching(tagParams(ownTag)).contains(deal.getId()));
+
+        assertFalse(segmentMapper.companyIdsMatching(tagParams(foreignTag)).contains(company.getId()));
+        assertFalse(segmentMapper.personIdsMatching(tagParams(foreignTag)).contains(person.getId()));
+        assertFalse(segmentMapper.personIdsMatching(tagParams(foreignTag)).contains(suspended.getId()));
+        assertFalse(segmentMapper.personIdsMatchingIncludingRestricted(tagParams(foreignTag)).contains(person.getId()));
+        assertFalse(segmentMapper.personIdsMatchingIncludingRestricted(tagParams(foreignTag))
+            .contains(suspended.getId()));
+        assertFalse(segmentMapper.dealIdsMatching(tagParams(foreignTag)).contains(deal.getId()));
+    }
+
     private Map<String, Object> existenceParams(String predicate) {
         return Map.of(
             "workspaceId", workspace.getId(),
@@ -278,6 +322,14 @@ class SegmentMapperTest extends AbstractMapperTest {
             "ids", companyIds);
     }
 
+    private Map<String, Object> tagParams(Tag tag) {
+        return Map.of(
+            "workspaceId", workspace.getId(),
+            "field", "tag",
+            "op", "has",
+            "id", tag.getId());
+    }
+
     private Workspace newSiblingWorkspace() {
         Workspace sibling = new Workspace();
         sibling.setName("Workspace " + unique());
@@ -293,6 +345,15 @@ class SegmentMapperTest extends AbstractMapperTest {
         company.setWorkspaceId(target.getId());
         companyMapper.insert(company);
         return company;
+    }
+
+    private Tag newTag(Workspace target) {
+        Tag tag = new Tag();
+        tag.setName("Tag " + unique());
+        tag.setColor("#abcdef");
+        tag.setWorkspaceId(target.getId());
+        tagMapper.insert(tag);
+        return tag;
     }
 
     private static Note newNote(int workspaceId, User author, Person person, Deal deal) {

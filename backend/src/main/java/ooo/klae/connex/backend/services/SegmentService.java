@@ -122,6 +122,9 @@ public class SegmentService {
             return false;
         }
         countConditions(definition, 1);
+        if (!segmentMapper.entityIdInWorkspace(workspaceId, type, entityId)) {
+            return false;
+        }
         EvalContext ctx = new EvalContext(workspaceId, userId, type, false, Set.of(entityId));
         return matchesGroup(definition, ctx, entityId, 1);
     }
