@@ -29,7 +29,7 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
@@ -42,7 +42,13 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
+import {
+    evaluableSegmentDefinition,
+    hasSegmentConditions,
+    normalizeSegmentDefinition,
+    removeSegmentCondition,
+    segmentConditionEntries,
+} from '@/app/lib/segmentDefinition';
 import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
@@ -687,15 +693,11 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
-        ...definition.conditions.flatMap((condition, index) =>
-            condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
-                ? [{
-                    id: `segment:${index}`,
-                    label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
-                    onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
-                }]
-                : [],
-        ),
+        ...segmentConditionEntries(definition).map(({ condition, groupPath, conditionIndex }) => ({
+            id: `segment:${[...groupPath, conditionIndex].join(':')}`,
+            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
+            onRemove: () => setDefinition((current) => removeSegmentCondition(current, groupPath, conditionIndex)),
+        })),
     ];
 
     const selectionActions = (
@@ -750,7 +752,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             setFilterState(config.filters ?? {});
             applyQuery(config.query ?? '');
             applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
-            setDefinition(isSegmentDefinition(config.segments) ? config.segments : EMPTY_DEFINITION);
+            setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
         },
         [setFilterState, applyQuery, applySort],
     );
@@ -816,7 +818,13 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                <SegmentBuilder definition={definition} fields={segmentFields} options={segmentOptions} onChange={setDefinition} />
+                                <SegmentBuilder
+                                    definition={definition}
+                                    fields={segmentFields}
+                                    options={segmentOptions}
+                                    allowGroups
+                                    onChange={setDefinition}
+                                />
                                 {displayMode === 'grid' && (
                                     <RecordsSortMenu
                                         columns={columns}

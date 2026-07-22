@@ -225,21 +225,6 @@ function countConditions(group: SegmentDefinition): number {
 export const EMPTY_DEFINITION: SegmentDefinition = { match: "all", conditions: [] };
 
 /**
- * Runtime guard for a {@link SegmentDefinition}: a non-array object with a conditions array and a
- * valid match. Guards callers that read {@code .conditions} against legacy or malformed saved-view
- * payloads (e.g. an older array shape) that would otherwise throw.
- */
-export function isSegmentDefinition(value: unknown): value is SegmentDefinition {
-    return (
-        value != null &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        Array.isArray((value as SegmentDefinition).conditions) &&
-        ((value as SegmentDefinition).match === "all" || (value as SegmentDefinition).match === "any")
-    );
-}
-
-/**
  * Builds the natural-language label for a condition: e.g. "Industry is Fintech", "Has an open deal",
  * "Tag is not Priority". {@code resolveTagName} maps a tag id to its name. Used by the removable
  * condition chips outside the builder; operator-only comparisons (is set / is empty) render without a
@@ -287,6 +272,7 @@ export default function SegmentBuilder({
     recordType = "company",
     options,
     advanced = false,
+    allowGroups = advanced,
 }: {
     definition: SegmentDefinition;
     fields: SegmentFields | null;
@@ -294,6 +280,7 @@ export default function SegmentBuilder({
     recordType?: string;
     options?: RuleBuilderOptions | null;
     advanced?: boolean;
+    allowGroups?: boolean;
 }) {
     const t = useTranslations("SmartSegments");
     const [open, setOpen] = useState(false);
@@ -329,6 +316,8 @@ export default function SegmentBuilder({
                             fields={fields}
                             options={options}
                             advanced={advanced}
+                            allowGroups={allowGroups}
+                            totalConditions={total}
                             depth={1}
                             onChange={onChange}
                         />
@@ -362,6 +351,8 @@ function GroupEditor({
     fields,
     options,
     advanced,
+    allowGroups,
+    totalConditions,
     depth,
     onChange,
     onRemove,
@@ -371,6 +362,8 @@ function GroupEditor({
     fields: SegmentFields | null;
     options?: RuleBuilderOptions | null;
     advanced: boolean;
+    allowGroups: boolean;
+    totalConditions: number;
     depth: number;
     onChange: (group: SegmentDefinition) => void;
     onRemove?: () => void;
@@ -383,8 +376,12 @@ function GroupEditor({
 
     const setConditions = (next: SegmentCondition[]) => onChange({ ...group, conditions: next });
     const setGroups = (next: SegmentDefinition[]) => onChange({ ...group, groups: next.length ? next : undefined });
-    const canAddCondition = conditions.length < catalog.limits.maxGroupConditions;
-    const canAddGroup = advanced && groups.length < catalog.limits.maxGroups && depth < catalog.limits.maxDepth - 1;
+    const hasConditionCapacity = totalConditions < catalog.limits.maxConditions;
+    const canAddCondition = hasConditionCapacity && conditions.length < catalog.limits.maxGroupConditions;
+    const canAddGroup = allowGroups
+        && hasConditionCapacity
+        && groups.length < catalog.limits.maxGroups
+        && depth < catalog.limits.maxDepth;
     const empty = conditions.length === 0 && groups.length === 0;
 
     const addCondition = (subject: string) => setConditions([...conditions, newCondition(catalog, subject)]);
@@ -436,6 +433,8 @@ function GroupEditor({
                             fields={fields}
                             options={options}
                             advanced={advanced}
+                            allowGroups={allowGroups}
+                            totalConditions={totalConditions}
                             onChange={(next) => setConditions(conditions.map((existing, i) => (i === index ? next : existing)))}
                             onRemove={() => setConditions(conditions.filter((_, i) => i !== index))}
                         />
@@ -451,6 +450,8 @@ function GroupEditor({
                     fields={fields}
                     options={options}
                     advanced={advanced}
+                    allowGroups={allowGroups}
+                    totalConditions={totalConditions}
                     depth={depth + 1}
                     onChange={(next) => setGroups(groups.map((existing, i) => (i === index ? next : existing)))}
                     onRemove={() => setGroups(groups.filter((_, i) => i !== index))}
