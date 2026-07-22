@@ -5,6 +5,7 @@ import {
     getActivitiesFromCookie,
     getContactsFromCookie,
     getDealsFromCookie,
+    getMyWorkspacesFromCookie,
     getUsers,
 } from "@/app/lib/api";
 import type { User } from "@/app/lib/types";
@@ -19,11 +20,12 @@ export default async function ActivityPage() {
 
     const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
 
-    const [activities, persons, deals, users] = await Promise.all([
+    const [activities, persons, deals, users, workspaceState] = await Promise.all([
         getActivitiesFromCookie(cookie),
         getContactsFromCookie(cookie),
         getDealsFromCookie(cookie),
         (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getMyWorkspacesFromCookie(cookie),
     ]);
 
     return (
@@ -33,6 +35,7 @@ export default async function ActivityPage() {
             deals={deals}
             users={users}
             currentUserId={user.id}
+            originWorkspaceId={workspaceState.activeWorkspaceId}
         />
     );
 }
