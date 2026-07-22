@@ -50,6 +50,7 @@ type Props = {
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
     defaultDescription?: string;
+    requestInit?: RequestInit;
 };
 
 export default function TaskDialog({
@@ -63,6 +64,7 @@ export default function TaskDialog({
     defaultDeal = null,
     defaultDueDate = '',
     defaultDescription = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
@@ -98,6 +100,7 @@ export default function TaskDialog({
                         defaultDeal={defaultDeal}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
+                        requestInit={requestInit}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -121,6 +124,7 @@ type TaskDialogFormProps = {
     defaultDeal: Deal | null;
     defaultDueDate: string;
     defaultDescription: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -144,6 +148,7 @@ export function TaskDialogForm({
     defaultDeal,
     defaultDueDate,
     defaultDescription,
+    requestInit,
     onSubmittingChange,
     onDirtyChange,
     onCancel,
@@ -193,18 +198,23 @@ export function TaskDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createTask({
-                description: description.trim(),
-                dueDate: dueDate || undefined,
-                assignedToId,
-                personId: selectedPerson?.id ?? undefined,
-                dealId: selectedDeal?.id ?? undefined,
-            });
+            await createTask(
+                {
+                    description: description.trim(),
+                    dueDate: dueDate || undefined,
+                    assignedToId,
+                    personId: selectedPerson?.id ?? undefined,
+                    dealId: selectedDeal?.id ?? undefined,
+                },
+                requestInit,
+            );
+            if (requestInit?.signal?.aborted) return;
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -222,8 +232,10 @@ export function TaskDialogForm({
                       : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
