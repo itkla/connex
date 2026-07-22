@@ -1,5 +1,7 @@
+import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
+import { getMyWorkspacesFromCookie } from "@/app/lib/api";
 import { type Activity, type Contact, type Deal, type Note, type Task, type User } from "@/app/lib/types";
 import { timeOf } from "@/app/lib/utils";
 import TimelineRow, { type TimelineEntry } from "./TimelineRow";
@@ -56,7 +58,11 @@ export default async function Timeline({
     companyId?: number | null;
     limit?: number;
 }) {
-    const t = await getTranslations("MeTimeline");
+    const cookie = (await headers()).get("cookie");
+    const [t, workspaceState] = await Promise.all([
+        getTranslations("MeTimeline"),
+        getMyWorkspacesFromCookie(cookie),
+    ]);
     const entries = buildTimeline(tasks, activities, notes);
     const visible = limit ? entries.slice(0, limit) : entries;
 
@@ -90,6 +96,7 @@ export default async function Timeline({
                         deals={deals}
                         currentUserId={currentUserId}
                         companyId={companyId ?? null}
+                        originWorkspaceId={workspaceState.activeWorkspaceId}
                     />
                 );
             })}

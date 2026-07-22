@@ -50,6 +50,7 @@ type Props = {
     deals: Deal[];
     users: User[];
     currentUserId: number;
+    originWorkspaceId: number | null;
 };
 
 type IconType = ComponentType<{ className?: string }>;
@@ -107,7 +108,14 @@ function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, 
     });
 }
 
-export default function ActivitiesBrowser({ activities, persons, deals, users, currentUserId }: Props) {
+export default function ActivitiesBrowser({
+    activities,
+    persons,
+    deals,
+    users,
+    currentUserId,
+    originWorkspaceId,
+}: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityPage');
     const tf = useTranslations('Filters');
@@ -512,6 +520,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                     }}
                     persons={persons}
                     deals={deals}
+                    originWorkspaceId={originWorkspaceId}
                 />
             )}
 

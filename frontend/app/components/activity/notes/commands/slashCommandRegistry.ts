@@ -111,11 +111,16 @@ export const ENTITY_COMMANDS: readonly SlashCommandDef[] = [
     DEAL_COMMAND,
 ];
 
+/** References supported by activity composers and editors. */
+export const ACTIVITY_REFERENCE_COMMANDS: readonly SlashCommandDef[] = [
+    ...ENTITY_COMMANDS,
+    FILE_COMMAND,
+];
+
 /** The activity composer command set: reveal the follow-up panel, then the record references. */
 export const ACTIVITY_COMMANDS: readonly SlashCommandDef[] = [
     FOLLOW_UP_COMMAND,
-    ...ENTITY_COMMANDS,
-    FILE_COMMAND,
+    ...ACTIVITY_REFERENCE_COMMANDS,
 ];
 
 type Translate = (key: string) => string;

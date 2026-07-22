@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -20,13 +20,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
-import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
+import { ACTIVITY_REFERENCE_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
 import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { type Activity, type Contact, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
-import { parseMysqlDateTime, toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
+import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass =
     'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
@@ -42,20 +43,12 @@ type ActivityDraft = {
     dealId: number | null;
 };
 
-// function toDatetimeLocalValue(value?: string | null): string {
-//     if (!value) return '';
-//     const ts = parseMysqlDateTime(value);
-//     if (Number.isNaN(ts)) return '';
-//     const d = new Date(ts);
-//     const pad = (n: number) => String(n).padStart(2, '0');
-//     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-// }
-
-// function normalizeType(value?: string | null): string {
-//     if (!value) return ACTIVITY_TYPES[0];
-//     const match = ACTIVITY_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
-//     return match ?? ACTIVITY_TYPES[0];
-// }
+type EditSession = {
+    activityId: number;
+    controller: AbortController;
+    requestInit: RequestInit;
+    workspaceId: number;
+};
 
 function toDraft(a: Activity): ActivityDraft {
     return {
@@ -68,35 +61,126 @@ function toDraft(a: Activity): ActivityDraft {
     };
 }
 
+function createEditSession(activityId: number, workspaceId: number): EditSession {
+    const controller = new AbortController();
+    return {
+        activityId,
+        controller,
+        requestInit: {
+            signal: controller.signal,
+            headers: { 'X-Workspace-Id': String(workspaceId) },
+        },
+        workspaceId,
+    };
+}
+
 export default function EditActivitySheet({
     activity,
     open,
     onOpenChange,
     persons,
     deals,
+    originWorkspaceId,
 }: {
     activity: Activity;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     persons: Contact[];
     deals: Deal[];
+    originWorkspaceId: number | null;
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditActivitySheet');
+    const { activeWorkspaceId, switching } = useWorkspace();
     const [draft, setDraft] = useState<ActivityDraft>(() => toDraft(activity));
-    const [isSaving, setIsSaving] = useState(false);
+    const [session, setSession] = useState<EditSession | null>(() =>
+        open && !switching && originWorkspaceId !== null && activeWorkspaceId === originWorkspaceId
+            ? createEditSession(activity.id, originWorkspaceId)
+            : null,
+    );
+    const [savingSession, setSavingSession] = useState<EditSession | null>(null);
+    const sessionRef = useRef(session);
+    const latestActivityRef = useRef(activity);
+
+    useLayoutEffect(() => {
+        latestActivityRef.current = activity;
+    }, [activity]);
+
+    const closeSession = useCallback(() => {
+        sessionRef.current?.controller.abort();
+        sessionRef.current = null;
+        setSession(null);
+        setSavingSession(null);
+    }, []);
+
+    const closeSheet = useCallback(() => {
+        closeSession();
+        setDraft(toDraft(latestActivityRef.current));
+        onOpenChange(false);
+    }, [closeSession, onOpenChange]);
+
+    const finishSaving = useCallback((current: EditSession) => {
+        if (sessionRef.current !== current || current.controller.signal.aborted) return;
+        setSavingSession((candidate) => candidate === current ? null : candidate);
+    }, []);
+
+    useLayoutEffect(() => {
+        const current = sessionRef.current;
+        if (!open) {
+            if (current !== null) closeSession();
+            return;
+        }
+        if (
+            switching
+            || originWorkspaceId === null
+            || activeWorkspaceId !== originWorkspaceId
+            || (current !== null && (
+                current.workspaceId !== originWorkspaceId
+                || current.activityId !== activity.id
+            ))
+        ) {
+            closeSheet();
+            return;
+        }
+        if (current !== null) return;
+        const next = createEditSession(activity.id, originWorkspaceId);
+        sessionRef.current = next;
+        setSession(next);
+        setDraft(toDraft(latestActivityRef.current));
+    }, [activeWorkspaceId, activity.id, closeSession, closeSheet, open, originWorkspaceId, switching]);
+
+    useLayoutEffect(() => () => {
+        sessionRef.current?.controller.abort();
+        sessionRef.current = null;
+    }, []);
 
     const handleOpenChange = (next: boolean) => {
-        onOpenChange(next);
-        if (!next) setDraft(toDraft(activity));
+        if (next) {
+            onOpenChange(true);
+            return;
+        }
+        closeSheet();
     };
 
     const saveUpdates = async () => {
+        const current = sessionRef.current;
+        if (
+            current === null
+            || current.controller.signal.aborted
+            || switching
+            || originWorkspaceId === null
+            || activeWorkspaceId !== originWorkspaceId
+            || current.workspaceId !== originWorkspaceId
+            || current.activityId !== activity.id
+        ) {
+            closeSheet();
+            return;
+        }
         if (!draft.subject.trim()) {
             toast.error(t('subjectRequired'));
             return;
         }
-        setIsSaving(true);
+        setSavingSession(current);
         try {
             const payload: UpdateActivityPayload = {
                 type: draft.type,
@@ -107,17 +191,33 @@ export default function EditActivitySheet({
                 personId: draft.personId,
                 dealId: draft.dealId,
             };
-            await updateActivity(activity.id, payload);
+            const updatedActivity = await updateActivity(current.activityId, payload, current.requestInit);
+            if (sessionRef.current !== current || current.controller.signal.aborted) return;
+            latestActivityRef.current = updatedActivity;
             toastSuccess(t('activityUpdated'));
-            handleOpenChange(false);
+            closeSheet();
             router.refresh();
         } catch (err) {
+            if (sessionRef.current !== current || current.controller.signal.aborted) return;
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
             toastError(message);
         } finally {
-            setIsSaving(false);
+            finishSaving(current);
         }
     };
+
+    const activeSession =
+        open
+        && !switching
+        && session !== null
+        && originWorkspaceId !== null
+        && activeWorkspaceId === originWorkspaceId
+        && session.workspaceId === originWorkspaceId
+        && session.activityId === activity.id
+        && !session.controller.signal.aborted
+            ? session
+            : null;
+    const isSaving = activeSession !== null && savingSession === activeSession;
 
     return (
         <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
@@ -215,13 +315,17 @@ export default function EditActivitySheet({
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
-                            <MentionEditor
-                                id="activity-notes"
-                                value={draft.notes}
-                                onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
-                                commands={ENTITY_COMMANDS}
-                                className={`${inputClass} min-h-24`}
-                            />
+                            {activeSession && (
+                                <MentionEditor
+                                    id="activity-notes"
+                                    value={draft.notes}
+                                    onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
+                                    commands={ACTIVITY_REFERENCE_COMMANDS}
+                                    requestInit={activeSession.requestInit}
+                                    ariaLabel={t('notesLabel')}
+                                    className={`${inputClass} min-h-24`}
+                                />
+                            )}
                         </div>
                     </div>
                 </div>
@@ -233,7 +337,7 @@ export default function EditActivitySheet({
                     <Button
                         onClick={saveUpdates}
                         variant="brand"
-                        disabled={isSaving}
+                        disabled={isSaving || activeSession === null}
                         className="transition-transform active:scale-[0.98]"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}

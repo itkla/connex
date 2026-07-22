@@ -49,6 +49,7 @@ export default function TimelineRow({
     deals,
     currentUserId,
     companyId,
+    originWorkspaceId,
 }: {
     entry: TimelineEntry;
     author?: User;
@@ -56,6 +57,7 @@ export default function TimelineRow({
     deals: Deal[];
     currentUserId?: number;
     companyId: number | null;
+    originWorkspaceId: number | null;
 }) {
     const t = useTranslations('MeTimeline');
     const locale = useLocale();
@@ -209,6 +211,7 @@ export default function TimelineRow({
                     onOpenChange={setEditOpen}
                     persons={persons}
                     deals={deals}
+                    originWorkspaceId={originWorkspaceId}
                 />
             )}
             {entry.kind === 'note' && currentUserId != null && (
