@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.dto.NotificationDto;
@@ -61,6 +63,8 @@ class NotificationDeliveryTest {
         }).when(inApp).dispatch(any());
         lenient().when(notificationMapper.findById(eq(9), anyInt()))
             .thenAnswer(invocation -> existingRow(invocation.getArgument(1), "info", null));
+        lenient().when(notificationMapper.claimEmailDelivery(eq(1), eq(9), any()))
+            .thenReturn(1);
         lenient().when(quietHoursControlAccess.evaluateForUser(
                 9, Instant.parse("2026-07-20T02:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
@@ -98,7 +102,45 @@ class NotificationDeliveryTest {
         delivery.deliver(n);
 
         verify(inApp).dispatch(n);
+        verify(notificationMapper).claimEmailDelivery(1, 9, n.getDedupeKey());
         verify(email).dispatch(n);
+    }
+
+    @Test
+    void email_notSent_whenConcurrentPassAlreadyClaimedDelivery() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        when(notificationMapper.claimEmailDelivery(1, 9, n.getDedupeKey())).thenReturn(0);
+
+        delivery.deliver(n);
+
+        verify(inApp).dispatch(n);
+        verify(notificationMapper).claimEmailDelivery(1, 9, n.getDedupeKey());
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void emailDispatchWaitsForTheNotificationTransactionToCommit() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        try {
+            delivery.deliver(n);
+
+            verify(email, never()).dispatch(any());
+            for (TransactionSynchronization synchronization
+                    : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(email).dispatch(n);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 
     @Test
@@ -133,6 +175,7 @@ class NotificationDeliveryTest {
 
         delivery.deliver(n);
 
+        verify(notificationMapper, never()).claimEmailDelivery(anyInt(), anyInt(), any());
         verify(email).dispatch(n);
     }
 
