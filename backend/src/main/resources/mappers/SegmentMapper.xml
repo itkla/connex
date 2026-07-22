@@ -137,6 +137,24 @@
         </choose>
     </sql>
 
+    <sql id="personCompanyOp">
+        <include refid="idOp"><property name="col" value="company_id"/></include>
+        AND EXISTS (
+            SELECT 1 FROM company visible_company
+            WHERE visible_company.id = person.company_id
+              AND (visible_company.workspace_id = #{workspaceId}
+                OR EXISTS (
+                    SELECT 1 FROM company_share visible_share
+                    JOIN workspace viewer_workspace ON viewer_workspace.id = visible_share.workspace_id
+                    JOIN workspace owner_workspace
+                      ON owner_workspace.id = visible_company.workspace_id
+                     AND owner_workspace.org_id = viewer_workspace.org_id
+                    WHERE visible_share.company_id = visible_company.id
+                      AND visible_share.workspace_id = #{workspaceId}
+                ))
+        )
+    </sql>
+
     <select id="companyIdsMatching" resultType="int">
         SELECT id FROM company WHERE workspace_id = #{workspaceId}
         <choose>
@@ -160,7 +178,7 @@
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
-            <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'company'"><include refid="personCompanyOp"/></when>
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
@@ -177,7 +195,7 @@
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
-            <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'company'"><include refid="personCompanyOp"/></when>
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
             <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
@@ -227,11 +245,14 @@
                       AND a.type = 'meeting' AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY))
             </when>
             <when test="predicate == 'has_note'">
-                AND EXISTS (SELECT 1 FROM note n WHERE n.${fk} = ${alias}.id AND n.visibility = 'workspace')
+                AND EXISTS (SELECT 1 FROM note n
+                    WHERE n.workspace_id = #{workspaceId} AND n.${fk} = ${alias}.id
+                      AND n.visibility = 'workspace')
             </when>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
-                    WHERE att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
+                    WHERE att.workspace_id = #{workspaceId}
+                      AND att.entity_type = '${entityType}' AND att.entity_id = ${alias}.id)
             </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
@@ -242,7 +263,8 @@
         <choose>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
-                    WHERE att.entity_type = 'company' AND att.entity_id = c.id)
+                    WHERE att.workspace_id = #{workspaceId}
+                      AND att.entity_type = 'company' AND att.entity_id = c.id)
             </when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
