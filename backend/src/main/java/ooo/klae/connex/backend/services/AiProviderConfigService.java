@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
@@ -89,6 +90,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private final AiProperties aiProperties;
     private final AiProviderConfigMapper aiProviderConfigMapper;
     private final OrganizationMapper organizationMapper;
+    private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final OrgMemberService orgMemberService;
     private final AiProviderSecretCipher aiProviderSecretCipher;
@@ -411,6 +413,9 @@ public class AiProviderConfigService implements AiProviderReadiness {
 
     private AiProviderConfig lockCurrentConfig(int orgId, int actorId) {
         if (organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        if (userMapper.lockById(actorId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
         orgMemberService.requireOrgAdminForUpdate(orgId, actorId);

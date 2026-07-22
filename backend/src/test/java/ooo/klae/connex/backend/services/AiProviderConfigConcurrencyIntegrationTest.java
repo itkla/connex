@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,8 +28,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
@@ -52,13 +55,14 @@ class AiProviderConfigConcurrencyIntegrationTest {
     @Autowired private AiProviderConfigService service;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private AiProviderConfigMapper aiProviderConfigMapper;
-    @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private AiProviderSecretCipher aiProviderSecretCipher;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
     @MockitoSpyBean private OrganizationMapper organizationMapper;
     @MockitoSpyBean private OrgMemberMapper orgMemberMapper;
+    @MockitoSpyBean private UserMapper userMapper;
     @MockitoBean private AuditService auditService;
     @MockitoBean private SessionSecurityService sessionSecurityService;
 
@@ -250,6 +254,63 @@ class AiProviderConfigConcurrencyIntegrationTest {
 
             revoke.get(20, TimeUnit.SECONDS);
             assertEquals(1, removal.get(20, TimeUnit.SECONDS));
+        } finally {
+            releaseRevoke.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNull(aiProviderConfigMapper.findByOrg(organization.getId()));
+        assertEquals(0, credentialCount());
+        assertNull(orgMemberMapper.getRole(organization.getId(), actor.getId()));
+    }
+
+    @Test
+    void accountDeletionCannotReachMembershipLocksWhileAiMutationHoldsActorUser() throws Exception {
+        CountDownLatch currentAuthorizationLocked = new CountDownLatch(1);
+        CountDownLatch releaseRevoke = new CountDownLatch(1);
+        CountDownLatch deletionUserLockAttempted = new CountDownLatch(1);
+        CountDownLatch deletionOwnerRowsAttempted = new CountDownLatch(1);
+        AtomicInteger userLockCalls = new AtomicInteger();
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        OrgMemberMapper realOrgMemberMapper = sqlSessionTemplate.getMapper(OrgMemberMapper.class);
+        doAnswer(invocation -> {
+            if (userLockCalls.incrementAndGet() == 2) {
+                deletionUserLockAttempted.countDown();
+            }
+            return realUserMapper.lockById(actor.getId());
+        }).when(userMapper).lockById(actor.getId());
+        doAnswer(invocation -> {
+            String role = realOrgMemberMapper.getRoleForUpdate(organization.getId(), actor.getId());
+            currentAuthorizationLocked.countDown();
+            if (!releaseRevoke.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Authorized AI config mutation did not resume");
+            }
+            return role;
+        }).when(orgMemberMapper).getRoleForUpdate(organization.getId(), actor.getId());
+        doAnswer(invocation -> {
+            deletionOwnerRowsAttempted.countDown();
+            return realOrgMemberMapper.lockOwnerIds(organization.getId());
+        }).when(orgMemberMapper).lockOwnerIds(organization.getId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> revoke = executor.submit(
+                    () -> service.revoke(firstWorkspace.getId(), actor.getId()));
+            assertTrue(currentAuthorizationLocked.await(10, TimeUnit.SECONDS));
+
+            Future<?> deletion = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        userMapper.lockById(actor.getId());
+                        orgMemberMapper.lockOwnerIds(organization.getId());
+                        orgMemberMapper.removeMember(organization.getId(), actor.getId());
+                    }));
+            assertTrue(deletionUserLockAttempted.await(10, TimeUnit.SECONDS));
+            assertFalse(deletionOwnerRowsAttempted.await(500, TimeUnit.MILLISECONDS));
+            releaseRevoke.countDown();
+
+            revoke.get(20, TimeUnit.SECONDS);
+            deletion.get(20, TimeUnit.SECONDS);
         } finally {
             releaseRevoke.countDown();
             executor.shutdownNow();

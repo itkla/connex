@@ -120,8 +120,9 @@ public class OrgMemberService {
      * Adds a user to the organization or changes their org role. Requires the actor
      * to be an org owner; the target must be a real user; and the organization must
      * always keep at least one owner (a sole owner cannot be demoted to admin). The
-     * organization, target user, and owner rows are locked in that order so role
-     * changes serialize with organization mutations and account deletion.
+     * organization, sorted actor/target users, and owner rows are locked in that
+     * order so role changes serialize with organization mutations, audit
+     * attribution, and account deletion.
      */
     @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
@@ -131,9 +132,7 @@ public class OrgMemberService {
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
-        if (userMapper.lockById(targetUserId) == null) {
-            throw new ResourceNotFoundException("User not found: " + targetUserId);
-        }
+        lockMembershipUserRoots(actorId, targetUserId);
         User target = userMapper.getUserById(targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User not found: " + targetUserId);
@@ -158,6 +157,7 @@ public class OrgMemberService {
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
+        lockMembershipUserRoot(actorId, actorId);
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
         if (isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
@@ -180,6 +180,25 @@ public class OrgMemberService {
             throw new ForbiddenException("Requires the organization owner role");
         }
         return ownerIds;
+    }
+
+    private void lockMembershipUserRoots(int actorId, int targetUserId) {
+        int firstUserId = Math.min(actorId, targetUserId);
+        int secondUserId = Math.max(actorId, targetUserId);
+        lockMembershipUserRoot(firstUserId, actorId);
+        if (secondUserId != firstUserId) {
+            lockMembershipUserRoot(secondUserId, actorId);
+        }
+    }
+
+    private void lockMembershipUserRoot(int userId, int actorId) {
+        if (userMapper.lockById(userId) != null) {
+            return;
+        }
+        if (userId == actorId) {
+            throw new ForbiddenException("Requires the organization owner role");
+        }
+        throw new ResourceNotFoundException("User not found: " + userId);
     }
 
     private boolean isSoleOwner(List<Integer> ownerIds, int userId) {

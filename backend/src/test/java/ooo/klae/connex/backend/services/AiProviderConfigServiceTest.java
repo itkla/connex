@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,6 +56,7 @@ class AiProviderConfigServiceTest {
     @Mock private AiProperties aiProperties;
     @Mock private AiProviderConfigMapper aiProviderConfigMapper;
     @Mock private OrganizationMapper organizationMapper;
+    @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private OrgMemberService orgMemberService;
     @Mock private AiProviderSecretCipher aiProviderSecretCipher;
@@ -67,13 +69,14 @@ class AiProviderConfigServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, workspaceMapper,
-                orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
+        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, userMapper,
+                workspaceMapper, orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
                 sessionSecurityService,
                 new ObjectMapper());
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
+        lenient().when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
         lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
@@ -349,8 +352,9 @@ class AiProviderConfigServiceTest {
 
         service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
 
-        InOrder mutations = inOrder(organizationMapper, orgMemberService, aiProviderConfigMapper);
+        InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
         mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(userMapper).lockById(ACTOR_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).upsert(any(AiProviderConfig.class));
@@ -375,8 +379,9 @@ class AiProviderConfigServiceTest {
 
         service.revoke(WORKSPACE_ID, ACTOR_ID);
 
-        InOrder mutations = inOrder(organizationMapper, orgMemberService, aiProviderConfigMapper);
+        InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
         mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(userMapper).lockById(ACTOR_ID);
         mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
         mutations.verify(aiProviderConfigMapper).deleteByOrg(ORG_ID);
@@ -401,6 +406,18 @@ class AiProviderConfigServiceTest {
         assertThrows(ForbiddenException.class,
                 () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
 
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_missingCurrentActorFailsBeforeMembershipAndConfigLocks() {
+        when(userMapper.lockById(ACTOR_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(orgMemberService, never()).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
         verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
         verify(aiProviderConfigMapper, never()).upsert(any());
     }
