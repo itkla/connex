@@ -2,6 +2,7 @@ import {
     BriefcaseIcon,
     BuildingOffice2Icon,
     CheckCircleIcon,
+    PaperClipIcon,
     UserIcon,
 } from '@heroicons/react/24/outline';
 
@@ -92,6 +93,17 @@ export const DEAL_COMMAND: SlashCommandDef = {
     entityTypes: ['deal'],
 };
 
+/** Link an existing file that is visible in the activity's workspace. */
+export const FILE_COMMAND: SlashCommandDef = {
+    id: 'file',
+    kind: 'insert-reference',
+    labelKey: 'slashFileCmd',
+    subtitleKey: 'slashFileCmdHint',
+    aliases: ['file', 'attachment', 'document', 'ファイル', '添付'],
+    icon: PaperClipIcon,
+    entityTypes: ['file'],
+};
+
 /** The record-reference commands (company, person, deal) as a stable, memo-friendly array. */
 export const ENTITY_COMMANDS: readonly SlashCommandDef[] = [
     COMPANY_COMMAND,
@@ -103,6 +115,7 @@ export const ENTITY_COMMANDS: readonly SlashCommandDef[] = [
 export const ACTIVITY_COMMANDS: readonly SlashCommandDef[] = [
     FOLLOW_UP_COMMAND,
     ...ENTITY_COMMANDS,
+    FILE_COMMAND,
 ];
 
 type Translate = (key: string) => string;

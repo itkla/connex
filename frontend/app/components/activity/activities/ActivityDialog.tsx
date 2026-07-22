@@ -476,10 +476,12 @@ export function ActivityDialogForm({
                                 value={notes}
                                 onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
+                                ariaLabel={t('notesLabel')}
                                 commands={ACTIVITY_COMMANDS}
                                 onRunAction={(actionId) => {
                                     if (actionId === 'followUp') enableFollowUp();
                                 }}
+                                requestInit={requestInit}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>

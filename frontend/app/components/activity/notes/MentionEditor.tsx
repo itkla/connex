@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 import { BoltIcon, BriefcaseIcon, BuildingOffice2Icon, CheckCircleIcon, DocumentTextIcon, PaperClipIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { getActiveWorkspaceMembers, getCompanies, getDeals, search } from '@/app/lib/api';
+import { getCompanies, getDeals, getWorkspaceMembers, search } from '@/app/lib/api';
 import { type Company, type Deal, type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
@@ -32,19 +32,35 @@ const MENTION_TRIGGER_TYPES: Record<'@' | '#', readonly NoteReferenceType[]> = {
 function currentWorkspaceKey(): string {
     if (typeof document === 'undefined') return '';
     const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
-    return match ? match[1] : '';
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+function requestWorkspaceKey(requestInit?: RequestInit): string {
+    const headerWorkspace = new Headers(requestInit?.headers).get('X-Workspace-Id');
+    return headerWorkspace ?? currentWorkspaceKey();
+}
+
+function requestWorkspaceId(requestInit?: RequestInit): number | null {
+    const workspaceId = Number(requestWorkspaceKey(requestInit));
+    return Number.isSafeInteger(workspaceId) && workspaceId > 0 ? workspaceId : null;
 }
 
 let membersCache: { key: string; promise: Promise<WorkspaceMember[]> } | null = null;
-function loadMembers(): Promise<WorkspaceMember[]> {
-    const key = currentWorkspaceKey();
+function loadMembers(requestInit?: RequestInit): Promise<WorkspaceMember[]> {
+    const workspaceId = requestWorkspaceId(requestInit);
+    if (workspaceId === null) return Promise.resolve([]);
+    if (requestInit?.signal) {
+        return getWorkspaceMembers(workspaceId, requestInit).catch(() => []);
+    }
+    const key = requestWorkspaceKey(requestInit);
     if (!membersCache || membersCache.key !== key) {
+        const promise = getWorkspaceMembers(workspaceId, requestInit).catch(() => {
+            if (membersCache?.promise === promise) membersCache = null;
+            return [];
+        });
         membersCache = {
             key,
-            promise: getActiveWorkspaceMembers().catch(() => {
-                membersCache = null;
-                return [];
-            }),
+            promise,
         };
     }
     return membersCache.promise;
@@ -61,6 +77,9 @@ type Suggestion = {
     sublabel: string;
     avatarUrl?: string | null;
 };
+
+const EMPTY_MEMBERS: WorkspaceMember[] = [];
+const EMPTY_SUGGESTIONS: Suggestion[] = [];
 
 function memberSuggestions(members: WorkspaceMember[], excludeUserId?: number): Suggestion[] {
     return members.flatMap((member): Suggestion[] =>
@@ -103,37 +122,55 @@ function searchSuggestions(results: SearchResults, excludeUserId?: number): Sugg
         label: company.name,
         sublabel: company.industry || 'Company',
     }));
-    return [...users, ...people, ...deals, ...companies];
+    const files = (results.attachments ?? []).map((file): Suggestion => ({
+        type: 'file',
+        id: file.id,
+        label: file.fileName,
+        sublabel: file.entityLabel || file.contentType || '',
+    }));
+    return [...users, ...people, ...deals, ...companies, ...files];
 }
 
 let recordsCache: { key: string; promise: Promise<Suggestion[]> } | null = null;
-function loadRecords(): Promise<Suggestion[]> {
-    const key = currentWorkspaceKey();
+function fetchRecords(requestInit?: RequestInit): Promise<Suggestion[]> {
+    return Promise.all([
+        getCompanies(requestInit).catch((error): Company[] => {
+            if (requestInit?.signal?.aborted) throw error;
+            return [];
+        }),
+        getDeals(requestInit).catch((error): Deal[] => {
+            if (requestInit?.signal?.aborted) throw error;
+            return [];
+        }),
+    ]).then(([companies, deals]): Suggestion[] => [
+        ...companies.map((company): Suggestion => ({
+            type: 'company',
+            id: company.id,
+            label: company.name,
+            sublabel: company.industry || 'Company',
+        })),
+        ...deals.map((deal): Suggestion => ({
+            type: 'deal',
+            id: deal.id,
+            label: deal.name,
+            sublabel: 'Deal',
+        })),
+    ]);
+}
+
+function loadRecords(requestInit?: RequestInit): Promise<Suggestion[]> {
+    if (requestInit?.signal) {
+        return fetchRecords(requestInit).catch(() => []);
+    }
+    const key = requestWorkspaceKey(requestInit);
     if (!recordsCache || recordsCache.key !== key) {
+        const promise = fetchRecords(requestInit).catch(() => {
+            if (recordsCache?.promise === promise) recordsCache = null;
+            return [];
+        });
         recordsCache = {
             key,
-            promise: Promise.all([
-                getCompanies().catch((): Company[] => []),
-                getDeals().catch((): Deal[] => []),
-            ])
-                .then(([companies, deals]): Suggestion[] => [
-                    ...companies.map((company): Suggestion => ({
-                        type: 'company',
-                        id: company.id,
-                        label: company.name,
-                        sublabel: company.industry || 'Company',
-                    })),
-                    ...deals.map((deal): Suggestion => ({
-                        type: 'deal',
-                        id: deal.id,
-                        label: deal.name,
-                        sublabel: 'Deal',
-                    })),
-                ])
-                .catch(() => {
-                    recordsCache = null;
-                    return [];
-                }),
+            promise,
         };
     }
     return recordsCache.promise;
@@ -202,7 +239,52 @@ function serialize(root: HTMLElement): string {
     return out.replace(/^\n/, '');
 }
 
-type ActiveQuery = { text: string; trigger: Trigger; left: number; top?: number; bottom?: number; above: boolean };
+type MenuPosition = {
+    left: number;
+    top?: number;
+    bottom?: number;
+    maxHeight: number;
+    above: boolean;
+};
+
+type ActiveQuery = MenuPosition & {
+    text: string;
+    trigger: Trigger;
+    workspaceKey: string;
+};
+
+type RemoteSearchState =
+    | { key: string; status: 'success'; results: SearchResults }
+    | { key: string; status: 'error' }
+    | null;
+
+type WorkspaceItems<T> = { workspaceKey: string; items: T[] };
+
+function menuPosition(range: Range): MenuPosition {
+    const rect = range.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const viewportRight = viewportLeft + viewportWidth;
+    const viewportBottom = viewportTop + viewportHeight;
+    const spaceBelow = viewportBottom - rect.bottom;
+    const spaceAbove = rect.top - viewportTop;
+    const above = spaceBelow < MENU_MAX_HEIGHT && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(0, (above ? spaceAbove : spaceBelow) - 8);
+    const left = Math.max(
+        viewportLeft + 8,
+        Math.min(rect.left, viewportRight - MENU_WIDTH - 8),
+    );
+    return {
+        left,
+        top: above ? undefined : rect.bottom + 6,
+        bottom: above ? window.innerHeight - rect.top + 6 : undefined,
+        maxHeight: Math.min(MENU_MAX_HEIGHT, availableHeight),
+        above,
+    };
+}
 
 type Props = {
     id?: string;
@@ -213,11 +295,14 @@ type Props = {
     excludeUserId?: number;
     ariaInvalid?: boolean;
     ariaDescribedby?: string;
+    ariaLabel?: string;
     autoFocus?: boolean;
     /** Slash commands offered from the Stage-A `/` menu; when omitted, `/` stays literal text. */
     commands?: readonly SlashCommandDef[];
     /** Invoked when a `run-action` slash command is chosen, with the command's `actionId`. */
     onRunAction?: (actionId: string) => void;
+    /** Request context inherited from the host overlay, including its workspace header and abort signal. */
+    requestInit?: RequestInit;
 };
 
 /**
@@ -243,9 +328,11 @@ export default function MentionEditor({
     excludeUserId,
     ariaInvalid,
     ariaDescribedby,
+    ariaLabel,
     autoFocus,
     commands,
     onRunAction,
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityNotesEditor');
     const editorRef = useRef<HTMLDivElement>(null);
@@ -254,37 +341,55 @@ export default function MentionEditor({
     const composingRef = useRef(false);
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
-    const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    const [records, setRecords] = useState<Suggestion[]>([]);
-    const [results, setResults] = useState<SearchResults | null>(null);
+    const activeWorkspaceKey = requestWorkspaceKey(requestInit);
+    const [memberState, setMemberState] = useState<WorkspaceItems<WorkspaceMember> | null>(null);
+    const [recordState, setRecordState] = useState<WorkspaceItems<Suggestion> | null>(null);
+    const [remoteSearch, setRemoteSearch] = useState<RemoteSearchState>(null);
+    const [searchAttempt, setSearchAttempt] = useState(0);
     const [query, setQuery] = useState<ActiveQuery | null>(null);
     const [pickerScope, setPickerScope] = useState<NoteReferenceType[] | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
 
     const hasCommands = (commands?.length ?? 0) > 0;
+    const members = memberState?.workspaceKey === activeWorkspaceKey ? memberState.items : EMPTY_MEMBERS;
+    const records = recordState?.workspaceKey === activeWorkspaceKey ? recordState.items : EMPTY_SUGGESTIONS;
 
     useEffect(() => {
+        const workspaceKey = activeWorkspaceKey;
         let cancelled = false;
-        loadMembers().then((list) => {
-            if (!cancelled) setMembers(list);
+        loadMembers(requestInit).then((items) => {
+            if (
+                !cancelled &&
+                !requestInit?.signal?.aborted &&
+                requestWorkspaceKey(requestInit) === workspaceKey
+            ) {
+                setMemberState({ workspaceKey, items });
+            }
         });
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [activeWorkspaceKey, requestInit]);
 
     const needsRecords =
         query?.trigger === '#' || (pickerScope?.some((type) => type === 'company' || type === 'deal') ?? false);
     useEffect(() => {
         if (!needsRecords) return;
+        const workspaceKey = activeWorkspaceKey;
         let cancelled = false;
-        loadRecords().then((list) => {
-            if (!cancelled) setRecords(list);
+        loadRecords(requestInit).then((items) => {
+            if (
+                !cancelled &&
+                !requestInit?.signal?.aborted &&
+                requestWorkspaceKey(requestInit) === workspaceKey
+            ) {
+                setRecordState({ workspaceKey, items });
+            }
         });
         return () => {
             cancelled = true;
         };
-    }, [needsRecords]);
+    }, [activeWorkspaceKey, needsRecords, requestInit]);
 
     useEffect(() => {
         const el = editorRef.current;
@@ -303,21 +408,52 @@ export default function MentionEditor({
     const stageB = query?.trigger === '/' && pickerScope !== null;
 
     const queryText = query?.text ?? '';
+    const searchTerm = queryText.trim();
+    const queryWorkspaceMatches = query === null || query.workspaceKey === activeWorkspaceKey;
+    const searchScopeKey = query?.trigger === '/'
+        ? pickerScope?.join(',') ?? ''
+        : query?.trigger ?? '';
+    const remoteQueryKey = !stageA && query && queryWorkspaceMatches && searchTerm.length > 0
+        ? [query.workspaceKey, searchScopeKey, searchTerm].join('\u0000')
+        : null;
+    const remoteRequestKey = remoteQueryKey === null
+        ? null
+        : `${remoteQueryKey}\u0000${searchAttempt}`;
+    const queryWorkspaceKey = query?.workspaceKey ?? null;
+
     useEffect(() => {
-        if (stageA || queryText.length < 1) return;
-        let cancelled = false;
+        if (remoteRequestKey === null || queryWorkspaceKey === null) return;
+        const controller = new AbortController();
+        const upstreamSignal = requestInit?.signal;
+        const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+        if (upstreamSignal?.aborted) {
+            abortFromUpstream();
+            return;
+        }
+        upstreamSignal?.addEventListener('abort', abortFromUpstream, { once: true });
+        const workspaceKey = queryWorkspaceKey;
         const handle = window.setTimeout(() => {
-            search(queryText)
+            search(searchTerm, { ...requestInit, signal: controller.signal })
                 .then((res) => {
-                    if (!cancelled) setResults(res);
+                    if (controller.signal.aborted || requestWorkspaceKey(requestInit) !== workspaceKey) return;
+                    setRemoteSearch({ key: remoteRequestKey, status: 'success', results: res });
                 })
-                .catch(() => {});
+                .catch(() => {
+                    if (controller.signal.aborted || requestWorkspaceKey(requestInit) !== workspaceKey) return;
+                    setRemoteSearch({ key: remoteRequestKey, status: 'error' });
+                });
         }, SEARCH_DEBOUNCE_MS);
         return () => {
-            cancelled = true;
             window.clearTimeout(handle);
+            upstreamSignal?.removeEventListener('abort', abortFromUpstream);
+            controller.abort();
         };
-    }, [queryText, stageA]);
+    }, [queryWorkspaceKey, remoteRequestKey, requestInit, searchTerm]);
+
+    const remoteResults = remoteSearch?.key === remoteRequestKey && remoteSearch.status === 'success'
+        ? remoteSearch.results
+        : null;
+    const remoteSearchFailed = remoteSearch?.key === remoteRequestKey && remoteSearch.status === 'error';
 
     const commandMatches = useMemo(() => {
         if (!stageA || !query || !commands) return [];
@@ -341,8 +477,8 @@ export default function MentionEditor({
         if (needle.length === 0) {
             return localPool.filter((suggestion) => allowed.includes(suggestion.type)).slice(0, MAX_SUGGESTIONS);
         }
-        if (results) {
-            return searchSuggestions(results, excludeUserId)
+        if (remoteResults) {
+            return searchSuggestions(remoteResults, excludeUserId)
                 .filter((suggestion) => allowed.includes(suggestion.type))
                 .slice(0, MAX_SUGGESTIONS);
         }
@@ -353,13 +489,20 @@ export default function MentionEditor({
                     (suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle)),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, pickerScope, members, records, results, excludeUserId]);
+    }, [query, pickerScope, members, records, remoteResults, excludeUserId]);
 
     const menuOpen =
-        query !== null && (stageA ? commandMatches.length > 0 : stageB ? true : suggestions.length > 0);
+        query !== null && queryWorkspaceMatches && (stageA ? commandMatches.length > 0 : stageB ? true : suggestions.length > 0);
     const optionCount = stageA ? commandMatches.length : suggestions.length;
     const boundedIndex = optionCount > 0 ? Math.min(activeIndex, optionCount - 1) : 0;
-    const activeOptionId = menuOpen && optionCount > 0 ? `${listboxId}-opt-${boundedIndex}` : undefined;
+    const stateOptionId = `${listboxId}-state`;
+    const activeOptionId = menuOpen
+        ? optionCount > 0
+            ? `${listboxId}-opt-${boundedIndex}`
+            : stageB && remoteSearchFailed
+                ? stateOptionId
+                : undefined
+        : undefined;
 
     const emit = useCallback(() => {
         const el = editorRef.current;
@@ -374,6 +517,40 @@ export default function MentionEditor({
         setPickerScope(null);
         setActiveIndex(0);
     }, []);
+
+    const repositionMenu = useCallback(() => {
+        const range = savedRange.current;
+        const editor = editorRef.current;
+        if (!range || !editor?.contains(range.startContainer)) return;
+        const position = menuPosition(range);
+        setQuery((current) => {
+            if (!current) return current;
+            if (
+                current.left === position.left &&
+                current.top === position.top &&
+                current.bottom === position.bottom &&
+                current.maxHeight === position.maxHeight &&
+                current.above === position.above
+            ) {
+                return current;
+            }
+            return { ...current, ...position };
+        });
+    }, []);
+
+    const menuVisible = query !== null;
+    useEffect(() => {
+        if (!menuVisible) return;
+        const viewport = window.visualViewport;
+        window.addEventListener('resize', repositionMenu);
+        viewport?.addEventListener('resize', repositionMenu);
+        viewport?.addEventListener('scroll', repositionMenu);
+        return () => {
+            window.removeEventListener('resize', repositionMenu);
+            viewport?.removeEventListener('resize', repositionMenu);
+            viewport?.removeEventListener('scroll', repositionMenu);
+        };
+    }, [menuVisible, repositionMenu]);
 
     const detectQuery = useCallback(() => {
         const el = editorRef.current;
@@ -400,18 +577,12 @@ export default function MentionEditor({
                 }
                 const preceding = index === 0 ? ' ' : textBefore[index - 1];
                 if (/\s/.test(preceding) || (index === 0 && !(node.previousSibling instanceof Text))) {
-                    const rect = range.getBoundingClientRect();
-                    const spaceBelow = window.innerHeight - rect.bottom;
-                    const above = spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow;
-                    const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
                     savedRange.current = range.cloneRange();
                     setQuery({
                         text: handle,
                         trigger: char,
-                        left,
-                        top: above ? undefined : rect.bottom + 6,
-                        bottom: above ? window.innerHeight - rect.top + 6 : undefined,
-                        above,
+                        workspaceKey: requestWorkspaceKey(requestInit),
+                        ...menuPosition(range),
                     });
                     if (char !== '/') setPickerScope(null);
                     setActiveIndex(0);
@@ -420,12 +591,13 @@ export default function MentionEditor({
                 closeMenu();
                 return;
             }
-            if (!HANDLE.test(char)) break;
+            const isStageBSpace = pickerScope !== null && (char === ' ' || char === '　');
+            if (!HANDLE.test(char) && !isStageBSpace) break;
             handle = char + handle;
             index -= 1;
         }
         closeMenu();
-    }, [closeMenu, hasCommands]);
+    }, [closeMenu, hasCommands, pickerScope, requestInit]);
 
     const handleInput = useCallback(() => {
         emit();
@@ -537,7 +709,7 @@ export default function MentionEditor({
                 closeMenu();
                 return;
             }
-            setResults(null);
+            setSearchAttempt((attempt) => attempt + 1);
             setActiveIndex(0);
             setQuery((current) => (current ? { ...current, text: '' } : current));
             setPickerScope(def.entityTypes ? [...def.entityTypes] : []);
@@ -560,6 +732,10 @@ export default function MentionEditor({
         [beginReferencePicker, rewriteSlashSpan, closeMenu, onRunAction],
     );
 
+    const retrySearch = useCallback(() => {
+        setSearchAttempt((attempt) => attempt + 1);
+    }, []);
+
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
             if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -580,12 +756,17 @@ export default function MentionEditor({
                     if (def) selectCommand(def);
                     return;
                 }
+                if (event.key === 'Enter' && stageB && optionCount === 0) {
+                    event.preventDefault();
+                    if (remoteSearchFailed) retrySearch();
+                    return;
+                }
                 if (event.key === 'Enter' && !stageA && suggestions[boundedIndex]) {
                     event.preventDefault();
                     insertReference(suggestions[boundedIndex]);
                     return;
                 }
-                if (event.key === ' ' && !stageA && query !== null && query.text.length >= 1) {
+                if (event.key === ' ' && query?.trigger !== '/' && query.text.length >= 1) {
                     const suggestion = suggestions[boundedIndex];
                     if (suggestion) {
                         event.preventDefault();
@@ -606,27 +787,33 @@ export default function MentionEditor({
                 emit();
             }
         },
-        [menuOpen, optionCount, stageA, commandMatches, suggestions, boundedIndex, selectCommand, insertReference, closeMenu, emit, query],
+        [menuOpen, optionCount, stageA, stageB, commandMatches, remoteSearchFailed, suggestions, boundedIndex, selectCommand, retrySearch, insertReference, closeMenu, emit, query],
     );
 
     const showStageBState = stageB && optionCount === 0;
-    const stageBSearchPending = stageB && queryText.length >= 1 && results === null;
-    const stageBStateLabel = stageBSearchPending
-        ? t('slashPickerSearching')
-        : queryText.length < 1
-          ? t('slashPickerPrompt')
-          : t('slashPickerNoResults');
+    const stageBSearchPending = stageB && searchTerm.length > 0 && remoteResults === null && !remoteSearchFailed;
+    const stageBStateLabel = remoteSearchFailed
+        ? t('slashPickerSearchError')
+        : stageBSearchPending
+          ? t('slashPickerSearching')
+          : searchTerm.length < 1
+            ? t('slashPickerPrompt')
+            : optionCount > 0
+              ? t('slashPickerResults', { count: optionCount })
+              : t('slashPickerNoResults');
 
     return (
         <>
             <div
                 id={id}
                 ref={editorRef}
-                role="textbox"
-                aria-multiline="true"
+                role="combobox"
                 aria-autocomplete="list"
+                aria-haspopup="listbox"
+                aria-expanded={menuOpen}
                 aria-controls={menuOpen ? listboxId : undefined}
                 aria-activedescendant={activeOptionId}
+                aria-label={ariaLabel ?? placeholder ?? t('composerAria')}
                 aria-invalid={ariaInvalid}
                 aria-describedby={ariaDescribedby}
                 contentEditable
@@ -650,6 +837,9 @@ export default function MentionEditor({
                     className,
                 )}
             />
+            <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                {stageB ? stageBStateLabel : ''}
+            </span>
             {typeof document !== 'undefined' &&
                 createPortal(
                     <AnimatePresence>
@@ -658,6 +848,8 @@ export default function MentionEditor({
                         key="mention-menu"
                         id={listboxId}
                         role="listbox"
+                        aria-label={stageA ? t('slashCommandMenuAria') : t('slashReferencePickerAria')}
+                        aria-busy={stageBSearchPending || undefined}
                         data-slot="editor-suggestion"
                         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
                         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
@@ -667,6 +859,7 @@ export default function MentionEditor({
                             left: query.left,
                             top: query.top,
                             bottom: query.bottom,
+                            maxHeight: query.maxHeight,
                             transformOrigin: query.above ? 'bottom left' : 'top left',
                         }}
                         className="pointer-events-auto fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
@@ -676,62 +869,96 @@ export default function MentionEditor({
                                   const optionId = `${listboxId}-opt-${index}`;
                                   const CommandIcon = def.icon;
                                   return (
-                                      <li
-                                          key={def.id}
-                                          id={optionId}
-                                          role="option"
-                                          aria-selected={index === boundedIndex}
-                                      >
+                                      <li key={def.id} role="presentation">
                                           <button
+                                              id={optionId}
                                               type="button"
+                                              role="option"
+                                              aria-selected={index === boundedIndex}
                                               tabIndex={-1}
-                                              onMouseDown={(event) => {
-                                                  event.preventDefault();
-                                                  selectCommand(def);
+                                              onPointerDown={(event) => {
+                                                  if (event.pointerType === 'mouse' && event.button === 0) {
+                                                      event.preventDefault();
+                                                  }
                                               }}
-                                              onMouseEnter={() => setActiveIndex(index)}
+                                              onClick={() => selectCommand(def)}
+                                              onPointerEnter={() => setActiveIndex(index)}
                                               className={cn(
-                                                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
-                                                  index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
+                                                  'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
+                                                  index === boundedIndex
+                                                      ? 'bg-brand-light/50 text-brand-dark'
+                                                      : 'text-foreground',
                                               )}
                                           >
                                               <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                                                   <CommandIcon className="size-3" />
                                               </span>
                                               <span className="min-w-0 flex-1 truncate font-medium">{t(def.labelKey)}</span>
-                                              <span className="shrink-0 truncate text-xs text-muted-foreground">{t(def.subtitleKey)}</span>
+                                              <span className="shrink-0 truncate text-xs text-muted-foreground">
+                                                  {t(def.subtitleKey)}
+                                              </span>
                                           </button>
                                       </li>
                                   );
                               })
                             : showStageBState
                               ? (
-                                  <li role="presentation" className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-                                      {stageBSearchPending && <Loader2Icon className="size-3.5 animate-spin" />}
-                                      <span className="truncate">{stageBStateLabel}</span>
+                                  <li role="presentation">
+                                      {remoteSearchFailed ? (
+                                          <button
+                                              id={stateOptionId}
+                                              type="button"
+                                              role="option"
+                                              aria-selected="true"
+                                              tabIndex={-1}
+                                              onPointerDown={(event) => {
+                                                  if (event.pointerType === 'mouse' && event.button === 0) {
+                                                      event.preventDefault();
+                                                  }
+                                              }}
+                                              onClick={retrySearch}
+                                              className="flex w-full cursor-pointer items-center gap-2 rounded-sm bg-brand-light/50 px-2 py-2 text-left text-sm text-brand-dark"
+                                          >
+                                              <span className="min-w-0 flex-1 truncate">{stageBStateLabel}</span>
+                                              <span className="shrink-0 font-medium text-foreground">
+                                                  {t('slashPickerRetry')}
+                                              </span>
+                                          </button>
+                                      ) : (
+                                          <div className="flex items-center gap-2 rounded-sm px-2 py-2 text-sm text-muted-foreground">
+                                              {stageBSearchPending && (
+                                                  <Loader2Icon
+                                                      className={cn('size-3.5 shrink-0', !reduceMotion && 'animate-spin')}
+                                                  />
+                                              )}
+                                              <span className="min-w-0 flex-1 truncate">{stageBStateLabel}</span>
+                                          </div>
+                                      )}
                                   </li>
                               )
                               : suggestions.map((suggestion, index) => {
                                     const optionId = `${listboxId}-opt-${index}`;
                                     const RecordIcon = suggestion.type === 'user' ? null : RECORD_ICON[suggestion.type];
                                     return (
-                                        <li
-                                            key={`${suggestion.type}-${suggestion.id}`}
-                                            id={optionId}
-                                            role="option"
-                                            aria-selected={index === boundedIndex}
-                                        >
+                                        <li key={`${suggestion.type}-${suggestion.id}`} role="presentation">
                                             <button
+                                                id={optionId}
                                                 type="button"
+                                                role="option"
+                                                aria-selected={index === boundedIndex}
                                                 tabIndex={-1}
-                                                onMouseDown={(event) => {
-                                                    event.preventDefault();
-                                                    insertReference(suggestion);
+                                                onPointerDown={(event) => {
+                                                    if (event.pointerType === 'mouse' && event.button === 0) {
+                                                        event.preventDefault();
+                                                    }
                                                 }}
-                                                onMouseEnter={() => setActiveIndex(index)}
+                                                onClick={() => insertReference(suggestion)}
+                                                onPointerEnter={() => setActiveIndex(index)}
                                                 className={cn(
-                                                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
-                                                    index === boundedIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
+                                                    'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
+                                                    index === boundedIndex
+                                                        ? 'bg-brand-light/50 text-brand-dark'
+                                                        : 'text-foreground',
                                                 )}
                                             >
                                                 {RecordIcon ? (
@@ -750,7 +977,9 @@ export default function MentionEditor({
                                                     </Avatar>
                                                 )}
                                                 <span className="min-w-0 flex-1 truncate font-medium">{suggestion.label}</span>
-                                                <span className="shrink-0 truncate text-xs text-muted-foreground">{suggestion.sublabel}</span>
+                                                <span className="shrink-0 truncate text-xs text-muted-foreground">
+                                                    {suggestion.sublabel}
+                                                </span>
                                             </button>
                                         </li>
                                     );
