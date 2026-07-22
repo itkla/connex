@@ -22,7 +22,7 @@ export function FilterChip({ label, reduce, onRemove }: { label: string; reduce:
             <button
                 type="button"
                 onClick={onRemove}
-                className="grid size-4 place-items-center rounded-full text-muted-foreground outline-none transition hover:bg-background hover:text-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-brand/40"
+                className="grid size-4 place-items-center rounded-full text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
                 aria-label="Remove filter"
             >
                 <XMarkIcon className="size-3" />
@@ -60,7 +60,7 @@ export default function FilterBar({
                     <button
                         type="button"
                         onClick={onClearAll}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
                     >
                         <XMarkIcon className="size-3.5" />
                         {clearAllLabel}

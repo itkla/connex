@@ -9,6 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -16,11 +19,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
+import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
+import ooo.klae.connex.backend.services.NotificationQuietHoursEvaluator;
 
 /**
  * Verifies delivery routing and realtime classification: in-app always delivers;
@@ -38,6 +45,8 @@ class NotificationDeliveryTest {
     @Mock private PreferenceMapper preferenceMapper;
     @Mock private NotificationPushPublisher pushPublisher;
     @Mock private NotificationStateVersionService stateVersionService;
+    @Mock private NotificationQuietHoursControlAccess quietHoursControlAccess;
+    @Mock private NotificationQuietHoursBypassPolicy bypassPolicy;
 
     private NotificationDelivery delivery;
 
@@ -45,10 +54,24 @@ class NotificationDeliveryTest {
     void setUp() {
         lenient().when(inApp.channel()).thenReturn("in_app");
         lenient().when(email.channel()).thenReturn("email");
-        lenient().when(inApp.dispatch(any())).thenReturn(1);
+        lenient().doAnswer(invocation -> {
+            Notification notification = invocation.getArgument(0);
+            if (notification.getId() == 0) {
+                notification.setId(77);
+            }
+            return 1;
+        }).when(inApp).dispatch(any());
+        lenient().when(notificationMapper.findById(eq(9), anyInt()))
+            .thenAnswer(invocation -> existingRow(invocation.getArgument(1), "info", null));
+        lenient().when(notificationMapper.claimEmailDelivery(eq(1), eq(9), any()))
+            .thenReturn(1);
+        lenient().when(quietHoursControlAccess.evaluateForUser(
+                9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
         delivery = new NotificationDelivery(
                 List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
-                stateVersionService);
+                stateVersionService, quietHoursControlAccess, bypassPolicy,
+                Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC));
     }
 
     private Notification notification() {
@@ -79,7 +102,45 @@ class NotificationDeliveryTest {
         delivery.deliver(n);
 
         verify(inApp).dispatch(n);
+        verify(notificationMapper).claimEmailDelivery(1, 9, n.getDedupeKey());
         verify(email).dispatch(n);
+    }
+
+    @Test
+    void email_notSent_whenConcurrentPassAlreadyClaimedDelivery() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        when(notificationMapper.claimEmailDelivery(1, 9, n.getDedupeKey())).thenReturn(0);
+
+        delivery.deliver(n);
+
+        verify(inApp).dispatch(n);
+        verify(notificationMapper).claimEmailDelivery(1, 9, n.getDedupeKey());
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void emailDispatchWaitsForTheNotificationTransactionToCommit() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        try {
+            delivery.deliver(n);
+
+            verify(email, never()).dispatch(any());
+            for (TransactionSynchronization synchronization
+                    : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(email).dispatch(n);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 
     @Test
@@ -114,6 +175,7 @@ class NotificationDeliveryTest {
 
         delivery.deliver(n);
 
+        verify(notificationMapper, never()).claimEmailDelivery(anyInt(), anyInt(), any());
         verify(email).dispatch(n);
     }
 
@@ -249,5 +311,65 @@ class NotificationDeliveryTest {
         verify(pushPublisher, never()).created(anyInt(), any(), any());
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
         verify(stateVersionService).markChanged(9);
+        verify(preferenceMapper, never()).isEnabledOptIn(anyInt(), any(), any());
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void quietHoursKeepInAppAndInvalidationButSuppressDetailAndEmail() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(77);
+            return 1;
+        }).when(inApp).dispatch(any());
+        when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(true, null));
+
+        delivery.deliver(n);
+
+        verify(inApp).dispatch(n);
+        verify(stateVersionService).markChanged(9);
+        verify(pushPublisher, never()).created(anyInt(), any(), any());
+        verify(pushPublisher, never()).updated(anyInt(), any(), any());
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void criticalReminderDoesNotBypassQuietHours() {
+        Notification n = notification();
+        n.setType("task.due");
+        n.setSeverity("critical");
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(77);
+            return 1;
+        }).when(inApp).dispatch(any());
+        when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "critical", null));
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(true, null));
+
+        delivery.deliver(n);
+
+        verify(bypassPolicy).bypasses(n);
+        verify(stateVersionService).markChanged(9);
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void quietHoursLookupFailureDeliversNormally() {
+        Notification n = notification();
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
+        when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
+        when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
+            .thenThrow(new IllegalStateException("control plane unavailable"));
+
+        delivery.deliver(n);
+
+        verify(stateVersionService).markChangedWithDetailedPush(9);
+        verify(stateVersionService, never()).markChanged(9);
+        verify(pushPublisher).created(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
+        verify(email).dispatch(n);
     }
 }

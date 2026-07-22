@@ -15,8 +15,6 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
-import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
@@ -107,10 +105,10 @@ public class DealRiskRationaleService {
             aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
                     contentHash, new DealRiskRationaleContent(narrative, actions), parsed.demaskWarnings(), generatedAt);
             return DealRationaleDto.of(dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
-        } catch (MaskingLeakException | AiProviderException exception) {
-            return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
             return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
+        } catch (RuntimeException exception) {
+            return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
         }
     }
 

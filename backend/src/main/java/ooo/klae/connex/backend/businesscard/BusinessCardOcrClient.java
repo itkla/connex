@@ -10,9 +10,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
@@ -37,6 +41,7 @@ public class BusinessCardOcrClient {
     private static final int MAX_LINE_CHARACTERS = 512;
     private static final int BUFFER_BYTES = 8_192;
     private static final int MIN_TOKEN_CHARACTERS = 32;
+    private static final Duration LOCAL_FIRST_RETRY_INTERVAL = Duration.ofMillis(250);
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -45,7 +50,7 @@ public class BusinessCardOcrClient {
     private final URI healthEndpoint;
     private final boolean readinessEnabled;
     private final Semaphore invocation = new Semaphore(1);
-    private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
+    private final AtomicReference<CompletableFuture<Boolean>> readinessProbe = new AtomicReference<>();
     private final AtomicLong readinessGeneration = new AtomicLong();
 
     private volatile long readinessExpiresAtNanos;
@@ -115,6 +120,50 @@ public class BusinessCardOcrClient {
     }
 
     /**
+     * Resolves an expired or unknown local readiness state before an external fallback decision.
+     * The wait is bounded by the configured local-first interval.
+     *
+     * @return {@code true} when the local scanner is confirmed ready
+     */
+    public boolean isReadyForScan() {
+        if (!isConfigured()) {
+            return false;
+        }
+        if (cachedReady && System.nanoTime() < readinessExpiresAtNanos) {
+            return true;
+        }
+        long deadlineNanos = System.nanoTime() + properties.getLocalFirstWait().toNanos();
+        while (!cachedReady) {
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                return cachedReady;
+            }
+            CompletableFuture<Boolean> probe = refreshReadiness();
+            if (probe == null) {
+                return cachedReady;
+            }
+            try {
+                if (probe.get(remainingNanos, TimeUnit.NANOSECONDS) || cachedReady) {
+                    return true;
+                }
+                remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos > 0) {
+                    TimeUnit.NANOSECONDS.sleep(Math.min(
+                            remainingNanos, LOCAL_FIRST_RETRY_INTERVAL.toNanos()));
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return cachedReady;
+            } catch (ExecutionException exception) {
+                return cachedReady;
+            } catch (TimeoutException exception) {
+                return cachedReady;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Runs one bounded OCR invocation and rejects excess concurrent work.
      *
      * @param image validated card image
@@ -181,24 +230,32 @@ public class BusinessCardOcrClient {
         }
     }
 
-    private void refreshReadiness() {
-        if (!readinessEnabled || !isConfigured()
-                || !readinessRefreshInFlight.compareAndSet(false, true)) {
-            return;
+    private CompletableFuture<Boolean> refreshReadiness() {
+        if (!readinessEnabled || !isConfigured()) {
+            return null;
+        }
+        CompletableFuture<Boolean> created = new CompletableFuture<>();
+        CompletableFuture<Boolean> current = readinessProbe.compareAndExchange(null, created);
+        if (current != null) {
+            return current;
         }
         long generation = readinessGeneration.get();
         Thread.startVirtualThread(() -> {
+            boolean accepted = false;
             try {
                 boolean ready = checkHealth();
                 long expiresAt = System.nanoTime() + properties.getReadinessCache().toNanos();
                 if (readinessGeneration.get() == generation) {
                     cachedReady = ready;
                     readinessExpiresAtNanos = expiresAt;
+                    accepted = ready;
                 }
             } finally {
-                readinessRefreshInFlight.set(false);
+                readinessProbe.compareAndSet(created, null);
+                created.complete(accepted);
             }
         });
+        return created;
     }
 
     private void markUnavailable() {

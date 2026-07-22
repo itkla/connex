@@ -10,6 +10,8 @@ import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 /**
@@ -31,10 +33,11 @@ public interface CompanyMapper {
     List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("limit") int limit, @Param("offset") int offset);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit, @Param("offset") int offset);
     long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope);
     CompanyEngagementCountsDto getCompanyEngagementCounts(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId);
@@ -62,12 +65,18 @@ public interface CompanyMapper {
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("limit") int limit);
-    /** Ids only for the same filter predicates as {@code getCompaniesPage}; backs "select all matching". */
+    /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("limit") int limit, @Param("offset") int offset);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit, @Param("offset") int offset);
+    /** CSV export using the browser filters and member scope, mirroring the visible list. */
+    List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope);
     List<String> distinctIndustries(int workspaceId);
     boolean hasCompanyWithoutIndustry(int workspaceId);
+    List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);
@@ -84,12 +93,22 @@ public interface CompanyMapper {
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);
     int update(Company company);
+    int updateOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("ownerId") Integer ownerId);
     int updateLogoUrlIfCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("currentLogoUrl") String currentLogoUrl,
         @Param("logoUrl") String logoUrl);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Clears company ownership held by one member within one workspace. */
+    void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /** Clears company ownership held by a user across every workspace. */
+    void clearOwnershipAnywhere(@Param("userId") int userId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);

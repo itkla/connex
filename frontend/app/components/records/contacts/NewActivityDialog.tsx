@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { TagIcon, CalendarIcon, BriefcaseIcon, PencilSquareIcon, Bars3BottomLeftIcon } from '@heroicons/react/24/outline';
@@ -263,6 +264,7 @@ export default function NewActivityDialog({
                                 value={notes}
                                 onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
+                                commands={ENTITY_COMMANDS}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>

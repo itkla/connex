@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ConsentMapper">
+
+  <sql id="consentColumns">
+    id, workspace_id, person_id, channel, purpose, status, source,
+    evidence_ref, captured_at, updated_at
+  </sql>
+
+  <select id="getForPerson" resultType="ContactChannelConsent">
+    SELECT <include refid="consentColumns"/> FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
+    ORDER BY channel, purpose
+  </select>
+
+  <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO contact_channel_consent
+      (workspace_id, person_id, channel, purpose, status, source, evidence_ref, captured_at)
+    VALUES
+      (#{workspaceId}, #{personId}, #{channel}, #{purpose}, #{status}, #{source},
+       #{evidenceRef}, #{capturedAt})
+    ON DUPLICATE KEY UPDATE
+      id = LAST_INSERT_ID(id), status = VALUES(status), source = VALUES(source),
+      evidence_ref = VALUES(evidence_ref), captured_at = VALUES(captured_at),
+      updated_at = CURRENT_TIMESTAMP
+  </insert>
+
+  <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO contact_channel_consent_event
+      (workspace_id, consent_id, person_id, channel, purpose, status, source,
+       evidence_ref, created_by_id)
+    VALUES
+      (#{workspaceId}, #{consentId}, #{personId}, #{channel}, #{purpose}, #{status},
+       #{source}, #{evidenceRef}, #{createdById})
+  </insert>
+
+  <update id="clearEventCreatorsAnywhere">
+    UPDATE contact_channel_consent_event SET created_by_id = NULL WHERE created_by_id = #{userId}
+  </update>
+
+</mapper>

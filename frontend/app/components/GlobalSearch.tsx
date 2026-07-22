@@ -11,7 +11,9 @@ import { Loader2Icon } from 'lucide-react';
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
+import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
+import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
@@ -21,8 +23,6 @@ const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 250;
 
 const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate', 'workspace'];
-
-const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
 
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
@@ -36,22 +36,20 @@ const PILL_INPUT =
 type Mode = 'inline' | 'palette';
 type ScopedResults = { query: string; data: SearchResults };
 
-function formatShortcut(chord: string): string {
-    return chord
-        .split('+')
-        .map((part) => SHORTCUT_GLYPHS[part] ?? part.toUpperCase())
-        .join('');
+function actionLabel(action: AppAction, t: (key: string) => string): string {
+    return action.label ?? t(action.labelKey);
 }
 
 function actionSearchText(action: AppAction, t: (key: string) => string): string {
-    const parts = [t(action.labelKey)];
+    const parts = [actionLabel(action, t)];
+    if (action.descriptionKey) parts.push(t(action.descriptionKey));
     if (action.keywords) parts.push(...action.keywords);
     if (action.keywordsKey) parts.push(t(action.keywordsKey));
     return parts.join(' ').toLowerCase();
 }
 
 function rankAction(action: AppAction, lowerQuery: string, t: (key: string) => string): number {
-    return t(action.labelKey).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
+    return actionLabel(action, t).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
 }
 
 function subscribeToViewport(onChange: () => void): () => void {
@@ -96,6 +94,7 @@ export default function GlobalSearch() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
+    const shortcutPlatform = useShortcutPlatform();
     const currentViewport = useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => '0:0:0:0');
     const [viewportOffsetLeft, viewportOffsetTop, currentViewportWidth, currentViewportHeight] = currentViewport.split(':').map(Number);
     const reduceMotion = useReducedMotion() ?? false;
@@ -209,6 +208,19 @@ export default function GlobalSearch() {
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
     }, [closePalette]);
+
+    useEffect(() => {
+        const onOpenRequest = () => {
+            if (modeRef.current === 'palette') return;
+            const active = document.activeElement;
+            lastFocusedRef.current = active instanceof HTMLElement ? active : null;
+            lastFocusedWasInlineRef.current =
+                active instanceof HTMLElement && containerRef.current?.contains(active) === true;
+            setMode('palette');
+        };
+        window.addEventListener('connex:open-search', onOpenRequest);
+        return () => window.removeEventListener('connex:open-search', onOpenRequest);
+    }, []);
 
     useEffect(() => {
         if (mode !== 'palette') return;
@@ -342,8 +354,13 @@ export default function GlobalSearch() {
                             aria-autocomplete="list"
                             autoComplete="off"
                         />
-                        <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                            ⌘K
+                        <kbd
+                            className={cn(
+                                'pointer-events-none absolute right-2 top-1/2 w-14 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] font-medium text-muted-foreground',
+                                !shortcutPlatform && 'invisible',
+                            )}
+                        >
+                            {formatShortcut('mod+k', shortcutPlatform ?? 'other')}
                         </kbd>
                     </motion.form>
 
@@ -493,8 +510,24 @@ export default function GlobalSearch() {
                                                             ) : Icon ? (
                                                                 <Icon className="size-4 text-muted-foreground" />
                                                             ) : null}
-                                                            <span className="flex-1 truncate">{tActions(action.labelKey)}</span>
-                                                            {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
+                                                            <span className="min-w-0 flex-1">
+                                                                <span className="block truncate">{action.label ?? tActions(action.labelKey)}</span>
+                                                                {action.descriptionKey ? (
+                                                                    <span className="block truncate text-xs text-muted-foreground">
+                                                                        {tActions(action.descriptionKey)}
+                                                                    </span>
+                                                                ) : null}
+                                                            </span>
+                                                            {action.shortcut && shortcutPlatform ? (
+                                                                <CommandShortcut
+                                                                    className={cn(
+                                                                        'shrink-0 whitespace-nowrap',
+                                                                        shortcutPlatform === 'other' && 'tracking-normal',
+                                                                    )}
+                                                                >
+                                                                    {formatShortcut(action.shortcut, shortcutPlatform)}
+                                                                </CommandShortcut>
+                                                            ) : null}
                                                         </CommandItem>
                                                     );
                                                 })}

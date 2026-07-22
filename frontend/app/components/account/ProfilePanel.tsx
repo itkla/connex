@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import ChangeEmailDialog from "@/app/components/account/ChangeEmailDialog";
 
 type Props = {
     user: User;
@@ -264,6 +265,7 @@ type ProfileFormProps = {
     onSelectPhoto: (file: File | null) => void;
     onReset: () => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+    onChangeEmail: () => void;
 };
 
 function ProfileForm({
@@ -280,6 +282,7 @@ function ProfileForm({
     onSelectPhoto,
     onReset,
     onSubmit,
+    onChangeEmail,
 }: ProfileFormProps) {
     const t = useTranslations("AccountProfile");
     const { displayName, username, timezone, preferredLocale } = draft;
@@ -339,7 +342,18 @@ function ProfileForm({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="account-email">{t("emailLabel")}</Label>
+                        <div className="flex items-center justify-between gap-2">
+                            <Label htmlFor="account-email">{t("emailLabel")}</Label>
+                            <Button
+                                type="button"
+                                variant="link"
+                                size="sm"
+                                className="h-auto p-0"
+                                onClick={onChangeEmail}
+                            >
+                                {t("changeEmail")}
+                            </Button>
+                        </div>
                         <Input
                             id="account-email"
                             type="email"
@@ -422,6 +436,7 @@ export default function ProfilePanel({ user }: Props) {
     const previewUrlRef = useRef<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+    const [changeEmailOpen, setChangeEmailOpen] = useState(false);
     const confirmedUser = confirmation.value;
     const { displayName, username, timezone, preferredLocale } = draft;
 
@@ -603,9 +618,12 @@ export default function ProfilePanel({ user }: Props) {
                 }}
                 onReset={reset}
                 onSubmit={handleSubmit}
+                onChangeEmail={() => setChangeEmailOpen(true)}
             />
 
             <ProfileDetails user={user} />
+
+            <ChangeEmailDialog open={changeEmailOpen} onOpenChange={setChangeEmailOpen} />
         </div>
     );
 }

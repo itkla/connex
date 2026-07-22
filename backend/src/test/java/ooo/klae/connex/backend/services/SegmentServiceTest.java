@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,12 +16,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.SegmentCatalogDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
@@ -399,5 +404,327 @@ class SegmentServiceTest extends AbstractServiceTest {
             many[i] = field("name", "contains", "x" + i);
         }
         assertThrows(BadRequestException.class, () -> evaluate(def("all", many)));
+    }
+
+    @Test
+    void catalog_company_exposesFieldsPredicatesAndLimits() {
+        SegmentCatalogDto dto = segmentService.catalog("company");
+
+        assertEquals("company", dto.recordType());
+        assertEquals(List.of("industry", "name", "website", "phone", "owner", "tag", "created", "updated"),
+            dto.fields().stream().map(SegmentCatalogDto.CatalogField::field).toList());
+        SegmentCatalogDto.CatalogField industry = dto.fields().stream()
+            .filter(f -> f.field().equals("industry")).findFirst().orElseThrow();
+        assertEquals("string", industry.kind());
+        assertEquals("industries", industry.valueSource());
+        assertEquals(List.of("equals", "contains", "starts_with", "is_set"), industry.operators());
+        assertEquals(List.of("warm_intro_available", "open_deal", "cooling", "no_activity", "has_attachment",
+                "warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold", "warmth_rising", "going_cold"),
+            dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
+        SegmentCatalogDto.CatalogPredicate noActivity = dto.predicates().stream()
+            .filter(p -> p.key().equals("no_activity")).findFirst().orElseThrow();
+        assertTrue(noActivity.acceptsDays());
+        assertEquals(30, noActivity.defaultDays());
+        assertEquals(3650, noActivity.maxDays());
+        assertFalse(dto.predicates().stream().filter(p -> p.key().equals("open_deal"))
+            .findFirst().orElseThrow().acceptsDays());
+        assertNotNull(dto.limits());
+        assertEquals(32, dto.limits().maxConditions());
+        assertEquals(4, dto.limits().maxDepth());
+    }
+
+    @Test
+    void catalog_deal_hasStatusEnumOptionsAndExistencePredicates() {
+        SegmentCatalogDto dto = segmentService.catalog("deal");
+
+        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment",
+                "at_risk", "risk_high", "risk_close_overdue", "risk_closing_soon", "risk_stalled",
+                "risk_stakeholder_cold", "risk_no_stakeholders"),
+            dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
+        assertEquals(List.of("open", "won", "lost"), dto.enumOptions().get("status"));
+        SegmentCatalogDto.CatalogField stage = dto.fields().stream()
+            .filter(f -> f.field().equals("stage")).findFirst().orElseThrow();
+        assertEquals("id", stage.kind());
+        assertEquals("stages", stage.valueSource());
+        assertEquals(List.of("is", "in"), stage.operators());
+    }
+
+    @Test
+    void catalog_person_hasExistencePredicatesAndNoEnumOptions() {
+        SegmentCatalogDto dto = segmentService.catalog("person");
+
+        assertEquals(List.of("has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment",
+                "warmth_hot", "warmth_warm", "warmth_cool", "warmth_cold", "warmth_rising", "going_cold"),
+            dto.predicates().stream().map(SegmentCatalogDto.CatalogPredicate::key).toList());
+        assertTrue(dto.enumOptions().isEmpty());
+    }
+
+    @Test
+    void catalog_unsupportedRecordType_throws() {
+        assertThrows(BadRequestException.class, () -> segmentService.catalog("task"));
+    }
+
+    private Task taskFor(Person person, Deal deal, boolean completed, String dueDate) {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("task " + unique());
+        task.setCompleted(completed);
+        task.setStatus(completed ? "done" : "todo");
+        task.setPosition(0);
+        task.setDueDate(dueDate);
+        task.setAssignedTo(currentUser);
+        task.setPerson(person);
+        task.setDeal(deal);
+        taskMapper.insert(task);
+        return task;
+    }
+
+    private void meetingFor(Person person, String timestamp) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("meeting_" + unique());
+        activity.setPerson(person);
+        activity.setCreatedBy(currentUser);
+        activity.setTimestamp(timestamp);
+        activityMapper.insert(activity);
+    }
+
+    private void noteFor(Person person, String visibility) {
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("note_" + unique());
+        note.setVisibility(visibility);
+        note.setAuthor(currentUser);
+        note.setPerson(person);
+        noteMapper.insert(note);
+    }
+
+    @Test
+    void personPredicate_hasOpenTask_matchesOnlyIncompleteTasks() {
+        Person withTask = newPerson(newCompany());
+        taskFor(withTask, null, false, null);
+        Person doneOnly = newPerson(newCompany());
+        taskFor(doneOnly, null, true, null);
+
+        List<Integer> ids = segmentService.evaluate("person", def("all", predicate("has_open_task")));
+
+        assertTrue(ids.contains(withTask.getId()));
+        assertFalse(ids.contains(doneOnly.getId()));
+    }
+
+    @Test
+    void personPredicate_recentMeeting_respectsWindowAndType() {
+        Person recent = newPerson(newCompany());
+        meetingFor(recent, LocalDateTime.now().format(MYSQL));
+        Person old = newPerson(newCompany());
+        meetingFor(old, LocalDateTime.now().minusDays(400).format(MYSQL));
+        Person callOnly = newPerson(newCompany());
+        recentActivity(callOnly);
+
+        SegmentCondition within = predicate("recent_meeting");
+        within.setDays(30);
+        List<Integer> ids = segmentService.evaluate("person", def("all", within));
+
+        assertTrue(ids.contains(recent.getId()));
+        assertFalse(ids.contains(old.getId()));
+        assertFalse(ids.contains(callOnly.getId()));
+    }
+
+    @Test
+    void personPredicate_hasNote_excludesPrivateNotes() {
+        Person shared = newPerson(newCompany());
+        noteFor(shared, "workspace");
+        Person privateOnly = newPerson(newCompany());
+        noteFor(privateOnly, "private");
+
+        List<Integer> ids = segmentService.evaluate("person", def("all", predicate("has_note")));
+
+        assertTrue(ids.contains(shared.getId()));
+        assertFalse(ids.contains(privateOnly.getId()));
+    }
+
+    @Test
+    void dealPredicate_overdueTask_matchesPastDueIncompleteTasks() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal overdue = newDeal(pipeline, stage, newCompany());
+        taskFor(null, overdue, false, "2000-01-01");
+        Deal future = newDeal(pipeline, stage, newCompany());
+        taskFor(null, future, false, "2999-01-01");
+
+        List<Integer> ids = segmentService.evaluate("deal", def("all", predicate("overdue_task")));
+
+        assertTrue(ids.contains(overdue.getId()));
+        assertFalse(ids.contains(future.getId()));
+    }
+
+    @Test
+    void predicate_notApplicableToRecordType_throws() {
+        assertThrows(BadRequestException.class,
+            () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
+        assertThrows(BadRequestException.class,
+            () -> segmentService.evaluate("company", def("all", predicate("has_open_task"))));
+        assertThrows(BadRequestException.class,
+            () -> segmentService.evaluate("deal", def("all", predicate("warmth_hot"))));
+    }
+
+    @Test
+    void companyPredicate_warmthCold_matchesUntouchedCompany() {
+        Company cold = newCompany();
+
+        assertTrue(evaluate(def("all", predicate("warmth_cold"))).contains(cold.getId()));
+        assertFalse(evaluate(def("all", predicate("warmth_hot"))).contains(cold.getId()));
+    }
+
+    @Test
+    void personPredicate_warmthCold_matchesUntouchedContact() {
+        Person cold = newPerson(newCompany());
+
+        List<Integer> coldIds = segmentService.evaluate("person", def("all", predicate("warmth_cold")));
+        List<Integer> hotIds = segmentService.evaluate("person", def("all", predicate("warmth_hot")));
+
+        assertTrue(coldIds.contains(cold.getId()));
+        assertFalse(hotIds.contains(cold.getId()));
+    }
+
+    @Test
+    void goingCold_excludesAlreadyColdRecords() {
+        Company cold = newCompany();
+
+        SegmentCondition goingCold = predicate("going_cold");
+        goingCold.setDays(90);
+        assertFalse(evaluate(def("all", goingCold)).contains(cold.getId()));
+    }
+
+    @Test
+    void dealPredicate_atRisk_matchesOverdueDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
+        Deal future = dealWith(pipeline, stage, newCompany(), 1000.0, "2999-01-01");
+
+        List<Integer> atRisk = segmentService.evaluate("deal", def("all", predicate("at_risk")));
+        List<Integer> riskHigh = segmentService.evaluate("deal", def("all", predicate("risk_high")));
+        List<Integer> closeOverdue = segmentService.evaluate("deal", def("all", predicate("risk_close_overdue")));
+
+        assertTrue(atRisk.contains(overdue.getId()));
+        assertTrue(riskHigh.contains(overdue.getId()));
+        assertTrue(closeOverdue.contains(overdue.getId()));
+        assertFalse(closeOverdue.contains(future.getId()));
+    }
+
+    @Test
+    void dealRiskPredicate_notApplicableToCompany_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", predicate("at_risk"))));
+    }
+
+    @Test
+    void companyField_websiteContains_matches() {
+        Company withSite = new Company();
+        withSite.setName("Site Co " + unique());
+        withSite.setWebsite("https://acme.example.com");
+        withSite.setWorkspaceId(workspace.getId());
+        companyMapper.insert(withSite);
+        Company noSite = companyWithIndustry("No Site " + unique(), "misc");
+
+        List<Integer> ids = segmentService.evaluate("company", def("all", field("website", "contains", "acme")));
+
+        assertTrue(ids.contains(withSite.getId()));
+        assertFalse(ids.contains(noSite.getId()));
+    }
+
+    @Test
+    void companyField_createdBeforeAndAfter_boundsOnCreatedAt() {
+        Company company = companyWithIndustry("Dated " + unique(), "misc");
+
+        assertTrue(segmentService.evaluate("company", def("all", field("created", "before", "2999-01-01"))).contains(company.getId()));
+        assertFalse(segmentService.evaluate("company", def("all", field("created", "after", "2999-01-01"))).contains(company.getId()));
+    }
+
+    @Test
+    void dealField_actualValueGte_matches() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal big = new Deal();
+        big.setName("Big " + unique());
+        big.setWorkspaceId(workspace.getId());
+        big.setOwnerId(currentUser.getId());
+        big.setValue(0.0);
+        big.setActualValue(900.0);
+        big.setCurrency("JPY");
+        big.setPipelineId(pipeline.getId());
+        big.setStageId(stage.getId());
+        big.setCompanyId(company.getId());
+        dealMapper.insert(big);
+        Deal small = dealWith(pipeline, stage, company, 0.0, null);
+
+        List<Integer> ids = segmentService.evaluate("deal", def("all", field("actual_value", "gte", "500")));
+
+        assertTrue(ids.contains(big.getId()));
+        assertFalse(ids.contains(small.getId()));
+    }
+
+    private void assertMatchAgrees(String recordType, SegmentDefinition definition, int entityId) {
+        boolean full = segmentService.evaluate(recordType, definition).contains(entityId);
+        boolean single = segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), recordType, definition, entityId);
+        assertEquals(full, single, "matchesEntity disagrees with full evaluation for entity " + entityId);
+    }
+
+    @Test
+    void matchesEntity_agreesWithFullEvaluation_acrossConditionTypes() {
+        Company fintech = companyWithIndustry("Acme " + unique(), "Fintech");
+        Company other = companyWithIndustry("Beta " + unique(), "Logistics");
+
+        SegmentCondition notHot = predicate("warmth_hot");
+        notHot.setNegate(true);
+
+        for (Company company : List.of(fintech, other)) {
+            int id = company.getId();
+            assertMatchAgrees("company", def("all", field("industry", "equals", "Fintech")), id);
+            assertMatchAgrees("company", def("all", predicate("warmth_cold")), id);
+            assertMatchAgrees("company", def("all", predicate("warmth_hot")), id);
+            assertMatchAgrees("company", def("all",
+                field("industry", "equals", "Fintech"), predicate("warmth_cold")), id);
+            assertMatchAgrees("company", def("any",
+                field("industry", "equals", "Fintech"), predicate("warmth_hot")), id);
+            assertMatchAgrees("company", def("all", notHot), id);
+        }
+    }
+
+    @Test
+    void matchesEntity_agreesWithFullEvaluation_forNestedGroups() {
+        Company fintech = companyWithIndustry("Nested " + unique(), "Fintech");
+
+        SegmentDefinition nested = def("all", field("industry", "equals", "Fintech"));
+        SegmentDefinition inner = new SegmentDefinition();
+        inner.setMatch("any");
+        inner.setConditions(List.of(predicate("warmth_cold"), predicate("warmth_hot")));
+        nested.setGroups(List.of(inner));
+
+        assertMatchAgrees("company", nested, fintech.getId());
+    }
+
+    @Test
+    void matchesEntity_computedPredicate_scoresSingleRecord() {
+        Company cold = newCompany();
+
+        assertTrue(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "company", def("all", predicate("warmth_cold")), cold.getId()));
+        assertFalse(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "company", def("all", predicate("warmth_hot")), cold.getId()));
+    }
+
+    @Test
+    void matchesEntity_dealRisk_agreesForOverdueDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
+
+        assertMatchAgrees("deal", def("all", predicate("at_risk")), overdue.getId());
+        assertTrue(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "deal", def("all", predicate("at_risk")), overdue.getId()));
     }
 }

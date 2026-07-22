@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CampaignMessageMapper">
+
+  <sql id="messageColumns">
+    id, workspace_id, campaign_id, channel, name, status, created_by_id, created_at, updated_at
+  </sql>
+
+  <sql id="revisionColumns">
+    id, workspace_id, message_id, version, locale, subject, body_html, body_text, created_at
+  </sql>
+
+  <select id="getMessages" resultType="CampaignMessage">
+    SELECT <include refid="messageColumns"/> FROM campaign_message
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+    ORDER BY id DESC
+  </select>
+
+  <select id="getMessage" resultType="CampaignMessage">
+    SELECT <include refid="messageColumns"/> FROM campaign_message
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insertMessage" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_message
+      (workspace_id, campaign_id, channel, name, status, created_by_id)
+    VALUES
+      (#{workspaceId}, #{campaignId}, #{channel}, #{name}, #{status}, #{createdById})
+  </insert>
+
+  <update id="updateMessage">
+    UPDATE campaign_message
+    SET name = #{name}, channel = #{channel}, status = #{status}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="nextRevisionVersion" resultType="int">
+    SELECT COALESCE(MAX(version), 0) + 1
+    FROM campaign_message_revision
+    WHERE workspace_id = #{workspaceId} AND message_id = #{messageId}
+  </select>
+
+  <insert id="insertRevision" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO campaign_message_revision
+      (workspace_id, message_id, version, locale, subject, body_html, body_text)
+    VALUES
+      (#{workspaceId}, #{messageId}, #{version}, #{locale}, #{subject}, #{bodyHtml}, #{bodyText})
+  </insert>
+
+  <select id="getRevisions" resultType="CampaignMessageRevision">
+    SELECT <include refid="revisionColumns"/> FROM campaign_message_revision
+    WHERE workspace_id = #{workspaceId} AND message_id = #{messageId}
+    ORDER BY version DESC
+  </select>
+
+  <select id="getRevision" resultType="CampaignMessageRevision">
+    SELECT <include refid="revisionColumns"/> FROM campaign_message_revision
+    WHERE workspace_id = #{workspaceId} AND message_id = #{messageId} AND version = #{version}
+  </select>
+
+</mapper>

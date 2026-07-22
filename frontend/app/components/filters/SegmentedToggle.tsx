@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 export type Segment<T extends string> = {
     value: T;
-    label?: string;
+    label?: React.ReactNode;
     icon?: React.ReactNode;
     ariaLabel?: string;
 };

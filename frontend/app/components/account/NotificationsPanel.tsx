@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowTrendingDownIcon, AtSymbolIcon, BriefcaseIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowTrendingDownIcon, AtSymbolIcon, BriefcaseIcon, CheckCircleIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 
 import type { NotificationPreference } from "@/app/lib/types";
 import { getNotificationPreferences, updateNotificationPreferences } from "@/app/lib/api";
@@ -30,6 +30,18 @@ const TYPES = [
     { type: "activity.mention", icon: AtSymbolIcon, titleKey: "activityMentionTitle", descriptionKey: "activityMentionDescription" },
     { type: "introduction.mention", icon: AtSymbolIcon, titleKey: "introductionMentionTitle", descriptionKey: "introductionMentionDescription" },
     { type: "deal.mention", icon: AtSymbolIcon, titleKey: "dealMentionTitle", descriptionKey: "dealMentionDescription" },
+    {
+        type: "document.approval_request",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalRequestTitle",
+        descriptionKey: "approvalRequestDescription",
+    },
+    {
+        type: "document.approval_decision",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalDecisionTitle",
+        descriptionKey: "approvalDecisionDescription",
+    },
 ] as const;
 
 type Channels = { inApp: boolean; email: boolean };

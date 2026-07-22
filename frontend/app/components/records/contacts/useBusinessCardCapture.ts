@@ -10,11 +10,12 @@ import {
     useState,
 } from 'react';
 
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
     ApiError,
     businessCardRequestErrorKind,
     clientRecoveryContext,
-    getCapabilities,
+    getBusinessCardAvailability,
     getEffectivePermissions,
     scanBusinessCard,
 } from '@/app/lib/api';
@@ -61,6 +62,13 @@ type OcrOwnedField = {
     baseline: string;
 };
 
+type BusinessCardAvailabilityState = {
+    workspaceId: number;
+    available: boolean;
+    scanAvailable: boolean;
+    canCreateCompany: boolean;
+};
+
 function scannedContactValue(result: BusinessCardScanResult, field: BusinessCardContactField): string {
     return result.fields[field].value?.trim() ?? '';
 }
@@ -77,10 +85,15 @@ export function useBusinessCardCapture({
     setPayload: Dispatch<SetStateAction<CreateContactPayload>>;
     onImportRetryRequiredChange?: (required: boolean) => void;
 }) {
-    const [available, setAvailable] = useState(false);
-    const [availabilityResolved, setAvailabilityResolved] = useState(false);
-    const [scanAvailable, setScanAvailable] = useState(false);
-    const [canCreateCompany, setCanCreateCompany] = useState(false);
+    const { activeWorkspaceId } = useWorkspace();
+    const [availabilityState, setAvailabilityState] = useState<BusinessCardAvailabilityState | null>(null);
+    const currentAvailability = availabilityState?.workspaceId === activeWorkspaceId
+        ? availabilityState
+        : null;
+    const available = currentAvailability?.available ?? false;
+    const availabilityResolved = currentAvailability != null;
+    const scanAvailable = currentAvailability?.scanAvailable ?? false;
+    const canCreateCompany = currentAvailability?.canCreateCompany ?? false;
     const [file, setFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [result, setResult] = useState<BusinessCardScanResult | null>(null);
@@ -162,30 +175,33 @@ export function useBusinessCardCapture({
 
     useEffect(() => {
         let cancelled = false;
-        if (!active) return;
-        Promise.all([getCapabilities(), getEffectivePermissions()])
-            .then(([capabilities, permissions]) => {
+        if (!active || activeWorkspaceId == null) return;
+        const workspaceId = activeWorkspaceId;
+        Promise.all([getBusinessCardAvailability(), getEffectivePermissions()])
+            .then(([availability, permissions]) => {
                 if (cancelled) return;
-                setAvailable(
-                    capabilities.businessCardImport
-                    && permissions.includes('PERSON_CREATE')
-                    && permissions.includes('ATTACHMENT_CREATE'),
-                );
-                setScanAvailable(capabilities.businessCardScanning);
-                setCanCreateCompany(permissions.includes('COMPANY_CREATE'));
-                setAvailabilityResolved(true);
+                setAvailabilityState({
+                    workspaceId,
+                    available: availability.importing
+                        && permissions.includes('PERSON_CREATE')
+                        && permissions.includes('ATTACHMENT_CREATE'),
+                    scanAvailable: availability.scanning,
+                    canCreateCompany: permissions.includes('COMPANY_CREATE'),
+                });
             })
             .catch(() => {
                 if (cancelled) return;
-                setAvailable(false);
-                setScanAvailable(false);
-                setCanCreateCompany(false);
-                setAvailabilityResolved(true);
+                setAvailabilityState({
+                    workspaceId,
+                    available: false,
+                    scanAvailable: false,
+                    canCreateCompany: false,
+                });
             });
         return () => {
             cancelled = true;
         };
-    }, [active]);
+    }, [active, activeWorkspaceId]);
 
     useEffect(() => {
         if (!active) return;
@@ -234,10 +250,7 @@ export function useBusinessCardCapture({
     if (active !== previousActive) {
         setPreviousActive(active);
         if (!active) {
-            setAvailable(false);
-            setAvailabilityResolved(false);
-            setScanAvailable(false);
-            setCanCreateCompany(false);
+            setAvailabilityState(null);
             setFile(null);
             setPreviewUrl(null);
             setResult(null);
@@ -462,11 +475,22 @@ export function useBusinessCardCapture({
         setStatus('scanning');
         setRequestError(null);
         try {
-            const capabilities = await getCapabilities();
+            const workspaceId = activeWorkspaceId;
+            if (workspaceId == null) {
+                setRequestError('unavailable');
+                setStatus('manual');
+                return;
+            }
+            const availability = await getBusinessCardAvailability();
             if (!activeRef.current || requestSequence !== scanRequestSequenceRef.current) return;
-            setScanAvailable(capabilities.businessCardScanning);
+            setAvailabilityState((current) => ({
+                workspaceId,
+                available: current?.workspaceId === workspaceId && current.available,
+                scanAvailable: availability.scanning,
+                canCreateCompany: current?.workspaceId === workspaceId && current.canCreateCompany,
+            }));
             if (!activeRef.current || requestSequence !== scanRequestSequenceRef.current) return;
-            if (!capabilities.businessCardScanning) {
+            if (!availability.scanning) {
                 setRequestError('unavailable');
                 setStatus('manual');
                 return;

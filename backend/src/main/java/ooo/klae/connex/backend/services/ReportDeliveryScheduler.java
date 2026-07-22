@@ -135,7 +135,8 @@ public class ReportDeliveryScheduler {
             }
             return;
         }
-        ReportDocumentDto document = reportService.generate(claimed.getReportDefinitionId(), null);
+        ReportDocumentDto document = reportService.generate(
+                claimed.getReportDefinitionId(), null, ReportService.NarrativeMode.FULL);
         recipients = scheduleService.activeRecipientsForDocument(claimed, document);
         if (recipients.isEmpty()) {
             if (scheduleService.isCurrentDeliverySchedule(claimed)) {

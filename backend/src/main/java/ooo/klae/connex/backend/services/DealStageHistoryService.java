@@ -48,6 +48,17 @@ public class DealStageHistoryService {
         recordAt(workspaceId, dealId, stageId, conversionEligible);
     }
 
+    /**
+     * Records the first stage a deal occupies at creation or new-row import. Unlike a transition,
+     * there is no prior state to reason from, so eligibility is fail-closed on the current outcome:
+     * a deal that starts open counts as reached-while-open (conversion-eligible), while one imported
+     * or created already won or lost never occupied the stage while open and is ineligible — so it
+     * cannot bias forecast conversion rates.
+     */
+    public void recordInitial(int workspaceId, int dealId, int stageId, Boolean currentOutcome) {
+        recordAt(workspaceId, dealId, stageId, currentOutcome == null);
+    }
+
     private void recordAt(int workspaceId, int dealId, int stageId, boolean conversionEligible) {
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         DealStageHistory history = new DealStageHistory();

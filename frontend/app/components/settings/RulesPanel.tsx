@@ -56,7 +56,8 @@ export function ruleToRequest(rule: Rule): RuleRequest {
     };
 }
 
-function ruleSummary(rule: Rule, t: (key: string, values?: Record<string, string>) => string): string {
+/** Human summary line for a rule, built from the shared WorkspaceRules vocabulary labels. */
+export function ruleSummary(rule: Rule, t: (key: string, values?: Record<string, string>) => string): string {
     const trigger =
         rule.trigger.type === "schedule"
             ? t("summarySchedule", { cadence: t(`cadence.${rule.trigger.cadence ?? "daily"}`) })

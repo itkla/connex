@@ -27,6 +27,7 @@ interface DealsKanbanProps {
     query: string;
     currency?: string;
     filters: DealFilterParams;
+    currentUserId: number;
     revision: number;
     reduce: boolean;
 }
@@ -46,6 +47,18 @@ function stageAccent(stage: Stage): string {
     return cls === 'won' ? 'var(--chart-won)' : cls === 'lost' ? 'var(--chart-lost)' : 'var(--chart-open)';
 }
 
+function dealId(deal: Deal): number {
+    return deal.id;
+}
+
+function dealColumnId(deal: Deal): string {
+    return String(deal.stage);
+}
+
+function dealPosition(deal: Deal): number {
+    return deal.position;
+}
+
 export default function DealsKanban({
     deals,
     pipelines,
@@ -60,6 +73,7 @@ export default function DealsKanban({
     query,
     currency,
     filters,
+    currentUserId,
     revision,
     reduce,
 }: DealsKanbanProps) {
@@ -224,8 +238,12 @@ export default function DealsKanban({
             const level = boardRisks.get(deal.id)?.level ?? 'none';
             if (!filters.risk.includes(level)) return false;
         }
+        if (filters.scope === 'me' && deal.ownerId !== currentUserId) return false;
+        if (filters.scope === 'unassigned' && deal.ownerId != null) return false;
+        if (filters.scope === 'members'
+            && (deal.ownerId == null || !filters.memberIds?.includes(deal.ownerId))) return false;
         return true;
-    }, [boardRisks, currency, filters, pipelineById, query, resolvedCompanyById, stageById]);
+    }, [boardRisks, currency, currentUserId, filters, pipelineById, query, resolvedCompanyById, stageById]);
 
     const columns: KanbanColumnDef[] = useMemo(() => {
         const stages = selectedPipelineId != null ? stagesByPipeline[selectedPipelineId] ?? [] : [];
@@ -318,9 +336,9 @@ export default function DealsKanban({
         <KanbanBoard<Deal>
             columns={columns}
             items={boardDeals}
-            getId={(d) => d.id}
-            getColumnId={(d) => String(d.stage)}
-            getPosition={(d) => d.position}
+            getId={dealId}
+            getColumnId={dealColumnId}
+            getPosition={dealPosition}
             renderCard={renderCard}
             onMove={onMove}
             reduce={reduce}

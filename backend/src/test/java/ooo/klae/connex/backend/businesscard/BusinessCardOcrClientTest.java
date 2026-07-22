@@ -17,6 +17,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
@@ -52,6 +55,7 @@ class BusinessCardOcrClientTest {
             builder.build(), new ObjectMapper(), properties, BASE, false);
 
         assertFalse(client.isReady());
+        assertFalse(client.isReadyForScan());
         server.verify();
     }
 
@@ -68,6 +72,114 @@ class BusinessCardOcrClientTest {
 
         assertTrue(awaitReady(client));
         server.verify();
+    }
+
+    @Test
+    void scanReadinessAwaitsTheBoundedInitialProbeBeforeExternalFallback() throws Exception {
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(request -> {
+                    probeStarted.countDown();
+                    try {
+                        if (!releaseProbe.await(5, TimeUnit.SECONDS)) {
+                            throw new IOException("Readiness probe test timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Readiness probe test was interrupted", exception);
+                    }
+                    return withSuccess("{\"ready\":true}", MediaType.APPLICATION_JSON)
+                            .createResponse(request);
+                });
+        BusinessCardOcrClient client = client(builder);
+        assertTrue(probeStarted.await(5, TimeUnit.SECONDS));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Boolean> first = executor.submit(client::isReadyForScan);
+            Future<Boolean> second = executor.submit(client::isReadyForScan);
+
+            assertFalse(first.isDone());
+            assertFalse(second.isDone());
+            releaseProbe.countDown();
+            assertTrue(first.get(5, TimeUnit.SECONDS));
+            assertTrue(second.get(5, TimeUnit.SECONDS));
+        } finally {
+            releaseProbe.countDown();
+            executor.shutdownNow();
+        }
+        server.verify(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void oneScanReadinessDecisionUsesTheRemainingWindowToObserveRecovery() throws Exception {
+        CountDownLatch firstProbeStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstProbe = new CountDownLatch(1);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(request -> {
+                    firstProbeStarted.countDown();
+                    try {
+                        if (!releaseFirstProbe.await(5, TimeUnit.SECONDS)) {
+                            throw new IOException("Readiness probe test timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Readiness probe test was interrupted", exception);
+                    }
+                    return withServiceUnavailable().createResponse(request);
+                });
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(withSuccess("{\"ready\":true}", MediaType.APPLICATION_JSON));
+        BusinessCardOcrClient client = client(builder, Duration.ofMinutes(1));
+        assertTrue(firstProbeStarted.await(5, TimeUnit.SECONDS));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Boolean> resolved = executor.submit(client::isReadyForScan);
+
+            assertFalse(resolved.isDone());
+            releaseFirstProbe.countDown();
+            assertTrue(resolved.get(5, TimeUnit.SECONDS));
+        } finally {
+            releaseFirstProbe.countDown();
+            executor.shutdownNow();
+        }
+        server.verify(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void scanReadinessStopsWaitingAtTheConfiguredLocalFirstDeadline() throws Exception {
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(request -> {
+                    probeStarted.countDown();
+                    try {
+                        releaseProbe.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Readiness probe test was interrupted", exception);
+                    }
+                    return withServiceUnavailable().createResponse(request);
+                });
+        BusinessCardProperties properties = properties(Duration.ofMinutes(1));
+        properties.setLocalFirstWait(Duration.ofMillis(50));
+        BusinessCardOcrClient client = new BusinessCardOcrClient(
+                builder.build(), new ObjectMapper(), properties, BASE);
+        assertTrue(probeStarted.await(5, TimeUnit.SECONDS));
+        long started = System.nanoTime();
+        try {
+            assertFalse(client.isReadyForScan());
+            assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 1000);
+        } finally {
+            releaseProbe.countDown();
+        }
+        server.verify(Duration.ofSeconds(2));
     }
 
     @Test
@@ -160,13 +272,18 @@ class BusinessCardOcrClientTest {
     }
 
     private static BusinessCardOcrClient client(RestClient.Builder builder, Duration readinessCache) {
+        BusinessCardProperties properties = properties(readinessCache);
+        return new BusinessCardOcrClient(
+                builder.build(), new ObjectMapper(), properties, BASE);
+    }
+
+    private static BusinessCardProperties properties(Duration readinessCache) {
         BusinessCardProperties properties = new BusinessCardProperties();
         properties.setEnabled(true);
         properties.setOcrBaseUrl(BASE);
         properties.setOcrServiceToken(TOKEN);
         properties.setReadinessCache(readinessCache);
-        return new BusinessCardOcrClient(
-                builder.build(), new ObjectMapper(), properties, BASE);
+        return properties;
     }
 
     private static boolean awaitReady(BusinessCardOcrClient client) throws InterruptedException {

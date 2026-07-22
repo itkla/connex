@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -42,13 +43,32 @@ class TaskServiceTest extends AbstractServiceTest {
     void move_acrossStatuses_updatesStatusAndRenumbersBothColumns() {
         Task t1 = newTask(currentUser, null, null);
         Task t2 = newTask(currentUser, null, null);
+        Task t3 = newTask(currentUser, null, null);
+        Task t4 = newTask(currentUser, null, null);
+        Task t5 = newTask(currentUser, null, null);
+        taskMapper.moveTask(workspace.getId(), t4.getId(), "in_progress", false, 0);
+        taskMapper.moveTask(workspace.getId(), t5.getId(), "in_progress", false, 1);
 
-        taskService.move(t1.getId(), "in_progress", 0);
+        taskService.move(t1.getId(), "in_progress", 1);
 
         assertEquals("in_progress", taskService.getTaskById(t1.getId()).getStatus());
-        assertEquals(List.of(t1.getId()), taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "in_progress"));
-        assertEquals(List.of(t2.getId()), taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo"));
+        assertEquals(List.of(t4.getId(), t1.getId(), t5.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "in_progress"));
+        assertEquals(List.of(t2.getId(), t3.getId()),
+            taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo"));
         assertEquals(0, taskService.getTaskById(t2.getId()).getPosition());
+        assertEquals(1, taskService.getTaskById(t3.getId()).getPosition());
+    }
+
+    @Test
+    void move_onlySourceTaskIntoEmptyStatusSkipsEmptySourceBatch() {
+        Task task = newTask(currentUser, null, null);
+
+        Task moved = taskService.move(task.getId(), "in_progress", 0);
+
+        assertEquals("in_progress", moved.getStatus());
+        assertEquals(0, moved.getPosition());
+        assertTrue(taskMapper.getTaskIdsInStatusOrdered(workspace.getId(), "todo").isEmpty());
     }
 
     @Test
@@ -158,6 +178,6 @@ class TaskServiceTest extends AbstractServiceTest {
         taskMapper.insert(foreign);
         jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
 
-        assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary());
+        assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary(MemberScope.allTeam()));
     }
 }

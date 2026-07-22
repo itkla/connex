@@ -77,6 +77,7 @@
     "toastImported": "新規{created}件、更新{updated}件をインポートしました",
     "openImport": "インポート",
     "exportCsv": "エクスポート",
+    "exportCurrentView": "現在のビューをエクスポート",
     "moreActions": "その他の操作",
     "exporting": "エクスポート中…",
     "exported": "エクスポートしました",

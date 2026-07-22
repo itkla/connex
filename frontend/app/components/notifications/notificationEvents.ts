@@ -54,27 +54,38 @@ function parseAllReadDetail(value: unknown): AllNotificationsReadDetail | null {
     if (!isObject(value)) return null;
     const state = parseStateChangedDetail(value);
     const unread = property(value, "unread");
+    const snoozed = property(value, "snoozed");
     const cutoffId = property(value, "cutoffId");
     const readAt = property(value, "readAt");
     const asOf = property(value, "asOf");
     const nextSnoozeExpiry = property(value, "nextSnoozeExpiry");
+    const quietHoursActive = property(value, "quietHoursActive");
+    const nextQuietHoursTransition = property(value, "nextQuietHoursTransition");
     if (!state
         || !isNonNegativeInteger(unread)
+        || !isNonNegativeInteger(snoozed)
         || !isNonNegativeInteger(cutoffId)
         || typeof readAt !== "string"
         || typeof asOf !== "string"
+        || typeof quietHoursActive !== "boolean"
         || (nextSnoozeExpiry !== undefined
             && nextSnoozeExpiry !== null
-            && typeof nextSnoozeExpiry !== "string")) {
+            && typeof nextSnoozeExpiry !== "string")
+        || (nextQuietHoursTransition !== undefined
+            && nextQuietHoursTransition !== null
+            && typeof nextQuietHoursTransition !== "string")) {
         return null;
     }
     return {
         ...state,
         unread,
+        snoozed,
         cutoffId,
         readAt,
         asOf,
+        quietHoursActive,
         ...(typeof nextSnoozeExpiry === "string" ? { nextSnoozeExpiry } : {}),
+        ...(typeof nextQuietHoursTransition === "string" ? { nextQuietHoursTransition } : {}),
     };
 }
 

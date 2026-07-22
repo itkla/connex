@@ -7,10 +7,13 @@ import {
     ChatBubbleLeftRightIcon,
     CheckCircleIcon,
     ChevronDownIcon,
+    CubeIcon,
+    DocumentDuplicateIcon,
     DocumentTextIcon,
     FolderIcon,
     FunnelIcon,
     HomeIcon,
+    MegaphoneIcon,
     TagIcon,
     UserCircleIcon,
     UserGroupIcon,
@@ -30,10 +33,11 @@ import {
     CheckIcon,
     Cog6ToothIcon,
     BuildingLibraryIcon,
+    BoltIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -48,18 +52,32 @@ import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
 import QuickCreateLauncher from '@/app/components/actions/QuickCreateLauncher';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useSidebarMode } from '@/app/hooks/useSidebarMode';
+import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePinnedViews } from '@/app/hooks/usePinnedViews';
+import { useRecentRecords } from '@/app/hooks/useRecentRecords';
+import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
+import { recentRecordHref } from '@/app/lib/recentRecords';
+import type { SidebarSectionId } from '@/app/lib/sidebarSections';
+import { useSidebarSections } from '@/app/hooks/useSidebarSections';
 
 type NavItem = {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     disabled?: boolean;
+    /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
+    active?: boolean;
 };
 
 type NavSection = {
+    id: SidebarSectionId;
     label: string;
     items: NavItem[];
+    activePaths?: readonly string[];
 };
 
 function useSections(): NavSection[] {
@@ -68,6 +86,7 @@ function useSections(): NavSection[] {
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const workspaceItems: NavItem[] = [
         { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+        { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
         ...(isOrgAdmin
             ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]
@@ -76,7 +95,9 @@ function useSections(): NavSection[] {
     ];
     return [
         {
+            id: "overview",
             label: t("sectionOverview"),
+            activePaths: ["/dashboard", "/overview"],
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
                 { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: false },
@@ -88,16 +109,29 @@ function useSections(): NavSection[] {
             ]
         },
         {
+            id: "records",
             label: t("sectionRecords"),
+            activePaths: ["/records"],
             items: [
                 { label: t("navCompanies"), href: "/records/companies", icon: BuildingOffice2Icon },
                 { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
+                { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
             ],
         },
         {
+            id: "marketing",
+            label: t("sectionMarketing"),
+            activePaths: ["/marketing"],
+            items: [
+                { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
+            ],
+        },
+        {
+            id: "activity",
             label: t("sectionActivity"),
+            activePaths: ["/activity"],
             items: [
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
@@ -105,18 +139,25 @@ function useSections(): NavSection[] {
             ],
         },
         {
+            id: "library",
             label: t("sectionLibrary"),
+            activePaths: ["/library"],
             items: [
+                { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
                 { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
         },
         {
+            id: "workspace",
             label: t("sectionWorkspace"),
+            activePaths: ["/users", "/workflows", "/settings", "/organization", "/admin"],
             items: workspaceItems,
         },
         {
+            id: "help",
             label: t("sectionHelp"),
+            activePaths: ["/docs"],
             items: [{ label: t("navDocs"), href: "/docs", icon: BookOpenIcon }],
         },
     ];
@@ -139,20 +180,48 @@ function isActive(pathname: string, href: string): boolean {
 function NavGroup({
     section,
     pathname,
+    rail,
+    collapsed,
+    navigationKey,
+    onCollapsedChange,
 }: {
     section: NavSection;
     pathname: string;
+    rail: boolean;
+    collapsed: boolean;
+    navigationKey: string;
+    onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
-    const [open, setOpen] = useState(true);
-    const sectionId = `nav-group-${section.label.toLowerCase()}`;
+    const itemActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
+    const groupActive = itemActive || section.activePaths?.some((href) => isActive(pathname, href)) === true;
+    const [manualState, setManualState] = useState<{ navigationKey: string; collapsed: boolean } | null>(null);
+    const manualStateCurrent = manualState?.navigationKey === navigationKey && manualState.collapsed === collapsed;
+    const open = manualStateCurrent ? !manualState.collapsed : groupActive || !collapsed;
+    const sectionId = `nav-group-${section.id}`;
+    if (rail) {
+        return (
+            <ul aria-label={section.label} className="flex flex-col items-center gap-1">
+                {section.items.map((item) => (
+                    <NavLink key={item.href} item={item} active={item.active ?? isActive(pathname, item.href)} rail />
+                ))}
+            </ul>
+        );
+    }
     return (
         <div>
             <button
                 type="button"
-                onClick={() => setOpen((o) => !o)}
+                onClick={() => {
+                    const nextOpen = !open;
+                    setManualState({ navigationKey, collapsed: !nextOpen });
+                    onCollapsedChange(section.id, !nextOpen);
+                }}
                 aria-expanded={open}
                 aria-controls={sectionId}
-                className="flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground"
+                className={cn(
+                    "flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground",
+                    groupActive && "text-foreground",
+                )}
             >
                 <span>{section.label}</span>
                 <ChevronDownIcon
@@ -165,7 +234,8 @@ function NavGroup({
                         <NavLink
                             key={item.href}
                             item={item}
-                            active={isActive(pathname, item.href)} // TODO: add active state for nested routes (/activity and /activity/tasks both show as active in the Sidebar; unintended behavior)
+                            active={item.active ?? isActive(pathname, item.href)}
+                            rail={false}
                         />
                     ))}
                 </ul>
@@ -174,8 +244,37 @@ function NavGroup({
     );
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail: boolean }) {
     const Icon = item.icon;
+    if (rail) {
+        const link = (
+            <Link
+                href={item.disabled ? "#" : item.href}
+                aria-current={active ? "page" : undefined}
+                aria-label={item.label}
+                className="group flex justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+                <span
+                    className={cn(
+                        "flex size-9 items-center justify-center rounded-lg transition-colors",
+                        active
+                            ? "bg-brand-light text-brand-dark"
+                            : "text-muted-foreground group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground",
+                    )}
+                >
+                    <Icon className="size-4 shrink-0" />
+                </span>
+            </Link>
+        );
+        return (
+            <li className={item.disabled ? "pointer-events-none opacity-50" : ""}>
+                <Tooltip>
+                    <TooltipTrigger asChild>{link}</TooltipTrigger>
+                    <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+            </li>
+        );
+    }
     return (
         <li className={item.disabled ? "opacity-50 disabled cursor-not-allowed" : ""}>
             <Link
@@ -232,7 +331,7 @@ function ThemeSubmenu() {
     );
 }
 
-function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
+function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; rail: boolean }) {
     const t = useTranslations("CommonSidebar");
     const locale = useLocale();
     const router = useRouter();
@@ -256,21 +355,31 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
     return (
         <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-                <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-md p-2 text-left transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
-                >
-                    <UserAvatar user={user} />
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-sidebar-foreground">
-                            {user.displayName}
+                {rail ? (
+                    <button
+                        type="button"
+                        aria-label={user.displayName}
+                        className="flex justify-center rounded-md p-1 transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
+                    >
+                        <UserAvatar user={user} />
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-md p-2 text-left transition hover:bg-sidebar-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:bg-sidebar-accent"
+                    >
+                        <UserAvatar user={user} />
+                        <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-sidebar-foreground">
+                                {user.displayName}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                                @{user.username}
+                            </div>
                         </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                            @{user.username}
-                        </div>
-                    </div>
-                    <EllipsisVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
-                </button>
+                        <EllipsisVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
+                    </button>
+                )}
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
                 <DropdownMenu.Content
@@ -366,6 +475,57 @@ export default function Sidebar({
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
     const sections = useSections();
+    const { activeWorkspaceId } = useWorkspace();
+    const { isCollapsed, setCollapsed } = useSidebarSections(user.id, activeWorkspaceId);
+    const { pins } = usePinnedViews();
+    const { recents } = useRecentRecords();
+    const searchParams = useSearchParams();
+    const svParam = searchParams.get("sv");
+    const navigationKey = `${user.id}:${activeWorkspaceId ?? "none"}:${pathname}:${svParam ?? ""}`;
+    const pinnedSection = useMemo<NavSection | null>(() => {
+        if (pins.length === 0) return null;
+        return {
+            id: "pinned-views",
+            label: t("sectionPinnedViews"),
+            items: pins.map((pin) => ({
+                label: pin.name,
+                href: savedViewHref(pin),
+                icon: savedViewRecordIcon(pin.recordType),
+                active: pathname === `/records/${savedViewRecordPath(pin.recordType)}` && svParam === savedViewToken(pin),
+            })),
+        };
+    }, [pins, t, pathname, svParam]);
+    const recentSection = useMemo<NavSection | null>(() => {
+        if (recents.length === 0) return null;
+        return {
+            id: "recent-records",
+            label: t("sectionRecent"),
+            items: recents.map((entry) => {
+                const href = recentRecordHref(entry.t, entry.id);
+                return {
+                    label: entry.label,
+                    href,
+                    icon: savedViewRecordIcon(entry.t),
+                    active: pathname === href,
+                };
+            }),
+        };
+    }, [recents, t, pathname]);
+    const { mode } = useSidebarMode();
+    const isMobile = useIsMobile();
+    const rail = !isMobile && mode === "rail";
+
+    const [transitionsEnabled, setTransitionsEnabled] = useState(false);
+    useEffect(() => {
+        let inner = 0;
+        const outer = requestAnimationFrame(() => {
+            inner = requestAnimationFrame(() => setTransitionsEnabled(true));
+        });
+        return () => {
+            cancelAnimationFrame(outer);
+            cancelAnimationFrame(inner);
+        };
+    }, []);
 
     async function handleLogout() {
         try {
@@ -378,28 +538,59 @@ export default function Sidebar({
     return (
         <div className="p-2 h-dvh">
             <aside
-                className={`flex flex-col min-h-0 ${className ?? ""}`}
+                className={cn(
+                    "flex min-h-0 flex-col",
+                    transitionsEnabled && "transition-[width,padding] duration-300 ease-out motion-reduce:transition-none",
+                    rail ? "w-16 p-3" : "w-64 p-6",
+                    className,
+                )}
                 aria-label={t("ariaPrimarySidebar")}
             >
-                <header className="mb-6 flex shrink-0 items-center justify-between gap-2">
-                    <WorkspaceSwitcher />
+                <header className={cn("mb-6 flex shrink-0 gap-2", rail ? "flex-col items-center" : "items-center justify-between")}>
+                    <WorkspaceSwitcher compact={rail} />
                     <NotificationBell />
                 </header>
 
-                <QuickCreateLauncher />
+                <QuickCreateLauncher compact={rail} />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
+                    {pinnedSection && (
+                        <NavGroup
+                            key={pinnedSection.id}
+                            section={pinnedSection}
+                            pathname={pathname}
+                            rail={rail}
+                            collapsed={isCollapsed(pinnedSection.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
+                        />
+                    )}
+                    {recentSection && (
+                        <NavGroup
+                            key={recentSection.id}
+                            section={recentSection}
+                            pathname={pathname}
+                            rail={rail}
+                            collapsed={isCollapsed(recentSection.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
+                        />
+                    )}
                     {sections.map((section) => (
                         <NavGroup
-                            key={section.label}
+                            key={section.id}
                             section={section}
                             pathname={pathname}
+                            rail={rail}
+                            collapsed={isCollapsed(section.id)}
+                            navigationKey={navigationKey}
+                            onCollapsedChange={setCollapsed}
                         />
                     ))}
                 </nav>
 
-                <div className="mt-4 shrink-0 border-t border-sidebar-border pt-4">
-                    <UserMenu user={user} onLogout={handleLogout} />
+                <div className={cn("mt-4 shrink-0 border-t border-sidebar-border pt-4", rail && "flex justify-center")}>
+                    <UserMenu user={user} onLogout={handleLogout} rail={rail} />
                 </div>
             </aside>
         </div>

@@ -4,11 +4,11 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, workspace_id, name, website, industry, phone, address, created_at, updated_at, logo_url
+    id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
   <sql id="qualifiedCompanyColumns">
-    c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address,
+    c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
     c.created_at, c.updated_at, c.logo_url
   </sql>
 
@@ -175,6 +175,21 @@
     </where>
   </sql>
 
+  <sql id="memberScopePredicate">
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND c.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND c.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND c.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
   <sql id="pageOrderBy">
     ORDER BY
     <choose>
@@ -216,6 +231,7 @@
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     <include refid="pageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
@@ -224,6 +240,7 @@
     SELECT COUNT(*)
     FROM company c
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
   </select>
 
   <select id="getCompanyEngagementCounts"
@@ -382,8 +399,17 @@
     SELECT c.id
     FROM company c
     <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
     ORDER BY c.id
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getCompaniesFiltered" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="memberScopePredicate"/>
+    ORDER BY c.name, c.id
   </select>
 
   <select id="distinctIndustries" resultType="string">
@@ -401,9 +427,18 @@
     )
   </select>
 
+  <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(CAST(c.owner_id AS CHAR), '__empty__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+    GROUP BY c.owner_id
+  </select>
+
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
-      c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
+      c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+      c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
     WHERE (c.workspace_id = #{workspaceId}
@@ -453,15 +488,17 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
-    VALUES (#{workspaceId}, #{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
+    VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry},
+      #{phone}, #{address}, #{logoUrl})
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
     VALUES
     <foreach collection="list" item="c" separator=",">
-      (#{c.workspaceId}, #{c.name}, #{c.website}, #{c.industry}, #{c.phone}, #{c.address}, #{c.logoUrl})
+      (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, #{c.name}, #{c.website}, #{c.industry},
+       #{c.phone}, #{c.address}, #{c.logoUrl})
     </foreach>
   </insert>
 
@@ -475,6 +512,12 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateOwner">
+    UPDATE company
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <select id="lockById" resultType="java.lang.Integer">
     SELECT id FROM company
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -485,6 +528,15 @@
     UPDATE company SET logo_url = #{logoUrl}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
       AND logo_url &lt;=&gt; #{currentLogoUrl}
+  </update>
+
+  <update id="clearMemberOwnership">
+    UPDATE company SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>

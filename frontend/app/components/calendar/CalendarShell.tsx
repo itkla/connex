@@ -9,7 +9,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
-import { parseCalendarDate } from '@/app/lib/utils';
+import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
 import {
     buildEvents,
@@ -266,8 +266,7 @@ export default function CalendarShell({
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
-            const el = e.target as HTMLElement | null;
-            if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+            if (isTypingTarget(e.target)) return;
             if (
                 document.querySelector(
                     '[data-state="open"][role="dialog"],[data-state="open"][role="alertdialog"],[data-state="open"][role="menu"]',

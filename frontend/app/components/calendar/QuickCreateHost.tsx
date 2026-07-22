@@ -73,7 +73,7 @@ export default function QuickCreateHost({
                     <button
                         type="button"
                         aria-label={t('quickCreate')}
-                        className="fixed right-6 bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] z-30 grid size-14 place-items-center rounded-full bg-brand text-brand-foreground shadow-lg outline-none transition active:scale-95 hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none"
+                        className="fixed right-6 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-30 grid size-14 place-items-center rounded-full bg-brand text-brand-foreground shadow-lg outline-none transition active:scale-95 hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none md:bottom-[calc(env(safe-area-inset-bottom)+1.5rem)]"
                     >
                         <PlusIcon className="size-6" />
                     </button>

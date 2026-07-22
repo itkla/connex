@@ -25,6 +25,30 @@ class SegmentMapperTest extends AbstractMapperTest {
     @Autowired private ShareMapper shareMapper;
 
     @Test
+    void ownerFieldConditionMatchesCurrentOwnerForCompanyAndPerson() {
+        User owner = newUser();
+        User other = newUser();
+        Company mine = newCompany();
+        Company theirs = newCompany();
+        companyMapper.updateOwner(workspace.getId(), mine.getId(), owner.getId());
+        companyMapper.updateOwner(workspace.getId(), theirs.getId(), other.getId());
+        Person myPerson = newPerson(mine);
+        Person theirPerson = newPerson(theirs);
+        personMapper.updateOwner(workspace.getId(), myPerson.getId(), owner.getId());
+        personMapper.updateOwner(workspace.getId(), theirPerson.getId(), other.getId());
+
+        List<Integer> companyMatches = segmentMapper.companyIdsMatching(Map.of(
+            "workspaceId", workspace.getId(), "field", "owner", "op", "is", "id", owner.getId()));
+        assertTrue(companyMatches.contains(mine.getId()));
+        assertFalse(companyMatches.contains(theirs.getId()));
+
+        List<Integer> personMatches = segmentMapper.personIdsMatching(Map.of(
+            "workspaceId", workspace.getId(), "field", "owner", "op", "is", "id", owner.getId()));
+        assertTrue(personMatches.contains(myPerson.getId()));
+        assertFalse(personMatches.contains(theirPerson.getId()));
+    }
+
+    @Test
     void suspendedPeopleAreExcludedFromUniversesMatchesAndPersonActivityPredicate() {
         Company company = newCompany();
         Person processable = newPerson(company);
