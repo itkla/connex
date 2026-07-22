@@ -166,6 +166,7 @@
   },
   "ActivityTasks": {
     "title": "タスク",
+    "entityLabel": "タスク",
     "subtitle": "チーム全員のフォローアップを見逃さない。",
     "today": "今日",
     "tasksLeft": "残り{count}件",
@@ -215,6 +216,8 @@
     "dueYesterday": "昨日",
     "ariaCompleteTask": "タスクを完了にする",
     "toastFailedUpdate": "タスクを更新できませんでした",
+    "toastDeleted": "タスクを削除しました",
+    "toastFailedDelete": "タスクを削除できませんでした",
     "taskUpdatedSuccess": "タスクを更新しました",
     "taskMarkedAsCompleteSuccess": "タスクを完了にしました",
     "taskMarkedAsIncompleteSuccess": "タスクを未完了にしました"

@@ -23,11 +23,12 @@ import { useActions } from '@/app/hooks/useActions';
 import type { ActionId, ActiveRecordRef } from '@/app/lib/actions/types';
 
 /**
- * The record a row/card menu acts on, plus the browser-local actions the shell owns (peek, quick
- * edit, delete) that can't live in the global registry because they drive browser-scoped UI.
+ * The record a row/card menu acts on, whether related-create actions fit that surface, and the
+ * browser-local actions the shell owns (peek, quick edit, delete).
  */
 export type RecordMenuModel = {
     record: ActiveRecordRef;
+    includeCreateActions?: boolean;
     onPeek?: () => void;
     onQuickEdit?: () => void;
     onDelete?: () => void;
@@ -62,7 +63,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
 
     return useMemo(() => {
         if (!enabled || actions.length === 0) return [];
-        const { record, onPeek, onQuickEdit, onDelete } = model;
+        const { record, includeCreateActions = true, onPeek, onQuickEdit, onDelete } = model;
 
         const registry = (id: ActionId): MenuItemDescriptor | null => {
             const action = getAction(id);
@@ -87,7 +88,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
 
         const groups: (MenuItemDescriptor | null)[][] = [
             [peek, ...REGISTRY_VIEW.map(registry)],
-            REGISTRY_CREATE.map(registry),
+            includeCreateActions ? REGISTRY_CREATE.map(registry) : [],
             [quickEdit, registry('record.copy-link')],
             [remove],
         ];
@@ -163,14 +164,23 @@ export function RecordContextMenu({ model, children }: { model: RecordMenuModel;
  * consume {@link useRecordMenuGroups}, so the pointer, keyboard, and right-click surfaces can never
  * drift. The trigger is keyboard-operable and reveals on row/card hover or focus.
  */
-export function RecordActionMenuTrigger({ model }: { model: RecordMenuModel }) {
+export function RecordActionMenuTrigger({
+    model,
+    triggerClassName,
+}: {
+    model: RecordMenuModel;
+    triggerClassName?: string;
+}) {
     const [activated, setActivated] = useState(false);
     const groups = useRecordMenuGroups(model, activated);
     const tr = useTranslations('RecordActionMenu');
     return (
         <DropdownMenu onOpenChange={(open) => open && setActivated(true)}>
             <DropdownMenuTrigger asChild>
-                <RecordActionsTriggerButton ariaLabel={tr('menuAria', { name: model.record.label })} />
+                <RecordActionsTriggerButton
+                    ariaLabel={tr('menuAria', { name: model.record.label })}
+                    className={triggerClassName}
+                />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
                 <MenuBody groups={groups} Item={DropdownMenuItem} Separator={DropdownMenuSeparator} />

@@ -1,6 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ComponentType,
+    type KeyboardEvent,
+} from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -26,15 +34,22 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import {
+    RecordActionMenuTrigger,
+    RecordContextMenu,
+    type RecordMenuModel,
+} from '@/app/components/records/RecordActionMenu';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
-import { getTaskById, updateTask } from '@/app/lib/api';
+import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
-import { toastError } from '@/app/lib/toast';
+import { toastError, toastSuccess } from '@/app/lib/toast';
+import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import type { Contact, Deal, Task, User } from '@/app/lib/types';
@@ -45,6 +60,7 @@ type Props = {
     deals: Deal[];
     users: User[];
     currentUserId: number;
+    canDeleteTasks: boolean;
 };
 
 type Bucket = 'overdue' | 'today' | 'upcoming' | 'noDate' | 'completed';
@@ -139,7 +155,14 @@ function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, 
     });
 }
 
-export default function TasksBrowser({ tasks: initialTasks, persons, deals, users, currentUserId }: Props) {
+export default function TasksBrowser({
+    tasks: initialTasks,
+    persons,
+    deals,
+    users,
+    currentUserId,
+    canDeleteTasks,
+}: Props) {
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
     const locale = useLocale();
@@ -168,8 +191,13 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const [viewInitialized, setViewInitialized] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
+    const [deletingTask, setDeletingTask] = useState<Task | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const [rovingTaskId, setRovingTaskId] = useState<number | null>(null);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState<Set<number>>(new Set());
+    const rowRefs = useRef(new Map<number, HTMLLIElement>());
+    const pendingFocusRef = useRef<number | null>(null);
     const timers = useRef<number[]>([]);
 
     const searchParams = useSearchParams();
@@ -333,6 +361,80 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     }, [filtered, completing]);
 
     const visibleBuckets = useMemo(() => ACTIVE_BUCKETS.filter((b) => grouped[b].length > 0), [grouped]);
+    const visibleTasks = useMemo(
+        () => queue === 'completed' ? filtered : visibleBuckets.flatMap((bucket) => grouped[bucket]),
+        [queue, filtered, visibleBuckets, grouped],
+    );
+    const effectiveRovingTaskId =
+        rovingTaskId != null && visibleTasks.some((task) => task.id === rovingTaskId)
+            ? rovingTaskId
+            : visibleTasks[0]?.id ?? null;
+
+    useEffect(() => {
+        const pendingFocusId = pendingFocusRef.current;
+        if (pendingFocusId == null) return;
+        const row = rowRefs.current.get(pendingFocusId);
+        if (!row) return;
+        pendingFocusRef.current = null;
+        row.focus();
+    }, [visibleTasks]);
+
+    const focusTaskRow = useCallback((taskId: number) => {
+        setRovingTaskId(taskId);
+        rowRefs.current.get(taskId)?.focus();
+    }, []);
+
+    const handleTaskRowKeyDown = useCallback(
+        (event: KeyboardEvent<HTMLLIElement>, task: Task) => {
+            if (event.target !== event.currentTarget) return;
+            const rowIndex = visibleTasks.findIndex((visibleTask) => visibleTask.id === task.id);
+            if (rowIndex < 0) return;
+
+            if (event.key === 'ArrowDown') {
+                const next = visibleTasks[rowIndex + 1];
+                if (next) {
+                    event.preventDefault();
+                    focusTaskRow(next.id);
+                }
+            } else if (event.key === 'ArrowUp') {
+                const previous = visibleTasks[rowIndex - 1];
+                if (previous) {
+                    event.preventDefault();
+                    focusTaskRow(previous.id);
+                }
+            } else if (event.key === 'Home') {
+                const first = visibleTasks[0];
+                if (first) {
+                    event.preventDefault();
+                    focusTaskRow(first.id);
+                }
+            } else if (event.key === 'End') {
+                const last = visibleTasks[visibleTasks.length - 1];
+                if (last) {
+                    event.preventDefault();
+                    focusTaskRow(last.id);
+                }
+            } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                const row = rowRefs.current.get(task.id);
+                if (row) {
+                    event.preventDefault();
+                    const rect = row.getBoundingClientRect();
+                    row.dispatchEvent(
+                        new MouseEvent('contextmenu', {
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: rect.right - 40,
+                            clientY: rect.top + rect.height / 2,
+                        }),
+                    );
+                }
+            } else if (event.key === 'Enter') {
+                event.preventDefault();
+                setEditingTask(task);
+            }
+        },
+        [visibleTasks, focusTaskRow],
+    );
 
     const setTaskCompleted = (id: number, value: boolean) =>
         setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
@@ -384,6 +486,30 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
         }
     };
 
+    const handleDeleteTask = async () => {
+        if (!deletingTask || deleting) return;
+        const deletingIndex = visibleTasks.findIndex((task) => task.id === deletingTask.id);
+        const focusTarget =
+            deletingIndex >= 0
+                ? visibleTasks[deletingIndex + 1] ?? visibleTasks[deletingIndex - 1] ?? null
+                : null;
+
+        setDeleting(true);
+        try {
+            await deleteTask(deletingTask.id);
+            pendingFocusRef.current = focusTarget?.id ?? null;
+            setRovingTaskId(focusTarget?.id ?? null);
+            setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
+            setDeletingTask(null);
+            toastSuccess(t('toastDeleted'));
+            router.refresh();
+        } catch (error) {
+            toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     const drawerCompanyId = editingTask?.personId
         ? personById.get(editingTask.personId)?.companyId ?? null
         : null;
@@ -412,23 +538,41 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
         setCompanyFilter(new Set());
     };
 
-    const renderRow = (task: Task, bucket: Bucket) => (
-        <TaskRow
-            key={task.id}
-            task={task}
-            reduce={reduce}
-            checked={completing.has(task.id) || task.completed}
-            person={task.personId ? personById.get(task.personId) : undefined}
-            deal={task.dealId ? dealById.get(task.dealId) : undefined}
-            assignee={userById.get(task.assignedToId)}
-            bucket={bucket}
-            onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
-            onOpen={() => setEditingTask(task)}
-            pending={pendingToggle.has(task.id)}
-            ariaCompleteLabel={t('ariaCompleteTask')}
-            due={formatDue(task.dueDate, t, locale)}
-        />
-    );
+    const renderRow = (task: Task, bucket: Bucket) => {
+        const label = noteSnippet(task.description, 60) || t('entityLabel');
+        const menuModel: RecordMenuModel = {
+            record: { type: 'task', id: task.id, label },
+            includeCreateActions: false,
+            onDelete: canDeleteTasks ? () => setDeletingTask(task) : undefined,
+        };
+
+        return (
+            <RecordContextMenu key={task.id} model={menuModel}>
+                <TaskRow
+                    task={task}
+                    reduce={reduce}
+                    checked={completing.has(task.id) || task.completed}
+                    person={task.personId ? personById.get(task.personId) : undefined}
+                    deal={task.dealId ? dealById.get(task.dealId) : undefined}
+                    assignee={userById.get(task.assignedToId)}
+                    bucket={bucket}
+                    onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
+                    onOpen={() => setEditingTask(task)}
+                    pending={pendingToggle.has(task.id)}
+                    ariaCompleteLabel={t('ariaCompleteTask')}
+                    due={formatDue(task.dueDate, t, locale)}
+                    menuModel={menuModel}
+                    tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
+                    rowRef={(row) => {
+                        if (row) rowRefs.current.set(task.id, row);
+                        else rowRefs.current.delete(task.id);
+                    }}
+                    onFocus={() => setRovingTaskId(task.id)}
+                    onKeyDown={(event) => handleTaskRowKeyDown(event, task)}
+                />
+            </RecordContextMenu>
+        );
+    };
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -684,6 +828,19 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                 />
             )}
 
+            <DeleteRecordDialog<Task>
+                open={deletingTask !== null}
+                onOpenChange={(open) => {
+                    if (!open && !deleting) setDeletingTask(null);
+                }}
+                selectedIds={new Set(deletingTask ? [deletingTask.id] : [])}
+                selectedItems={deletingTask ? [deletingTask] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(task) => noteSnippet(task.description, 60) || t('entityLabel')}
+                isDeleting={deleting}
+                confirmDelete={() => void handleDeleteTask()}
+            />
+
             <TaskDialog
                 open={creating}
                 onOpenChange={setCreating}
@@ -844,6 +1001,11 @@ type TaskRowProps = {
     pending: boolean;
     ariaCompleteLabel: string;
     due: { label: string; tone: DueTone } | null;
+    menuModel: RecordMenuModel;
+    tabIndex: number;
+    rowRef: (row: HTMLLIElement | null) => void;
+    onFocus: () => void;
+    onKeyDown: (event: KeyboardEvent<HTMLLIElement>) => void;
 };
 
 function TaskRow({
@@ -859,19 +1021,29 @@ function TaskRow({
     pending,
     ariaCompleteLabel,
     due,
+    menuModel,
+    tabIndex,
+    rowRef,
+    onFocus,
+    onKeyDown,
 }: TaskRowProps) {
     const isCompletedRow = bucket === 'completed';
 
     return (
         <motion.li
+            ref={rowRef}
             layout={!reduce}
             initial={false}
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
             transition={{ duration: 0.22, ease: EASE_OUT }}
             className={cn(
-                'group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/80',
+                'group flex cursor-pointer items-center gap-3 px-5 py-3 outline-hidden transition-colors hover:bg-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
                 (checked || isCompletedRow) && 'opacity-55',
             )}
+            tabIndex={tabIndex}
+            aria-keyshortcuts="Shift+F10"
+            onFocus={onFocus}
+            onKeyDown={onKeyDown}
             onClick={onOpen}
         >
             <div onClick={(e) => e.stopPropagation()} className="shrink-0">
@@ -952,6 +1124,13 @@ function TaskRow({
                 ) : (
                     <div className="size-6" />
                 )}
+            </div>
+
+            <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+                <RecordActionMenuTrigger
+                    model={menuModel}
+                    triggerClassName="opacity-100 sm:opacity-0"
+                />
             </div>
         </motion.li>
     );
