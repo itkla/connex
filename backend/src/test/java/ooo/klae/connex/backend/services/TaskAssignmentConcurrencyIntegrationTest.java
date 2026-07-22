@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -148,6 +149,10 @@ class TaskAssignmentConcurrencyIntegrationTest {
             assertTrue(removalLocked.await(10, TimeUnit.SECONDS));
             Future<Task> assignment = executor.submit(() -> reassignTask(workspaceId));
             assertTrue(assignmentStarted.await(10, TimeUnit.SECONDS));
+            assertThrows(
+                TimeoutException.class,
+                () -> assignment.get(1, TimeUnit.SECONDS)
+            );
             releaseRemoval.countDown();
 
             removal.get(20, TimeUnit.SECONDS);
