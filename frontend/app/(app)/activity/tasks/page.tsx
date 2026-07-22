@@ -6,6 +6,7 @@ import {
     getContactsFromCookie,
     getDealsFromCookie,
     getEffectivePermissionsFromCookie,
+    getMyWorkspacesFromCookie,
     getUsers,
 } from "@/app/lib/api";
 import type { User } from "@/app/lib/types";
@@ -20,12 +21,13 @@ export default async function TasksPage() {
 
     const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
 
-    const [tasks, persons, deals, users, effectivePermissions] = await Promise.all([
+    const [tasks, persons, deals, users, effectivePermissions, workspaceState] = await Promise.all([
         getTasksFromCookie(cookie),
         getContactsFromCookie(cookie),
         getDealsFromCookie(cookie),
         (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
         getEffectivePermissionsFromCookie(cookie),
+        getMyWorkspacesFromCookie(cookie),
     ]);
 
     return (
@@ -36,6 +38,7 @@ export default async function TasksPage() {
             users={users}
             currentUserId={user.id}
             canDeleteTasks={effectivePermissions.includes('TASK_DELETE')}
+            originWorkspaceId={workspaceState.activeWorkspaceId}
         />
     );
 }

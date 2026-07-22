@@ -215,6 +215,7 @@
     "dueTomorrow": "明日",
     "dueYesterday": "昨日",
     "ariaCompleteTask": "タスクを完了にする",
+    "ariaOpenTask": "タスク「{name}」を開く",
     "toastFailedUpdate": "タスクを更新できませんでした",
     "toastDeleted": "タスクを削除しました",
     "toastFailedDelete": "タスクを削除できませんでした",

@@ -215,6 +215,7 @@
     "dueTomorrow": "Tomorrow",
     "dueYesterday": "Yesterday",
     "ariaCompleteTask": "Mark task complete",
+    "ariaOpenTask": "Open task: {name}",
     "toastFailedUpdate": "Failed to update task",
     "toastDeleted": "Task deleted",
     "toastFailedDelete": "Failed to delete task",

@@ -146,11 +146,22 @@ export const RecordActionsTriggerButton = forwardRef<HTMLButtonElement, { ariaLa
  * focused) opens the shared record action menu. Left-click behaviour of the wrapped element is
  * untouched, and the content is portaled so it is safe to wrap a `<tr>` or a grid card.
  */
-export function RecordContextMenu({ model, children }: { model: RecordMenuModel; children: ReactNode }) {
+export function RecordContextMenu({
+    model,
+    children,
+    onOpenChange,
+}: {
+    model: RecordMenuModel;
+    children: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+}) {
     const [activated, setActivated] = useState(false);
     const groups = useRecordMenuGroups(model, activated);
     return (
-        <ContextMenu onOpenChange={(open) => open && setActivated(true)}>
+        <ContextMenu onOpenChange={(open) => {
+            if (open) setActivated(true);
+            onOpenChange?.(open);
+        }}>
             <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
             <ContextMenuContent>
                 <MenuBody groups={groups} Item={ContextMenuItem} Separator={ContextMenuSeparator} />

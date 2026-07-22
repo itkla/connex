@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -10,7 +11,7 @@ import {
     type KeyboardEvent,
 } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -62,6 +63,7 @@ type Props = {
     users: User[];
     currentUserId: number;
     canDeleteTasks: boolean;
+    originWorkspaceId: number | null;
 };
 
 type Bucket = 'overdue' | 'today' | 'upcoming' | 'noDate' | 'completed';
@@ -163,14 +165,16 @@ export default function TasksBrowser({
     users,
     currentUserId,
     canDeleteTasks,
+    originWorkspaceId,
 }: Props) {
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const router = useRouter();
+    const pathname = usePathname() ?? '';
     const reduce = useReducedMotion() ?? false;
     const { activeWorkspaceId, switching } = useWorkspace();
-    const [originWorkspaceId] = useState(activeWorkspaceId);
+    const [originPathname] = useState(pathname);
 
     const [now] = useState(() => Date.now());
     const [tasks, setTasks] = useState<Task[]>(initialTasks);
@@ -199,18 +203,33 @@ export default function TasksBrowser({
     const [rovingTaskId, setRovingTaskId] = useState<number | null>(null);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState<Set<number>>(new Set());
-    const rowRefs = useRef(new Map<number, HTMLLIElement>());
+    const rowRefs = useRef(new Map<number, HTMLButtonElement>());
     const pendingFocusRef = useRef<number | null>(null);
     const timers = useRef<number[]>([]);
-    const workspaceCurrent = !switching
+    const deleteControllerRef = useRef<AbortController | null>(null);
+    const liveScopeRef = useRef({ active: true, activeWorkspaceId, pathname, switching });
+    const pageCurrent = !switching
         && originWorkspaceId !== null
-        && activeWorkspaceId === originWorkspaceId;
+        && activeWorkspaceId === originWorkspaceId
+        && pathname === originPathname;
+
+    useLayoutEffect(() => {
+        liveScopeRef.current = { active: true, activeWorkspaceId, pathname, switching };
+        return () => {
+            liveScopeRef.current = { active: false, activeWorkspaceId, pathname, switching };
+            deleteControllerRef.current?.abort();
+            deleteControllerRef.current = null;
+        };
+    }, [activeWorkspaceId, pathname, switching]);
 
     useEffect(() => {
-        if (workspaceCurrent) return;
-        const timer = window.setTimeout(() => setDeletingTask(null), 0);
+        if (pageCurrent) return;
+        const timer = window.setTimeout(() => {
+            setDeletingTask(null);
+            setDeleting(false);
+        }, 0);
         return () => window.clearTimeout(timer);
-    }, [workspaceCurrent]);
+    }, [pageCurrent]);
 
     const searchParams = useSearchParams();
     useEffect(() => {
@@ -397,8 +416,7 @@ export default function TasksBrowser({
     }, []);
 
     const handleTaskRowKeyDown = useCallback(
-        (event: KeyboardEvent<HTMLLIElement>, task: Task) => {
-            if (event.target !== event.currentTarget) return;
+        (event: KeyboardEvent<HTMLButtonElement>, task: Task) => {
             const rowIndex = visibleTasks.findIndex((visibleTask) => visibleTask.id === task.id);
             if (rowIndex < 0) return;
 
@@ -440,9 +458,6 @@ export default function TasksBrowser({
                         }),
                     );
                 }
-            } else if (event.key === 'Enter') {
-                event.preventDefault();
-                setEditingTask(task);
             }
         },
         [visibleTasks, focusTaskRow],
@@ -452,7 +467,7 @@ export default function TasksBrowser({
         setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
 
     const handleToggleComplete = async (task: Task, next: boolean) => {
-        if (pendingToggle.has(task.id)) return;
+        if (!pageCurrent || task.workspaceId !== originWorkspaceId || pendingToggle.has(task.id)) return;
         setPendingToggle((prev) => new Set(prev).add(task.id));
 
         const commitOptimistic = () => {
@@ -473,14 +488,18 @@ export default function TasksBrowser({
         }
 
         try {
-            await updateTask(task.id, {
-                description: task.description,
-                dueDate: task.dueDate,
-                assignedToId: task.assignedToId,
-                personId: task.personId ?? undefined,
-                dealId: task.dealId ?? undefined,
-                completed: next,
-            });
+            await updateTask(
+                task.id,
+                {
+                    description: task.description,
+                    dueDate: task.dueDate,
+                    assignedToId: task.assignedToId,
+                    personId: task.personId ?? undefined,
+                    dealId: task.dealId ?? undefined,
+                    completed: next,
+                },
+                { headers: { 'X-Workspace-Id': String(originWorkspaceId) } },
+            );
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
             setTaskCompleted(task.id, !next);
@@ -502,7 +521,8 @@ export default function TasksBrowser({
         if (
             !deletingTask
             || deleting
-            || !workspaceCurrent
+            || !pageCurrent
+            || deletingTask.workspaceId !== originWorkspaceId
             || pendingToggle.has(deletingTask.id)
             || completing.has(deletingTask.id)
         ) return;
@@ -513,10 +533,21 @@ export default function TasksBrowser({
                 : null;
 
         setDeleting(true);
+        const controller = new AbortController();
+        deleteControllerRef.current = controller;
+        const scopeCurrent = () => {
+            const scope = liveScopeRef.current;
+            return scope.active
+                && !scope.switching
+                && scope.activeWorkspaceId === originWorkspaceId
+                && scope.pathname === originPathname;
+        };
         try {
             await deleteTask(deletingTask.id, {
                 headers: { 'X-Workspace-Id': String(originWorkspaceId) },
+                signal: controller.signal,
             });
+            if (controller.signal.aborted || !scopeCurrent()) return;
             pendingFocusRef.current = focusTarget?.id ?? null;
             setRovingTaskId(focusTarget?.id ?? null);
             setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
@@ -524,16 +555,20 @@ export default function TasksBrowser({
             toastSuccess(t('toastDeleted'));
             router.refresh();
         } catch (error) {
+            if (controller.signal.aborted || !scopeCurrent()) return;
             toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
         } finally {
-            setDeleting(false);
+            if (deleteControllerRef.current === controller) {
+                deleteControllerRef.current = null;
+                if (scopeCurrent()) setDeleting(false);
+            }
         }
     };
 
     const drawerCompanyId = editingTask?.personId
         ? personById.get(editingTask.personId)?.companyId ?? null
         : null;
-    const visibleDeletingTask = workspaceCurrent ? deletingTask : null;
+    const visibleDeletingTask = pageCurrent ? deletingTask : null;
 
     const hasAnyTasks = tasks.length > 0;
     const isEmpty = filtered.length === 0;
@@ -562,10 +597,11 @@ export default function TasksBrowser({
     const renderRow = (task: Task, bucket: Bucket) => {
         const label = noteSnippet(task.description, 60) || t('entityLabel');
         const taskMutationPending = pendingToggle.has(task.id) || completing.has(task.id);
+        const taskInOriginWorkspace = task.workspaceId === originWorkspaceId;
         const menuModel: RecordMenuModel = {
             record: { type: 'task', id: task.id, label },
             includeCreateActions: false,
-            onDelete: canDeleteTasks && workspaceCurrent && !taskMutationPending
+            onDelete: canDeleteTasks && pageCurrent && taskInOriginWorkspace && !taskMutationPending
                 ? () => setDeletingTask(task)
                 : undefined,
         };
@@ -581,9 +617,12 @@ export default function TasksBrowser({
                 assignee={userById.get(task.assignedToId)}
                 bucket={bucket}
                 onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
-                onOpen={() => setEditingTask(task)}
+                onOpen={() => {
+                    if (pageCurrent && taskInOriginWorkspace) setEditingTask(task);
+                }}
                 pending={pendingToggle.has(task.id)}
                 ariaCompleteLabel={t('ariaCompleteTask')}
+                ariaOpenLabel={t('ariaOpenTask', { name: label })}
                 due={formatDue(task.dueDate, t, locale)}
                 menuModel={menuModel}
                 tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
@@ -1023,12 +1062,13 @@ type TaskRowProps = {
     onOpen: () => void;
     pending: boolean;
     ariaCompleteLabel: string;
+    ariaOpenLabel: string;
     due: { label: string; tone: DueTone } | null;
     menuModel: RecordMenuModel;
     tabIndex: number;
-    rowRef: (row: HTMLLIElement | null) => void;
+    rowRef: (row: HTMLButtonElement | null) => void;
     onFocus: () => void;
-    onKeyDown: (event: KeyboardEvent<HTMLLIElement>) => void;
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 };
 
 function TaskRow({
@@ -1043,6 +1083,7 @@ function TaskRow({
     onOpen,
     pending,
     ariaCompleteLabel,
+    ariaOpenLabel,
     due,
     menuModel,
     tabIndex,
@@ -1051,26 +1092,57 @@ function TaskRow({
     onKeyDown,
 }: TaskRowProps) {
     const isCompletedRow = bucket === 'completed';
+    const touchContextRef = useRef(false);
+    const suppressNextOpenRef = useRef(false);
 
     return (
-        <RecordContextMenu model={menuModel}>
+        <RecordContextMenu
+            model={menuModel}
+            onOpenChange={(open) => {
+                if (open && touchContextRef.current) suppressNextOpenRef.current = true;
+            }}
+        >
             <motion.li
-                ref={rowRef}
                 layout={!reduce}
                 initial={false}
                 exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
                 transition={{ duration: 0.22, ease: EASE_OUT }}
                 className={cn(
-                    'group flex cursor-pointer items-center gap-3 px-5 py-3 outline-hidden transition-colors hover:bg-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand',
+                    'group relative flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/80',
                     (checked || isCompletedRow) && 'opacity-55',
                 )}
-                tabIndex={tabIndex}
-                aria-keyshortcuts="Shift+F10"
-                onFocus={onFocus}
-                onKeyDown={onKeyDown}
-                onClick={onOpen}
             >
-                <div onClick={(event) => event.stopPropagation()} className="shrink-0">
+                <button
+                    ref={rowRef}
+                    type="button"
+                    tabIndex={tabIndex}
+                    aria-label={ariaOpenLabel}
+                    aria-keyshortcuts="Shift+F10"
+                    className="absolute inset-0 z-0 outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                    onFocus={onFocus}
+                    onKeyDown={onKeyDown}
+                    onPointerDown={(event) => {
+                        suppressNextOpenRef.current = false;
+                        touchContextRef.current = event.pointerType !== 'mouse';
+                    }}
+                    onPointerCancel={() => {
+                        touchContextRef.current = false;
+                    }}
+                    onClick={() => {
+                        touchContextRef.current = false;
+                        if (suppressNextOpenRef.current) {
+                            suppressNextOpenRef.current = false;
+                            return;
+                        }
+                        onOpen();
+                    }}
+                />
+
+                <div
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className="relative z-10 shrink-0"
+                >
                     <Checkbox
                         checked={checked}
                         onCheckedChange={(value) => onToggle(value === true)}
@@ -1081,19 +1153,25 @@ function TaskRow({
                 </div>
 
                 <span
+                    onPointerDown={(event) => {
+                        if (event.target instanceof Element && event.target.closest('a')) {
+                            event.stopPropagation();
+                        }
+                    }}
                     className={cn(
-                        'min-w-0 flex-1 truncate text-sm',
+                        'pointer-events-none relative z-10 min-w-0 flex-1 truncate text-sm [&_a]:pointer-events-auto',
                         checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
                     )}
                 >
                     <NoteContent content={task.description} references={task.references} />
                 </span>
 
-                <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
+                <div className="relative z-10 hidden shrink-0 items-center gap-1.5 sm:flex">
                     {person && (
                         <Link
                             href={`/records/contacts/${person.id}`}
                             onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
                             className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                             title={person.name}
                         >
@@ -1105,6 +1183,7 @@ function TaskRow({
                         <Link
                             href={`/records/deals/${deal.id}`}
                             onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
                             className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
                             title={deal.name}
                         >
@@ -1114,7 +1193,7 @@ function TaskRow({
                     )}
                 </div>
 
-                <div className="w-18 shrink-0 text-right">
+                <div className="pointer-events-none relative z-10 w-18 shrink-0 text-right">
                     {due && !isCompletedRow ? (
                         <span
                             className={cn(
@@ -1127,7 +1206,7 @@ function TaskRow({
                     ) : null}
                 </div>
 
-                <div className="shrink-0">
+                <div className="relative z-10 shrink-0">
                     {assignee ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -1151,7 +1230,7 @@ function TaskRow({
                 </div>
 
                 <div
-                    className="shrink-0"
+                    className="relative z-10 shrink-0"
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                 >
