@@ -166,6 +166,7 @@
   },
   "ActivityTasks": {
     "title": "Tasks",
+    "entityLabel": "task",
     "subtitle": "Stay on top of every follow-up across your team.",
     "today": "Today",
     "tasksLeft": "{count} left",
@@ -214,7 +215,10 @@
     "dueTomorrow": "Tomorrow",
     "dueYesterday": "Yesterday",
     "ariaCompleteTask": "Mark task complete",
+    "ariaOpenTask": "Open task: {name}",
     "toastFailedUpdate": "Failed to update task",
+    "toastDeleted": "Task deleted",
+    "toastFailedDelete": "Failed to delete task",
     "taskUpdatedSuccess": "Task updated successfully",
     "taskMarkedAsCompleteSuccess": "Task marked as complete",
     "taskMarkedAsIncompleteSuccess": "Task marked as incomplete"

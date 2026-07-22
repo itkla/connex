@@ -1,8 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ComponentType,
+    type KeyboardEvent,
+} from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -26,15 +35,23 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import {
+    RecordActionMenuTrigger,
+    RecordContextMenu,
+    type RecordMenuModel,
+} from '@/app/components/records/RecordActionMenu';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
-import { getTaskById, updateTask } from '@/app/lib/api';
+import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
-import { toastError } from '@/app/lib/toast';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { toastError, toastSuccess } from '@/app/lib/toast';
+import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import type { Contact, Deal, Task, User } from '@/app/lib/types';
@@ -45,6 +62,8 @@ type Props = {
     deals: Deal[];
     users: User[];
     currentUserId: number;
+    canDeleteTasks: boolean;
+    originWorkspaceId: number | null;
 };
 
 type Bucket = 'overdue' | 'today' | 'upcoming' | 'noDate' | 'completed';
@@ -139,12 +158,23 @@ function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, 
     });
 }
 
-export default function TasksBrowser({ tasks: initialTasks, persons, deals, users, currentUserId }: Props) {
+export default function TasksBrowser({
+    tasks: initialTasks,
+    persons,
+    deals,
+    users,
+    currentUserId,
+    canDeleteTasks,
+    originWorkspaceId,
+}: Props) {
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const router = useRouter();
+    const pathname = usePathname() ?? '';
     const reduce = useReducedMotion() ?? false;
+    const { activeWorkspaceId, switching } = useWorkspace();
+    const [originPathname] = useState(pathname);
 
     const [now] = useState(() => Date.now());
     const [tasks, setTasks] = useState<Task[]>(initialTasks);
@@ -168,9 +198,65 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const [viewInitialized, setViewInitialized] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
+    const [deletingTask, setDeletingTask] = useState<Task | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const [rovingTaskId, setRovingTaskId] = useState<number | null>(null);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState<Set<number>>(new Set());
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const rowRefs = useRef(new Map<number, HTMLButtonElement>());
+    const pendingFocusRef = useRef<number | 'search' | null>(null);
     const timers = useRef<number[]>([]);
+    const deleteControllerRef = useRef<AbortController | null>(null);
+    const toggleControllersRef = useRef(new Map<number, AbortController>());
+    const liveScopeRef = useRef({
+        active: true,
+        activeWorkspaceId,
+        originWorkspaceId,
+        pathname,
+        switching,
+    });
+    const pageCurrent = !switching
+        && originWorkspaceId !== null
+        && activeWorkspaceId === originWorkspaceId
+        && pathname === originPathname;
+
+    useLayoutEffect(() => {
+        const toggleControllers = toggleControllersRef.current;
+        liveScopeRef.current = {
+            active: true,
+            activeWorkspaceId,
+            originWorkspaceId,
+            pathname,
+            switching,
+        };
+        return () => {
+            liveScopeRef.current = {
+                active: false,
+                activeWorkspaceId,
+                originWorkspaceId,
+                pathname,
+                switching,
+            };
+            deleteControllerRef.current?.abort();
+            deleteControllerRef.current = null;
+            toggleControllers.forEach((controller) => controller.abort());
+            toggleControllers.clear();
+        };
+    }, [activeWorkspaceId, originWorkspaceId, pathname, switching]);
+
+    useEffect(() => {
+        if (pageCurrent) return;
+        const timer = window.setTimeout(() => {
+            timers.current.forEach((id) => window.clearTimeout(id));
+            timers.current = [];
+            setDeletingTask(null);
+            setDeleting(false);
+            setPendingToggle(new Set());
+            setCompleting(new Set());
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [pageCurrent]);
 
     const searchParams = useSearchParams();
     useEffect(() => {
@@ -333,41 +419,177 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     }, [filtered, completing]);
 
     const visibleBuckets = useMemo(() => ACTIVE_BUCKETS.filter((b) => grouped[b].length > 0), [grouped]);
+    const visibleTasks = useMemo(
+        () => queue === 'completed' ? filtered : visibleBuckets.flatMap((bucket) => grouped[bucket]),
+        [queue, filtered, visibleBuckets, grouped],
+    );
+    const effectiveRovingTaskId =
+        rovingTaskId != null && visibleTasks.some((task) => task.id === rovingTaskId)
+            ? rovingTaskId
+            : visibleTasks[0]?.id ?? null;
+
+    useEffect(() => {
+        const pendingFocus = pendingFocusRef.current;
+        if (pendingFocus == null) return;
+        if (pendingFocus === 'search') {
+            pendingFocusRef.current = null;
+            searchInputRef.current?.focus();
+            return;
+        }
+        const row = rowRefs.current.get(pendingFocus);
+        if (!row) return;
+        pendingFocusRef.current = null;
+        row.focus();
+    }, [visibleTasks]);
+
+    const focusTaskRow = useCallback((taskId: number) => {
+        setRovingTaskId(taskId);
+        rowRefs.current.get(taskId)?.focus();
+    }, []);
+
+    const handleTaskRowKeyDown = useCallback(
+        (event: KeyboardEvent<HTMLButtonElement>, task: Task) => {
+            const rowIndex = visibleTasks.findIndex((visibleTask) => visibleTask.id === task.id);
+            if (rowIndex < 0) return;
+
+            if (event.key === 'ArrowDown') {
+                const next = visibleTasks[rowIndex + 1];
+                if (next) {
+                    event.preventDefault();
+                    focusTaskRow(next.id);
+                }
+            } else if (event.key === 'ArrowUp') {
+                const previous = visibleTasks[rowIndex - 1];
+                if (previous) {
+                    event.preventDefault();
+                    focusTaskRow(previous.id);
+                }
+            } else if (event.key === 'Home') {
+                const first = visibleTasks[0];
+                if (first) {
+                    event.preventDefault();
+                    focusTaskRow(first.id);
+                }
+            } else if (event.key === 'End') {
+                const last = visibleTasks[visibleTasks.length - 1];
+                if (last) {
+                    event.preventDefault();
+                    focusTaskRow(last.id);
+                }
+            } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                const row = rowRefs.current.get(task.id);
+                if (row) {
+                    event.preventDefault();
+                    const rect = row.getBoundingClientRect();
+                    row.dispatchEvent(
+                        new MouseEvent('contextmenu', {
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: rect.right - 40,
+                            clientY: rect.top + rect.height / 2,
+                        }),
+                    );
+                }
+            }
+        },
+        [visibleTasks, focusTaskRow],
+    );
 
     const setTaskCompleted = (id: number, value: boolean) =>
         setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
 
     const handleToggleComplete = async (task: Task, next: boolean) => {
-        if (pendingToggle.has(task.id)) return;
+        const operationWorkspaceId = originWorkspaceId;
+        if (
+            !pageCurrent
+            || operationWorkspaceId === null
+            || task.workspaceId !== operationWorkspaceId
+            || pendingToggle.has(task.id)
+        ) return;
+        const controller = new AbortController();
+        toggleControllersRef.current.set(task.id, controller);
+        const scopeCurrent = () => {
+            const scope = liveScopeRef.current;
+            return scope.active
+                && !scope.switching
+                && scope.activeWorkspaceId === operationWorkspaceId
+                && scope.originWorkspaceId === operationWorkspaceId
+                && scope.pathname === originPathname;
+        };
         setPendingToggle((prev) => new Set(prev).add(task.id));
+        let optimisticTimerId: number | null = null;
+        let requestSettled = false;
+        let timerSettled = !(next && !reduce);
+
+        const finishOperation = () => {
+            if (!requestSettled || !timerSettled) return;
+            if (toggleControllersRef.current.get(task.id) !== controller) return;
+            toggleControllersRef.current.delete(task.id);
+            if (scopeCurrent()) {
+                setPendingToggle((prev) => {
+                    const n = new Set(prev);
+                    n.delete(task.id);
+                    return n;
+                });
+            }
+        };
 
         const commitOptimistic = () => {
+            if (optimisticTimerId !== null) {
+                timers.current = timers.current.filter((id) => id !== optimisticTimerId);
+                optimisticTimerId = null;
+            }
+            timerSettled = true;
+            if (
+                controller.signal.aborted
+                || !scopeCurrent()
+                || toggleControllersRef.current.get(task.id) !== controller
+            ) {
+                finishOperation();
+                return;
+            }
             setTaskCompleted(task.id, next);
             setCompleting((prev) => {
                 const n = new Set(prev);
                 n.delete(task.id);
                 return n;
             });
+            finishOperation();
         };
 
         if (next && !reduce) {
             setCompleting((prev) => new Set(prev).add(task.id));
             const id = window.setTimeout(commitOptimistic, COMPLETE_LINGER_MS);
+            optimisticTimerId = id;
             timers.current.push(id);
         } else {
             commitOptimistic();
         }
 
         try {
-            await updateTask(task.id, {
-                description: task.description,
-                dueDate: task.dueDate,
-                assignedToId: task.assignedToId,
-                personId: task.personId ?? undefined,
-                dealId: task.dealId ?? undefined,
-                completed: next,
-            });
+            await updateTask(
+                task.id,
+                {
+                    description: task.description,
+                    dueDate: task.dueDate,
+                    assignedToId: task.assignedToId,
+                    personId: task.personId ?? undefined,
+                    dealId: task.dealId ?? undefined,
+                    completed: next,
+                },
+                {
+                    headers: { 'X-Workspace-Id': String(operationWorkspaceId) },
+                    signal: controller.signal,
+                },
+            );
         } catch (err) {
+            if (controller.signal.aborted || !scopeCurrent()) return;
+            if (optimisticTimerId !== null) {
+                window.clearTimeout(optimisticTimerId);
+                timers.current = timers.current.filter((id) => id !== optimisticTimerId);
+                optimisticTimerId = null;
+            }
+            timerSettled = true;
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
             setTaskCompleted(task.id, !next);
             setCompleting((prev) => {
@@ -376,17 +598,66 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                 return n;
             });
         } finally {
-            setPendingToggle((prev) => {
-                const n = new Set(prev);
-                n.delete(task.id);
-                return n;
+            requestSettled = true;
+            finishOperation();
+        }
+    };
+
+    const handleDeleteTask = async () => {
+        const operationWorkspaceId = originWorkspaceId;
+        if (
+            !deletingTask
+            || deleting
+            || !pageCurrent
+            || operationWorkspaceId === null
+            || deletingTask.workspaceId !== operationWorkspaceId
+            || pendingToggle.has(deletingTask.id)
+            || completing.has(deletingTask.id)
+        ) return;
+        const deletingIndex = visibleTasks.findIndex((task) => task.id === deletingTask.id);
+        const focusTarget =
+            deletingIndex >= 0
+                ? visibleTasks[deletingIndex + 1] ?? visibleTasks[deletingIndex - 1] ?? null
+                : null;
+
+        setDeleting(true);
+        const controller = new AbortController();
+        deleteControllerRef.current = controller;
+        const scopeCurrent = () => {
+            const scope = liveScopeRef.current;
+            return scope.active
+                && !scope.switching
+                && scope.activeWorkspaceId === operationWorkspaceId
+                && scope.originWorkspaceId === operationWorkspaceId
+                && scope.pathname === originPathname;
+        };
+        try {
+            await deleteTask(deletingTask.id, {
+                headers: { 'X-Workspace-Id': String(operationWorkspaceId) },
+                signal: controller.signal,
             });
+            if (controller.signal.aborted || !scopeCurrent()) return;
+            pendingFocusRef.current = focusTarget?.id ?? 'search';
+            setRovingTaskId(focusTarget?.id ?? null);
+            setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
+            setDeletingTask(null);
+            toastSuccess(t('toastDeleted'));
+            router.refresh();
+        } catch (error) {
+            if (controller.signal.aborted || !scopeCurrent()) return;
+            toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
+        } finally {
+            if (deleteControllerRef.current === controller) {
+                deleteControllerRef.current = null;
+                if (scopeCurrent()) setDeleting(false);
+            }
         }
     };
 
     const drawerCompanyId = editingTask?.personId
         ? personById.get(editingTask.personId)?.companyId ?? null
         : null;
+    const visibleDeletingTask = pageCurrent ? deletingTask : null;
 
     const hasAnyTasks = tasks.length > 0;
     const isEmpty = filtered.length === 0;
@@ -412,23 +683,47 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
         setCompanyFilter(new Set());
     };
 
-    const renderRow = (task: Task, bucket: Bucket) => (
-        <TaskRow
-            key={task.id}
-            task={task}
-            reduce={reduce}
-            checked={completing.has(task.id) || task.completed}
-            person={task.personId ? personById.get(task.personId) : undefined}
-            deal={task.dealId ? dealById.get(task.dealId) : undefined}
-            assignee={userById.get(task.assignedToId)}
-            bucket={bucket}
-            onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
-            onOpen={() => setEditingTask(task)}
-            pending={pendingToggle.has(task.id)}
-            ariaCompleteLabel={t('ariaCompleteTask')}
-            due={formatDue(task.dueDate, t, locale)}
-        />
-    );
+    const renderRow = (task: Task, bucket: Bucket) => {
+        const label = noteSnippet(task.description, 60) || t('entityLabel');
+        const taskMutationPending = pendingToggle.has(task.id) || completing.has(task.id);
+        const taskInOriginWorkspace = task.workspaceId === originWorkspaceId;
+        const menuModel: RecordMenuModel = {
+            record: { type: 'task', id: task.id, label },
+            includeCreateActions: false,
+            onDelete: canDeleteTasks && pageCurrent && taskInOriginWorkspace && !taskMutationPending
+                ? () => setDeletingTask(task)
+                : undefined,
+        };
+
+        return (
+            <TaskRow
+                key={task.id}
+                task={task}
+                reduce={reduce}
+                checked={completing.has(task.id) || task.completed}
+                person={task.personId ? personById.get(task.personId) : undefined}
+                deal={task.dealId ? dealById.get(task.dealId) : undefined}
+                assignee={userById.get(task.assignedToId)}
+                bucket={bucket}
+                onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
+                onOpen={() => {
+                    if (pageCurrent && taskInOriginWorkspace) setEditingTask(task);
+                }}
+                pending={pendingToggle.has(task.id)}
+                ariaCompleteLabel={t('ariaCompleteTask')}
+                ariaOpenLabel={t('ariaOpenTask', { name: label })}
+                due={formatDue(task.dueDate, t, locale)}
+                menuModel={menuModel}
+                tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
+                rowRef={(row) => {
+                    if (row) rowRefs.current.set(task.id, row);
+                    else rowRefs.current.delete(task.id);
+                }}
+                onFocus={() => setRovingTaskId(task.id)}
+                onKeyDown={(event) => handleTaskRowKeyDown(event, task)}
+            />
+        );
+    };
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -508,6 +803,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                                 className="py-0"
                                 search={
                                     <SearchField
+                                        inputRef={searchInputRef}
                                         value={query}
                                         onChange={setQuery}
                                         onClear={() => setQuery('')}
@@ -567,6 +863,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                                     className="py-0"
                                     search={
                                         <SearchField
+                                            inputRef={searchInputRef}
                                             value={query}
                                             onChange={setQuery}
                                             onClear={() => setQuery('')}
@@ -683,6 +980,19 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                     deals={deals}
                 />
             )}
+
+            <DeleteRecordDialog<Task>
+                open={visibleDeletingTask !== null}
+                onOpenChange={(open) => {
+                    if (!open && !deleting) setDeletingTask(null);
+                }}
+                selectedIds={new Set(visibleDeletingTask ? [visibleDeletingTask.id] : [])}
+                selectedItems={visibleDeletingTask ? [visibleDeletingTask] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(task) => noteSnippet(task.description, 60) || t('entityLabel')}
+                isDeleting={deleting}
+                confirmDelete={() => void handleDeleteTask()}
+            />
 
             <TaskDialog
                 open={creating}
@@ -843,7 +1153,13 @@ type TaskRowProps = {
     onOpen: () => void;
     pending: boolean;
     ariaCompleteLabel: string;
+    ariaOpenLabel: string;
     due: { label: string; tone: DueTone } | null;
+    menuModel: RecordMenuModel;
+    tabIndex: number;
+    rowRef: (row: HTMLButtonElement | null) => void;
+    onFocus: () => void;
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 };
 
 function TaskRow({
@@ -858,102 +1174,181 @@ function TaskRow({
     onOpen,
     pending,
     ariaCompleteLabel,
+    ariaOpenLabel,
     due,
+    menuModel,
+    tabIndex,
+    rowRef,
+    onFocus,
+    onKeyDown,
 }: TaskRowProps) {
     const isCompletedRow = bucket === 'completed';
+    const touchContextRef = useRef(false);
+    const suppressNextOpenRef = useRef(false);
+    const handleRowPointerDown = (pointerType: string) => {
+        suppressNextOpenRef.current = false;
+        touchContextRef.current = pointerType !== 'mouse';
+    };
+    const handleRowOpen = () => {
+        touchContextRef.current = false;
+        if (suppressNextOpenRef.current) {
+            suppressNextOpenRef.current = false;
+            return;
+        }
+        onOpen();
+    };
 
     return (
-        <motion.li
-            layout={!reduce}
-            initial={false}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
-            transition={{ duration: 0.22, ease: EASE_OUT }}
-            className={cn(
-                'group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/80',
-                (checked || isCompletedRow) && 'opacity-55',
-            )}
-            onClick={onOpen}
+        <RecordContextMenu
+            model={menuModel}
+            onOpenChange={(open) => {
+                if (open && touchContextRef.current) {
+                    suppressNextOpenRef.current = true;
+                } else if (!open) {
+                    touchContextRef.current = false;
+                    suppressNextOpenRef.current = false;
+                }
+            }}
         >
-            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                <Checkbox
-                    checked={checked}
-                    onCheckedChange={(value) => onToggle(value === true)}
-                    disabled={pending && !checked}
-                    aria-label={ariaCompleteLabel}
-                    className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
-                />
-            </div>
-
-            <span
+            <motion.li
+                layout={!reduce}
+                initial={false}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
+                transition={{ duration: 0.22, ease: EASE_OUT }}
                 className={cn(
-                    'min-w-0 flex-1 truncate text-sm',
-                    checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
+                    'group relative flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/80',
+                    (checked || isCompletedRow) && 'opacity-55',
                 )}
             >
-                <NoteContent content={task.description} references={task.references} />
-            </span>
+                <button
+                    ref={rowRef}
+                    type="button"
+                    tabIndex={tabIndex}
+                    aria-label={ariaOpenLabel}
+                    aria-keyshortcuts="Shift+F10"
+                    className="absolute inset-0 z-0 outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                    onFocus={onFocus}
+                    onKeyDown={onKeyDown}
+                    onPointerDown={(event) => handleRowPointerDown(event.pointerType)}
+                    onPointerCancel={() => {
+                        touchContextRef.current = false;
+                    }}
+                    onClick={handleRowOpen}
+                />
 
-            <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-                {person && (
-                    <Link
-                        href={`/records/contacts/${person.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
-                        title={person.name}
-                    >
-                        <UserIcon className="size-3 shrink-0" />
-                        <span className="truncate">{person.name}</span>
-                    </Link>
-                )}
-                {deal && (
-                    <Link
-                        href={`/records/deals/${deal.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
-                        title={deal.name}
-                    >
-                        <BriefcaseIcon className="size-3 shrink-0" />
-                        <span className="truncate">{deal.name}</span>
-                    </Link>
-                )}
-            </div>
+                <div
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className="relative z-10 shrink-0"
+                >
+                    <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => onToggle(value === true)}
+                        disabled={pending}
+                        aria-label={ariaCompleteLabel}
+                        className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
+                    />
+                </div>
 
-            <div className="w-18 shrink-0 text-right">
-                {due && !isCompletedRow ? (
-                    <span
-                        className={cn(
-                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
-                            DUE_CHIP[due.tone],
-                        )}
-                    >
-                        {due.label}
-                    </span>
-                ) : null}
-            </div>
+                <span
+                    onPointerDown={(event) => {
+                        if (event.target instanceof Element && event.target.closest('a')) {
+                            event.stopPropagation();
+                        }
+                    }}
+                    className={cn(
+                        'pointer-events-none relative z-10 min-w-0 flex-1 truncate text-sm [&_a]:pointer-events-auto',
+                        checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
+                    )}
+                >
+                    <NoteContent content={task.description} references={task.references} />
+                </span>
 
-            <div className="shrink-0">
-                {assignee ? (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Avatar size="sm" className="ring-1 ring-border">
-                                {assignee.profilePictureUrl ? (
-                                    <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
-                                ) : (
-                                    <AvatarFallback>
-                                        <UserIcon className="size-3 text-muted-foreground" />
-                                    </AvatarFallback>
-                                )}
-                            </Avatar>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" align="end">
-                            {assignee.displayName || assignee.username}
-                        </TooltipContent>
-                    </Tooltip>
-                ) : (
-                    <div className="size-6" />
-                )}
-            </div>
-        </motion.li>
+                <div className="relative z-10 hidden shrink-0 items-center gap-1.5 sm:flex">
+                    {person && (
+                        <Link
+                            href={`/records/contacts/${person.id}`}
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                            title={person.name}
+                        >
+                            <UserIcon className="size-3 shrink-0" />
+                            <span className="truncate">{person.name}</span>
+                        </Link>
+                    )}
+                    {deal && (
+                        <Link
+                            href={`/records/deals/${deal.id}`}
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
+                            title={deal.name}
+                        >
+                            <BriefcaseIcon className="size-3 shrink-0" />
+                            <span className="truncate">{deal.name}</span>
+                        </Link>
+                    )}
+                </div>
+
+                <div className="pointer-events-none relative z-10 w-18 shrink-0 text-right">
+                    {due && !isCompletedRow ? (
+                        <span
+                            className={cn(
+                                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
+                                DUE_CHIP[due.tone],
+                            )}
+                        >
+                            {due.label}
+                        </span>
+                    ) : null}
+                </div>
+
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={ariaOpenLabel}
+                    className="relative z-10 shrink-0"
+                    onPointerDown={(event) => handleRowPointerDown(event.pointerType)}
+                    onPointerCancel={() => {
+                        touchContextRef.current = false;
+                    }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleRowOpen();
+                    }}
+                >
+                    {assignee ? (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Avatar size="sm" className="ring-1 ring-border">
+                                    {assignee.profilePictureUrl ? (
+                                        <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
+                                    ) : (
+                                        <AvatarFallback>
+                                            <UserIcon className="size-3 text-muted-foreground" />
+                                        </AvatarFallback>
+                                    )}
+                                </Avatar>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" align="end">
+                                {assignee.displayName || assignee.username}
+                            </TooltipContent>
+                        </Tooltip>
+                    ) : (
+                        <div className="size-6" />
+                    )}
+                </button>
+
+                <div
+                    className="relative z-10 shrink-0"
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <RecordActionMenuTrigger model={menuModel} triggerClassName="opacity-100" />
+                </div>
+            </motion.li>
+        </RecordContextMenu>
     );
 }
 
