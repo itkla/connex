@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
@@ -54,8 +55,12 @@ public interface TaskMapper {
     List<Integer> getTaskIdsInStatusOrdered(@Param("workspaceId") int workspaceId, @Param("status") String status);
     /** The next free tail position in a status column ({@code MAX(position)+1}, or 0 when empty). */
     int nextTaskPosition(@Param("workspaceId") int workspaceId, @Param("status") String status);
-    /** Sets a single task's manual sort position within its status column. */
-    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+    /** Sets manual sort positions for tasks that still belong to the expected workspace status. */
+    int setPositions(
+        @Param("workspaceId") int workspaceId,
+        @Param("status") String status,
+        @Param("positions") List<BoardPositionUpdate> positions
+    );
     /** Sets a task's status, completion flag and position together so the done/completed CHECK holds. */
     int moveTask(
         @Param("workspaceId") int workspaceId,

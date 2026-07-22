@@ -916,9 +916,20 @@
     WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
   </select>
 
-  <update id="setPosition">
-    UPDATE deal SET position = #{position}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  <update id="setPositions">
+    UPDATE deal
+    SET position = CASE id
+      <foreach collection="positions" item="entry">
+        WHEN #{entry.id} THEN #{entry.position}
+      </foreach>
+      ELSE position
+    END
+    WHERE workspace_id = #{workspaceId}
+      AND stage_id = #{stageId}
+      AND id IN
+      <foreach collection="positions" item="entry" open="(" separator="," close=")">
+        #{entry.id}
+      </foreach>
   </update>
 
   <update id="updateExpectedCloseDate">

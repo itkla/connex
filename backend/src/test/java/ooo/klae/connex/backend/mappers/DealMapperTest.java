@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
@@ -152,10 +153,14 @@ class DealMapperTest extends AbstractMapperTest {
         Deal firstTie = newDealIn(pageWorkspace, pipeline, earlierStage);
         Deal secondTie = newDealIn(pageWorkspace, pipeline, earlierStage);
         Deal afterTies = newDealIn(pageWorkspace, pipeline, earlierStage);
-        dealMapper.setPosition(pageWorkspace.getId(), laterStageDeal.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), firstTie.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), secondTie.getId(), 0);
-        dealMapper.setPosition(pageWorkspace.getId(), afterTies.getId(), 1);
+        dealMapper.setPositions(pageWorkspace.getId(), laterStage.getId(), List.of(
+            new BoardPositionUpdate(laterStageDeal.getId(), 0)
+        ));
+        dealMapper.setPositions(pageWorkspace.getId(), earlierStage.getId(), List.of(
+            new BoardPositionUpdate(firstTie.getId(), 0),
+            new BoardPositionUpdate(secondTie.getId(), 0),
+            new BoardPositionUpdate(afterTies.getId(), 1)
+        ));
         Pipeline foreignPipeline = newPipeline();
         Stage foreignStage = newStage(foreignPipeline, 0);
         Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());

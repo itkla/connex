@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -68,6 +70,7 @@ public class TaskService {
     private static final String MENTION_SEVERITY = "info";
     private static final String IN_APP = "in_app";
     private static final int SNIPPET_LENGTH = 140;
+    private static final int POSITION_BATCH_SIZE = 500;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public List<Task> getAllTasks() {
@@ -252,16 +255,11 @@ public class TaskService {
         if (statusChanged) {
             List<Integer> source = taskMapper.getTaskIdsInStatusOrdered(workspaceId, oldStatus);
             source.removeIf(existing -> existing == id);
-            for (int i = 0; i < source.size(); i++) {
-                taskMapper.setPosition(workspaceId, source.get(i), i);
-            }
+            setPositions(workspaceId, oldStatus, source);
         }
 
         taskMapper.moveTask(workspaceId, id, status, toDone, index);
-        for (int i = 0; i < target.size(); i++) {
-            int tid = target.get(i);
-            if (tid != id) taskMapper.setPosition(workspaceId, tid, i);
-        }
+        setPositions(workspaceId, status, target);
 
         Task moved = taskMapper.getTaskById(workspaceId, id);
         auditService.record("task.update", "task", id, before.getDescription(),
@@ -273,6 +271,17 @@ public class TaskService {
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         return hydrate(workspaceId, moved);
+    }
+
+    private void setPositions(int workspaceId, String status, List<Integer> ids) {
+        for (int start = 0; start < ids.size(); start += POSITION_BATCH_SIZE) {
+            int end = Math.min(start + POSITION_BATCH_SIZE, ids.size());
+            List<BoardPositionUpdate> positions = new ArrayList<>(end - start);
+            for (int index = start; index < end; index++) {
+                positions.add(new BoardPositionUpdate(ids.get(index), index));
+            }
+            taskMapper.setPositions(workspaceId, status, positions);
+        }
     }
 
     /**
