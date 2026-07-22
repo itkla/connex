@@ -6,4 +6,6 @@ package ooo.klae.connex.backend.ai;
  */
 public interface AiProviderReadiness {
     boolean isReadyForOrg(int orgId);
+
+    boolean isImageInputReadyForOrg(int orgId);
 }

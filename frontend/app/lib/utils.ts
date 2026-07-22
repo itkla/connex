@@ -19,6 +19,22 @@ export function formatShortDate(value: string | undefined, locale: string) {
 }
 
 /**
+ * Whether a keyboard event target is a text-entry surface (input, textarea, select,
+ * contenteditable, or ARIA textbox), so global single-key shortcuts must not fire.
+ */
+export function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable ||
+        target.getAttribute('role') === 'textbox'
+    );
+}
+
+/**
  * Persists the user's locale preference.
  * @param locale - the locale code to persist (e.g. "en", "ja")
  */

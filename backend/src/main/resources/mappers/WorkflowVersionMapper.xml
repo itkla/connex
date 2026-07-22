@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowVersionMapper">
+
+  <sql id="columns">
+    id, workspace_id, workflow_id, version_number, name, description, record_type,
+    trigger_type, trigger_config, condition_json, actions_json, execution_mode,
+    run_as_user_id, created_by_id, published_by_id, definition_json, canvas_json,
+    definition_hash, published_at
+  </sql>
+
+  <sql id="qualifiedColumns">
+    v.id, v.workspace_id, v.workflow_id, v.version_number, v.name, v.description,
+    v.record_type, v.trigger_type, v.trigger_config, v.condition_json, v.actions_json,
+    v.execution_mode, v.run_as_user_id, v.created_by_id, v.published_by_id,
+    v.definition_json, v.canvas_json, v.definition_hash, v.published_at
+  </sql>
+
+  <select id="getById" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="listByWorkflow" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+    ORDER BY version_number DESC, id DESC
+  </select>
+
+  <select id="getLatest" resultType="WorkflowVersion">
+    SELECT <include refid="columns"/> FROM workflow_version
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+    ORDER BY version_number DESC, id DESC
+    LIMIT 1
+  </select>
+
+  <select id="findLockCandidatesByUserAnywhere" resultType="WorkflowVersion">
+    SELECT <include refid="qualifiedColumns"/> FROM workflow_version v
+    JOIN workflow w
+      ON w.workspace_id = v.workspace_id
+     AND w.id = v.workflow_id
+     AND w.active_version_id = v.id
+    LEFT JOIN rule r
+      ON r.workspace_id = w.workspace_id
+     AND r.id = w.legacy_rule_id
+    WHERE v.created_by_id = #{userId}
+       OR v.published_by_id = #{userId}
+       OR v.run_as_user_id = #{userId}
+       OR w.created_by_id = #{userId}
+       OR w.updated_by_id = #{userId}
+       OR w.draft_run_as_user_id = #{userId}
+       OR r.created_by_id = #{userId}
+       OR r.run_as_user_id = #{userId}
+    ORDER BY v.workspace_id, v.workflow_id, v.id
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_version
+      (workspace_id, workflow_id, version_number, name, description, record_type,
+       trigger_type, trigger_config, condition_json, actions_json, execution_mode,
+       run_as_user_id, created_by_id, published_by_id, definition_json, canvas_json,
+       definition_hash)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{versionNumber}, #{name}, #{description}, #{recordType},
+       #{triggerType}, #{triggerConfig}, #{conditionJson}, #{actionsJson}, #{executionMode},
+       #{runAsUserId}, #{createdById}, #{publishedById}, #{definitionJson}, #{canvasJson},
+       #{definitionHash})
+  </insert>
+
+</mapper>

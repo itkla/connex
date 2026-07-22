@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DocumentTemplateMapper">
+
+  <resultMap id="DocumentTemplateResult" type="DocumentTemplate">
+    <id     property="id"          column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="name"        column="name"/>
+    <result property="type"        column="type"/>
+    <result property="locale"      column="locale"/>
+    <result property="title"       column="title"/>
+    <result property="intro"       column="intro"/>
+    <result property="terms"       column="terms"/>
+    <result property="footer"      column="footer"/>
+    <result property="body"        column="body"/>
+    <result property="active"      column="active"/>
+    <result property="createdAt"   column="created_at"/>
+    <result property="updatedAt"   column="updated_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, workspace_id, name, type, locale, title, intro, terms, footer, body, active, created_at, updated_at
+  </sql>
+
+  <select id="getAll" resultMap="DocumentTemplateResult">
+    SELECT <include refid="cols"/> FROM document_template
+    WHERE workspace_id = #{workspaceId} ORDER BY name, id
+  </select>
+
+  <select id="getById" resultMap="DocumentTemplateResult">
+    SELECT <include refid="cols"/> FROM document_template
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_template (workspace_id, name, type, locale, title, intro, terms, footer, body, active)
+    VALUES (#{workspaceId}, #{name}, #{type}, #{locale}, #{title}, #{intro}, #{terms}, #{footer}, #{body}, #{active})
+  </insert>
+
+  <update id="update">
+    UPDATE document_template SET
+      name = #{name}, type = #{type}, locale = #{locale}, title = #{title},
+      intro = #{intro}, terms = #{terms}, footer = #{footer}, body = #{body}, active = #{active}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM document_template WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+</mapper>

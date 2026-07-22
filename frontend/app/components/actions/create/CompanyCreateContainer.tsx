@@ -40,6 +40,7 @@ export default function CompanyCreateContainer({
     onOpenChange,
     embedded = false,
     onCancel,
+    requestInit,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -47,6 +48,7 @@ export default function CompanyCreateContainer({
     embedded?: boolean;
     /** Cancel handler for embedded mode — steps back to the launcher selector. */
     onCancel?: () => void;
+    requestInit?: RequestInit;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -83,9 +85,10 @@ export default function CompanyCreateContainer({
             title: c.title.trim(),
             companyId,
         };
-        const newContact = await createContact(contactPayload);
+        const newContact = await createContact(contactPayload, requestInit);
+        if (requestInit?.signal?.aborted) return newContact;
         if (c.imageFile) {
-            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile, requestInit).catch(() => undefined);
         }
         return newContact;
     };
@@ -93,21 +96,21 @@ export default function CompanyCreateContainer({
     useEffect(() => {
         if (!open || loaded) return;
         let cancelled = false;
-        getCompanies()
+        getCompanies(requestInit)
             .then((next) => {
-                if (cancelled) return;
+                if (cancelled || requestInit?.signal?.aborted) return;
                 setExistingCompanies(next);
                 setLoaded(true);
             })
             .catch(() => {
-                if (cancelled) return;
+                if (cancelled || requestInit?.signal?.aborted) return;
                 setExistingCompanies([]);
                 setLoaded(true);
             });
         return () => {
             cancelled = true;
         };
-    }, [open, loaded]);
+    }, [open, loaded, requestInit]);
 
     useEffect(() => {
         invalidatePendingClose();
@@ -134,17 +137,21 @@ export default function CompanyCreateContainer({
         setCreating(true);
         try {
             const companyPayload = cleanCompanyPayload(payload);
-            const created = await createCompany(companyPayload);
+            const created = await createCompany(companyPayload, requestInit);
+            if (requestInit?.signal?.aborted) return;
             let logoUploadFailed = false;
             if (logoFile) {
                 try {
-                    await uploadCompanyLogo(created.id, logoFile);
+                    await uploadCompanyLogo(created.id, logoFile, requestInit);
                 } catch {
+                    if (requestInit?.signal?.aborted) return;
                     logoUploadFailed = true;
                 }
+                if (requestInit?.signal?.aborted) return;
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
+                if (requestInit?.signal?.aborted) return;
                 const failed = results.filter((r) => r.status === 'rejected').length;
                 if (failed === pendingContacts.length) {
                     toastError(t('feedback.companyContactsAllFailed', { count: failed }));
@@ -170,6 +177,7 @@ export default function CompanyCreateContainer({
                 router.refresh();
             }, 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             setCreating(false);
             if (isFieldError(err)) throw err;
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));

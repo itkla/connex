@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ProviderConnectionMapper">
+
+  <resultMap id="ProviderConnectionResult" type="ProviderConnection">
+    <id     property="id"                   column="id"/>
+    <result property="userId"               column="user_id"/>
+    <result property="provider"             column="provider"/>
+    <result property="status"               column="status"/>
+    <result property="providerAccountEmail" column="provider_account_email"/>
+    <result property="grantedScopes"        column="granted_scopes"/>
+    <result property="credentialRef"        column="credential_ref"/>
+    <result property="lastSyncAt"           column="last_sync_at"/>
+    <result property="errorCode"            column="error_code"/>
+    <result property="createdAt"            column="created_at"/>
+    <result property="updatedAt"            column="updated_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, user_id, provider, status, provider_account_email, granted_scopes, credential_ref,
+    last_sync_at, error_code, created_at, updated_at
+  </sql>
+
+  <select id="getByUserId" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE user_id = #{userId}
+    ORDER BY provider
+  </select>
+
+  <select id="getByUserAndProvider" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE user_id = #{userId} AND provider = #{provider}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO provider_connection (
+      user_id, provider, status, provider_account_email, granted_scopes, credential_ref, error_code
+    ) VALUES (
+      #{userId}, #{provider}, #{status}, #{providerAccountEmail}, #{grantedScopes}, #{credentialRef}, #{errorCode}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE provider_connection SET
+      status = #{status},
+      provider_account_email = #{providerAccountEmail},
+      granted_scopes = #{grantedScopes},
+      credential_ref = #{credentialRef},
+      error_code = #{errorCode}
+    WHERE user_id = #{userId} AND provider = #{provider}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM provider_connection WHERE user_id = #{userId} AND provider = #{provider}
+  </delete>
+</mapper>

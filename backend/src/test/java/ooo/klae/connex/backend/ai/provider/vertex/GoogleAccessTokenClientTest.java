@@ -6,6 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -24,8 +32,15 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -37,6 +52,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import tools.jackson.databind.JsonNode;
@@ -120,6 +138,32 @@ class GoogleAccessTokenClientTest {
     }
 
     @Test
+    void accessToken_productionPathUsesTheSharedPinnedDeadlineTransport() throws Exception {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        when(providerClient.post(
+                any(), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
+                any(AiRequestDeadline.class), any()))
+                .thenReturn(new FixedAiProviderClient.Response(
+                        200, tokenResponse(ACCESS_TOKEN, 3600).getBytes(StandardCharsets.UTF_8)));
+        GoogleAccessTokenClient client = new GoogleAccessTokenClient(
+                properties, providerClient, objectMapper, clock);
+
+        String token = client.accessToken(credentials(GoogleAccessTokenClient.TOKEN_ENDPOINT.toString()));
+
+        assertEquals(ACCESS_TOKEN, token);
+        verify(providerClient).post(
+                eq(GoogleAccessTokenClient.TOKEN_ENDPOINT),
+                eq(java.util.Set.of(GoogleAccessTokenClient.TOKEN_HOST)),
+                argThat(headers -> ContentType.APPLICATION_FORM_URLENCODED.getMimeType()
+                        .equals(headers.get("Content-Type"))),
+                eq(ContentType.APPLICATION_FORM_URLENCODED),
+                any(byte[].class),
+                any(AiRequestDeadline.class),
+                eq("Google OAuth token exchange"));
+    }
+
+    @Test
     void accessToken_reusesCachedTokenBeforeRefreshWindow() throws Exception {
         server.expect(requestTo(GoogleAccessTokenClient.TOKEN_ENDPOINT))
                 .andRespond(withSuccess(tokenResponse(ACCESS_TOKEN, 3600), MediaType.APPLICATION_JSON));
@@ -156,6 +200,94 @@ class GoogleAccessTokenClientTest {
                     org.mockito.Mockito.times(2));
         }
         server.verify();
+    }
+
+    @Test
+    void accessToken_sharedRefreshWaitHonorsTheWaitingCallersDeadline() throws Exception {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        when(providerClient.post(
+                any(), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
+                any(AiRequestDeadline.class), any()))
+                .thenAnswer(invocation -> {
+                    refreshStarted.countDown();
+                    if (!releaseRefresh.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out releasing OAuth refresh");
+                    }
+                    return new FixedAiProviderClient.Response(
+                            200, tokenResponse(ACCESS_TOKEN, 3600).getBytes(StandardCharsets.UTF_8));
+                });
+        GoogleAccessTokenClient client = new GoogleAccessTokenClient(
+                properties, providerClient, objectMapper, clock);
+        AiCredentials credentials = credentials(GoogleAccessTokenClient.TOKEN_ENDPOINT.toString());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<String> owner = executor.submit(
+                () -> client.accessToken(credentials, AiRequestDeadline.afterMillis(5000)));
+        try {
+            assertTrue(refreshStarted.await(5, TimeUnit.SECONDS));
+
+            long startedAt = System.nanoTime();
+            AiProviderException exception = assertThrows(AiProviderException.class,
+                    () -> client.accessToken(credentials, AiRequestDeadline.afterMillis(50)));
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            assertEquals("Vertex invocation exceeded its deadline", exception.getMessage());
+            assertTrue(elapsedMillis < 1000);
+        } finally {
+            releaseRefresh.countDown();
+            assertEquals(ACCESS_TOKEN, owner.get(5, TimeUnit.SECONDS));
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void accessToken_cacheEvictionDoesNotWaitForConcurrentOAuthRefresh() throws Exception {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        AtomicInteger requestCount = new AtomicInteger();
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        when(providerClient.post(
+                any(), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
+                any(AiRequestDeadline.class), any()))
+                .thenAnswer(invocation -> {
+                    int request = requestCount.incrementAndGet();
+                    if (request == 257) {
+                        refreshStarted.countDown();
+                        if (!releaseRefresh.await(5, TimeUnit.SECONDS)) {
+                            throw new AssertionError("Timed out releasing OAuth refresh");
+                        }
+                    }
+                    String token = "token-" + request;
+                    return new FixedAiProviderClient.Response(
+                            200, tokenResponse(token, 3600).getBytes(StandardCharsets.UTF_8));
+                });
+        GoogleAccessTokenClient client = new GoogleAccessTokenClient(
+                properties, providerClient, objectMapper, clock);
+        for (int index = 0; index < 256; index++) {
+            client.accessToken(credentialsForEmail("cached-" + index + "@example.test"));
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<String> slowRefresh = executor.submit(
+                () -> client.accessToken(credentialsForEmail("slow@example.test")));
+        Future<String> fastRefresh = null;
+        try {
+            assertTrue(refreshStarted.await(5, TimeUnit.SECONDS));
+            fastRefresh = executor.submit(
+                    () -> client.accessToken(credentialsForEmail("fast@example.test")));
+
+            assertEquals("token-258", fastRefresh.get(1, TimeUnit.SECONDS));
+        } finally {
+            releaseRefresh.countDown();
+            assertEquals("token-257", slowRefresh.get(5, TimeUnit.SECONDS));
+            if (fastRefresh != null && !fastRefresh.isDone()) {
+                fastRefresh.cancel(true);
+            }
+            executor.shutdownNow();
+        }
+        assertEquals(258, requestCount.get());
     }
 
     @Test
@@ -220,10 +352,19 @@ class GoogleAccessTokenClientTest {
         return AiCredentials.of(Map.of("serviceAccountJson", serviceAccountJson(tokenUri)));
     }
 
+    private AiCredentials credentialsForEmail(String clientEmail) throws Exception {
+        return AiCredentials.of(Map.of("serviceAccountJson", serviceAccountJson(clientEmail,
+                GoogleAccessTokenClient.TOKEN_ENDPOINT.toString())));
+    }
+
     private String serviceAccountJson(String tokenUri) throws Exception {
+        return serviceAccountJson(CLIENT_EMAIL, tokenUri);
+    }
+
+    private String serviceAccountJson(String clientEmail, String tokenUri) throws Exception {
         ObjectNode credential = objectMapper.createObjectNode();
         credential.put("type", "service_account");
-        credential.put("client_email", CLIENT_EMAIL);
+        credential.put("client_email", clientEmail);
         credential.put("private_key", privateKeyPem);
         credential.put("token_uri", tokenUri);
         return objectMapper.writeValueAsString(credential);

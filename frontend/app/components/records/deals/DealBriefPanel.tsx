@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { generateDealBrief } from '@/app/lib/api';
+import { recoverAiResult } from '@/app/lib/aiRecovery';
 import type { DealBrief } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,16 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                     setStoredState({ dealId, status: 'hidden' });
                 }
             } catch {
-                if (!cancelled) setStoredState({ dealId, status: 'error' });
+                if (cancelled) return;
+                const recovered = await recoverAiResult(
+                    () => generateDealBrief(dealId, false),
+                    (brief) => brief.available && ((brief.sections?.length ?? 0) > 0 || Boolean(brief.brief)),
+                    () => cancelled,
+                );
+                if (cancelled) return;
+                setStoredState(recovered
+                    ? { dealId, status: 'ready', brief: recovered }
+                    : { dealId, status: 'error' });
             }
         })();
         return () => {

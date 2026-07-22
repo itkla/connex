@@ -81,4 +81,6 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	maxHeapSize = '1536m'
+	forkEvery = 100
 }

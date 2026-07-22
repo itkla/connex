@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Service;
 
@@ -19,11 +20,13 @@ import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -43,11 +46,13 @@ import tools.jackson.databind.node.ObjectNode;
 public class AiInvocationService {
     private static final String AUDIT_ACTION = "ai.llm.call";
     private static final String AUDIT_ENTITY_TYPE = "ai_call";
+    private static final String AUDIT_OUTCOME_ATTEMPT = "attempt";
     private static final String UNKNOWN_TARGET = "unresolved";
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
 
     private final AiFeatureGate aiFeatureGate;
+    private final AiMediaAdmissionService aiMediaAdmissionService;
     private final AiProviderConfigService aiProviderConfigService;
     private final AiProviderRouter aiProviderRouter;
     private final WorkspaceService workspaceService;
@@ -60,14 +65,16 @@ public class AiInvocationService {
      * @return demasked completion outcome
      */
     public AiCompletionOutcome complete(AiInvocation invocation) {
-        RawInvocation raw = invokeRaw(invocation, false);
-        AiCompletionResult result = raw.result();
-        Demasker.DemaskResult demasked = Demasker.demask(
-                CompletionNormalizer.stripReasoning(result.text()), invocation.context());
-        emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                result.stopReason(), demasked.warnings(), null, false, null);
-        return new AiCompletionOutcome(demasked.text(), demasked.warnings(),
-                result.inputTokens(), result.outputTokens(), result.stopReason());
+        try (RawInvocation raw = invokeRaw(invocation, false)) {
+            AiCompletionResult result = raw.result();
+            Demasker.DemaskResult demasked = Demasker.demask(
+                    CompletionNormalizer.stripReasoning(result.text()), invocation.context());
+            raw.close();
+            emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                    result.stopReason(), demasked.warnings(), null, false, null);
+            return new AiCompletionOutcome(demasked.text(), demasked.warnings(),
+                    result.inputTokens(), result.outputTokens(), result.stopReason());
+        }
     }
 
     /**
@@ -80,32 +87,54 @@ public class AiInvocationService {
      * @return parsed or malformed structured outcome
      */
     public <T> AiStructuredOutcome<T> completeStructured(AiInvocation invocation, Class<T> type) {
+        return completeStructured(invocation, type, AiRawOutputGuard.PERMIT_ALL);
+    }
+
+    /**
+     * As {@link #completeStructured(AiInvocation, Class)}, but validates the raw, still-masked output
+     * with {@code guard} before demasking. A rejected output fails closed to
+     * {@link AiStructuredOutcome.Malformed}.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param <T> content type
+     * @return parsed or malformed structured outcome
+     */
+    public <T> AiStructuredOutcome<T> completeStructured(
+            AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
         Objects.requireNonNull(type, "type");
-        RawInvocation raw = invokeRaw(invocation, true);
-        AiCompletionResult result = raw.result();
-        String stripped = CompletionNormalizer.stripReasoning(result.text());
-        ObjectNode object = AiJson.extractObject(stripped, objectMapper);
-        if (object == null) {
-            return malformed(raw, invocation, result, truncationReason(result.stopReason()));
+        Objects.requireNonNull(guard, "guard");
+        try (RawInvocation raw = invokeRaw(invocation, true)) {
+            AiCompletionResult result = raw.result();
+            String stripped = CompletionNormalizer.stripReasoning(result.text());
+            ObjectNode object = AiJson.extractObject(stripped, objectMapper);
+            if (object == null) {
+                return malformed(raw, invocation, result, truncationReason(result.stopReason()));
+            }
+            if (!guard.permits(object)) {
+                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+            }
+            int warnings = Demasker.demaskTree(object, invocation.context());
+            T value;
+            try {
+                value = objectMapper.treeToValue(object, type);
+            } catch (JacksonException | IllegalArgumentException exception) {
+                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+            }
+            if (value == null) {
+                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+            }
+            raw.close();
+            emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                    result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
+            return new AiStructuredOutcome.Parsed<>(value, warnings,
+                    result.inputTokens(), result.outputTokens(), result.stopReason());
         }
-        int warnings = Demasker.demaskTree(object, invocation.context());
-        T value;
-        try {
-            value = objectMapper.treeToValue(object, type);
-        } catch (JacksonException | IllegalArgumentException exception) {
-            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
-        }
-        if (value == null) {
-            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
-        }
-        emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
-        return new AiStructuredOutcome.Parsed<>(value, warnings,
-                result.inputTokens(), result.outputTokens(), result.stopReason());
     }
 
     private <T> AiStructuredOutcome<T> malformed(
             RawInvocation raw, AiInvocation invocation, AiCompletionResult result, String parseOutcome) {
+        raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), null, null, true, parseOutcome);
         return new AiStructuredOutcome.Malformed<>(parseOutcome,
@@ -119,12 +148,41 @@ public class AiInvocationService {
         String correlationId = UUID.randomUUID().toString();
 
         try {
-            aiFeatureGate.requireAiUsable();
+            if (invocation.images().isEmpty()) {
+                aiFeatureGate.requireAiUsable();
+            } else {
+                aiFeatureGate.requireAiImageUsable();
+            }
         } catch (ForbiddenException exception) {
             emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
                     null, null, null, null, "gate", structured, null);
             throw exception;
         }
+
+        return invokeAdmitted(invocation, structured, workspaceId, orgId, correlationId);
+    }
+
+    private AiMediaAdmissionService.Lease acquireMedia(
+            int workspaceId,
+            int orgId,
+            String correlationId,
+            AiInvocation invocation,
+            boolean structured) {
+        try {
+            return aiMediaAdmissionService.acquire(orgId, invocation.images());
+        } catch (TooManyRequestsException exception) {
+            emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
+                    null, null, null, null, "media_admission", structured, null);
+            throw exception;
+        }
+    }
+
+    private RawInvocation invokeAdmitted(
+            AiInvocation invocation,
+            boolean structured,
+            int workspaceId,
+            int orgId,
+            String correlationId) {
 
         ResolvedAiProvider resolved;
         try {
@@ -133,6 +191,12 @@ public class AiInvocationService {
             emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
                     null, null, null, null, "provider", structured, null);
             throw exception;
+        }
+
+        if (!invocation.images().isEmpty() && !resolved.imageInputSupported()) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException("Configured AI model does not support image input");
         }
 
         String serializedPrompt;
@@ -155,13 +219,23 @@ public class AiInvocationService {
         emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
                 null, null, null, null, null, structured, null);
 
+        MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
         try {
+            if (!invocation.images().isEmpty()) {
+                mediaLease = MediaLeaseGuard.of(acquireMedia(
+                        workspaceId, orgId, correlationId, invocation, structured));
+            }
             AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
                     .complete(request(resolved, invocation));
-            return new RawInvocation(workspaceId, orgId, resolved, correlationId, structured, result);
+            return new RawInvocation(
+                    workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
         } catch (AiProviderException exception) {
+            mediaLease.close();
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                     null, null, null, null, "provider_exception", structured, null);
+            throw exception;
+        } catch (RuntimeException | Error exception) {
+            mediaLease.close();
             throw exception;
         }
     }
@@ -177,7 +251,7 @@ public class AiInvocationService {
                 .map(message -> new AiMessage(message.getRole(), message.getContent()))
                 .toList();
         return new AiCompletionRequest(resolved.target(), resolved.credentials(), invocation.prompt().getSystemPrompt(),
-                messages, invocation.maxTokens(), invocation.temperature());
+                messages, invocation.images(), invocation.maxTokens(), invocation.temperature());
     }
 
     private String serializePrompt(MaskedPrompt prompt) {
@@ -218,6 +292,16 @@ public class AiInvocationService {
         metadata.put("outcome", outcome);
         metadata.put("correlationId", correlationId);
         metadata.put("messageCount", invocation.prompt().getMessages().size());
+        metadata.put("mediaCount", invocation.images().size());
+        if (!invocation.images().isEmpty()) {
+            metadata.put("mediaBytes", invocation.images().stream()
+                    .mapToInt(AiInputImage::size)
+                    .sum());
+            metadata.put("mediaTypes", invocation.images().stream()
+                    .map(AiInputImage::contentType)
+                    .distinct()
+                    .toList());
+        }
         metadata.put("structured", structured);
         if (inputTokens != null) {
             metadata.put("inputTokens", inputTokens);
@@ -236,6 +320,11 @@ public class AiInvocationService {
         }
         if (reason != null) {
             metadata.put("reason", reason);
+        }
+        if (AUDIT_OUTCOME_ATTEMPT.equals(outcome)) {
+            auditService.recordStrictIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
+                    targetLabel(resolved), "AI call " + outcome, metadata);
+            return;
         }
         auditService.recordIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
                 targetLabel(resolved), "AI call " + outcome, metadata);
@@ -263,6 +352,36 @@ public class AiInvocationService {
             ResolvedAiProvider resolved,
             String correlationId,
             boolean structured,
-            AiCompletionResult result) {
+            AiCompletionResult result,
+            MediaLeaseGuard mediaLease) implements AutoCloseable {
+
+        @Override
+        public void close() {
+            mediaLease.close();
+        }
+    }
+
+    private static final class MediaLeaseGuard implements AutoCloseable {
+        private final AiMediaAdmissionService.Lease delegate;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private MediaLeaseGuard(AiMediaAdmissionService.Lease delegate) {
+            this.delegate = delegate;
+        }
+
+        private static MediaLeaseGuard none() {
+            return new MediaLeaseGuard(null);
+        }
+
+        private static MediaLeaseGuard of(AiMediaAdmissionService.Lease delegate) {
+            return new MediaLeaseGuard(Objects.requireNonNull(delegate, "delegate"));
+        }
+
+        @Override
+        public void close() {
+            if (delegate != null && closed.compareAndSet(false, true)) {
+                delegate.close();
+            }
+        }
     }
 }

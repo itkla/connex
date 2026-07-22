@@ -21,6 +21,8 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
 class TaskMapperTest extends AbstractMapperTest {
@@ -292,6 +294,49 @@ class TaskMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void setPositionsUpdatesOnlyExpectedWorkspaceStatus() {
+        User user = newUser();
+        Task first = build("first", user, null, null);
+        Task second = build("second", user, null, null);
+        Task unlisted = build("unlisted", user, null, null);
+        Task wrongStatus = build("wrong-status", user, null, null);
+        taskMapper.insert(first);
+        taskMapper.insert(second);
+        taskMapper.insert(unlisted);
+        taskMapper.insert(wrongStatus);
+        taskMapper.moveTask(workspace.getId(), wrongStatus.getId(), "in_progress", false, 9);
+        Workspace foreignWorkspace = newWorkspace();
+        Task foreign = build("foreign", user, null, null);
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        taskMapper.insert(foreign);
+        int unlistedPosition = taskMapper.getTaskById(workspace.getId(), unlisted.getId()).getPosition();
+        int wrongStatusPosition = taskMapper.getTaskById(workspace.getId(), wrongStatus.getId()).getPosition();
+        int foreignPosition = taskMapper.getTaskById(foreignWorkspace.getId(), foreign.getId()).getPosition();
+
+        taskMapper.setPositions(workspace.getId(), "todo", List.of(
+            new BoardPositionUpdate(first.getId(), 7),
+            new BoardPositionUpdate(second.getId(), 2),
+            new BoardPositionUpdate(wrongStatus.getId(), 1),
+            new BoardPositionUpdate(foreign.getId(), 0)
+        ));
+
+        Task movedFirst = taskMapper.getTaskById(workspace.getId(), first.getId());
+        Task movedSecond = taskMapper.getTaskById(workspace.getId(), second.getId());
+        assertEquals(7, movedFirst.getPosition());
+        assertEquals(2, movedSecond.getPosition());
+        assertEquals("todo", movedFirst.getStatus());
+        assertFalse(movedFirst.isCompleted());
+        assertEquals("todo", movedSecond.getStatus());
+        assertFalse(movedSecond.isCompleted());
+        assertEquals(unlistedPosition,
+            taskMapper.getTaskById(workspace.getId(), unlisted.getId()).getPosition());
+        assertEquals(wrongStatusPosition,
+            taskMapper.getTaskById(workspace.getId(), wrongStatus.getId()).getPosition());
+        assertEquals(foreignPosition,
+            taskMapper.getTaskById(foreignWorkspace.getId(), foreign.getId()).getPosition());
+    }
+
+    @Test
     void taskSummaryCountsStatusesAndDueWindowsWithinWorkspace() {
         LocalDate today = LocalDate.of(2026, 7, 10);
         Workspace target = newWorkspace();
@@ -321,10 +366,39 @@ class TaskMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today.plusDays(8), farFuture.getId());
         jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today, foreign.getId());
 
-        TaskSummaryDto summary = taskMapper.taskSummary(target.getId(), today);
+        TaskSummaryDto summary = taskMapper.taskSummary(target.getId(), today, MemberScope.allTeam());
 
         assertEquals(new TaskSummaryDto(2, 1, 1, 1, 1), summary);
-        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1), taskMapper.taskSummary(foreignWorkspace.getId(), today));
+        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1),
+            taskMapper.taskSummary(foreignWorkspace.getId(), today, MemberScope.allTeam()));
+    }
+
+    @Test
+    void taskSummaryHonorsMemberScopeByAssignee() {
+        LocalDate today = LocalDate.of(2026, 7, 10);
+        Workspace target = newWorkspace();
+        User assignee = newUser();
+        User other = newUser();
+        Task mine = build("mine", assignee, null, null);
+        mine.setWorkspaceId(target.getId());
+        taskMapper.insert(mine);
+        Task theirs = build("theirs", other, null, null);
+        theirs.setWorkspaceId(target.getId());
+        taskMapper.insert(theirs);
+        Task nobody = build("nobody", assignee, null, null);
+        nobody.setWorkspaceId(target.getId());
+        taskMapper.insert(nobody);
+        jdbcTemplate.update("UPDATE task SET assigned_to_id = NULL WHERE id = ?", nobody.getId());
+
+        MemberScope me = MemberScope.fromRequest("me", null, assignee.getId());
+        MemberScope members = MemberScope.fromRequest(
+            "members", List.of(assignee.getId(), other.getId()), assignee.getId());
+        MemberScope unassigned = MemberScope.fromRequest("unassigned", null, assignee.getId());
+
+        assertEquals(3, taskMapper.taskSummary(target.getId(), today, MemberScope.allTeam()).todo());
+        assertEquals(1, taskMapper.taskSummary(target.getId(), today, me).todo());
+        assertEquals(2, taskMapper.taskSummary(target.getId(), today, members).todo());
+        assertEquals(1, taskMapper.taskSummary(target.getId(), today, unassigned).todo());
     }
 
     private Workspace newWorkspace() {

@@ -15,8 +15,6 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
-import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -92,10 +90,10 @@ public class DealBriefService {
             aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
                     contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt);
             return DealBriefDto.of(dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
-        } catch (MaskingLeakException | AiProviderException exception) {
-            return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
+        } catch (RuntimeException exception) {
+            return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
         }
     }
 

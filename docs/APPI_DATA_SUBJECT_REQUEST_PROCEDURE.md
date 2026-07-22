@@ -46,7 +46,7 @@ A data subject (or authorized representative) may request, regarding their **ret
 
 ---
 
-**Known conscious exclusions** (tracked in [#579](https://github.com/itkla/connex/issues/579)): the disclosure export omits persisted AI outputs (`ai_output_cache`) and audit `changes` payloads (actions/outcomes only); pre-restriction AI cache rows are not purged (they stop being served); free text in *other* records naming the subject is outside the restriction's reach. Keep this procedure as the human process around the tooling.
+**Known conscious exclusions** (tracked in [#579](https://github.com/itkla/connex/issues/579)): the disclosure export omits persisted AI outputs (`ai_output_cache`) and audit `changes` payloads (actions/outcomes only). Restricting a contact now purges its person-keyed AI cache — intro rationales naming the subject and the briefs/risk rationales of the subject's deals — so those demasked outputs do not persist at rest; report narratives (keyed by report, not person) are not purged and regenerate without the subject. Free text in *other* records naming the subject is outside the restriction's reach. Keep this procedure as the human process around the tooling.
 
 [#221]: https://github.com/itkla/connex/issues/221
 [#224]: https://github.com/itkla/connex/issues/224

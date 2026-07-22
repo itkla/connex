@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BandCounts;
 import ooo.klae.connex.backend.dto.DecayCounts;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
@@ -294,7 +295,8 @@ public class ScoringService {
 
     /** Scores the complete relationship-map company set after enforcing its fixed workspace cap. */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
-        long companyCount = companyMapper.countCompanies(workspaceId, null, null, false, null);
+        long companyCount = companyMapper.countCompanies(
+            workspaceId, null, null, false, null, MemberScope.allTeam());
         if (companyCount > MAX_BATCH_COMPANIES) {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");

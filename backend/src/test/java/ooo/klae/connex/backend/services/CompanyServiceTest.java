@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,6 +19,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Activity;
@@ -28,8 +30,10 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -40,12 +44,15 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 
 class CompanyServiceTest extends AbstractServiceTest {
 
     @Autowired CompanyService companyService;
     @Autowired ShareMapper shareMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @MockitoBean RuleTriggerPublisher ruleTriggers;
+    @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
     void createRejectsClientSuppliedLogoUrl() {
@@ -56,12 +63,17 @@ class CompanyServiceTest extends AbstractServiceTest {
         Company created = companyService.createCompany(company);
 
         assertNull(created.getLogoUrl());
+        assertEquals(currentUser.getId(), created.getOwnerId());
         assertNull(companyMapper.getCompanyById(workspace.getId(), created.getId()).getLogoUrl());
+        assertEquals(currentUser.getId(),
+            companyMapper.getCompanyById(workspace.getId(), created.getId()).getOwnerId());
     }
 
     @Test
     void genericUpdatePreservesAndReturnsCurrentManagedLogo() {
         Company company = newCompany();
+        User owner = newUser();
+        companyMapper.updateOwner(workspace.getId(), company.getId(), owner.getId());
         String managed = "/api/companies/" + company.getId()
             + "/logo/550e8400-e29b-41d4-a716-446655440000.png";
         assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
@@ -72,8 +84,44 @@ class CompanyServiceTest extends AbstractServiceTest {
         Company updated = companyService.updateCompany(company.getId(), company);
 
         assertEquals(managed, updated.getLogoUrl());
+        assertEquals(owner.getId(), updated.getOwnerId());
         assertEquals(managed,
             companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+    }
+
+    @Test
+    void updateOwnerAssignsAndUnassignsMemberWithAuditNotificationAndRuleTrigger() {
+        Company company = newCompany();
+        User owner = newUser();
+
+        Company assigned = companyService.updateOwner(company.getId(), owner.getId());
+
+        assertEquals(owner.getId(), assigned.getOwnerId());
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'company' "
+                + "AND entity_id = ? AND action = 'company.updateOwner' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), company.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("ownerId"));
+        assertTrue(changes.contains(Integer.toString(owner.getId())));
+        verify(notificationChanges).publish(workspace.getId(), "company", company.getId());
+        verify(ruleTriggers).publish(
+            workspace.getId(), "company", company.getId(), "company.owner_changed");
+
+        Company unassigned = companyService.updateOwner(company.getId(), null);
+
+        assertNull(unassigned.getOwnerId());
+    }
+
+    @Test
+    void updateOwnerRejectsNonMemberBeforeChangingTheCompany() {
+        Company company = newCompany();
+        User outsider = newUser();
+        workspaceMapper.removeMember(workspace.getId(), outsider.getId());
+
+        assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
+            () -> companyService.updateOwner(company.getId(), outsider.getId()));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
     }
 
     @Test
@@ -97,6 +145,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             () -> companyService.removeTag(shared.getId(), tag.getId()));
         assertThrows(ResourceNotFoundException.class,
             () -> companyService.replaceTags(shared.getId(), List.of(tag.getId())));
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.updateOwner(shared.getId(), currentUser.getId()));
         assertThrows(ResourceNotFoundException.class,
             () -> companyService.deleteCompany(shared.getId()));
 
@@ -147,7 +197,7 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Test
     void getMatchingCompanyIdsRejectsRequestsWithoutFilters() {
         assertThrows(BadRequestException.class,
-            () -> companyService.getMatchingCompanyIds(null, null, false, null));
+            () -> companyService.getMatchingCompanyIds(null, null, false, null, MemberScope.allTeam()));
     }
 
     @Test
@@ -183,15 +233,19 @@ class CompanyServiceTest extends AbstractServiceTest {
         List<Integer> requestedIds = List.of(3, 5);
         List<Integer> matchingIds = List.of(3);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(mapper.countCompanies(7, "%Target%", industry, true, requestedIds)).thenReturn(1L);
-        when(mapper.getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0))
+        when(mapper.countCompanies(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam())).thenReturn(1L);
+        when(mapper.getCompanyIdsFiltered(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), 1000, 0))
             .thenReturn(matchingIds);
 
         assertEquals(matchingIds,
-            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds));
+            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds, MemberScope.allTeam()));
 
-        verify(mapper).countCompanies(7, "%Target%", industry, true, requestedIds);
-        verify(mapper).getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0);
+        verify(mapper).countCompanies(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam());
+        verify(mapper).getCompanyIdsFiltered(
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), 1000, 0);
     }
 
     @Test
@@ -200,12 +254,14 @@ class CompanyServiceTest extends AbstractServiceTest {
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         CompanyService service = companyService(mapper, workspaceService);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(mapper.countCompanies(7, "%Target%", null, false, null)).thenReturn(1001L);
+        when(mapper.countCompanies(
+            7, "%Target%", null, false, null, MemberScope.allTeam())).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
-            () -> service.getMatchingCompanyIds("%Target%", null, false, null));
+            () -> service.getMatchingCompanyIds("%Target%", null, false, null, MemberScope.allTeam()));
 
-        verify(mapper, never()).getCompanyIdsFiltered(7, "%Target%", null, false, null, 1000, 0);
+        verify(mapper, never()).getCompanyIdsFiltered(
+            7, "%Target%", null, false, null, MemberScope.allTeam(), 1000, 0);
     }
 
     @Test
@@ -227,7 +283,9 @@ class CompanyServiceTest extends AbstractServiceTest {
         CompanyService service = new CompanyService(
             mapper, mock(TagMapper.class), personMapper, dealMapper,
             mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class),
+            mock(AuthService.class),
             mock(AuditService.class),
+            mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), mock(ReferenceService.class),
             Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
@@ -266,7 +324,8 @@ class CompanyServiceTest extends AbstractServiceTest {
         when(referenceService.hydrate(7, List.of(note))).thenReturn(List.of(note));
         CompanyService service = new CompanyService(
             mapper, mock(TagMapper.class), personMapper, dealMapper,
-            activityMapper, noteMapper, taskMapper, mock(AuditService.class),
+            activityMapper, noteMapper, taskMapper, mock(AuthService.class), mock(AuditService.class),
+            mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), referenceService, Clock.systemUTC(),
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
@@ -291,7 +350,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(ActivityMapper.class),
             mock(NoteMapper.class),
             mock(TaskMapper.class),
+            mock(AuthService.class),
             mock(AuditService.class),
+            mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             mock(RuleTriggerPublisher.class),
             workspaceService,
             mock(CustomFieldValueService.class),

@@ -1,11 +1,16 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
@@ -19,8 +24,7 @@ import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
-import java.time.LocalDate;
-import java.util.List;
+import ooo.klae.connex.backend.dto.MemberScope;
 
 /**
  * mapper interface for {@code Deal} persistence.
@@ -73,6 +77,7 @@ public interface DealMapper {
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope,
         @Param("limit") int limit,
         @Param("offset") int offset
     );
@@ -85,7 +90,21 @@ public interface DealMapper {
         @Param("companyIds") List<Integer> companyIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
-        @Param("riskIds") List<Integer> riskIds
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
+    );
+    /** Full filtered+scoped deal set for CSV export, mirroring the visible list without pagination. */
+    List<Deal> getDealsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealCurrencyMetricsDto> dealMetricsFiltered(
         @Param("workspaceId") int workspaceId,
@@ -96,7 +115,8 @@ public interface DealMapper {
         @Param("companyIds") List<Integer> companyIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
-        @Param("riskIds") List<Integer> riskIds
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope
     );
     List<Integer> getFilteredDealIds(
         @Param("workspaceId") int workspaceId,
@@ -108,60 +128,72 @@ public interface DealMapper {
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
+        @Param("memberScope") MemberScope memberScope,
         @Param("limit") int limit
     );
     DealRevenueRangeDto revenueClosedEventRange(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueClosedByBoundaries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("boundaries") List<DealRevenueMonthBoundary> boundaries
+        @Param("boundaries") List<DealRevenueMonthBoundary> boundaries,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueScheduledClosedByMonth(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealStageDistributionDto> stageDistribution(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     DealKpiPeriodDto dealKpiCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("days") int days
+        @Param("days") int days,
+        @Param("memberScope") MemberScope memberScope
     );
     DealKpiPeriodDto dealKpiPrevious(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("previousDays") int previousDays
+        @Param("previousDays") int previousDays,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealKpiClosedBucketDto> dealKpiClosedSeries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("span") double span
+        @Param("span") double span,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealBucketValueDto> dealKpiNewPipelineSeries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
-        @Param("span") double span
+        @Param("span") double span,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealPipelineValueDto> dealPipelineValue(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("days") int days
+        @Param("days") int days,
+        @Param("memberScope") MemberScope memberScope
     );
     List<DealAgingDto> dealAging(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     long closingSoonCount(
         @Param("workspaceId") int workspaceId,
@@ -176,17 +208,28 @@ public interface DealMapper {
     );
     List<Deal> topOpenDeals(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
     List<Deal> topWonDeals(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("memberScope") MemberScope memberScope
     );
-    List<FacetCount> countsByStatus(int workspaceId);
-    List<FacetCount> countsByStage(int workspaceId);
-    List<FacetCount> countsByPipeline(int workspaceId);
-    List<FacetCount> countsByCompany(int workspaceId);
-    List<FacetCount> countsByCurrency(int workspaceId);
+    List<FacetCount> countsByStatus(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByStage(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByPipeline(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByCompany(@Param("workspaceId") int workspaceId);
+    /**
+     * Owner facet counts over the whole workspace: like every facet, the owner picker keeps
+     * showing all options (with stable counts) while a member scope is applied.
+     */
+    List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByCurrency(@Param("workspaceId") int workspaceId);
+    List<Deal> getDealBoard(
+        @Param("workspaceId") int workspaceId,
+        @Param("pipelineId") int pipelineId
+    );
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
@@ -199,6 +242,7 @@ public interface DealMapper {
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -210,19 +254,34 @@ public interface DealMapper {
     List<Deal> getDealsByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     List<Integer> getRiskCandidateIds(@Param("workspaceId") int workspaceId,
+            @Param("memberScope") MemberScope memberScope,
             @Param("limit") int limit);
     int insert(Deal deal);
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
     int update(Deal deal);
+    int updateName(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("name") String name
+    );
+    int updateValue(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("value") BigDecimal value
+    );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /** Deal ids in a stage, in board order (position, then id), for renumbering a column on a move. */
     List<Integer> getDealIdsInStageOrdered(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     /** The next free tail position in a stage column ({@code MAX(position)+1}, or 0 when empty). */
     int nextDealPosition(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
-    /** Sets a single deal's manual sort position within its stage column. */
-    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+    /** Sets manual sort positions for deals that still belong to the expected workspace stage. */
+    int setPositions(
+        @Param("workspaceId") int workspaceId,
+        @Param("stageId") int stageId,
+        @Param("positions") List<BoardPositionUpdate> positions
+    );
 
     /** Sets only a deal's expected close date, scoped to the workspace. */
     int updateExpectedCloseDate(

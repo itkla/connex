@@ -5,23 +5,32 @@ import { type ComponentType, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
+    ArrowPathIcon,
     ArrowRightIcon,
     ArrowTrendingUpIcon,
     ChartBarIcon,
-    FlagIcon,
+    DocumentDuplicateIcon,
     EllipsisHorizontalIcon,
+    FlagIcon,
     HeartIcon,
     PresentationChartLineIcon,
-    ShieldExclamationIcon,
     ShareIcon,
+    ShieldExclamationIcon,
     SparklesIcon,
     TrashIcon,
     UserGroupIcon,
 } from '@heroicons/react/24/outline';
 
-import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
-import { deleteReport } from '@/app/lib/api';
+import Rise from '@/app/components/motion/Rise';
+import {
+    cloneReportConfig,
+    groupReportTemplates,
+    reportTemplateMeasures,
+} from '@/app/components/reports/reportConfig';
+import { createReport, deleteReport } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -51,6 +60,8 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'activity-team': UserGroupIcon,
 };
 
+const NAME_COPY_BUDGET = 120;
+
 export default function ReportsBoard({
     templates,
     initialReports,
@@ -66,6 +77,8 @@ export default function ReportsBoard({
     const [reports, setReports] = useState(initialReports);
     const [deleting, setDeleting] = useState<ReportDefinition | null>(null);
     const [busy, setBusy] = useState(false);
+    const [creatingKey, setCreatingKey] = useState<string | null>(null);
+    const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
     const canReadGoals = effectivePermissions.includes('GOAL_READ');
     const visibleTemplates = canReadGoals
         ? templates
@@ -73,6 +86,52 @@ export default function ReportsBoard({
     const visibleReports = canReadGoals
         ? reports
         : reports.filter((report) => report.config.widgets.every((widget) => widget.measure !== 'attainment'));
+    const templateGroups = groupReportTemplates(visibleTemplates);
+    const hasReports = visibleReports.length > 0;
+
+    const createFromTemplate = async (template: ReportTemplate) => {
+        if (creatingKey) return;
+        setCreatingKey(template.key);
+        const config = cloneReportConfig(template.config);
+        try {
+            const created = await createReport({
+                name: t(`templates.${template.key}.name`),
+                description: t(`templates.${template.key}.description`),
+                cadence: template.cadence,
+                templateKey: template.key,
+                config: {
+                    ...config,
+                    widgets: config.widgets.map((widget) => ({ ...widget, title: t(`measure.${widget.measure}`) })),
+                },
+            });
+            router.push(`/overview/reports/${created.id}`);
+        } catch (error) {
+            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            setCreatingKey(null);
+        }
+    };
+
+    const duplicateReport = async (report: ReportDefinition) => {
+        if (duplicatingId) return;
+        setDuplicatingId(report.id);
+        const base = report.name.length > NAME_COPY_BUDGET ? report.name.slice(0, NAME_COPY_BUDGET) : report.name;
+        try {
+            const created = await createReport({
+                name: t('landing.copyName', { name: base }),
+                description: report.description,
+                cadence: report.cadence,
+                templateKey: report.templateKey,
+                config: cloneReportConfig(report.config),
+            });
+            setReports((current) => [created, ...current]);
+            toastSuccess(t('landing.duplicated', { name: report.name }));
+            router.refresh();
+        } catch (error) {
+            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+        } finally {
+            setDuplicatingId(null);
+        }
+    };
 
     const confirmDelete = async () => {
         if (!deleting) return;
@@ -90,137 +149,194 @@ export default function ReportsBoard({
         }
     };
 
+    const startSection = (
+        <section aria-labelledby="start-title">
+            <div className="mb-6 max-w-2xl">
+                <h2 id="start-title" className="text-xl font-bold tracking-tight text-foreground">
+                    {hasReports ? t('landing.startTitle') : t('landing.firstTitle')}
+                </h2>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {hasReports ? t('landing.startSubtitle') : t('landing.firstSubtitle')}
+                </p>
+            </div>
+            <div className="space-y-8">
+                {templateGroups.map((group) => (
+                    <div key={group.id}>
+                        <div className="mb-3 flex items-center gap-3">
+                            <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                {t(`landing.groups.${group.id}`)}
+                            </h3>
+                            <div className="h-px flex-1 bg-border" />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                            {group.templates.map((template) => {
+                                const Icon = TEMPLATE_ICONS[template.key] ?? PresentationChartLineIcon;
+                                const measures = reportTemplateMeasures(template);
+                                const shown = measures.slice(0, 3).map((measure) => t(`measure.${measure}`));
+                                const extra = measures.length - shown.length;
+                                const creating = creatingKey === template.key;
+                                return (
+                                    <div
+                                        key={template.key}
+                                        className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] duration-200 ease-out hover:border-brand/40 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)] dark:hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.6)]"
+                                    >
+                                        <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                                            <Icon className="size-5" />
+                                        </div>
+                                        <h4 className="mt-4 text-base font-semibold text-foreground">
+                                            {t(`templates.${template.key}.name`)}
+                                        </h4>
+                                        <p className="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">
+                                            {t(`templates.${template.key}.description`)}
+                                        </p>
+                                        {shown.length > 0 ? (
+                                            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                                                <span className="font-medium text-foreground/70">{t('landing.includes')} </span>
+                                                {new Intl.ListFormat(locale, { type: 'unit' }).format(shown)}
+                                                {extra > 0 ? ` ${t('landing.moreMeasures', { count: extra })}` : ''}
+                                            </p>
+                                        ) : null}
+                                        <Button
+                                            variant="outline"
+                                            className="mt-5 w-full"
+                                            onClick={() => createFromTemplate(template)}
+                                            disabled={creatingKey !== null}
+                                        >
+                                            {creating ? (
+                                                <>
+                                                    <ArrowPathIcon className="animate-spin motion-reduce:animate-none" />
+                                                    {t('landing.creating')}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {t('landing.createReport')}
+                                                    <ArrowRightIcon />
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </section>
+    );
+
     return (
         <div className="min-h-full bg-background px-2 pb-12 pt-8">
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
-                <header className="flex flex-wrap items-end justify-between gap-5">
-                    <div>
-                        <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
-                            {t('landing.eyebrow')}
-                        </p>
-                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('landing.title')}</h1>
-                        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                            {t('landing.subtitle')}
-                        </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        {canReadGoals ? (
-                            <Button asChild variant="outline">
-                                <Link href="/overview/reports/goals">
-                                    <FlagIcon />
-                                    {t('landing.manageGoals')}
+                <Rise>
+                    <header className="flex flex-wrap items-end justify-between gap-5">
+                        <div>
+                            <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                                {t('landing.eyebrow')}
+                            </p>
+                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('landing.title')}</h1>
+                            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                                {t('landing.subtitle')}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {canReadGoals ? (
+                                <Button asChild variant="outline">
+                                    <Link href="/overview/reports/goals">
+                                        <FlagIcon />
+                                        {t('landing.manageGoals')}
+                                    </Link>
+                                </Button>
+                            ) : null}
+                            <Button asChild variant="brand">
+                                <Link href="/overview/reports/new">
+                                    <SparklesIcon />
+                                    {t('landing.newReport')}
                                 </Link>
                             </Button>
-                        ) : null}
-                        <Button asChild variant="brand">
-                            <Link href="/overview/reports/new">
-                                <SparklesIcon />
-                                {t('landing.newReport')}
-                            </Link>
-                        </Button>
-                    </div>
-                </header>
+                        </div>
+                    </header>
+                </Rise>
 
-                <section aria-labelledby="report-templates-title">
-                    <div className="mb-4 flex items-end justify-between gap-4">
-                        <div>
-                            <h2 id="report-templates-title" className="text-xl font-bold tracking-tight text-foreground">
-                                {t('landing.templatesTitle')}
-                            </h2>
-                            <p className="mt-1 text-sm text-muted-foreground">{t('landing.templatesSubtitle')}</p>
-                        </div>
-                        <Button asChild variant="ghost" size="sm">
-                            <Link href="/overview/reports/new">{t('landing.startBlank')}</Link>
-                        </Button>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-                        {visibleTemplates.map((template) => {
-                            const Icon = TEMPLATE_ICONS[template.key] ?? PresentationChartLineIcon;
-                            return (
-                                <Link
-                                    key={template.key}
-                                    href={`/overview/reports/new?template=${encodeURIComponent(template.key)}`}
-                                    className="group flex min-h-56 flex-col rounded-2xl border border-border bg-card p-5 hover:border-brand/40 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                >
-                                    <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
-                                        <Icon className="size-5" />
-                                    </div>
-                                    <h3 className="mt-6 text-lg font-semibold text-foreground">
-                                        {t(`templates.${template.key}.name`)}
-                                    </h3>
-                                    <p className="mt-2 flex-1 text-sm leading-relaxed text-muted-foreground">
-                                        {t(`templates.${template.key}.description`)}
-                                    </p>
-                                    <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand-dark">
-                                        {t('landing.useTemplate')}
-                                        <ArrowRightIcon className="size-4" />
-                                    </span>
-                                </Link>
-                            );
-                        })}
-                    </div>
-                </section>
-
-                <section aria-labelledby="saved-reports-title">
-                    <div className="mb-4">
-                        <h2 id="saved-reports-title" className="text-xl font-bold tracking-tight text-foreground">
-                            {t('landing.savedTitle')}
-                        </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">{t('landing.savedSubtitle')}</p>
-                    </div>
-                    {visibleReports.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
-                            <PresentationChartLineIcon className="mx-auto size-7 text-muted-foreground" />
-                            <h3 className="mt-4 text-base font-semibold text-foreground">{t('landing.emptyTitle')}</h3>
-                            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{t('landing.emptyBody')}</p>
-                        </div>
-                    ) : (
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            <ul className="divide-y divide-border">
-                                {visibleReports.map((report) => (
-                                    <li key={report.id} className="group flex items-center gap-4 px-5 py-4 hover:bg-muted/50">
-                                        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                                            <PresentationChartLineIcon className="size-5" />
-                                        </div>
-                                        <Link href={`/overview/reports/${report.id}`} className="min-w-0 flex-1">
-                                            <p className="truncate font-medium text-foreground group-hover:text-brand-dark">{report.name}</p>
-                                            <p className="mt-1 truncate text-sm text-muted-foreground">
-                                                {report.description || t('landing.noDescription')}
-                                            </p>
-                                        </Link>
-                                        <div className="hidden shrink-0 text-right sm:block">
-                                            <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                                                {t(`cadence.${report.cadence}`)}
-                                            </p>
-                                            <p className="mt-1 text-xs text-muted-foreground">
-                                                {t('landing.updated', {
-                                                    date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(report.updatedAt)),
-                                                })}
-                                            </p>
-                                        </div>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon-sm" aria-label={t('landing.actions', { name: report.name })}>
-                                                    <EllipsisHorizontalIcon />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem asChild>
-                                                    <Link href={`/overview/reports/${report.id}/edit`}>{t('common.edit')}</Link>
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(report)}>
-                                                    <TrashIcon />
-                                                    {t('common.delete')}
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-                </section>
+                {hasReports ? (
+                    <>
+                        <Rise delay={0.06}>
+                            <section aria-labelledby="your-reports-title">
+                                <div className="mb-4">
+                                    <h2 id="your-reports-title" className="text-xl font-bold tracking-tight text-foreground">
+                                        {t('landing.yourReportsTitle')}
+                                    </h2>
+                                    <p className="mt-1 text-sm text-muted-foreground">{t('landing.yourReportsSubtitle')}</p>
+                                </div>
+                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                    <ul className="divide-y divide-border">
+                                        {visibleReports.map((report) => {
+                                            const Icon = (report.templateKey && TEMPLATE_ICONS[report.templateKey])
+                                                || PresentationChartLineIcon;
+                                            return (
+                                                <li
+                                                    key={report.id}
+                                                    className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/40"
+                                                >
+                                                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light/60 text-brand-dark">
+                                                        <Icon className="size-5" />
+                                                    </div>
+                                                    <Link href={`/overview/reports/${report.id}`} className="min-w-0 flex-1">
+                                                        <div className="flex min-w-0 items-center gap-2">
+                                                            <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-dark">
+                                                                {report.name}
+                                                            </p>
+                                                            <Badge variant="secondary" className="shrink-0 font-normal">
+                                                                {t(`cadence.${report.cadence}`)}
+                                                            </Badge>
+                                                        </div>
+                                                        <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                                                            {report.description || t('landing.noDescription')}
+                                                        </p>
+                                                    </Link>
+                                                    <p className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+                                                        {t('landing.updated', {
+                                                            date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(report.updatedAt)),
+                                                        })}
+                                                    </p>
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button variant="ghost" size="icon-sm" aria-label={t('landing.actions', { name: report.name })}>
+                                                                <EllipsisHorizontalIcon />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end">
+                                                            <DropdownMenuItem asChild>
+                                                                <Link href={`/overview/reports/${report.id}`}>{t('landing.open')}</Link>
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem asChild>
+                                                                <Link href={`/overview/reports/${report.id}/edit`}>{t('common.edit')}</Link>
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                onSelect={() => duplicateReport(report)}
+                                                                disabled={duplicatingId !== null}
+                                                            >
+                                                                <DocumentDuplicateIcon />
+                                                                {t('landing.duplicate')}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(report)}>
+                                                                <TrashIcon />
+                                                                {t('common.delete')}
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            </section>
+                        </Rise>
+                        <Rise delay={0.12}>{startSection}</Rise>
+                    </>
+                ) : (
+                    <Rise delay={0.06}>{startSection}</Rise>
+                )}
             </div>
 
             <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>

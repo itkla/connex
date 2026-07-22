@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
@@ -48,15 +50,24 @@ class ConnectionServiceTest extends AbstractServiceTest {
         assertEquals(shared.getId(), connection.getPersonId());
         assertNull(connection.getCompanyId());
         assertNull(connection.getCompanyName());
+        connection = connectionService.getTopConnections(source.getId(), 5).getFirst();
+        assertEquals(shared.getId(), connection.getPersonId());
+        assertNull(connection.getCompanyId());
+        assertNull(connection.getCompanyName());
 
         personMapper.updateProcessingRestrictions(sibling.getId(), shared.getId(), true, true);
         connection = connectionService.getConnections(source.getId()).getFirst();
         assertNotNull(connection.getSuspendedAt());
         assertNotNull(connection.getProvisionCeasedAt());
+        assertTrue(connectionService.getTopConnections(source.getId(), 5).isEmpty());
 
         assertEquals(1, shareMapper.shareCompany(
             foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+        personMapper.updateProcessingRestrictions(sibling.getId(), shared.getId(), false, false);
         connection = connectionService.getConnections(source.getId()).getFirst();
+        assertEquals(foreignCompany.getId(), connection.getCompanyId());
+        assertEquals(foreignCompany.getName(), connection.getCompanyName());
+        connection = connectionService.getTopConnections(source.getId(), 5).getFirst();
         assertEquals(foreignCompany.getId(), connection.getCompanyId());
         assertEquals(foreignCompany.getName(), connection.getCompanyName());
 
@@ -68,6 +79,7 @@ class ConnectionServiceTest extends AbstractServiceTest {
 
         assertEquals(1, shareMapper.unsharePerson(shared.getId(), sibling.getId(), workspace.getId()));
         assertTrue(connectionService.getConnections(source.getId()).isEmpty());
+        assertTrue(connectionService.getTopConnections(source.getId(), 5).isEmpty());
 
         connectionService.removeConnection(source.getId(), shared.getId());
         assertEquals(0, jdbcTemplate.queryForObject(
@@ -130,9 +142,41 @@ class ConnectionServiceTest extends AbstractServiceTest {
         connect(forgedHub, target);
 
         assertTrue(connectionService.getConnections(source.getId()).isEmpty());
+        assertTrue(connectionService.getTopConnections(source.getId(), 5).isEmpty());
         IntroPathDto path = connectionService.findIntroPath(target.getId());
         assertFalse(path.isReachable());
         assertTrue(path.getSteps().isEmpty());
+    }
+
+    @Test
+    void topConnectionsRequireVisibleFocalPersonAndRespectShareRevocation() {
+        Workspace sibling = workspaceInOrg(orgId(workspace));
+        Person focal = personIn(sibling, null, "Sibling Focal");
+        Person owned = personIn(workspace, null, "Owned Connection");
+        connect(focal, owned);
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> connectionService.getTopConnections(focal.getId(), 5));
+
+        assertEquals(1, shareMapper.sharePerson(
+            focal.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+        assertEquals(owned.getId(),
+            connectionService.getTopConnections(focal.getId(), 5).getFirst().getPersonId());
+
+        assertEquals(1, shareMapper.unsharePerson(focal.getId(), sibling.getId(), workspace.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> connectionService.getTopConnections(focal.getId(), 5));
+    }
+
+    @Test
+    void topConnectionsCapRequestedLimitsAtFive() {
+        Person focal = personIn(workspace, null, "Focal Person");
+        for (int index = 0; index < 7; index++) {
+            connect(focal, personIn(workspace, null, "Connection " + index));
+        }
+
+        assertEquals(5, connectionService.getTopConnections(focal.getId(), 100).size());
+        assertTrue(connectionService.getTopConnections(focal.getId(), 0).isEmpty());
     }
 
     @Test

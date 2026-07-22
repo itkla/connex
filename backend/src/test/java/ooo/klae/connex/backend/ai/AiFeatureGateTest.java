@@ -79,4 +79,16 @@ class AiFeatureGateTest {
         assertTrue(gate.isAiUsable());
         assertDoesNotThrow(gate::requireAiUsable);
     }
+
+    @Test
+    void imageUseRequiresImageCapableProviderReadiness() {
+        properties.setEnabled(true);
+        when(workspaceService.permissionsFor(7, 42)).thenReturn(EnumSet.of(Permission.AI_USE));
+        when(providerReadiness.getIfAvailable()).thenReturn(readiness);
+        when(readiness.isImageInputReadyForOrg(3)).thenReturn(false, true, true);
+
+        assertFalse(gate.isAiImageUsable());
+        assertTrue(gate.isAiImageUsable());
+        assertDoesNotThrow(gate::requireAiImageUsable);
+    }
 }

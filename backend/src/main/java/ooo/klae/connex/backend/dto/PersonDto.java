@@ -31,6 +31,9 @@ public class PersonDto {
 
     private Integer workspaceId;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer ownerId;
+
     @NotBlank
     @Size(max = 255)
     private String name;
@@ -83,6 +86,7 @@ public class PersonDto {
     protected static <T extends PersonDto> T populate(T dto, Person p) {
         dto.setId(p.getId());
         dto.setWorkspaceId(p.getWorkspaceId());
+        dto.setOwnerId(p.getOwnerId());
         dto.setName(p.getName());
         dto.setEmail(p.getEmail());
         dto.setPhone(p.getPhone());

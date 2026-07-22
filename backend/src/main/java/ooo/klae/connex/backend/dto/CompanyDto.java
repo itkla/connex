@@ -27,6 +27,9 @@ public class CompanyDto {
 
     private Integer workspaceId;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer ownerId;
+
     @NotBlank
     @Size(max = 255)
     private String name;
@@ -60,6 +63,7 @@ public class CompanyDto {
         CompanyDto dto = new CompanyDto();
         dto.id = c.getId();
         dto.workspaceId = c.getWorkspaceId();
+        dto.ownerId = c.getOwnerId();
         dto.name = c.getName();
         dto.website = c.getWebsite();
         dto.industry = c.getIndustry();

@@ -12,5 +12,7 @@ public class WorkspaceMember {
     private int workspaceId;
     private int userId;
     private String role;
+    private Integer roleId;
+    private String status;
     private String createdAt;
 }

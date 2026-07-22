@@ -8,17 +8,20 @@ import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
 
 import {
+    ApiError,
     completeTask,
     dismissNotification,
     getNotifications,
     markAllNotificationsRead,
     markNotificationRead,
+    snoozeNotification,
 } from "@/app/lib/api";
-import { type Notification } from "@/app/lib/types";
+import { type Notification, type SnoozeRequest } from "@/app/lib/types";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle } from "@/app/components/notifications/notificationContent";
+import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -46,7 +49,7 @@ export default function NotificationBell() {
         const generation = ++loadGenerationRef.current;
         setLoading(true);
         try {
-            const page = await getNotifications({ state: "unread", page: 1, size: 8 });
+            const page = await getNotifications({ status: "unread", page: 1, size: 8 });
             if (loadGenerationRef.current === generation) {
                 if (page.stateVersion < requiredStateVersionRef.current) return;
                 loadedStateVersionRef.current = page.stateVersion;
@@ -122,6 +125,27 @@ export default function NotificationBell() {
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
+        }
+    }
+
+    async function snooze(item: Notification, body: SnoozeRequest) {
+        try {
+            const updated = await snoozeNotification(item.id, body);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
+            setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409) {
+                toastError(t("snoozeConflict"));
+                void load(true);
+            } else if (error instanceof ApiError && error.status === 404) {
+                toastError(t("snoozeGone"));
+                void load(true);
+            } else {
+                toastError(t("actionError"));
+            }
         }
     }
 
@@ -260,6 +284,7 @@ export default function NotificationBell() {
                                                     <CheckIcon className="size-4" />
                                                 </button>
                                             ) : null}
+                                            <SnoozeMenu onSnooze={(body) => void snooze(item, body)} />
                                             <button
                                                 type="button"
                                                 aria-label={t("dismiss")}

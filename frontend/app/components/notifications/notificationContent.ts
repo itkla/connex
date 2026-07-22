@@ -5,6 +5,7 @@ import {
     BellIcon,
     BriefcaseIcon,
     CheckCircleIcon,
+    ShieldCheckIcon,
     UserGroupIcon,
 } from "@heroicons/react/24/outline";
 
@@ -124,6 +125,32 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("dealMentionBody", { actor: notification.actorLabel ?? "" }),
         };
     }
+    if (notification.type === "document.approval_request") {
+        return {
+            title: t("documentApprovalRequestTitle"),
+            body: t("documentApprovalRequestBody", {
+                actor: notification.actorLabel ?? "",
+                document: text(data.documentTitle, notification.sourceLabel ?? ""),
+            }),
+        };
+    }
+    if (notification.type === "document.approval_decision") {
+        const document = text(data.documentTitle, notification.sourceLabel ?? "");
+        if (data.decision === "cancelled") {
+            return {
+                title: t("documentApprovalCancelledTitle"),
+                body: t("documentApprovalCancelledBody", { document }),
+            };
+        }
+        const approved = data.decision === "approved";
+        return {
+            title: t(approved ? "documentApprovedTitle" : "documentRejectedTitle"),
+            body: t(approved ? "documentApprovedBody" : "documentRejectedBody", {
+                actor: notification.actorLabel ?? "",
+                document,
+            }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 
@@ -137,6 +164,7 @@ export function notificationIcon(notification: Notification) {
     if (notification.type === "activity.mention") return AtSymbolIcon;
     if (notification.type === "introduction.mention") return AtSymbolIcon;
     if (notification.type === "deal.mention") return AtSymbolIcon;
+    if (notification.type.startsWith("document.approval")) return ShieldCheckIcon;
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
     if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;

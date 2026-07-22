@@ -25,6 +25,7 @@ export default function ContactCreateContainer({
     embedded = false,
     onCancel,
     onDismissLockChange,
+    requestInit,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -34,6 +35,7 @@ export default function ContactCreateContainer({
     /** Cancel handler for embedded mode — steps back to the launcher selector. */
     onCancel?: () => void;
     onDismissLockChange?: (locked: boolean) => void;
+    requestInit?: RequestInit;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -104,20 +106,20 @@ export default function ContactCreateContainer({
     const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
         invalidatePendingClose();
         const operationGeneration = closeGenerationRef.current;
-        const isCurrent = () => closeGenerationRef.current === operationGeneration;
+        const isCurrent = () => closeGenerationRef.current === operationGeneration && !requestInit?.signal?.aborted;
         setSucceeded(false);
         creatingRef.current = true;
         setCreating(true);
         emitDismissLock();
         try {
-            const imported = businessCard ? await importBusinessCard(businessCard) : null;
+            const imported = businessCard ? await importBusinessCard(businessCard, requestInit) : null;
             if (!isCurrent()) return;
-            const newContact = imported?.contact ?? await createContact(payload);
+            const newContact = imported?.contact ?? await createContact(payload, requestInit);
             if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {
                 try {
-                    await uploadContactPicture(newContact.id, imageFile);
+                    await uploadContactPicture(newContact.id, imageFile, requestInit);
                 } catch {
                     avatarUploadFailed = true;
                 }
