@@ -2608,6 +2608,9 @@ export type RuleExecution = {
     executedAt: string;
 };
 
+/** Latest execution fields included only in the rule list projection. */
+export type RuleExecutionSummary = Pick<RuleExecution, "status" | "executedAt">;
+
 export type Rule = {
     id: number;
     name: string;
@@ -2622,6 +2625,11 @@ export type Rule = {
     createdById?: number | null;
     createdAt: string;
     updatedAt: string;
+};
+
+/** A rule enriched with its latest execution for the workflows list. */
+export type RuleListItem = Rule & {
+    latestExecution: RuleExecutionSummary | null;
 };
 
 export type RuleRequest = {

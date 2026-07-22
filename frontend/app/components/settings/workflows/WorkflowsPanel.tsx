@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
     BoltIcon,
     ClockIcon,
@@ -13,10 +13,11 @@ import {
     TrashIcon,
 } from "@heroicons/react/24/outline";
 
-import type { Rule } from "@/app/lib/types";
+import type { Rule, RuleListItem } from "@/app/lib/types";
 import { deleteRule, getRules, updateRule } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,7 @@ import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { ruleSummary, ruleToRequest } from "@/app/components/settings/RulesPanel";
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
+import { WORKFLOW_RUN_STATUS_CLASS } from "@/app/components/settings/workflows/workflowRunStatus";
 import { useWorkflowDuplication } from "@/app/components/settings/workflows/useWorkflowDuplication";
 
 const rowActionTrigger =
@@ -45,6 +47,7 @@ const rowActionTrigger =
 export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceRules");
     const tw = useTranslations("WorkspaceWorkflows");
+    const locale = useLocale();
     const router = useRouter();
     const { activeWorkspaceId, activeWorkspace, switching } = useWorkspace();
     const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
@@ -54,7 +57,7 @@ export default function WorkflowsPanel() {
         switching,
     });
 
-    const [rules, setRules] = useState<Rule[]>([]);
+    const [rules, setRules] = useState<RuleListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [accessDenied, setAccessDenied] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Rule | null>(null);
@@ -89,7 +92,7 @@ export default function WorkflowsPanel() {
         };
     }, [activeWorkspaceId, t]);
 
-    const toggleEnabled = async (rule: Rule) => {
+    const toggleEnabled = async (rule: RuleListItem) => {
         const next = !rule.enabled;
         setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: next } : r)));
         try {
@@ -179,7 +182,7 @@ export default function WorkflowsPanel() {
                                 type="button"
                                 onClick={() => router.push(`/workflows/${rule.id}`)}
                                 disabled={duplicatingRuleId === rule.id}
-                                className="min-w-0 flex-1 space-y-1 text-left focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"
+                                className="min-w-0 flex-1 space-y-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-wait disabled:opacity-60"
                             >
                                 <span className="flex items-center gap-2">
                                     <span className="truncate text-sm font-medium text-foreground group-hover:underline">
@@ -207,6 +210,28 @@ export default function WorkflowsPanel() {
                                     )}
                                 </span>
                                 <span className="block truncate text-xs text-muted-foreground">{ruleSummary(rule, t)}</span>
+                                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                    {rule.latestExecution ? (
+                                        <>
+                                            <Badge
+                                                variant="outline"
+                                                className={WORKFLOW_RUN_STATUS_CLASS[rule.latestExecution.status]}
+                                            >
+                                                {tw(`runs.status.${rule.latestExecution.status}`)}
+                                            </Badge>
+                                            <time
+                                                dateTime={rule.latestExecution.executedAt}
+                                                title={formatDateTime(rule.latestExecution.executedAt, locale)}
+                                            >
+                                                {tw("runs.latest", {
+                                                    time: formatRelativeTime(rule.latestExecution.executedAt, locale),
+                                                })}
+                                            </time>
+                                        </>
+                                    ) : (
+                                        tw("runs.emptyTitle")
+                                    )}
+                                </span>
                                 {rule.executionMode === "system" && !canRunAsSystem ? (
                                     <span id={`system-toggle-restriction-${rule.id}`} className="block text-xs text-muted-foreground">
                                         {t("systemToggleRestricted")}
@@ -311,6 +336,10 @@ function WorkflowSkeleton({ rows }: { rows: number }) {
                     <div className="flex-1 space-y-2">
                         <Skeleton className="h-3.5 w-32" />
                         <Skeleton className="h-3 w-52" />
+                        <div className="flex items-center gap-2">
+                            <Skeleton className="h-5 w-16 rounded-full" />
+                            <Skeleton className="h-3 w-20" />
+                        </div>
                     </div>
                 </li>
             ))}
