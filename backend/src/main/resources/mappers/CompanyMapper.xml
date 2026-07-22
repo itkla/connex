@@ -455,6 +455,13 @@
     FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
   </select>
 
+  <select id="getOwnedCompanyByIdForUpdate" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getCompaniesWithWebsite" resultType="Company">
     SELECT id, website FROM company WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
   </select>

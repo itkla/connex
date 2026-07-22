@@ -237,7 +237,7 @@ public class ImportService {
 
     private boolean applyPersonUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName, Map<String, Integer> companyByName) {
-        Person existing = getOwnedPerson(workspaceId, row.matchedId);
+        Person existing = personMapper.getOwnedPersonByIdForUpdate(workspaceId, row.matchedId);
         if (existing == null) {
             fail(row, "Matched contact #" + row.matchedId + " not found");
             return false;
@@ -253,10 +253,7 @@ public class ImportService {
             stub.setId(companyId);
             existing.setCompany(stub);
         }
-        if (personMapper.update(existing) != 1) {
-            fail(row, "Matched contact #" + row.matchedId + " not found");
-            return false;
-        }
+        personMapper.update(existing);
         Integer afterCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
         if (afterCompanyId != null && !afterCompanyId.equals(beforeCompanyId)) {
             employmentService.recordTransition(workspaceId, existing.getId(), afterCompanyId, existing.getTitle());
@@ -382,7 +379,7 @@ public class ImportService {
 
     private boolean applyCompanyUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName) {
-        Company existing = getOwnedCompany(workspaceId, row.matchedId);
+        Company existing = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, row.matchedId);
         if (existing == null) {
             fail(row, "Matched company #" + row.matchedId + " not found");
             return false;
@@ -392,10 +389,7 @@ public class ImportService {
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
-        if (companyMapper.update(existing) != 1) {
-            fail(row, "Matched company #" + row.matchedId + " not found");
-            return false;
-        }
+        companyMapper.update(existing);
         attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
         return true;

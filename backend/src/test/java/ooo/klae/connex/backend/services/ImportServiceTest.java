@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 
 import org.junit.jupiter.api.Test;
@@ -334,6 +333,21 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(personEmail, updatedPerson.getEmail());
         assertEquals(companyName, updatedCompany.getName());
         assertEquals(companyWebsite, updatedCompany.getWebsite());
+
+        ImportResult noOpPerson = importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", personName, "Email", personEmail)),
+            "fill_empty",
+            Map.of(0, person.getId())));
+        ImportResult noOpCompany = importService.commitCompanies(req(
+            List.of(map("Name", "name"), map("Website", "website")),
+            List.of(Map.of("Name", companyName, "Website", companyWebsite)),
+            "fill_empty",
+            Map.of(0, company.getId())));
+        assertEquals(1, noOpPerson.getUpdated());
+        assertTrue(noOpPerson.getFailed().isEmpty());
+        assertEquals(1, noOpCompany.getUpdated());
+        assertTrue(noOpCompany.getFailed().isEmpty());
     }
 
     @Test
@@ -380,8 +394,8 @@ class ImportServiceTest extends AbstractServiceTest {
         int companyCustomCount = rowCount(
             "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
             company.getId());
-        doReturn(0).when(personMapperSpy).update(any(Person.class));
-        doReturn(0).when(companyMapperSpy).update(any(Company.class));
+        doReturn(null).when(personMapperSpy).getOwnedPersonByIdForUpdate(workspace.getId(), person.getId());
+        doReturn(null).when(companyMapperSpy).getOwnedCompanyByIdForUpdate(workspace.getId(), company.getId());
 
         ImportResult personResult = importService.commitPersons(personRequest);
         ImportResult companyResult = importService.commitCompanies(companyRequest);
