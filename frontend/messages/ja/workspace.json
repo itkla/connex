@@ -371,6 +371,7 @@
       "scheduledTarget": "定期評価",
       "recordFallback": "レコード",
       "target": "{record} #{id}",
+      "latest": "最終実行 {time}",
       "status": {
         "running": "実行中",
         "matched": "完了",

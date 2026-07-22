@@ -130,4 +130,18 @@
     LIMIT #{limit}
   </select>
 
+  <select id="getLatestExecutionsByWorkspace" resultType="RuleExecution">
+    SELECT r.id AS rule_id, latest_execution.status, latest_execution.executed_at
+    FROM rule r
+    JOIN LATERAL (
+      SELECT re.status, re.executed_at
+      FROM rule_execution re
+      WHERE re.workspace_id = r.workspace_id AND re.rule_id = r.id
+      ORDER BY re.executed_at DESC, re.id DESC
+      LIMIT 1
+    ) latest_execution ON TRUE
+    WHERE r.workspace_id = #{workspaceId}
+    ORDER BY r.id
+  </select>
+
 </mapper>

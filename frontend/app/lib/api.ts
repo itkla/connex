@@ -3031,7 +3031,7 @@ export function deleteWorkspaceRole(workspaceId: number, roleId: number) {
 }
 
 export function getRules(init: RequestInit = {}) {
-    return getJson<Types.Rule[]>(`/api/rules`, { cache: "no-store", ...init });
+    return getJson<Types.RuleListItem[]>(`/api/rules`, { cache: "no-store", ...init });
 }
 
 export function createRule(payload: Types.RuleRequest, init: RequestInit = {}) {

@@ -25,4 +25,5 @@ public class RuleDto {
     private Integer createdById;
     private String createdAt;
     private String updatedAt;
+    private RuleExecutionSummaryDto latestExecution;
 }

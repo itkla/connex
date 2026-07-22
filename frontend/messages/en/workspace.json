@@ -371,6 +371,7 @@
       "scheduledTarget": "Scheduled evaluation",
       "recordFallback": "Record",
       "target": "{record} #{id}",
+      "latest": "Last run {time}",
       "status": {
         "running": "Running",
         "matched": "Matched",

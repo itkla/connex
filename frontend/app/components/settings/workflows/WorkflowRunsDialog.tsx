@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
 import { useLocale, useTranslations } from "next-intl";
 
-import type { Rule, RuleExecution, RuleExecutionStatus } from "@/app/lib/types";
+import type { Rule, RuleExecution } from "@/app/lib/types";
 import { getRuleExecutions } from "@/app/lib/api";
-import { formatDateTime } from "@/app/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,14 +18,11 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const STATUS_CLASS: Record<RuleExecutionStatus, string> = {
-    running: "border-brand/30 bg-brand-light text-foreground",
-    matched: "border-border bg-secondary text-secondary-foreground",
-    partial: "border-risk-medium/30 bg-risk-medium/15 text-foreground",
-    skipped: "border-border bg-muted text-muted-foreground",
-    failed: "border-destructive/30 bg-destructive/10 text-destructive",
-};
+import {
+    formatWorkflowRunDateTime,
+    normalizeWorkflowRunDateTime,
+    WORKFLOW_RUN_STATUS_CLASS,
+} from "@/app/components/settings/workflows/workflowRunStatus";
 
 type LoadState = "loading" | "success" | "error";
 
@@ -130,11 +126,14 @@ export default function WorkflowRunsDialog({
                             {executions.map((execution) => (
                                 <li key={execution.id} className="space-y-3 px-6 py-4">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <Badge variant="outline" className={STATUS_CLASS[execution.status]}>
+                                        <Badge variant="outline" className={WORKFLOW_RUN_STATUS_CLASS[execution.status]}>
                                             {t(`runs.status.${execution.status}`)}
                                         </Badge>
-                                        <time className="text-xs text-muted-foreground" dateTime={execution.executedAt}>
-                                            {formatDateTime(execution.executedAt, locale)}
+                                        <time
+                                            className="text-xs text-muted-foreground"
+                                            dateTime={normalizeWorkflowRunDateTime(execution.executedAt)}
+                                        >
+                                            {formatWorkflowRunDateTime(execution.executedAt, locale)}
                                         </time>
                                     </div>
                                     <dl className="grid gap-2 text-xs sm:grid-cols-2">

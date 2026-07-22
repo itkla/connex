@@ -71,4 +71,7 @@ public interface RuleMapper {
     /** Recent executions for a rule scoped to the workspace, newest first. */
     List<RuleExecution> getExecutionsByRule(@Param("workspaceId") int workspaceId, @Param("ruleId") int ruleId, @Param("limit") int limit);
 
+    /** Latest execution for each rule with history in the workspace. */
+    List<RuleExecution> getLatestExecutionsByWorkspace(@Param("workspaceId") int workspaceId);
+
 }

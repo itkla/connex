@@ -12,6 +12,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -45,6 +46,7 @@ class RuleServiceTest extends AbstractServiceTest {
     @Autowired RuleMapper ruleMapper;
     @Autowired WorkflowMapper workflowMapper;
     @Autowired WorkflowVersionMapper workflowVersionMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private static RuleTrigger schedule(String cadence) {
         RuleTrigger trigger = new RuleTrigger();
@@ -440,5 +442,58 @@ class RuleServiceTest extends AbstractServiceTest {
         int before = ruleService.list().size();
         ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
         assertTrue(ruleService.list().size() >= before + 1);
+    }
+
+    @Test
+    void list_projectsLatestExecutionDeterministicallyAndIsolatesWorkspace() {
+        int ruleId = ruleService.create(
+            req("deal", entityChange("deal.won"), "user", action("notify"))).getId();
+        int noHistoryRuleId = ruleService.create(
+            req("company", entityChange("company.updated"), "user", action("notify"))).getId();
+
+        RuleExecution older = execution(ruleId, "skipped");
+        RuleExecution tiedLowerId = execution(ruleId, "failed");
+        RuleExecution tiedHigherId = execution(ruleId, "matched");
+        jdbcTemplate.update(
+            "UPDATE rule_execution SET executed_at = ? WHERE workspace_id = ? AND id = ?",
+            "2026-07-20 09:00:00", workspace.getId(), older.getId());
+        jdbcTemplate.update(
+            "UPDATE rule_execution SET executed_at = ? WHERE workspace_id = ? AND id IN (?, ?)",
+            "2026-07-21 10:15:00", workspace.getId(), tiedLowerId.getId(), tiedHigherId.getId());
+
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        jdbcTemplate.update(
+            "INSERT INTO rule_execution "
+                + "(workspace_id, rule_id, status, dedupe_key, executed_at) VALUES (?, ?, ?, ?, ?)",
+            other.getId(), ruleId, "running", "foreign-" + unique(), "2026-07-22 11:00:00");
+
+        List<RuleDto> listed = ruleService.list();
+        RuleDto projected = listed.stream()
+            .filter(rule -> rule.getId() == ruleId)
+            .findFirst()
+            .orElseThrow();
+        RuleDto withoutHistory = listed.stream()
+            .filter(rule -> rule.getId() == noHistoryRuleId)
+            .findFirst()
+            .orElseThrow();
+
+        assertNotNull(projected.getLatestExecution());
+        assertEquals("matched", projected.getLatestExecution().status());
+        assertEquals("2026-07-21 10:15:00", projected.getLatestExecution().executedAt());
+        assertNull(withoutHistory.getLatestExecution());
+    }
+
+    private RuleExecution execution(int ruleId, String status) {
+        RuleExecution execution = new RuleExecution();
+        execution.setWorkspaceId(workspace.getId());
+        execution.setRuleId(ruleId);
+        execution.setStatus(status);
+        execution.setDedupeKey(status + "-" + unique());
+        ruleMapper.insertExecution(execution);
+        return execution;
     }
 }
