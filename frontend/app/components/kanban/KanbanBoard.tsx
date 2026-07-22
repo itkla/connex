@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useMemo, useRef, useState } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -57,8 +57,13 @@ export interface KanbanBoardProps<T> {
 
 type ColumnItems = Record<string, number[]>;
 
-function groupItems<T>(props: KanbanBoardProps<T>): ColumnItems {
-    const { columns, items, getId, getColumnId, getPosition } = props;
+function groupItems<T>(
+    columns: KanbanColumnDef[],
+    items: T[],
+    getId: (item: T) => number,
+    getColumnId: (item: T) => string,
+    getPosition: (item: T) => number,
+): ColumnItems {
     const map: ColumnItems = {};
     for (const col of columns) map[col.id] = [];
     const sorted = [...items].sort((a, b) => getPosition(a) - getPosition(b) || getId(a) - getId(b));
@@ -69,11 +74,12 @@ function groupItems<T>(props: KanbanBoardProps<T>): ColumnItems {
     return map;
 }
 
-function findColumn(map: ColumnItems, id: number): string | null {
+function indexColumns(map: ColumnItems): Map<number, string> {
+    const index = new Map<number, string>();
     for (const [col, ids] of Object.entries(map)) {
-        if (ids.includes(id)) return col;
+        for (const id of ids) index.set(id, col);
     }
-    return null;
+    return index;
 }
 
 const boardCollisionDetection: CollisionDetection = (args) => {
@@ -82,13 +88,17 @@ const boardCollisionDetection: CollisionDetection = (args) => {
 };
 
 export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
-    const { columns, items, getId, renderCard, onMove, reduce, emptyHint, countLabel, accessibility } = props;
+    const { columns, items, getId, getColumnId, getPosition, renderCard, onMove, reduce, emptyHint, countLabel, accessibility } = props;
 
-    const incoming = groupItems(props);
-    const incomingKey = JSON.stringify(incoming);
+    const incoming = useMemo(
+        () => groupItems(columns, items, getId, getColumnId, getPosition),
+        [columns, items, getId, getColumnId, getPosition],
+    );
+    const incomingKey = useMemo(() => JSON.stringify(incoming), [incoming]);
 
     const [columnItems, setColumnItems] = useState<ColumnItems>(incoming);
     const snapshotRef = useRef<ColumnItems>(incoming);
+    const snapshotColumnByItemIdRef = useRef<Map<number, string>>(new Map());
     const [activeId, setActiveId] = useState<number | null>(null);
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
@@ -97,7 +107,11 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         setColumnItems(incoming);
     }
 
-    const itemsById = new Map<number, T>(items.map((item) => [getId(item), item]));
+    const itemsById = useMemo(
+        () => new Map<number, T>(items.map((item) => [getId(item), item])),
+        [items, getId],
+    );
+    const columnByItemId = useMemo(() => indexColumns(columnItems), [columnItems]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -108,6 +122,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const onDragStart = (event: DragStartEvent) => {
         snapshotRef.current = columnItems;
+        snapshotColumnByItemIdRef.current = columnByItemId;
         setActiveId(Number(event.active.id));
     };
 
@@ -117,8 +132,8 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         const activeId = Number(active.id);
         const overStr = String(over.id);
         const current = columnItems;
-        const fromCol = findColumn(current, activeId);
-        const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : findColumn(current, Number(over.id));
+        const fromCol = columnByItemId.get(activeId);
+        const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : columnByItemId.get(Number(over.id));
         if (!fromCol || !toCol || !current[toCol] || fromCol === toCol) return;
 
         const fromIds = current[fromCol].filter((id) => id !== activeId);
@@ -143,7 +158,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         }
         const overStr = String(over.id);
         const current = columnItems;
-        const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : findColumn(current, Number(over.id));
+        const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : columnByItemId.get(Number(over.id));
         if (!toCol || !current[toCol]) {
             commit(snapshot);
             return;
@@ -152,7 +167,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         let toIds = current[toCol];
         const oldIndex = toIds.indexOf(activeId);
         if (oldIndex < 0) {
-            const fromCol = findColumn(current, activeId);
+            const fromCol = columnByItemId.get(activeId);
             const insertAt = overStr.startsWith(COL_PREFIX)
                 ? toIds.length
                 : Math.max(0, toIds.indexOf(Number(over.id)));
@@ -172,7 +187,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         }
         const finalIndex = toIds.indexOf(activeId);
 
-        const originCol = findColumn(snapshot, activeId);
+        const originCol = snapshotColumnByItemIdRef.current.get(activeId);
         const originIndex = originCol ? snapshot[originCol].indexOf(activeId) : -1;
         if (originCol === toCol && originIndex === finalIndex) return;
 

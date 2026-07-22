@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
@@ -275,8 +276,12 @@ public interface DealMapper {
     List<Integer> getDealIdsInStageOrdered(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     /** The next free tail position in a stage column ({@code MAX(position)+1}, or 0 when empty). */
     int nextDealPosition(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
-    /** Sets a single deal's manual sort position within its stage column. */
-    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+    /** Sets manual sort positions for deals that still belong to the expected workspace stage. */
+    int setPositions(
+        @Param("workspaceId") int workspaceId,
+        @Param("stageId") int stageId,
+        @Param("positions") List<BoardPositionUpdate> positions
+    );
 
     /** Sets only a deal's expected close date, scoped to the workspace. */
     int updateExpectedCloseDate(

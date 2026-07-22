@@ -46,6 +46,7 @@ import tools.jackson.databind.node.ObjectNode;
 public class AiInvocationService {
     private static final String AUDIT_ACTION = "ai.llm.call";
     private static final String AUDIT_ENTITY_TYPE = "ai_call";
+    private static final String AUDIT_OUTCOME_ATTEMPT = "attempt";
     private static final String UNKNOWN_TARGET = "unresolved";
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
@@ -319,6 +320,11 @@ public class AiInvocationService {
         }
         if (reason != null) {
             metadata.put("reason", reason);
+        }
+        if (AUDIT_OUTCOME_ATTEMPT.equals(outcome)) {
+            auditService.recordStrictIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
+                    targetLabel(resolved), "AI call " + outcome, metadata);
+            return;
         }
         auditService.recordIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
                 targetLabel(resolved), "AI call " + outcome, metadata);

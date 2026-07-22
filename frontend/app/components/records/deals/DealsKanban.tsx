@@ -47,6 +47,18 @@ function stageAccent(stage: Stage): string {
     return cls === 'won' ? 'var(--chart-won)' : cls === 'lost' ? 'var(--chart-lost)' : 'var(--chart-open)';
 }
 
+function dealId(deal: Deal): number {
+    return deal.id;
+}
+
+function dealColumnId(deal: Deal): string {
+    return String(deal.stage);
+}
+
+function dealPosition(deal: Deal): number {
+    return deal.position;
+}
+
 export default function DealsKanban({
     deals,
     pipelines,
@@ -324,9 +336,9 @@ export default function DealsKanban({
         <KanbanBoard<Deal>
             columns={columns}
             items={boardDeals}
-            getId={(d) => d.id}
-            getColumnId={(d) => String(d.stage)}
-            getPosition={(d) => d.position}
+            getId={dealId}
+            getColumnId={dealColumnId}
+            getPosition={dealPosition}
             renderCard={renderCard}
             onMove={onMove}
             reduce={reduce}
