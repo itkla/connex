@@ -269,24 +269,22 @@ export function ActivityDialogForm({
         personId: selectedPerson?.id ?? null,
         dealId: selectedDeal?.id ?? null,
     }));
-    const dirty =
-        !submitting &&
-        !succeeded &&
-        !followUpFailed &&
-        (subject !== initial.subject ||
-            notes !== initial.notes ||
-            type !== initial.type ||
-            when !== initial.when ||
-            (selectedPerson?.id ?? null) !== initial.personId ||
-            (selectedDeal?.id ?? null) !== initial.dealId ||
-            followUpEnabled);
+    const formChanged =
+        subject !== initial.subject ||
+        notes !== initial.notes ||
+        type !== initial.type ||
+        when !== initial.when ||
+        (selectedPerson?.id ?? null) !== initial.personId ||
+        (selectedDeal?.id ?? null) !== initial.dealId ||
+        followUpEnabled;
+    const dirty = !submitting && !succeeded && !followUpFailed && formChanged;
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
 
     useEffect(() => {
         const meaningful = subject.trim().length > 0 || notes.trim().length > 0;
-        if (dirty) hasChangedRef.current = true;
+        if (formChanged) hasChangedRef.current = true;
         if (!hasChangedRef.current || succeeded) return;
         if (meaningful) {
             ownsDraftRef.current = true;
@@ -304,7 +302,7 @@ export function ActivityDialogForm({
             personId: selectedPerson?.id ?? null,
             dealId: selectedDeal?.id ?? null,
         });
-    }, [dirty, notes, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, subject, succeeded, type]);
+    }, [formChanged, notes, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, subject, succeeded, type]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

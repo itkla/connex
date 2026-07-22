@@ -223,12 +223,11 @@ export function NoteDialogForm({
         personId: selectedPerson?.id ?? null,
         dealId: selectedDeal?.id ?? null,
     }));
-    const dirty =
-        !submitting &&
-        !succeeded &&
-        (content !== initial.content ||
-            (selectedPerson?.id ?? null) !== initial.personId ||
-            (selectedDeal?.id ?? null) !== initial.dealId);
+    const formChanged =
+        content !== initial.content ||
+        (selectedPerson?.id ?? null) !== initial.personId ||
+        (selectedDeal?.id ?? null) !== initial.dealId;
+    const dirty = !submitting && !succeeded && formChanged;
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
@@ -236,7 +235,7 @@ export function NoteDialogForm({
     useEffect(() => {
         if (isEdit) return;
         const meaningful = noteContentToVisibleText(content).length > 0;
-        if (dirty) hasChangedRef.current = true;
+        if (formChanged) hasChangedRef.current = true;
         if (!hasChangedRef.current || succeeded) return;
         if (meaningful) {
             ownsDraftRef.current = true;
@@ -252,7 +251,7 @@ export function NoteDialogForm({
             personId: selectedPerson?.id ?? null,
             dealId: selectedDeal?.id ?? null,
         });
-    }, [content, dirty, isEdit, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, succeeded]);
+    }, [content, formChanged, isEdit, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, succeeded]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

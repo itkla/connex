@@ -11,6 +11,7 @@ import {
     getDraftKeyGeneration,
     listFreshDrafts,
     readDraft,
+    subscribeDraftChanges,
     type StoredDraft,
 } from '@/app/lib/formDrafts';
 import { useActions } from '@/app/hooks/useActions';
@@ -20,7 +21,7 @@ import type { ActivityDraftData } from '@/app/components/activity/activities/Act
 import type { NoteDraftData } from '@/app/components/activity/notes/NoteDialog';
 import type { TaskDraftData } from '@/app/components/activity/tasks/TaskDialog';
 import { ACTIVITY_TYPES } from '@/app/components/activity/activities/activityTypeMeta';
-import { noteContentToPlainText, noteContentToVisibleText } from '@/app/lib/references';
+import { noteContentToVisibleText } from '@/app/lib/references';
 
 const MAX_LABEL = 48;
 /** Defer the toast past the mount/hydration tick so the sonner Toaster has subscribed before it fires. */
@@ -234,6 +235,11 @@ export default function DraftResumeBridge() {
         if (drafts.length === 0) return;
         let active = true;
         const refreshTimers = new Set<number>();
+        const changedKeys = new Set<string>();
+        const unsubscribe = subscribeDraftChanges((key) => {
+            changedKeys.add(key);
+            toast.dismiss(key);
+        });
 
         function deferRefresh(refresh: () => void, delay: number) {
             const timer = window.setTimeout(() => {
@@ -249,6 +255,7 @@ export default function DraftResumeBridge() {
             const delay =
                 current && !sameActivityDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
             deferRefresh(() => {
+                if (changedKeys.has(stored.key)) return;
                 const latestGeneration = getDraftKeyGeneration(stored.key);
                 if (latestGeneration !== keyGeneration) {
                     refreshActivityToast(stored);
@@ -317,6 +324,7 @@ export default function DraftResumeBridge() {
             const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
             const delay = current && !sameNoteDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
             deferRefresh(() => {
+                if (changedKeys.has(stored.key)) return;
                 const latestGeneration = getDraftKeyGeneration(stored.key);
                 if (latestGeneration !== keyGeneration) {
                     refreshNoteToast(stored);
@@ -376,6 +384,7 @@ export default function DraftResumeBridge() {
             const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
             const delay = current && !sameTaskDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
             deferRefresh(() => {
+                if (changedKeys.has(stored.key)) return;
                 const latestGeneration = getDraftKeyGeneration(stored.key);
                 if (latestGeneration !== keyGeneration) {
                     refreshTaskToast(stored);
@@ -389,7 +398,7 @@ export default function DraftResumeBridge() {
         }
 
         function showTaskToast(stored: StoredDraft<TaskDraftData>, keyGeneration: number) {
-            const label = shorten(noteContentToPlainText(stored.data.description));
+            const label = shorten(noteContentToVisibleText(stored.data.description));
             toastInfo(t('taskMessageNamed', { label }), {
                 id: stored.key,
                 duration: Infinity,
@@ -432,17 +441,33 @@ export default function DraftResumeBridge() {
 
         const timer = window.setTimeout(() => {
             for (const draft of drafts) {
+                if (
+                    changedKeys.has(draft.stored.key) ||
+                    draft.keyGeneration !== getDraftKeyGeneration(draft.stored.key)
+                ) {
+                    continue;
+                }
                 if (draft.kind === 'activity') {
-                    showActivityToast(draft.stored, draft.keyGeneration);
+                    const current = readCurrentActivityDraft(draft.stored, userId, activeWorkspaceId);
+                    if (current && sameActivityDraft(current, draft.stored)) {
+                        showActivityToast(current, draft.keyGeneration);
+                    }
                 } else if (draft.kind === 'note') {
-                    showNoteToast(draft.stored, draft.keyGeneration);
+                    const current = readCurrentNoteDraft(draft.stored, userId, activeWorkspaceId);
+                    if (current && sameNoteDraft(current, draft.stored)) {
+                        showNoteToast(current, draft.keyGeneration);
+                    }
                 } else {
-                    showTaskToast(draft.stored, draft.keyGeneration);
+                    const current = readCurrentTaskDraft(draft.stored, userId, activeWorkspaceId);
+                    if (current && sameTaskDraft(current, draft.stored)) {
+                        showTaskToast(current, draft.keyGeneration);
+                    }
                 }
             }
         }, DRAFT_TOAST_DELAY_MS);
         return () => {
             active = false;
+            unsubscribe();
             window.clearTimeout(timer);
             for (const refreshTimer of refreshTimers) window.clearTimeout(refreshTimer);
             for (const draft of drafts) toast.dismiss(draft.stored.key);

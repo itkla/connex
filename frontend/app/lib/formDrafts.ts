@@ -1,6 +1,7 @@
 const DRAFT_PREFIX = 'connex:draft:';
 let draftStoreGeneration = 0;
 const draftKeyGenerations = new Map<string, number>();
+const draftChangeListeners = new Set<(key: string) => void>();
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -53,6 +54,16 @@ export function advanceDraftKeyGeneration(key: string): number {
     const next = getDraftKeyGeneration(key) + 1;
     draftKeyGenerations.set(key, next);
     return next;
+}
+
+/** Subscribes to committed writes and clears for composer draft keys. */
+export function subscribeDraftChanges(listener: (key: string) => void): () => void {
+    draftChangeListeners.add(listener);
+    return () => draftChangeListeners.delete(listener);
+}
+
+function notifyDraftChange(key: string): void {
+    for (const listener of draftChangeListeners) listener(key);
 }
 
 /** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
@@ -118,6 +129,7 @@ export function writeDraft<T>(key: string, params: { version: number; scope: str
     };
     try {
         store.setItem(key, JSON.stringify(envelope));
+        notifyDraftChange(key);
     } catch {
         /* quota exceeded or private mode — drafts are best-effort */
     }
@@ -127,12 +139,14 @@ export function writeDraft<T>(key: string, params: { version: number; scope: str
 export function clearDraft(key: string): void {
     advanceDraftKeyGeneration(key);
     const store = safeSession();
-    if (!store) return;
-    try {
-        store.removeItem(key);
-    } catch {
-        /* ignore */
+    if (store) {
+        try {
+            store.removeItem(key);
+        } catch {
+            /* ignore */
+        }
     }
+    notifyDraftChange(key);
 }
 
 /** Removes a draft only while `expectedGeneration` still owns the key. */

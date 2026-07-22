@@ -236,21 +236,20 @@ export function TaskDialogForm({
         personId: selectedPerson?.id ?? null,
         dealId: selectedDeal?.id ?? null,
     }));
-    const dirty =
-        !submitting &&
-        !succeeded &&
-        (description !== initial.description ||
-            dueDate !== initial.dueDate ||
-            (assignee?.id ?? null) !== initial.assigneeId ||
-            (selectedPerson?.id ?? null) !== initial.personId ||
-            (selectedDeal?.id ?? null) !== initial.dealId);
+    const formChanged =
+        description !== initial.description ||
+        dueDate !== initial.dueDate ||
+        (assignee?.id ?? null) !== initial.assigneeId ||
+        (selectedPerson?.id ?? null) !== initial.personId ||
+        (selectedDeal?.id ?? null) !== initial.dealId;
+    const dirty = !submitting && !succeeded && formChanged;
     useEffect(() => {
         onDirtyChange?.(dirty);
     }, [dirty, onDirtyChange]);
 
     useEffect(() => {
         const meaningful = description.trim().length > 0;
-        if (dirty) hasChangedRef.current = true;
+        if (formChanged) hasChangedRef.current = true;
         if (!hasChangedRef.current || succeeded) return;
         if (meaningful) {
             ownsDraftRef.current = true;
@@ -272,8 +271,8 @@ export function TaskDialogForm({
         assignee,
         currentUserId,
         description,
-        dirty,
         dueDate,
+        formChanged,
         onClearDraft,
         onPersistDraft,
         selectedDeal,

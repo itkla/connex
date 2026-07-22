@@ -81,6 +81,7 @@
       "dealCreated": "取引を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",
       "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
+      "restoredAssigneeUnavailable": "保存されていた担当者は利用できません。タスクを作成する前に担当者を確認してください。",
       "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
       "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
       "taskCreated": "タスクを作成しました",

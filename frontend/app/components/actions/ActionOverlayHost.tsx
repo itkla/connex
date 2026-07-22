@@ -9,7 +9,8 @@ import type { Contact, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
-import { toastError } from "@/app/lib/toast";
+import { toastError, toastWarn } from "@/app/lib/toast";
+import { draftKey, getDraftKeyGeneration } from "@/app/lib/formDrafts";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -157,6 +158,24 @@ export default function ActionOverlayHost({
     const restoredAssigneeId = rosterOnly && rendered.request.kind === "create-task"
         ? rendered.request.draft?.assigneeId
         : undefined;
+    const restoredDraftGeneration = rosterOnly && "restoredDraftGeneration" in rendered.request
+        ? rendered.request.restoredDraftGeneration
+        : undefined;
+    const restoredDraftFormType = kind === "create-task"
+        ? "task"
+        : kind === "create-note"
+            ? "note"
+            : kind === "create-activity"
+                ? "activity"
+                : null;
+    const restoredDraftKey = restoredDraftGeneration !== undefined && restoredDraftFormType !== null
+        ? draftKey({
+            userId: user?.id ?? null,
+            workspaceId: rendered?.originWorkspaceId ?? null,
+            formType: restoredDraftFormType,
+            scope: "global",
+        })
+        : null;
     const referenceKey = needsReference
         ? [rendered?.generation, kind, defaultPersonId, defaultDealId, rosterOnly].join(":")
         : null;
@@ -175,6 +194,13 @@ export default function ActionOverlayHost({
         )
             .then((references) => {
                 if (cancelled || requestInit.signal?.aborted) return;
+                if (
+                    restoredDraftKey !== null &&
+                    restoredDraftGeneration !== getDraftKeyGeneration(restoredDraftKey)
+                ) {
+                    onClose();
+                    return;
+                }
                 setLoadedReferences({ key: referenceKey, ...references });
             })
             .catch(() => {
@@ -192,6 +218,8 @@ export default function ActionOverlayHost({
         referenceKey,
         requestInit,
         restoredDealId,
+        restoredDraftGeneration,
+        restoredDraftKey,
         restoredPersonId,
         rosterOnly,
         t,
@@ -203,6 +231,19 @@ export default function ActionOverlayHost({
         getUsers(requestInit)
             .then((fetched) => {
                 if (cancelled || requestInit.signal?.aborted) return;
+                if (
+                    restoredDraftKey !== null &&
+                    restoredDraftGeneration !== getDraftKeyGeneration(restoredDraftKey)
+                ) {
+                    onClose();
+                    return;
+                }
+                if (
+                    restoredAssigneeId != null &&
+                    !fetched.some((candidate) => candidate.id === restoredAssigneeId)
+                ) {
+                    toastWarn(t("feedback.restoredAssigneeUnavailable"));
+                }
                 setLoadedUsers({ key: usersKey, users: fetched });
             })
             .catch(() => {
@@ -217,7 +258,15 @@ export default function ActionOverlayHost({
         return () => {
             cancelled = true;
         };
-    }, [onClose, requestInit, restoredAssigneeId, t, usersKey]);
+    }, [
+        onClose,
+        requestInit,
+        restoredAssigneeId,
+        restoredDraftGeneration,
+        restoredDraftKey,
+        t,
+        usersKey,
+    ]);
 
     if (!user) return null;
 
