@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
@@ -62,7 +63,6 @@ class AiProviderConfigConcurrencyIntegrationTest {
     private Workspace firstWorkspace;
     private Workspace secondWorkspace;
     private User actor;
-    private String credentialRef;
 
     @BeforeEach
     void setUp() {
@@ -86,10 +86,12 @@ class AiProviderConfigConcurrencyIntegrationTest {
         workspaceMapper.addMember(secondWorkspace.getId(), actor.getId(), "admin");
         orgMemberMapper.addMember(organization.getId(), actor.getId(), "owner");
 
-        credentialRef = aiProviderSecretCipher.encryptCredential(
+        String credentialRef = aiProviderSecretCipher.encryptCredential(
                 organization.getId(),
                 "{\"accessKeyId\":\"AKIATEST12345678\",\"secretAccessKey\":\"abcd1234wxyz\"}");
         aiProviderConfigMapper.upsert(readyConfig(credentialRef));
+        assertEquals("REPEATABLE-READ", jdbcTemplate.queryForObject(
+                "SELECT @@transaction_isolation", String.class));
     }
 
     @AfterEach
@@ -119,6 +121,7 @@ class AiProviderConfigConcurrencyIntegrationTest {
                     BadRequestException.class,
                     () -> service.save(secondWorkspace.getId(), actor.getId(), preservingRequest)));
             assertTrue(barrier.secondAttempted().await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> save.get(500, TimeUnit.MILLISECONDS));
             barrier.releaseFirst().countDown();
 
             revoke.get(20, TimeUnit.SECONDS);
@@ -149,6 +152,7 @@ class AiProviderConfigConcurrencyIntegrationTest {
             Future<?> revoke = executor.submit(
                     () -> service.revoke(secondWorkspace.getId(), actor.getId()));
             assertTrue(barrier.secondAttempted().await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> revoke.get(500, TimeUnit.MILLISECONDS));
             barrier.releaseFirst().countDown();
 
             assertNotNull(save.get(20, TimeUnit.SECONDS));
