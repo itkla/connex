@@ -98,7 +98,7 @@ public class AuditIntegrityService {
 
     private void lockForeignKeyParents(AuditLog entry) {
         if (entry.getActorId() != null && userMapper.lockByIdForShare(entry.getActorId()) == null) {
-            throw new IllegalStateException("Audit actor no longer exists");
+            entry.setActorId(null);
         }
         if (entry.getWorkspaceId() != null
                 && workspaceMapper.lockWorkspaceForShare(entry.getWorkspaceId()) == null) {

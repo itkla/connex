@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -87,5 +89,37 @@ class AuditIntegrityLockOrderTest {
         order.verify(auditIntegrityMapper).lockHead("workspace", 7);
         order.verify(auditLogMapper).insert(entry);
         order.verify(auditIntegrityMapper).advanceHead("workspace", 7, 1, 2, entry.getRowHash());
+    }
+
+    @Test
+    void missingActorFallsBackToCapturedLabelBeforeInsert() {
+        AuditLog entry = new AuditLog();
+        entry.setActorId(9);
+        entry.setActorLabel("Deleted User");
+        entry.setOrgId(3);
+        entry.setAction("secret_store.secret.use");
+        entry.setEntityType("organization");
+        entry.setOutcome("success");
+        entry.setSummary("Secret used");
+        AuditIntegrityHead head = new AuditIntegrityHead();
+        head.setScopeType("organization");
+        head.setScopeId(3);
+        head.setNextChainIndex(1);
+        head.setCurrentHash(GENESIS_HASH);
+        when(userMapper.lockByIdForShare(9)).thenReturn(null);
+        when(organizationMapper.lockByIdForShare(3)).thenReturn(3);
+        when(auditIntegrityMapper.lockHead("organization", 3)).thenReturn(head);
+        when(auditIntegrityMapper.advanceHead(eq("organization"), eq(3), eq(1L), eq(2L), any()))
+                .thenReturn(1);
+
+        service.appendIndependent(entry);
+
+        assertNull(entry.getActorId());
+        assertEquals("Deleted User", entry.getActorLabel());
+        InOrder order = inOrder(userMapper, organizationMapper, auditIntegrityMapper, auditLogMapper);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(organizationMapper).lockByIdForShare(3);
+        order.verify(auditIntegrityMapper).ensureHead("organization", 3, GENESIS_HASH);
+        order.verify(auditLogMapper).insert(entry);
     }
 }

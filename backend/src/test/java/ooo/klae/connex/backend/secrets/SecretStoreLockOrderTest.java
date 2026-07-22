@@ -96,12 +96,19 @@ class SecretStoreLockOrderTest {
     }
 
     @Test
-    void successfulUseDefersDurableAuditUntilAfterRollbackReleasesScopeLocks() {
+    void successfulLazyRewrapAfterRollbackAuditsUseWithoutClaimingCommittedRewrap() {
         StoredSecret secret = secret(1, "organization", 7);
         secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
         when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
         when(secretValueMapper.findById(1)).thenReturn(secret);
+        when(properties.isLazyRewrapEnabled()).thenReturn(true);
         when(crypto.decrypt(anyString(), anyString(), anyString(), anyString())).thenReturn("plaintext");
+        when(crypto.isActiveKey("old-v1")).thenReturn(false);
+        when(crypto.activeKeyId()).thenReturn("new-v2");
+        when(crypto.encrypt(anyString(), anyString()))
+                .thenReturn(new SecretStoreCrypto.EncryptedSecret("new-key", "new-ciphertext"));
+        when(secretValueMapper.updateRewrapped(
+                org.mockito.ArgumentMatchers.any(), anyString(), anyString(), anyString())).thenReturn(1);
         List<TransactionSynchronization> synchronizations;
         TransactionSynchronizationManager.initSynchronization();
         try {

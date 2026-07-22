@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.secrets;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.function.IntConsumer;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -236,28 +237,28 @@ public class SecretStore {
     }
 
     private void auditUse(StoredSecret secret, boolean rewrapped) {
-        deferIndependentAudit(() -> auditService.recordIndependentScoped(
+        deferIndependentAudit(status -> auditService.recordIndependentScoped(
                 "secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret used",
-                auditMetadata(secret, rewrapped)));
+                auditMetadata(secret, rewrapped && status == TransactionSynchronization.STATUS_COMMITTED)));
     }
 
     private void auditUseFailure(StoredSecret secret, RuntimeException exception) {
-        deferIndependentAudit(() -> auditService.recordFailureScoped(
+        deferIndependentAudit(status -> auditService.recordFailureScoped(
                 "secret_store.secret.use_failed", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret use failed",
                 exception.getClass().getSimpleName()));
     }
 
-    private void deferIndependentAudit(Runnable recordAudit) {
+    private void deferIndependentAudit(IntConsumer recordAudit) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            recordAudit.run();
+            recordAudit.accept(TransactionSynchronization.STATUS_COMMITTED);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                recordAudit.run();
+                recordAudit.accept(status);
             }
         });
     }
@@ -270,7 +271,7 @@ public class SecretStore {
     }
 
     private void auditRewrapFailure(StoredSecret secret, RuntimeException exception) {
-        deferIndependentAudit(() -> auditService.recordFailureScoped(
+        deferIndependentAudit(status -> auditService.recordFailureScoped(
                 "secret_store.secret.rewrap_failed", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret rewrap failed",
                 exception.getClass().getSimpleName()));
