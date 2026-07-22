@@ -23,6 +23,33 @@ import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 class TaskMapperXmlTest {
 
     @Test
+    void boardRootLockUsesTenantBoundAtomicUpsert() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = Map.of("workspaceId", 11);
+
+        BoundSql boundSql = configuration
+            .getMappedStatement(TaskMapper.class.getName() + ".lockTaskBoard")
+            .getBoundSql(parameters);
+        String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertEquals(
+            "INSERT INTO task_board_lock (workspace_id) VALUES (?) "
+                + "ON DUPLICATE KEY UPDATE workspace_id = ?",
+            sql
+        );
+        assertEquals(2, boundSql.getParameterMappings().size());
+
+        PreparedStatement statement = mock(PreparedStatement.class);
+        configuration.newParameterHandler(
+            configuration.getMappedStatement(TaskMapper.class.getName() + ".lockTaskBoard"),
+            parameters,
+            boundSql
+        ).setParameters(statement);
+        verify(statement).setInt(1, 11);
+        verify(statement).setInt(2, 11);
+    }
+
+    @Test
     void batchPositionUpdateKeepsWorkspaceAndStatusPredicates() throws Exception {
         Configuration configuration = configuration();
         Map<String, Object> parameters = new HashMap<>();

@@ -11,6 +11,7 @@ import java.util.Set;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -442,7 +443,7 @@ public class WarmPathService {
      * default with mention tokens when it is absent. Requires {@code TASK_CREATE} in addition to
      * {@code PERSON_UPDATE}, enforced by the task service.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Task acceptPath(int targetPersonId, int bridgePersonId, String taskDescription) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

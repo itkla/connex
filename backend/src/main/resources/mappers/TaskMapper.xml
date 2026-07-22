@@ -210,6 +210,12 @@
       AND assigned_to_id = #{assignedToId}
   </update>
 
+  <insert id="lockTaskBoard">
+    INSERT INTO task_board_lock (workspace_id)
+    VALUES (#{workspaceId})
+    ON DUPLICATE KEY UPDATE workspace_id = #{workspaceId}
+  </insert>
+
   <select id="getTaskIdsInStatusOrdered" resultType="java.lang.Integer">
     SELECT id FROM task
     WHERE workspace_id = #{workspaceId} AND status = #{status}

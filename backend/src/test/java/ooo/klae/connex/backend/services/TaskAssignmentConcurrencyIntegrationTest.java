@@ -109,6 +109,7 @@ class TaskAssignmentConcurrencyIntegrationTest {
         tenantContext.clear();
         if (workspace != null) {
             jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM task_board_lock WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }

@@ -14,6 +14,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -270,6 +272,7 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void backfillAndReplayPreserveOneExecutionPerEvent() throws Exception {
         User principal = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), principal.getId(), "admin");

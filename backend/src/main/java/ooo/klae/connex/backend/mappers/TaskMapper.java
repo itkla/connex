@@ -52,6 +52,8 @@ public interface TaskMapper {
         @Param("position") int position
     );
 
+    /** Acquires the exact workspace task-board root through an atomic insert-or-update. */
+    void lockTaskBoard(@Param("workspaceId") int workspaceId);
     /** Task ids in a status column, in board order (position, then id), for renumbering on a move. */
     List<Integer> getTaskIdsInStatusOrdered(@Param("workspaceId") int workspaceId, @Param("status") String status);
     /** Discovers candidate task ids before exact board-move locks are acquired in Java-sorted order. */

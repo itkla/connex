@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
@@ -106,6 +105,7 @@ class TaskMoveConcurrencyIntegrationTest {
         tenantContext.clear();
         if (workspace != null) {
             jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM task_board_lock WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
@@ -124,19 +124,18 @@ class TaskMoveConcurrencyIntegrationTest {
         CountDownLatch firstLocked = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondStarted = new CountDownLatch(1);
-        AtomicInteger lockReads = new AtomicInteger();
+        AtomicInteger lockAttempts = new AtomicInteger();
         TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
         doAnswer(invocation -> {
-            int lockRead = lockReads.incrementAndGet();
-            if (lockRead == 3) secondStarted.countDown();
-            int taskId = invocation.getArgument(1);
-            Task locked = realTaskMapper.getTaskByIdForUpdate(workspaceId, taskId);
-            if (lockRead == 2) {
+            int lockAttempt = lockAttempts.incrementAndGet();
+            if (lockAttempt == 2) secondStarted.countDown();
+            realTaskMapper.lockTaskBoard(workspaceId);
+            if (lockAttempt == 1) {
                 firstLocked.countDown();
                 assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(taskMapperSpy).getTaskByIdForUpdate(eq(workspaceId), anyInt());
+            return null;
+        }).when(taskMapperSpy).lockTaskBoard(workspaceId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {

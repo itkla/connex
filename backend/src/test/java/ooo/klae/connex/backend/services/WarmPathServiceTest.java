@@ -15,6 +15,8 @@ import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -33,6 +35,7 @@ import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
  * Database-backed tests for {@link WarmPathService}: the path lifecycle (surface, accept into a
  * task, dismiss) and the tenant-scoping invariants on reads and writes.
  */
+@Transactional(isolation = Isolation.READ_COMMITTED)
 class WarmPathServiceTest extends AbstractServiceTest {
 
     @Autowired private WarmPathService warmPathService;
