@@ -12,6 +12,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -35,6 +36,7 @@ class SegmentServiceTest extends AbstractServiceTest {
 
     @Autowired SegmentService segmentService;
     @Autowired PersonEdgeMapper edgeMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private static final DateTimeFormatter MYSQL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -143,6 +145,41 @@ class SegmentServiceTest extends AbstractServiceTest {
 
         assertTrue(ids.contains(tagged.getId()));
         assertFalse(ids.contains(untagged.getId()));
+    }
+
+    @Test
+    void field_tagNegationComplementsWorkspaceOwnedMembershipOnly() {
+        Company ownTagged = newCompany();
+        Company foreignLinked = newCompany();
+        Tag ownTag = newTag();
+        companyMapper.addTag(workspace.getId(), ownTagged.getId(), ownTag.getId());
+
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        Tag foreignTag = new Tag();
+        foreignTag.setName("tag_" + unique());
+        foreignTag.setColor("#abcdef");
+        foreignTag.setWorkspaceId(other.getId());
+        tagMapper.insert(foreignTag);
+        jdbcTemplate.update(
+            "INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)", foreignLinked.getId(), foreignTag.getId());
+
+        SegmentDefinition foreignTagCondition = def(
+            "all", field("tag", "has", String.valueOf(foreignTag.getId())));
+        assertFalse(evaluate(foreignTagCondition).contains(foreignLinked.getId()));
+
+        SegmentCondition notOwnTag = field("tag", "has", String.valueOf(ownTag.getId()));
+        notOwnTag.setNegate(true);
+        SegmentDefinition notOwnTagCondition = def("all", notOwnTag);
+        List<Integer> ids = evaluate(notOwnTagCondition);
+
+        assertFalse(ids.contains(ownTagged.getId()));
+        assertTrue(ids.contains(foreignLinked.getId()));
+        assertMatchAgrees("company", foreignTagCondition, foreignLinked.getId());
+        assertMatchAgrees("company", notOwnTagCondition, ownTagged.getId());
+        assertMatchAgrees("company", notOwnTagCondition, foreignLinked.getId());
     }
 
     @Test
@@ -705,6 +742,53 @@ class SegmentServiceTest extends AbstractServiceTest {
         nested.setGroups(List.of(inner));
 
         assertMatchAgrees("company", nested, fintech.getId());
+    }
+
+    @Test
+    void matchesEntityRejectsForeignWorkspaceEntitiesBeforeNegation() {
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        Company foreignCompany = new Company();
+        foreignCompany.setName("Company " + unique());
+        foreignCompany.setWorkspaceId(other.getId());
+        companyMapper.insert(foreignCompany);
+        Person foreignPerson = new Person();
+        foreignPerson.setName("Person " + unique());
+        foreignPerson.setWorkspaceId(other.getId());
+        foreignPerson.setCompany(foreignCompany);
+        personMapper.insert(foreignPerson);
+        Pipeline foreignPipeline = new Pipeline();
+        foreignPipeline.setName("Pipeline " + unique());
+        foreignPipeline.setWorkspaceId(other.getId());
+        pipelineMapper.insertPipeline(foreignPipeline);
+        Stage foreignStage = new Stage();
+        foreignStage.setName("Stage " + unique());
+        foreignStage.setWorkspaceId(other.getId());
+        foreignStage.setPipeline(foreignPipeline);
+        foreignStage.setPosition(0);
+        pipelineMapper.insertStage(foreignStage);
+        Deal foreignDeal = new Deal();
+        foreignDeal.setName("Deal " + unique());
+        foreignDeal.setWorkspaceId(other.getId());
+        foreignDeal.setValue(1000.0);
+        foreignDeal.setCurrency("JPY");
+        foreignDeal.setPipelineId(foreignPipeline.getId());
+        foreignDeal.setStageId(foreignStage.getId());
+        foreignDeal.setCompanyId(foreignCompany.getId());
+        dealMapper.insert(foreignDeal);
+
+        SegmentCondition notTag = field("tag", "has", String.valueOf(newTag().getId()));
+        notTag.setNegate(true);
+        SegmentDefinition definition = def("all", notTag);
+
+        assertFalse(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "company", definition, foreignCompany.getId()));
+        assertFalse(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "person", definition, foreignPerson.getId()));
+        assertFalse(segmentService.matchesEntity(
+            workspace.getId(), currentUser.getId(), "deal", definition, foreignDeal.getId()));
     }
 
     @Test

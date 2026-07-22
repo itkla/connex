@@ -29,6 +29,10 @@ public interface SegmentMapper {
     /** Ids of all deals owned by the workspace, used as the negate universe for deal conditions. */
     List<Integer> dealIdsInWorkspace(int workspaceId);
 
+    /** Whether one company, processable person, or deal id belongs to the workspace-owned segment universe. */
+    boolean entityIdInWorkspace(@Param("workspaceId") int workspaceId,
+            @Param("recordType") String recordType, @Param("entityId") int entityId);
+
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
     List<Integer> companyIdsWithOpenDeal(int workspaceId);
 

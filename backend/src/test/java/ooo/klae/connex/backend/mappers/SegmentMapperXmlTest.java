@@ -66,6 +66,39 @@ class SegmentMapperXmlTest {
         assertTrue(inSql.contains("AND company_id IN ( ? , ? )"));
     }
 
+    @Test
+    void tagFieldPredicatesRequireTagFromEvaluationWorkspace() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("field", "tag");
+        parameters.put("op", "has");
+        parameters.put("id", 17);
+
+        assertTagBoundary(sql(configuration, "companyIdsMatching", parameters), "company_tag");
+        assertTagBoundary(sql(configuration, "personIdsMatching", parameters), "person_tag");
+        assertTagBoundary(sql(configuration, "personIdsMatchingIncludingRestricted", parameters), "person_tag");
+        assertTagBoundary(sql(configuration, "dealIdsMatching", parameters), "deal_tag");
+    }
+
+    @Test
+    void entityMembershipCheckUsesBoundWorkspaceAndEntityIds() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("entityId", 17);
+
+        parameters.put("recordType", "company");
+        assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
+            "SELECT 1 FROM company WHERE workspace_id = ? AND id = ?"));
+        parameters.put("recordType", "person");
+        assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
+            "SELECT 1 FROM person WHERE workspace_id = ? AND id = ? AND suspended_at IS NULL"));
+        parameters.put("recordType", "deal");
+        assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
+            "SELECT 1 FROM deal WHERE workspace_id = ? AND id = ?"));
+    }
+
     private static String sql(Configuration configuration, String statement, String predicate) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);
@@ -89,6 +122,13 @@ class SegmentMapperXmlTest {
         assertTrue(sql.contains("visible_company.workspace_id = ?"));
         assertTrue(sql.contains("visible_share.workspace_id = ?"));
         assertTrue(sql.contains("owner_workspace.org_id = viewer_workspace.org_id"));
+    }
+
+    private static void assertTagBoundary(String sql, String junction) {
+        assertTrue(sql.contains("SELECT " + junction + "."));
+        assertTrue(sql.contains("segment_tag.id = " + junction + ".tag_id"));
+        assertTrue(sql.contains("segment_tag.workspace_id = ?"));
+        assertTrue(sql.contains("WHERE " + junction + ".tag_id = ?"));
     }
 
     private static Configuration configuration() throws Exception {
