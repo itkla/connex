@@ -15,6 +15,9 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -44,6 +47,9 @@ public class AuditIntegrityService {
 
     private final AuditLogMapper auditLogMapper;
     private final AuditIntegrityMapper auditIntegrityMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
     private final AuditIntegrityProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -65,6 +71,7 @@ public class AuditIntegrityService {
     }
 
     private void appendChained(AuditLog entry) {
+        lockForeignKeyParents(entry);
         AuditScope scope = scopeFor(entry);
         auditIntegrityMapper.ensureHead(scope.type(), scope.id(), GENESIS_HASH);
         AuditIntegrityHead head = auditIntegrityMapper.lockHead(scope.type(), scope.id());
@@ -87,6 +94,19 @@ public class AuditIntegrityService {
         }
         log.info("AUDIT_INTEGRITY_CHECKPOINT scopeType={} scopeId={} chainIndex={} auditLogId={} prevHash={} rowHash={}",
                 scope.type(), scope.id(), chainIndex, entry.getId(), entry.getPrevHash(), entry.getRowHash());
+    }
+
+    private void lockForeignKeyParents(AuditLog entry) {
+        if (entry.getActorId() != null && userMapper.lockByIdForShare(entry.getActorId()) == null) {
+            entry.setActorId(null);
+        }
+        if (entry.getWorkspaceId() != null
+                && workspaceMapper.lockWorkspaceForShare(entry.getWorkspaceId()) == null) {
+            throw new IllegalStateException("Audit workspace no longer exists");
+        }
+        if (entry.getOrgId() != null && organizationMapper.lockByIdForShare(entry.getOrgId()) == null) {
+            throw new IllegalStateException("Audit organization no longer exists");
+        }
     }
 
     /**

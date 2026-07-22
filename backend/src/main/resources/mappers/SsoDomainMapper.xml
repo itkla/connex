@@ -3,6 +3,13 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.SsoDomainMapper">
 
+  <select id="lockMutationRoot" resultType="int">
+    SELECT singleton_id
+    FROM sso_domain_mutation_lock
+    WHERE singleton_id = 1
+    FOR UPDATE
+  </select>
+
   <select id="findOrgByDomain" resultType="int">
     SELECT org_id FROM sso_domain WHERE domain = #{domain}
   </select>

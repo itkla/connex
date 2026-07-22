@@ -30,6 +30,8 @@ import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
@@ -87,6 +89,8 @@ public class AiProviderConfigService implements AiProviderReadiness {
 
     private final AiProperties aiProperties;
     private final AiProviderConfigMapper aiProviderConfigMapper;
+    private final OrganizationMapper organizationMapper;
+    private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final OrgMemberService orgMemberService;
     private final AiProviderSecretCipher aiProviderSecretCipher;
@@ -124,7 +128,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
         }
 
         String provider = resolveProvider(request.getProvider());
-        AiProviderConfig existing = aiProviderConfigMapper.findByOrg(orgId);
+        AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
         boolean sameProvider = existing != null && provider.equals(existing.getProvider());
         AiProviderConfig config = new AiProviderConfig();
         config.setOrgId(orgId);
@@ -174,7 +178,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     public void revoke(int workspaceId, int actorId) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        AiProviderConfig existing = aiProviderConfigMapper.findByOrg(orgId);
+        AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
         aiProviderConfigMapper.deleteByOrg(orgId);
         if (existing != null && !isBlank(existing.getCredentialRef())) {
             aiProviderSecretCipher.deleteCredentialReference(orgId, existing.getCredentialRef());
@@ -198,9 +202,15 @@ public class AiProviderConfigService implements AiProviderReadiness {
     /**
      * Resolves the configured organization provider and decrypts credentials for provider use.
      * @param orgId the organization
+     * @param actorId the authenticated user resolving the provider
      * @return resolved provider configuration with decrypted credentials
      */
-    public ResolvedAiProvider resolveForOrg(int orgId) {
+    @Transactional
+    public ResolvedAiProvider resolveForOrg(int orgId, int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null
+                || organizationMapper.lockByIdForShare(orgId) == null) {
+            throw new ForbiddenException("AI provider is not available for this organization");
+        }
         AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
         if (!isReady(config)) {
             throw new ForbiddenException("AI provider is not available for this organization");
@@ -405,6 +415,17 @@ public class AiProviderConfigService implements AiProviderReadiness {
         }
         orgMemberService.requireOrgAdmin(orgId, actorId);
         return orgId;
+    }
+
+    private AiProviderConfig lockCurrentConfig(int orgId, int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        if (organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
+        return aiProviderConfigMapper.findByOrgForUpdate(orgId);
     }
 
     private static String resolveProvider(String requested) {

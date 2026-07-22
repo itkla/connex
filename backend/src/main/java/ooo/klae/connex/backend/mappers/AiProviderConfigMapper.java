@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.AiProviderConfig;
  */
 public interface AiProviderConfigMapper {
     AiProviderConfig findByOrg(@Param("orgId") int orgId);
+    AiProviderConfig findByOrgForUpdate(@Param("orgId") int orgId);
     void upsert(AiProviderConfig config);
     void deleteByOrg(@Param("orgId") int orgId);
 }

@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -39,6 +42,8 @@ import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,6 +55,8 @@ class AiProviderConfigServiceTest {
 
     @Mock private AiProperties aiProperties;
     @Mock private AiProviderConfigMapper aiProviderConfigMapper;
+    @Mock private OrganizationMapper organizationMapper;
+    @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private OrgMemberService orgMemberService;
     @Mock private AiProviderSecretCipher aiProviderSecretCipher;
@@ -62,12 +69,16 @@ class AiProviderConfigServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, workspaceMapper,
-                orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
+        service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, userMapper,
+                workspaceMapper, orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
                 sessionSecurityService,
                 new ObjectMapper());
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
+        lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
+        lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        lenient().when(organizationMapper.lockByIdForShare(ORG_ID)).thenReturn(ORG_ID);
+        lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
         lenient().doAnswer(invocation -> {
@@ -337,6 +348,20 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void save_locksOrganizationBeforeReadingAndWritingConfig() {
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any())).thenReturn("secret:v1:77");
+
+        service.save(WORKSPACE_ID, ACTOR_ID, validRequest());
+
+        InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
+        mutations.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+        mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).upsert(any(AiProviderConfig.class));
+    }
+
+    @Test
     void revoke_deletesRowCredentialAndAudits() {
         stored = readyConfig();
 
@@ -347,6 +372,71 @@ class AiProviderConfigServiceTest {
         verify(aiProviderSecretCipher).deleteCredentialReference(ORG_ID, "secret:v1:88");
         verify(auditService).record("org.ai_provider.revoke", "organization", ORG_ID, null,
                 "Revoked AI provider configuration", null);
+    }
+
+    @Test
+    void revoke_locksOrganizationBeforeReadingAndDeletingConfig() {
+        stored = readyConfig();
+
+        service.revoke(WORKSPACE_ID, ACTOR_ID);
+
+        InOrder mutations = inOrder(organizationMapper, userMapper, orgMemberService, aiProviderConfigMapper);
+        mutations.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        mutations.verify(organizationMapper).lockById(ORG_ID);
+        mutations.verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+        mutations.verify(aiProviderConfigMapper).findByOrgForUpdate(ORG_ID);
+        mutations.verify(aiProviderConfigMapper).deleteByOrg(ORG_ID);
+    }
+
+    @Test
+    void save_missingOrganizationFailsBeforeConfigRead() {
+        when(organizationMapper.lockById(ORG_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_currentAuthorizationFailurePreventsConfigRead() {
+        doThrow(new ForbiddenException("Requires an organization administrator role"))
+                .when(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_missingCurrentActorFailsBeforeMembershipAndConfigLocks() {
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, validRequest()));
+
+        verify(organizationMapper, never()).lockById(ORG_ID);
+        verify(orgMemberService, never()).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void revoke_currentAuthorizationFailurePreventsConfigAndSecretWrites() {
+        stored = readyConfig();
+        doThrow(new ForbiddenException("Requires an organization administrator role"))
+                .when(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.revoke(WORKSPACE_ID, ACTOR_ID));
+
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(ORG_ID);
+        verify(aiProviderConfigMapper, never()).deleteByOrg(ORG_ID);
+        verify(aiProviderSecretCipher, never()).deleteCredentialReference(anyInt(), any());
+        verify(auditService, never()).record(any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
@@ -507,7 +597,7 @@ class AiProviderConfigServiceTest {
                         }
                         """);
 
-        ResolvedAiProvider resolved = service.resolveForOrg(ORG_ID);
+        ResolvedAiProvider resolved = service.resolveForOrg(ORG_ID, ACTOR_ID);
 
         assertEquals("bedrock", resolved.provider());
         assertEquals("ap-northeast-1", resolved.region());
@@ -523,6 +613,23 @@ class AiProviderConfigServiceTest {
         assertEquals("SESSION_TOKEN", resolved.credentials().get("sessionToken"));
         assertFalse(resolved.toString().contains("SECRET_ACCESS_KEY"));
         assertFalse(resolved.toString().contains("SESSION_TOKEN"));
+
+        InOrder resolution = inOrder(userMapper, organizationMapper, aiProviderConfigMapper, aiProviderSecretCipher);
+        resolution.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        resolution.verify(organizationMapper).lockByIdForShare(ORG_ID);
+        resolution.verify(aiProviderConfigMapper).findByOrg(ORG_ID);
+        resolution.verify(aiProviderSecretCipher).decryptCredential(ORG_ID, "secret:v1:88");
+    }
+
+    @Test
+    void resolveForOrg_missingActorFailsBeforeOrganizationAndConfigReads() {
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
+
+        verify(organizationMapper, never()).lockByIdForShare(ORG_ID);
+        verify(aiProviderConfigMapper, never()).findByOrg(ORG_ID);
+        verify(aiProviderSecretCipher, never()).decryptCredential(eq(ORG_ID), any());
     }
 
     @Test
@@ -530,7 +637,7 @@ class AiProviderConfigServiceTest {
         stored = readyConfig();
         stored.setEnabled(false);
 
-        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID));
+        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
         verify(aiProviderSecretCipher, never()).decryptCredential(eq(ORG_ID), any());
     }
 
@@ -540,7 +647,9 @@ class AiProviderConfigServiceTest {
         when(aiProviderSecretCipher.decryptCredential(ORG_ID, "secret:v1:88"))
                 .thenReturn("{\"accessKeyId\":\"AKIA_TEST\",\"secretAccessKey\":\"SUPER_SECRET\"");
 
-        AiProviderException exception = assertThrows(AiProviderException.class, () -> service.resolveForOrg(ORG_ID));
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.resolveForOrg(ORG_ID, ACTOR_ID));
 
         assertFalse(exception.getMessage().contains("SUPER_SECRET"));
         assertFalse(String.valueOf(exception).contains("SUPER_SECRET"));

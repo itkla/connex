@@ -186,7 +186,7 @@ public class AiInvocationService {
 
         ResolvedAiProvider resolved;
         try {
-            resolved = aiProviderConfigService.resolveForOrg(orgId);
+            resolved = aiProviderConfigService.resolveForOrg(orgId, workspaceService.getCurrentUserId());
         } catch (ForbiddenException | AiProviderException exception) {
             emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
                     null, null, null, null, "provider", structured, null);

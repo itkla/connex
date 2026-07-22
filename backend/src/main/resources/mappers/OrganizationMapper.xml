@@ -10,4 +10,12 @@
   <select id="getById" resultType="Organization">
     SELECT id, name, slug, created_at, updated_at FROM organization WHERE id = #{id}
   </select>
+
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM organization WHERE id = #{id} FOR UPDATE
+  </select>
+
+  <select id="lockByIdForShare" resultType="java.lang.Integer">
+    SELECT id FROM organization WHERE id = #{id} FOR SHARE
+  </select>
 </mapper>

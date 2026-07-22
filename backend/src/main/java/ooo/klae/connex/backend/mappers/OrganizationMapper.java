@@ -11,4 +11,6 @@ import ooo.klae.connex.backend.beans.Organization;
 public interface OrganizationMapper {
     int insert(Organization organization);
     Organization getById(int id);
+    Integer lockById(int id);
+    Integer lockByIdForShare(int id);
 }

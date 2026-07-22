@@ -1,14 +1,25 @@
 package ooo.klae.connex.backend.secrets;
 
+import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
+import java.util.function.IntConsumer;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.SecretUnavailableException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
 /**
@@ -20,6 +31,9 @@ import ooo.klae.connex.backend.services.AuditService;
 @RequiredArgsConstructor
 public class SecretStore {
     private final SecretValueMapper secretValueMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
     private final SecretStoreCrypto crypto;
     private final SecretStoreProperties properties;
     private final AuditService auditService;
@@ -38,6 +52,7 @@ public class SecretStore {
 
     @Transactional
     public String put(SecretPurpose purpose, int scopeId, String plaintext) {
+        lockScopeParentsForShare(purpose.scopeType(), scopeId);
         StoredSecret secret = new StoredSecret();
         secret.setScopeType(purpose.scopeType());
         secret.setScopeId(scopeId);
@@ -55,6 +70,7 @@ public class SecretStore {
 
     @Transactional
     public String get(SecretPurpose purpose, int scopeId, String reference) {
+        lockScopeParentsForShare(purpose.scopeType(), scopeId);
         StoredSecret secret = find(purpose, scopeId, reference);
         try {
             requireSupportedAlgorithms(secret);
@@ -73,12 +89,15 @@ public class SecretStore {
     public int rewrapBatchToActiveKey(int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 10_000));
         int count = 0;
-        for (StoredSecret secret : secretValueMapper.listRewrapCandidates(crypto.activeKeyId(), safeLimit)) {
+        List<StoredSecret> candidates = secretValueMapper.listRewrapCandidates(crypto.activeKeyId(), safeLimit);
+        lockBatchScopeParentsForShare(candidates);
+        for (StoredSecret secret : candidates) {
             try {
                 requireSupportedAlgorithms(secret);
                 String plaintext = crypto.decrypt(secret.getKeyId(), secret.getEncryptedDataKey(),
                         secret.getCiphertext(), aad(secret));
                 if (rewrapToActiveKey(secret, plaintext)) {
+                    auditRewrap(secret, crypto.activeKeyId());
                     count++;
                 }
             } catch (RuntimeException e) {
@@ -102,6 +121,7 @@ public class SecretStore {
     public void delete(SecretPurpose purpose, int scopeId, String reference) {
         SecretReference parsed = SecretReference.parseOrNull(reference);
         if (parsed != null) {
+            lockScopeParentsForShare(purpose.scopeType(), scopeId);
             StoredSecret secret = secretValueMapper.findById(parsed.id());
             if (secret != null && matches(secret, purpose, scopeId)) {
                 secretValueMapper.delete(secret.getId());
@@ -144,23 +164,103 @@ public class SecretStore {
         rewrapped.setCiphertext(encrypted.ciphertext());
         int updated = secretValueMapper.updateRewrapped(rewrapped, current.getKeyId(),
                 current.getEncryptedDataKey(), current.getCiphertext());
-        if (updated == 1) {
-            auditRewrap(current, rewrapped.getKeyId());
-            return true;
+        return updated == 1;
+    }
+
+    private void lockScopeParentsForShare(String scopeType, int scopeId) {
+        Integer actorId = currentActorId();
+        if ("user".equals(scopeType)) {
+            int firstUserId = actorId == null ? scopeId : Math.min(actorId, scopeId);
+            int secondUserId = actorId == null ? scopeId : Math.max(actorId, scopeId);
+            lockUserForShare(firstUserId);
+            if (secondUserId != firstUserId) {
+                lockUserForShare(secondUserId);
+            }
+            return;
         }
-        return false;
+        if (actorId != null) {
+            lockUserForShare(actorId);
+        }
+        if ("workspace".equals(scopeType)) {
+            if (workspaceMapper.lockWorkspaceForShare(scopeId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
+        } else if ("organization".equals(scopeType)
+                && organizationMapper.lockByIdForShare(scopeId) == null) {
+            throw new ResourceNotFoundException("Secret scope not found");
+        }
+    }
+
+    private void lockBatchScopeParentsForShare(List<StoredSecret> candidates) {
+        TreeSet<Integer> userIds = new TreeSet<>();
+        TreeSet<Integer> workspaceIds = new TreeSet<>();
+        TreeSet<Integer> organizationIds = new TreeSet<>();
+        Integer actorId = currentActorId();
+        if (actorId != null) {
+            userIds.add(actorId);
+        }
+        for (StoredSecret secret : candidates) {
+            if ("user".equals(secret.getScopeType())) {
+                userIds.add(secret.getScopeId());
+            } else if ("workspace".equals(secret.getScopeType())) {
+                workspaceIds.add(secret.getScopeId());
+            } else if ("organization".equals(secret.getScopeType())) {
+                organizationIds.add(secret.getScopeId());
+            }
+        }
+        userIds.forEach(this::lockUserForShare);
+        for (int workspaceId : workspaceIds) {
+            if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
+        }
+        for (int organizationId : organizationIds) {
+            if (organizationMapper.lockByIdForShare(organizationId) == null) {
+                throw new ResourceNotFoundException("Secret scope not found");
+            }
+        }
+    }
+
+    private void lockUserForShare(int userId) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            throw new ResourceNotFoundException("Secret scope user not found");
+        }
+    }
+
+    private static Integer currentActorId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user) {
+            return user.getId();
+        }
+        return null;
     }
 
     private void auditUse(StoredSecret secret, boolean rewrapped) {
-        auditService.recordIndependentScoped("secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
+        deferIndependentAudit(status -> auditService.recordIndependentScoped(
+                "secret_store.secret.use", scopeEntityType(secret), scopeEntityId(secret),
                 workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret used",
-                auditMetadata(secret, rewrapped));
+                auditMetadata(secret, rewrapped && status == TransactionSynchronization.STATUS_COMMITTED)));
     }
 
     private void auditUseFailure(StoredSecret secret, RuntimeException exception) {
-        auditService.recordFailureScoped("secret_store.secret.use_failed", scopeEntityType(secret),
-                scopeEntityId(secret), workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(),
-                "Secret use failed", exception.getClass().getSimpleName());
+        deferIndependentAudit(status -> auditService.recordFailureScoped(
+                "secret_store.secret.use_failed", scopeEntityType(secret), scopeEntityId(secret),
+                workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret use failed",
+                exception.getClass().getSimpleName()));
+    }
+
+    private void deferIndependentAudit(IntConsumer recordAudit) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            recordAudit.accept(TransactionSynchronization.STATUS_COMMITTED);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                recordAudit.accept(status);
+            }
+        });
     }
 
     private void auditRewrap(StoredSecret previous, String newKeyId) {
@@ -171,9 +271,10 @@ public class SecretStore {
     }
 
     private void auditRewrapFailure(StoredSecret secret, RuntimeException exception) {
-        auditService.recordFailureScoped("secret_store.secret.rewrap_failed", scopeEntityType(secret),
-                scopeEntityId(secret), workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(),
-                "Secret rewrap failed", exception.getClass().getSimpleName());
+        deferIndependentAudit(status -> auditService.recordFailureScoped(
+                "secret_store.secret.rewrap_failed", scopeEntityType(secret), scopeEntityId(secret),
+                workspaceAuditScope(secret), orgAuditScope(secret), secret.getPurpose(), "Secret rewrap failed",
+                exception.getClass().getSimpleName()));
     }
 
     private static Map<String, Object> auditMetadata(StoredSecret secret, boolean rewrapped) {

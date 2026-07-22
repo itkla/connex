@@ -60,6 +60,7 @@ public final class TablePlaneRegistry {
         "secret_value",
         "sso_connection",
         "sso_domain",
+        "sso_domain_mutation_lock",
         "sso_link_challenge",
         "user_object_deletion_queue",
         "webauthn_credential",

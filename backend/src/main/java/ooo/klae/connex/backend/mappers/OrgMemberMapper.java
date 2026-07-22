@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.OrgMembershipDto;
  */
 public interface OrgMemberMapper {
     String getRole(@Param("orgId") int orgId, @Param("userId") int userId);
+    String getRoleForUpdate(@Param("orgId") int orgId, @Param("userId") int userId);
     boolean isMember(@Param("orgId") int orgId, @Param("userId") int userId);
     int addMember(@Param("orgId") int orgId, @Param("userId") int userId, @Param("orgRole") String orgRole);
     int updateRole(@Param("orgId") int orgId, @Param("userId") int userId, @Param("orgRole") String orgRole);
