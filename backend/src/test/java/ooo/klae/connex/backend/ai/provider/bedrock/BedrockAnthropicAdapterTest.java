@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import tools.jackson.databind.JsonNode;
@@ -58,7 +59,7 @@ class BedrockAnthropicAdapterTest {
                         }
                         """);
 
-        AiCompletionResult result = adapter.complete(validRequest("Use short answers"));
+        AiCompletionResult result = adapter.complete(validRequest("Use short answers", AiOutputMode.JSON));
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
@@ -72,6 +73,8 @@ class BedrockAnthropicAdapterTest {
         assertEquals("Hello?", body.path("messages").path(0).path("content").asString());
         assertEquals("assistant", body.path("messages").path(1).path("role").asString());
         assertEquals("Hello.", body.path("messages").path(1).path("content").asString());
+        assertFalse(body.has("response_format"));
+        assertFalse(body.has("responseMimeType"));
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
@@ -106,6 +109,8 @@ class BedrockAnthropicAdapterTest {
                 credentials(),
                 null,
                 List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.TEXT,
                 64,
                 0.25);
 
@@ -123,6 +128,10 @@ class BedrockAnthropicAdapterTest {
     }
 
     private static AiCompletionRequest validRequest(String systemPrompt) {
+        return validRequest(systemPrompt, AiOutputMode.TEXT);
+    }
+
+    private static AiCompletionRequest validRequest(String systemPrompt, AiOutputMode outputMode) {
         return new AiCompletionRequest(
                 new AiProviderTarget("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                         null, null, null, null, false),
@@ -131,6 +140,8 @@ class BedrockAnthropicAdapterTest {
                 List.of(
                         new AiMessage("user", "Hello?"),
                         new AiMessage("assistant", "Hello.")),
+                List.of(),
+                outputMode,
                 64,
                 0.25);
     }

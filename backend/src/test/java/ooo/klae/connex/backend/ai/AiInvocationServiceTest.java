@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
@@ -134,6 +135,9 @@ class AiInvocationServiceTest {
         assertEquals(0, outcome.demaskWarnings());
         assertEquals(12, outcome.inputTokens());
         assertEquals(7, outcome.outputTokens());
+        ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(requestCaptor.capture());
+        assertEquals(AiOutputMode.TEXT, requestCaptor.getValue().outputMode());
         List<Map<?, ?>> audits = auditMetadata();
         assertEquals("attempt", audits.get(0).get("outcome"));
         assertEquals("success", audits.get(1).get("outcome"));
@@ -304,6 +308,9 @@ class AiInvocationServiceTest {
         assertEquals(30, parsed.inputTokens());
         assertEquals(12, parsed.outputTokens());
         assertEquals("end_turn", parsed.stopReason());
+        ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(requestCaptor.capture());
+        assertEquals(AiOutputMode.JSON, requestCaptor.getValue().outputMode());
     }
 
     @Test

@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import tools.jackson.databind.JsonNode;
@@ -95,11 +96,29 @@ class VertexAdapterTest {
                 root.path("systemInstruction").path("parts").path(0).path("text").asString());
         assertEquals(64, root.path("generationConfig").path("maxOutputTokens").asInt());
         assertEquals(0.25, root.path("generationConfig").path("temperature").asDouble());
+        assertFalse(root.path("generationConfig").has("responseMimeType"));
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
         assertFalse(result.toString().contains("Hello world"));
+    }
+
+    @Test
+    void complete_geminiJsonRequestsNativeJsonResponse() throws Exception {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(geminiResponse());
+
+        adapter.complete(request("gemini-2.5-flash", null, AiOutputMode.JSON));
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(vertexClient).complete(
+                any(URI.class), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
+        JsonNode generationConfig = objectMapper.readTree(body.getValue()).path("generationConfig");
+        assertEquals("application/json", generationConfig.path("responseMimeType").asString());
     }
 
     @Test
@@ -119,7 +138,8 @@ class VertexAdapterTest {
                         }
                         """);
 
-        AiCompletionResult result = adapter.complete(request("claude-sonnet-4@20250514", "Be concise"));
+        AiCompletionResult result = adapter.complete(
+                request("claude-sonnet-4@20250514", "Be concise", AiOutputMode.JSON));
 
         ArgumentCaptor<URI> endpoint = ArgumentCaptor.forClass(URI.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
@@ -137,6 +157,8 @@ class VertexAdapterTest {
         assertEquals("Hello.", root.path("messages").path(1).path("content").asString());
         assertEquals(64, root.path("max_tokens").asInt());
         assertEquals(0.25, root.path("temperature").asDouble());
+        assertFalse(root.has("generationConfig"));
+        assertFalse(root.has("responseMimeType"));
         assertEquals("Hello from Claude", result.text());
         assertEquals(9, result.inputTokens());
         assertEquals(4, result.outputTokens());
@@ -189,7 +211,7 @@ class VertexAdapterTest {
                 "bedrock", "us-central1", "gemini-2.5-flash", null, null, null, "connex-prod1", false));
         AiCompletionRequest invalidRole = new AiCompletionRequest(
                 target("gemini-2.5-flash"), credentials(), null,
-                List.of(new AiMessage("system", "role text")), 64, 0.25);
+                List.of(new AiMessage("system", "role text")), List.of(), AiOutputMode.TEXT, 64, 0.25);
 
         assertThrows(AiProviderException.class, () -> adapter.complete(invalidProject));
         assertThrows(AiProviderException.class, () -> adapter.complete(invalidRegion));
@@ -232,6 +254,8 @@ class VertexAdapterTest {
                 AiCredentials.of(Map.of("serviceAccountJson", SERVICE_ACCOUNT_JSON + PRIVATE_KEY)),
                 PROMPT,
                 List.of(new AiMessage("user", PROMPT)),
+                List.of(),
+                AiOutputMode.TEXT,
                 64,
                 0.25);
 
@@ -248,6 +272,11 @@ class VertexAdapterTest {
     }
 
     private static AiCompletionRequest request(String modelId, String systemPrompt) {
+        return request(modelId, systemPrompt, AiOutputMode.TEXT);
+    }
+
+    private static AiCompletionRequest request(
+            String modelId, String systemPrompt, AiOutputMode outputMode) {
         return new AiCompletionRequest(
                 target(modelId),
                 credentials(),
@@ -255,6 +284,8 @@ class VertexAdapterTest {
                 List.of(
                         new AiMessage("user", "Hello?"),
                         new AiMessage("assistant", "Hello.")),
+                List.of(),
+                outputMode,
                 64,
                 0.25);
     }
@@ -265,6 +296,8 @@ class VertexAdapterTest {
                 credentials(),
                 null,
                 List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.TEXT,
                 64,
                 0.25);
     }

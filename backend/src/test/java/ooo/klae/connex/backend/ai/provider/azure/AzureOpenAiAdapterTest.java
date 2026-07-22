@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import tools.jackson.databind.JsonNode;
@@ -65,7 +66,9 @@ class AzureOpenAiAdapterTest {
                         """);
 
         AiCompletionResult result = adapter.complete(validRequest(
-                "https://CONNEX.openai.azure.com/admin/path?api-version=ignored", "Use short answers"));
+                "https://CONNEX.openai.azure.com/admin/path?api-version=ignored",
+                "Use short answers",
+                AiOutputMode.JSON));
 
         ArgumentCaptor<URI> endpointCaptor = ArgumentCaptor.forClass(URI.class);
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
@@ -81,6 +84,7 @@ class AzureOpenAiAdapterTest {
         assertEquals("Hello.", body.path("messages").path(2).path("content").asString());
         assertEquals(64, body.path("max_completion_tokens").asInt());
         assertEquals(0.25, body.path("temperature").asDouble());
+        assertFalse(body.has("response_format"));
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
@@ -99,6 +103,7 @@ class AzureOpenAiAdapterTest {
                 "Extract literal fields",
                 List.of(new AiMessage("user", "Read the card")),
                 List.of(image()),
+                AiOutputMode.TEXT,
                 64,
                 0);
 
@@ -207,6 +212,11 @@ class AzureOpenAiAdapterTest {
     }
 
     private static AiCompletionRequest validRequest(String endpoint, String systemPrompt) {
+        return validRequest(endpoint, systemPrompt, AiOutputMode.TEXT);
+    }
+
+    private static AiCompletionRequest validRequest(
+            String endpoint, String systemPrompt, AiOutputMode outputMode) {
         return new AiCompletionRequest(
                 new AiProviderTarget("azure_openai", null, "gpt-4o", endpoint,
                         "2025-01-01-preview", "contacts-prod", null, false),
@@ -215,6 +225,8 @@ class AzureOpenAiAdapterTest {
                 List.of(
                         new AiMessage("user", "Hello?"),
                         new AiMessage("assistant", "Hello.")),
+                List.of(),
+                outputMode,
                 64,
                 0.25);
     }
@@ -230,6 +242,8 @@ class AzureOpenAiAdapterTest {
                 credentials(),
                 null,
                 List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.TEXT,
                 64,
                 0.25);
     }
