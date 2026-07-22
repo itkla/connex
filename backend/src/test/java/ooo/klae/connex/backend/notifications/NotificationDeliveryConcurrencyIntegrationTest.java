@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,6 +48,7 @@ class NotificationDeliveryConcurrencyIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @MockitoSpyBean private NotificationMapper notificationMapper;
     @MockitoBean private PreferenceMapper preferenceMapper;
     @MockitoBean private EmailNotificationDispatcher emailDispatcher;
@@ -94,8 +96,10 @@ class NotificationDeliveryConcurrencyIntegrationTest {
     void concurrentMissingPreReadsProduceOneCommittedEmail() throws Exception {
         String dedupeKey = "task.due:concurrent:" + UUID.randomUUID();
         CountDownLatch bothMissing = new CountDownLatch(2);
+        NotificationMapper realNotificationMapper = sqlSessionTemplate.getMapper(NotificationMapper.class);
         doAnswer(invocation -> {
-            Notification existing = (Notification) invocation.callRealMethod();
+            Notification existing = realNotificationMapper.findByDedupe(
+                workspace.getId(), recipient.getId(), dedupeKey);
             if (existing == null) {
                 bothMissing.countDown();
                 if (!bothMissing.await(10, TimeUnit.SECONDS)) {
