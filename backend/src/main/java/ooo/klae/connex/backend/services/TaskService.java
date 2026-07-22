@@ -180,9 +180,11 @@ public class TaskService {
     @RequirePermission(Permission.TASK_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Task before = taskMapper.getTaskById(workspaceId, id);
+        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
-        taskMapper.delete(workspaceId, id);
+        if (taskMapper.delete(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_TASK, id);
         auditService.record("task.delete", "task", id, before.getDescription(),
             "Deleted task " + before.getDescription(),

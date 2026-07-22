@@ -39,6 +39,7 @@ public interface TaskMapper {
     List<Task> getTasksByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Task getTaskByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Task task);

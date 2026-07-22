@@ -60,6 +60,30 @@ class TaskMapperXmlTest {
         verify(statement).setInt(8, 29);
     }
 
+    @Test
+    void deleteLockReadKeepsWorkspacePredicateAndLocksRow() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = Map.of("workspaceId", 11, "id", 23);
+
+        BoundSql boundSql = configuration
+            .getMappedStatement(TaskMapper.class.getName() + ".getTaskByIdForUpdate")
+            .getBoundSql(parameters);
+        String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertTrue(sql.contains(
+            "FROM task FORCE INDEX (uq_task_workspace_id) WHERE workspace_id = ? AND id = ? FOR UPDATE"));
+        assertEquals(2, boundSql.getParameterMappings().size());
+
+        PreparedStatement statement = mock(PreparedStatement.class);
+        configuration.newParameterHandler(
+            configuration.getMappedStatement(TaskMapper.class.getName() + ".getTaskByIdForUpdate"),
+            parameters,
+            boundSql
+        ).setParameters(statement);
+        verify(statement).setInt(1, 11);
+        verify(statement).setInt(2, 23);
+    }
+
     private static Configuration configuration() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
