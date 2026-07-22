@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import tools.jackson.databind.JsonNode;
@@ -93,7 +94,7 @@ class OpenAiCompatibleAdapterTest {
                         """);
 
         AiCompletionResult result = adapter.complete(request(
-                "https://api.example.test/v1", false, "Use short answers", credentials()));
+                "https://api.example.test/v1", false, "Use short answers", credentials(), AiOutputMode.JSON));
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
@@ -108,6 +109,7 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("Hello.", body.path("messages").path(2).path("content").asString());
         assertEquals(64, body.path("max_tokens").asInt());
         assertFalse(body.has("max_completion_tokens"));
+        assertFalse(body.has("response_format"));
         assertEquals(0.25, body.path("temperature").asDouble());
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
@@ -126,6 +128,7 @@ class OpenAiCompatibleAdapterTest {
                 "Extract literal fields",
                 List.of(new AiMessage("user", "Read the card")),
                 List.of(image()),
+                AiOutputMode.TEXT,
                 64,
                 0);
 
@@ -257,6 +260,8 @@ class OpenAiCompatibleAdapterTest {
                 credentials(),
                 PROMPT,
                 List.of(new AiMessage("user", PROMPT)),
+                List.of(),
+                AiOutputMode.TEXT,
                 64,
                 0.25);
 
@@ -274,6 +279,15 @@ class OpenAiCompatibleAdapterTest {
 
     private static AiCompletionRequest request(String endpoint, boolean allowInternalEndpoint,
             String systemPrompt, AiCredentials credentials) {
+        return request(endpoint, allowInternalEndpoint, systemPrompt, credentials, AiOutputMode.TEXT);
+    }
+
+    private static AiCompletionRequest request(
+            String endpoint,
+            boolean allowInternalEndpoint,
+            String systemPrompt,
+            AiCredentials credentials,
+            AiOutputMode outputMode) {
         return new AiCompletionRequest(
                 target(endpoint, allowInternalEndpoint),
                 credentials,
@@ -281,6 +295,8 @@ class OpenAiCompatibleAdapterTest {
                 List.of(
                         new AiMessage("user", "Hello?"),
                         new AiMessage("assistant", "Hello.")),
+                List.of(),
+                outputMode,
                 64,
                 0.25);
     }

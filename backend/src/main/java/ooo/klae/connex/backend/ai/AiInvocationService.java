@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
@@ -65,7 +66,7 @@ public class AiInvocationService {
      * @return demasked completion outcome
      */
     public AiCompletionOutcome complete(AiInvocation invocation) {
-        try (RawInvocation raw = invokeRaw(invocation, false)) {
+        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.TEXT)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -104,7 +105,7 @@ public class AiInvocationService {
             AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(guard, "guard");
-        try (RawInvocation raw = invokeRaw(invocation, true)) {
+        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.JSON)) {
             AiCompletionResult result = raw.result();
             String stripped = CompletionNormalizer.stripReasoning(result.text());
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
@@ -141,8 +142,10 @@ public class AiInvocationService {
                 result.inputTokens(), result.outputTokens(), result.stopReason());
     }
 
-    private RawInvocation invokeRaw(AiInvocation invocation, boolean structured) {
+    private RawInvocation invokeRaw(AiInvocation invocation, AiOutputMode outputMode) {
         Objects.requireNonNull(invocation, "invocation");
+        Objects.requireNonNull(outputMode, "outputMode");
+        boolean structured = outputMode == AiOutputMode.JSON;
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = workspaceService.getCurrentOrgId();
         String correlationId = UUID.randomUUID().toString();
@@ -159,7 +162,7 @@ public class AiInvocationService {
             throw exception;
         }
 
-        return invokeAdmitted(invocation, structured, workspaceId, orgId, correlationId);
+        return invokeAdmitted(invocation, outputMode, workspaceId, orgId, correlationId);
     }
 
     private AiMediaAdmissionService.Lease acquireMedia(
@@ -179,10 +182,11 @@ public class AiInvocationService {
 
     private RawInvocation invokeAdmitted(
             AiInvocation invocation,
-            boolean structured,
+            AiOutputMode outputMode,
             int workspaceId,
             int orgId,
             String correlationId) {
+        boolean structured = outputMode == AiOutputMode.JSON;
 
         ResolvedAiProvider resolved;
         try {
@@ -226,7 +230,7 @@ public class AiInvocationService {
                         workspaceId, orgId, correlationId, invocation, structured));
             }
             AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
-                    .complete(request(resolved, invocation));
+                    .complete(request(resolved, invocation, outputMode));
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
         } catch (AiProviderException exception) {
@@ -246,12 +250,13 @@ public class AiInvocationService {
                 : AiStructuredOutcome.REASON_MALFORMED;
     }
 
-    private AiCompletionRequest request(ResolvedAiProvider resolved, AiInvocation invocation) {
+    private AiCompletionRequest request(
+            ResolvedAiProvider resolved, AiInvocation invocation, AiOutputMode outputMode) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
                 .map(message -> new AiMessage(message.getRole(), message.getContent()))
                 .toList();
         return new AiCompletionRequest(resolved.target(), resolved.credentials(), invocation.prompt().getSystemPrompt(),
-                messages, invocation.images(), invocation.maxTokens(), invocation.temperature());
+                messages, invocation.images(), outputMode, invocation.maxTokens(), invocation.temperature());
     }
 
     private String serializePrompt(MaskedPrompt prompt) {

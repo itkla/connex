@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -71,6 +72,7 @@ class BedrockAnthropicAdapterImageTest {
                 "Extract literal fields",
                 List.of(new AiMessage("user", "Read the card")),
                 List.of(image()),
+                AiOutputMode.TEXT,
                 64,
                 0);
     }

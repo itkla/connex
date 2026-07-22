@@ -10,6 +10,7 @@ import java.util.Objects;
  * @param systemPrompt optional system instruction text
  * @param messages ordered conversation messages
  * @param images bounded embedded images attached to the first user message
+ * @param outputMode requested provider response shape
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
  */
@@ -19,24 +20,16 @@ public record AiCompletionRequest(
         String systemPrompt,
         List<AiMessage> messages,
         List<AiInputImage> images,
+        AiOutputMode outputMode,
         int maxTokens,
         double temperature) {
-
-    public AiCompletionRequest(
-            AiProviderTarget target,
-            AiCredentials credentials,
-            String systemPrompt,
-            List<AiMessage> messages,
-            int maxTokens,
-            double temperature) {
-        this(target, credentials, systemPrompt, messages, List.of(), maxTokens, temperature);
-    }
 
     public AiCompletionRequest {
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(credentials, "credentials");
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
         images = List.copyOf(Objects.requireNonNull(images, "images"));
+        Objects.requireNonNull(outputMode, "outputMode");
         if (images.size() > 1) {
             throw new IllegalArgumentException("AI completion accepts at most one image");
         }
@@ -46,6 +39,7 @@ public record AiCompletionRequest(
     public String toString() {
         return "AiCompletionRequest[target=" + target
                 + ", credentials=<redacted>, systemPrompt=<redacted>, messages=<redacted>, maxTokens="
-                + maxTokens + ", images=<redacted>, temperature=" + temperature + "]";
+                + maxTokens + ", images=<redacted>, outputMode=" + outputMode
+                + ", temperature=" + temperature + "]";
     }
 }

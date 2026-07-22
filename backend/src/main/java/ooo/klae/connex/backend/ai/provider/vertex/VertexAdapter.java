@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
@@ -127,6 +128,9 @@ public class VertexAdapter implements AiProvider {
         ObjectNode generationConfig = root.putObject("generationConfig");
         generationConfig.put("maxOutputTokens", request.maxTokens());
         generationConfig.put("temperature", request.temperature());
+        if (request.outputMode() == AiOutputMode.JSON) {
+            generationConfig.put("responseMimeType", "application/json");
+        }
         return objectMapper.writeValueAsString(root);
     }
 
