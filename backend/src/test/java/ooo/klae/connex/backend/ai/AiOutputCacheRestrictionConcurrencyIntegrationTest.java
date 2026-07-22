@@ -119,7 +119,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         personMapper.insert(person);
         assertTrue(shareMapper.sharePerson(
                 person.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(),
-                owner.getId(), false) > 0);
+                owner.getId(), false, List.of(ownerWorkspace.getId(), granteeWorkspace.getId())) > 0);
 
         company = new Company();
         company.setWorkspaceId(granteeWorkspace.getId());

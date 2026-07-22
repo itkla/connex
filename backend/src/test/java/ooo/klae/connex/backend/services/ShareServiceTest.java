@@ -7,15 +7,24 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -23,6 +32,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ShareServiceTest extends AbstractServiceTest {
 
     @Autowired ShareService shareService;
@@ -30,10 +40,44 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
     @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired PlatformTransactionManager transactionManager;
+    private final List<Integer> createdUserIds = new ArrayList<>();
+    private final List<Integer> createdOrganizationIds = new ArrayList<>();
+    private final List<Integer> createdWorkspaceIds = new ArrayList<>();
+    private final List<Integer> createdCompanyIds = new ArrayList<>();
+    private final List<Integer> createdPersonIds = new ArrayList<>();
 
     @AfterEach
     void clearContext() {
         clearRequestContext();
+    }
+
+    @AfterEach
+    void cleanUpCommittedFixtures() {
+        createdPersonIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM person_share WHERE person_id = ?", id));
+        createdCompanyIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM company_share WHERE company_id = ?", id));
+        createdPersonIds.forEach(id -> jdbcTemplate.update("DELETE FROM person WHERE id = ?", id));
+        createdCompanyIds.forEach(id -> jdbcTemplate.update("DELETE FROM company WHERE id = ?", id));
+        createdWorkspaceIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
+        createdOrganizationIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", id));
+        createdOrganizationIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM organization WHERE id = ?", id));
+        createdUserIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", id));
+        createdUserIds.forEach(id -> jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", id));
+    }
+
+    @Override
+    protected User newUser() {
+        User user = super.newUser();
+        createdUserIds.add(user.getId());
+        return user;
     }
 
     private Company companyIn(int workspaceId) {
@@ -41,7 +85,15 @@ class ShareServiceTest extends AbstractServiceTest {
         company.setName("Acme " + unique());
         company.setWorkspaceId(workspaceId);
         companyMapper.insert(company);
+        createdCompanyIds.add(company.getId());
         return company;
+    }
+
+    private WorkspaceMembershipDto createOwnerWorkspace(String name) {
+        WorkspaceMembershipDto created = workspaceService.createWorkspace(name, currentUser.getId());
+        createdWorkspaceIds.add(created.getId());
+        createdOrganizationIds.add(created.getOrgId());
+        return created;
     }
 
     /**
@@ -52,13 +104,14 @@ class ShareServiceTest extends AbstractServiceTest {
     private WorkspaceMembershipDto createSiblingWorkspace(WorkspaceMembershipDto first, String name) {
         tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner", null);
         WorkspaceMembershipDto sibling = workspaceService.createWorkspace(name, currentUser.getId());
+        createdWorkspaceIds.add(sibling.getId());
         authenticateAs(currentUser, first.getId());
         return sibling;
     }
 
     @Test
     void sharingMakesACompanyVisibleToTheGrantee() {
-        WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner WS", currentUser.getId());
+        WorkspaceMembershipDto a = createOwnerWorkspace("Owner WS");
         WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee WS");
         Company company = companyIn(a.getId());
 
@@ -77,7 +130,7 @@ class ShareServiceTest extends AbstractServiceTest {
 
     @Test
     void unshareRemovesVisibility() {
-        WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner2 WS", currentUser.getId());
+        WorkspaceMembershipDto a = createOwnerWorkspace("Owner2 WS");
         WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee2 WS");
         Company company = companyIn(a.getId());
 
@@ -92,14 +145,53 @@ class ShareServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void listHydratesSortsAndOmitsTargetsMissingFromTheControlSnapshot() {
+        WorkspaceMembershipDto owner = createOwnerWorkspace("List Owner WS");
+        WorkspaceMembershipDto zulu = createSiblingWorkspace(owner, "Zulu Target WS");
+        WorkspaceMembershipDto alpha = createSiblingWorkspace(owner, "Alpha Target WS");
+        Company company = companyIn(owner.getId());
+
+        shareService.share("company", company.getId(), zulu.getId(), false);
+        shareService.share("company", company.getId(), alpha.getId(), true);
+
+        List<ShareDto> shares = shareService.listShares("company", company.getId());
+        assertEquals(List.of("Alpha Target WS", "Zulu Target WS"), shares.stream()
+            .map(ShareDto::getWorkspaceName)
+            .toList());
+        assertTrue(shares.getFirst().isCanEdit());
+
+        jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", alpha.getId());
+        jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", alpha.getId());
+
+        shares = shareService.listShares("company", company.getId());
+        assertEquals(List.of(zulu.getId()), shares.stream().map(ShareDto::getWorkspaceId).toList());
+    }
+
+    @Test
+    void shareRunsOutsideAnAmbientCallerTransaction() {
+        WorkspaceMembershipDto owner = createOwnerWorkspace("Transaction Owner WS");
+        WorkspaceMembershipDto target = createSiblingWorkspace(owner, "Transaction Target WS");
+        Company company = companyIn(owner.getId());
+        TransactionTemplate callerTransaction = new TransactionTemplate(transactionManager);
+
+        callerTransaction.executeWithoutResult(status -> {
+            shareService.share("company", company.getId(), target.getId(), false);
+            status.setRollbackOnly();
+        });
+
+        assertTrue(companyMapper.exists(target.getId(), company.getId()));
+    }
+
+    @Test
     void cannotShareToAWorkspaceYouDoNotBelongTo() {
-        WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner3 WS", currentUser.getId());
+        WorkspaceMembershipDto a = createOwnerWorkspace("Owner3 WS");
         Company company = companyIn(a.getId());
 
         Workspace foreign = new Workspace();
         foreign.setName("Foreign WS");
         foreign.setSlug("foreign-" + unique());
         workspaceMapper.insert(foreign);
+        createdWorkspaceIds.add(foreign.getId());
         User outsider = newUser();
         workspaceMapper.addMember(foreign.getId(), outsider.getId(), "owner");
 
@@ -110,18 +202,20 @@ class ShareServiceTest extends AbstractServiceTest {
 
     @Test
     void cannotShareAcrossOrganizations() {
-        WorkspaceMembershipDto a = workspaceService.createWorkspace("Org1 WS", currentUser.getId());
+        WorkspaceMembershipDto a = createOwnerWorkspace("Org1 WS");
         Company company = companyIn(a.getId());
 
         Organization otherOrg = new Organization();
         otherOrg.setName("Other Org");
         otherOrg.setSlug("other-org-" + unique());
         organizationMapper.insert(otherOrg);
+        createdOrganizationIds.add(otherOrg.getId());
         Workspace otherOrgWs = new Workspace();
         otherOrgWs.setOrgId(otherOrg.getId());
         otherOrgWs.setName("Other Org WS");
         otherOrgWs.setSlug("other-org-ws-" + unique());
         workspaceMapper.insert(otherOrgWs);
+        createdWorkspaceIds.add(otherOrgWs.getId());
         workspaceMapper.addMember(otherOrgWs.getId(), currentUser.getId(), "owner");
 
         tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
@@ -131,19 +225,21 @@ class ShareServiceTest extends AbstractServiceTest {
 
     @Test
     void provisionCeasedPersonBlocksNewShareButStillAllowsUnshare() {
-        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Person Owner WS", currentUser.getId());
+        WorkspaceMembershipDto owner = createOwnerWorkspace("Person Owner WS");
         WorkspaceMembershipDto existingTarget = createSiblingWorkspace(owner, "Existing Target WS");
         Person person = new Person();
         person.setWorkspaceId(owner.getId());
         person.setName("Provision ceased " + unique());
         personMapper.insert(person);
+        createdPersonIds.add(person.getId());
 
         shareService.share("person", person.getId(), existingTarget.getId(), false);
         WorkspaceMembershipDto blockedTarget = createSiblingWorkspace(owner, "Blocked Target WS");
         personMapper.updateProcessingRestrictions(owner.getId(), person.getId(), false, true);
 
         assertEquals(0, shareMapper.sharePerson(
-            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false,
+            List.of(owner.getId(), blockedTarget.getId())));
         BadRequestException blocked = assertThrows(BadRequestException.class,
             () -> shareService.share("person", person.getId(), blockedTarget.getId(), false));
         assertEquals("Third-party provision has been ceased for this contact", blocked.getMessage());

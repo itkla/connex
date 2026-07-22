@@ -23,8 +23,8 @@ import ooo.klae.connex.backend.dto.ShareDto;
 /**
  * SQL-level proof of the share invariants (#97, #313 Phase 2): a share grant
  * whose record is not owned by the acting workspace, or whose target workspace
- * belongs to a different organization, inserts nothing — even if every
- * service-layer check were bypassed. Complements the service-level
+ * is absent from the owning organization's trusted snapshot, inserts nothing
+ * even if every service-layer check were bypassed. Complements the service-level
  * {@code ShareServiceTest.cannotShareAcrossOrganizations} (which proves the
  * request path throws) by proving the data layer refuses on its own.
  */
@@ -46,7 +46,8 @@ class ShareMapperTest extends AbstractMapperTest {
         personMapper.insert(unshared);
         int grantedBy = newUser().getId();
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), workspace.getId(), sibling.getId(), grantedBy, false));
+            person.getId(), workspace.getId(), sibling.getId(), grantedBy, false,
+            List.of(workspace.getId(), sibling.getId())));
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, true);
         jdbcTemplate.update(
             "INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
@@ -72,7 +73,7 @@ class ShareMapperTest extends AbstractMapperTest {
         Company company = newCompany();
 
         int affected = shareMapper.shareCompany(company.getId(), workspace.getId(),
-            sibling.getId(), newUser().getId(), false);
+            sibling.getId(), newUser().getId(), false, List.of(workspace.getId(), sibling.getId()));
 
         assertEquals(1, affected);
         assertTrue(companyMapper.exists(sibling.getId(), company.getId()),
@@ -85,9 +86,9 @@ class ShareMapperTest extends AbstractMapperTest {
         Company company = newCompany();
 
         int affected = shareMapper.shareCompany(company.getId(), workspace.getId(),
-            foreign.getId(), newUser().getId(), false);
+            foreign.getId(), newUser().getId(), false, List.of(workspace.getId()));
 
-        assertEquals(0, affected, "the SQL org ceiling must refuse a cross-org grant");
+        assertEquals(0, affected, "the SQL allowlist ceiling must refuse a cross-org grant");
         assertFalse(companyMapper.exists(foreign.getId(), company.getId()),
             "a refused grant must leave the record invisible in the foreign workspace");
     }
@@ -98,7 +99,7 @@ class ShareMapperTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
 
         int affected = shareMapper.sharePerson(person.getId(), workspace.getId(),
-            foreign.getId(), newUser().getId(), false);
+            foreign.getId(), newUser().getId(), false, List.of(workspace.getId()));
 
         assertEquals(0, affected);
         assertFalse(personMapper.exists(foreign.getId(), person.getId()));
@@ -110,7 +111,7 @@ class ShareMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
 
         int affected = shareMapper.sharePipeline(pipeline.getId(), workspace.getId(),
-            foreign.getId(), newUser().getId(), false);
+            foreign.getId(), newUser().getId(), false, List.of(workspace.getId()));
 
         assertEquals(0, affected);
         assertFalse(pipelineMapper.pipelineExists(foreign.getId(), pipeline.getId()));
@@ -123,7 +124,8 @@ class ShareMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
 
         assertEquals(1, shareMapper.sharePipeline(
-            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false));
+            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false,
+            List.of(workspace.getId(), sibling.getId())));
 
         assertNotNull(pipelineMapper.getVisibleStageById(sibling.getId(), stage.getId()));
         assertNull(pipelineMapper.getStageById(sibling.getId(), stage.getId()));
@@ -134,7 +136,8 @@ class ShareMapperTest extends AbstractMapperTest {
         Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
         Pipeline pipeline = newPipeline();
         shareMapper.sharePipeline(
-            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false);
+            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false,
+            List.of(workspace.getId(), sibling.getId()));
         Stage mismatched = new Stage();
         mismatched.setWorkspaceId(sibling.getId());
         mismatched.setName("Mismatched");
@@ -153,7 +156,7 @@ class ShareMapperTest extends AbstractMapperTest {
         Company company = newCompany();
 
         int affected = shareMapper.shareCompany(company.getId(), sibling.getId(),
-            another.getId(), newUser().getId(), false);
+            another.getId(), newUser().getId(), false, List.of(sibling.getId(), another.getId()));
 
         assertEquals(0, affected, "only the owning workspace can grant a share");
         assertFalse(companyMapper.exists(another.getId(), company.getId()));
@@ -166,9 +169,9 @@ class ShareMapperTest extends AbstractMapperTest {
         int grantedBy = newUser().getId();
 
         assertEquals(1, shareMapper.shareCompany(company.getId(), workspace.getId(),
-            sibling.getId(), grantedBy, false));
+            sibling.getId(), grantedBy, false, List.of(workspace.getId(), sibling.getId())));
         int again = shareMapper.shareCompany(company.getId(), workspace.getId(),
-            sibling.getId(), grantedBy, false);
+            sibling.getId(), grantedBy, false, List.of(workspace.getId(), sibling.getId()));
 
         assertEquals(1, again,
             "under the driver's found-rows semantics an unchanged re-grant still reports the matched "
@@ -183,7 +186,7 @@ class ShareMapperTest extends AbstractMapperTest {
         Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
         Company company = newCompany();
         shareMapper.shareCompany(company.getId(), workspace.getId(), sibling.getId(),
-            newUser().getId(), false);
+            newUser().getId(), false, List.of(workspace.getId(), sibling.getId()));
 
         int affected = shareMapper.unshareCompany(company.getId(), sibling.getId(), sibling.getId());
 
@@ -198,13 +201,14 @@ class ShareMapperTest extends AbstractMapperTest {
         Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
         Company company = newCompany();
         shareMapper.shareCompany(company.getId(), workspace.getId(), sibling.getId(),
-            newUser().getId(), false);
+            newUser().getId(), false, List.of(workspace.getId(), sibling.getId()));
 
         List<ShareDto> viaOwner = shareMapper.listCompanyShares(workspace.getId(), company.getId());
         List<ShareDto> viaOther = shareMapper.listCompanyShares(sibling.getId(), company.getId());
 
         assertEquals(1, viaOwner.size());
         assertEquals(sibling.getId(), viaOwner.getFirst().getWorkspaceId());
+        assertNull(viaOwner.getFirst().getWorkspaceName());
         assertTrue(viaOther.isEmpty(),
             "share listings are only readable through the workspace that owns the record");
     }

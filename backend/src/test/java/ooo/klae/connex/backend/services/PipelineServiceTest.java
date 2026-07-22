@@ -85,7 +85,8 @@ class PipelineServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(sibling);
         workspaceMapper.addMember(sibling.getId(), currentUser.getId(), "owner");
         shareMapper.sharePipeline(
-            pipeline.getId(), workspace.getId(), sibling.getId(), currentUser.getId(), false);
+            pipeline.getId(), workspace.getId(), sibling.getId(), currentUser.getId(), false,
+            List.of(workspace.getId(), sibling.getId()));
         workspace = sibling;
         authenticateAs(currentUser, sibling.getId());
         Deal granteeDeal = newDeal(pipeline, sharedStage, newCompany());

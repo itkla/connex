@@ -154,9 +154,11 @@ class AttachmentServiceTest extends AbstractServiceTest {
         Company company = companyInWorkspace(ownerWorkspace);
         Person person = personInWorkspace(ownerWorkspace);
         assertEquals(1, shareMapper.shareCompany(
-            company.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            company.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+            List.of(ownerWorkspace.getId(), workspace.getId())));
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            person.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+            List.of(ownerWorkspace.getId(), workspace.getId())));
         byte[] bytes = { 1, 2, 3 };
 
         Attachment companyAttachment = attachmentService.upload(

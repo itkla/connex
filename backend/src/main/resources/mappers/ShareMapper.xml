@@ -12,47 +12,47 @@
   <select id="ownsPipeline" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id})
   </select>
+  <select id="getOwnedPersonProvisionState" resultType="ooo.klae.connex.backend.beans.Person">
+    SELECT id, workspace_id, provision_ceased_at
+    FROM person
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
 
-  <!-- Share grants are INSERT..SELECT so the SQL itself enforces the two share
-       invariants (defense-in-depth below ShareService): the record must be owned by
-       the acting workspace, and the target workspace must be in the SAME organization
-       (cross-org sharing is structurally forbidden, MULTITENANCY_PLAN §0.5). A grant
-       violating either inserts nothing and returns 0. Row counts are driver-
-       dependent (an unchanged re-grant reports 1 under found-rows semantics but 0
-       under affected-rows), so ShareService confirms via the *ShareExists probes
-       before treating 0 as a refusal — the contract holds under either setting. -->
   <insert id="shareCompany">
     INSERT INTO company_share (company_id, workspace_id, granted_by, can_edit)
-    SELECT c.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT c.id, #{targetWorkspaceId}, #{grantedBy}, #{canEdit}
     FROM company c
-    JOIN workspace ow ON ow.id = c.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE c.id = #{id} AND c.workspace_id = #{workspaceId}
+      AND #{targetWorkspaceId} IN
+      <foreach collection="workspaceIds" item="allowedWorkspaceId" open="(" separator="," close=")">
+        #{allowedWorkspaceId}
+      </foreach>
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePerson">
     INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit)
-    SELECT p.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT p.id, #{targetWorkspaceId}, #{grantedBy}, #{canEdit}
     FROM person p
-    JOIN workspace ow ON ow.id = p.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE p.id = #{id} AND p.workspace_id = #{workspaceId}
       AND p.provision_ceased_at IS NULL
+      AND #{targetWorkspaceId} IN
+      <foreach collection="workspaceIds" item="allowedWorkspaceId" open="(" separator="," close=")">
+        #{allowedWorkspaceId}
+      </foreach>
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePipeline">
     INSERT INTO pipeline_share (pipeline_id, workspace_id, granted_by, can_edit)
-    SELECT pl.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT pl.id, #{targetWorkspaceId}, #{grantedBy}, #{canEdit}
     FROM pipeline pl
-    JOIN workspace ow ON ow.id = pl.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE pl.id = #{id} AND pl.workspace_id = #{workspaceId}
+      AND #{targetWorkspaceId} IN
+      <foreach collection="workspaceIds" item="allowedWorkspaceId" open="(" separator="," close=")">
+        #{allowedWorkspaceId}
+      </foreach>
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
 
-  <!-- Existence probes (owner-anchored) let ShareService distinguish an idempotent
-       re-grant from a refused grant without depending on driver affected-rows
-       semantics. -->
   <select id="companyShareExists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM company_share s
@@ -72,8 +72,6 @@
       WHERE s.pipeline_id = #{id} AND s.workspace_id = #{targetWorkspaceId})
   </select>
 
-  <!-- Revocation and listing anchor on the owning workspace in SQL, so a share row
-       is only ever touched or read through the workspace that owns the record. -->
   <delete id="unshareCompany">
     DELETE s FROM company_share s
     JOIN company c ON c.id = s.company_id AND c.workspace_id = #{workspaceId}
@@ -96,28 +94,25 @@
   </delete>
 
   <select id="listCompanyShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM company_share s
     JOIN company c ON c.id = s.company_id AND c.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.company_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
   <select id="listPersonShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM person_share s
     JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.person_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
   <select id="listPipelineShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM pipeline_share s
     JOIN pipeline pl ON pl.id = s.pipeline_id AND pl.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.pipeline_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
 
   <update id="clearCompanyShareGrantedByAnywhere">
