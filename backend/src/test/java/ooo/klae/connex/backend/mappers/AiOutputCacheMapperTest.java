@@ -9,12 +9,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiOutputCache;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class AiOutputCacheMapperTest extends AbstractMapperTest {
 
     @Autowired AiOutputCacheMapper aiOutputCacheMapper;
+    @Autowired ActivityMapper activityMapper;
+    @Autowired NoteMapper noteMapper;
+    @Autowired TaskMapper taskMapper;
 
     @Test
     void upsert_assignsGeneratedId() {
@@ -77,6 +89,43 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
                 .getPayload().contains("there"));
     }
 
+    @Test
+    void deleteForPersonPurgesBriefsForCurrentStructuredDealLinksOnly() {
+        Company company = newCompany();
+        Person subject = newPerson(company);
+        User actor = newUser();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal activityDeal = newDeal(pipeline, stage, company);
+        Deal noteDeal = newDeal(pipeline, stage, company);
+        Deal taskDeal = newDeal(pipeline, stage, company);
+        Deal stakeholderDeal = newDeal(pipeline, stage, company);
+        Deal unrelatedDeal = newDeal(pipeline, stage, company);
+        activityMapper.insert(activity(subject, activityDeal, actor));
+        noteMapper.insert(note(subject, noteDeal, actor));
+        taskMapper.insert(task(subject, taskDeal, actor));
+        dealMapper.addPerson(workspace.getId(), stakeholderDeal.getId(), subject.getId(), null);
+        for (Deal deal : new Deal[] {activityDeal, noteDeal, taskDeal, stakeholderDeal}) {
+            save(workspace, "deal.brief:en", deal.getId(), 0, "brief-" + deal.getId(), "{}", 0);
+            save(workspace, "deal.risk_rationale:en", deal.getId(), 0,
+                    "risk-" + deal.getId(), "{}", 0);
+        }
+        save(workspace, "deal.brief:en", unrelatedDeal.getId(), 0,
+                "brief-unrelated", "{}", 0);
+
+        assertEquals(5, aiOutputCacheMapper.deleteForPerson(workspace.getId(), subject.getId()));
+
+        assertNull(cached("deal.brief:en", activityDeal));
+        assertNull(cached("deal.brief:en", noteDeal));
+        assertNull(cached("deal.brief:en", taskDeal));
+        assertNull(cached("deal.brief:en", stakeholderDeal));
+        assertNull(cached("deal.risk_rationale:en", stakeholderDeal));
+        assertNotNull(cached("deal.risk_rationale:en", activityDeal));
+        assertNotNull(cached("deal.risk_rationale:en", noteDeal));
+        assertNotNull(cached("deal.risk_rationale:en", taskDeal));
+        assertNotNull(cached("deal.brief:en", unrelatedDeal));
+    }
+
     private AiOutputCache save(
             Workspace ws, String feature, int subjectAId, int subjectBId, String hash, String payload, int warnings) {
         AiOutputCache row = new AiOutputCache();
@@ -90,6 +139,45 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         row.setGeneratedAt("2026-07-09T18:30:00Z");
         aiOutputCacheMapper.upsert(row);
         return row;
+    }
+
+    private AiOutputCache cached(String feature, Deal deal) {
+        return aiOutputCacheMapper.getBySubject(workspace.getId(), feature, deal.getId(), 0);
+    }
+
+    private Activity activity(Person person, Deal deal, User actor) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("call");
+        activity.setSubject("Activity " + unique());
+        activity.setPerson(person);
+        activity.setDeal(deal);
+        activity.setCreatedBy(actor);
+        activity.setTimestamp("2026-07-22 09:00:00");
+        return activity;
+    }
+
+    private Note note(Person person, Deal deal, User actor) {
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Note " + unique());
+        note.setAuthor(actor);
+        note.setPerson(person);
+        note.setDeal(deal);
+        return note;
+    }
+
+    private Task task(Person person, Deal deal, User actor) {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Task " + unique());
+        task.setCompleted(false);
+        task.setStatus("todo");
+        task.setPosition(0);
+        task.setAssignedTo(actor);
+        task.setPerson(person);
+        task.setDeal(deal);
+        return task;
     }
 
     private Workspace newWorkspace() {

@@ -87,8 +87,13 @@ public class DealBriefService {
                 return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
             }
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                    contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt);
+            boolean safeToServe = aiOutputCacheStore.saveForPersons(
+                    workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
+                    contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt,
+                    assembly.contributorPersonIds());
+            if (!safeToServe) {
+                return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+            }
             return DealBriefDto.of(dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
         } catch (ForbiddenException exception) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.riskrationale;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
@@ -91,6 +92,7 @@ class DealRiskRationaleAssemblerTest {
         RationaleAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk);
         String serialized = serialized(assembly.prompt());
 
+        assertEquals(List.of(PERSON_ID), assembly.contributorPersonIds());
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("person={{P2}}"));
@@ -154,6 +156,7 @@ class DealRiskRationaleAssemblerTest {
         String serialized = serialized(assembly.prompt());
 
         assertFalse(assembly.atRisk());
+        assertEquals(List.of(), assembly.contributorPersonIds());
         assertTrue(serialized.contains("Level: none"));
         assertTrue(serialized.contains("Score: 0"));
         assertFalse(serialized.contains("Ceased Contact"));

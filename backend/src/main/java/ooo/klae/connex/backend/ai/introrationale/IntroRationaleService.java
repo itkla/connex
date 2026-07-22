@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.introrationale;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -95,8 +96,13 @@ public class IntroRationaleService {
             }
             String rationale = truncate(content.rationale().strip(), MAX_RATIONALE_CHARS);
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, cacheFeature, lo, hi,
-                    contentHash, new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt);
+            boolean safeToServe = aiOutputCacheStore.saveForPersons(
+                    workspaceId, cacheFeature, lo, hi, contentHash,
+                    new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt,
+                    List.of(lo, hi));
+            if (!safeToServe) {
+                return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+            }
             return IntroRationaleDto.of(lo, hi, rationale, generatedAt, parsed.demaskWarnings());
         } catch (ForbiddenException exception) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);

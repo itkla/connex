@@ -82,6 +82,9 @@ class IntroRationaleServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), anyInt())).thenReturn(new Person());
+        lenient().when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(true);
         LocaleContextHolder.setLocale(Locale.ENGLISH);
     }
 
@@ -154,8 +157,26 @@ class IntroRationaleServiceTest {
         verify(aiInvocationService).completeStructured(invocation.capture(), eq(IntroRationaleContent.class));
         assertEquals(FEATURE, invocation.getValue().feature());
         assertEquals(IntroRationaleService.MAX_TOKENS, invocation.getValue().maxTokens());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
-                eq(HASH), any(IntroRationaleContent.class), eq(2), eq(NOW.toString()));
+        verify(aiOutputCacheStore).saveForPersons(
+                eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
+                eq(HASH), any(IntroRationaleContent.class), eq(2), eq(NOW.toString()),
+                eq(List.of(PERSON_A_ID, PERSON_B_ID)));
+    }
+
+    @Test
+    void generate_participantRestrictedBeforeCacheAdmissionReturnsNotASuggestion() {
+        arrangeMiss(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new IntroRationaleContent("Alice should meet Bob."),
+                        0, 20, 10, "end_turn"));
+        when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(false);
+
+        IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertUnavailable(result, "not_a_suggestion");
     }
 
     @Test
@@ -179,7 +200,8 @@ class IntroRationaleServiceTest {
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         assertEquals(1, result.getWarnings());
         verify(aiInvocationService, never()).completeStructured(any(), any());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -201,8 +223,10 @@ class IntroRationaleServiceTest {
         assertEquals("Fresh.", result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
-                eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()));
+        verify(aiOutputCacheStore).saveForPersons(
+                eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
+                eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()),
+                eq(List.of(PERSON_A_ID, PERSON_B_ID)));
     }
 
     @Test
@@ -215,7 +239,8 @@ class IntroRationaleServiceTest {
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 
         assertUnavailable(result, "provider_error");
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -227,7 +252,8 @@ class IntroRationaleServiceTest {
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 
         assertUnavailable(result, "provider_error");
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test

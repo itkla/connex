@@ -23,9 +23,22 @@
     WHERE (
       (c.feature LIKE 'intro.rationale:%'
         AND (c.subject_a_id = #{personId} OR c.subject_b_id = #{personId}))
-      OR ((c.feature LIKE 'deal.brief:%' OR c.feature LIKE 'deal.risk_rationale:%')
+      OR (c.feature LIKE 'deal.risk_rationale:%'
         AND c.subject_a_id IN (
           SELECT dp.deal_id FROM deal_person dp WHERE dp.person_id = #{personId}
+        ))
+      OR (c.feature LIKE 'deal.brief:%'
+        AND c.subject_a_id IN (
+          SELECT dp.deal_id FROM deal_person dp WHERE dp.person_id = #{personId}
+          UNION
+          SELECT a.deal_id FROM activity a
+          WHERE a.person_id = #{personId} AND a.deal_id IS NOT NULL
+          UNION
+          SELECT n.deal_id FROM note n
+          WHERE n.person_id = #{personId} AND n.deal_id IS NOT NULL
+          UNION
+          SELECT t.deal_id FROM task t
+          WHERE t.person_id = #{personId} AND t.deal_id IS NOT NULL
         ))
     )
   </delete>

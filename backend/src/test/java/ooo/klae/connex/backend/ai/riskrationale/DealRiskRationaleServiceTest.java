@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,6 +76,9 @@ class DealRiskRationaleServiceTest {
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(true);
         LocaleContextHolder.setLocale(Locale.ENGLISH);
     }
 
@@ -128,7 +132,7 @@ class DealRiskRationaleServiceTest {
         DealRiskDto risk = atRisk();
         RationaleAssembly eligible = assembly();
         RationaleAssembly filtered = new RationaleAssembly(
-            eligible.context(), eligible.prompt(), false);
+            eligible.context(), eligible.prompt(), false, eligible.contributorPersonIds());
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(filtered);
@@ -160,9 +164,25 @@ class DealRiskRationaleServiceTest {
                 result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(2),
-                eq(NOW.toString()));
+                eq(NOW.toString()), eq(List.of(73)));
+    }
+
+    @Test
+    void generate_contributorRestrictedBeforeCacheAdmissionReturnsProviderError() {
+        arrangeMiss(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealRiskRationaleContent("Fresh narrative.", List.of()),
+                        0, 20, 10, "end_turn"));
+        when(aiOutputCacheStore.saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(false);
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertUnavailable(result, "provider_error");
     }
 
     @Test
@@ -186,7 +206,8 @@ class DealRiskRationaleServiceTest {
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         assertEquals(1, result.getWarnings());
         verify(aiInvocationService, never()).completeStructured(any(), any());
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -230,9 +251,9 @@ class DealRiskRationaleServiceTest {
         assertEquals("Fresh narrative.", result.getNarrative());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
-                eq(NOW.toString()));
+                eq(NOW.toString()), eq(List.of(73)));
     }
 
     @Test
@@ -252,9 +273,9 @@ class DealRiskRationaleServiceTest {
         assertEquals("Fresh narrative.", result.getNarrative());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
-                eq(NOW.toString()));
+                eq(NOW.toString()), eq(List.of(73)));
     }
 
     @Test
@@ -267,7 +288,8 @@ class DealRiskRationaleServiceTest {
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "provider_error");
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -280,7 +302,8 @@ class DealRiskRationaleServiceTest {
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "provider_error");
-        verify(aiOutputCacheStore, never()).save(anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -333,7 +356,7 @@ class DealRiskRationaleServiceTest {
                 .system("Use only the supplied risk factors.")
                 .userTurn("Stakeholder: " + person)
                 .build();
-        return new RationaleAssembly(context, prompt);
+        return new RationaleAssembly(context, prompt, true, List.of(73));
     }
 
     private static AiOutputCache row(String contentHash, int warnings, String generatedAt) {

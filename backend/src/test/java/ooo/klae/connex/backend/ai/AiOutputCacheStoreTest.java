@@ -1,12 +1,20 @@
 package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -24,18 +33,23 @@ import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.beans.AiOutputCache;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AiOutputCacheStoreTest {
     @Mock private AiOutputCacheMapper aiOutputCacheMapper;
+    @Mock private PersonMapper personMapper;
 
     private AiOutputCacheStore store;
 
     @BeforeEach
     void setUp() {
-        store = new AiOutputCacheStore(aiOutputCacheMapper, JsonMapper.builder().build());
+        store = new AiOutputCacheStore(aiOutputCacheMapper, personMapper, JsonMapper.builder().build());
     }
 
     @Test
@@ -81,6 +95,132 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
+    void saveForPersons_locksDistinctContributorRowsInAscendingOrderBeforeUpsert() {
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person(3));
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 9)).thenReturn(person(9));
+
+        boolean safeToServe = store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(9, 3, 9));
+
+        assertTrue(safeToServe);
+        InOrder ordered = inOrder(personMapper, aiOutputCacheMapper);
+        ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
+        ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, 9);
+        ordered.verify(aiOutputCacheMapper).upsert(any(AiOutputCache.class));
+    }
+
+    @Test
+    void saveForPersons_rejectsSuspendedContributor() {
+        Person person = person(3);
+        person.setSuspendedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person);
+
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(aiOutputCacheMapper, never()).upsert(any());
+    }
+
+    @Test
+    void saveForPersons_rejectsProvisionCeasedContributor() {
+        Person person = person(3);
+        person.setProvisionCeasedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person);
+
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(aiOutputCacheMapper, never()).upsert(any());
+    }
+
+    @Test
+    void saveForPersons_rejectsMissingOrInvisibleContributor() {
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(null);
+
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(aiOutputCacheMapper, never()).upsert(any());
+    }
+
+    @Test
+    void saveForPersons_treatsSerializationFailureAsSafeAfterContributorAdmission() {
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person(3));
+        AiOutputCacheStore failingStore = new AiOutputCacheStore(
+                aiOutputCacheMapper, personMapper, objectMapper);
+
+        assertTrue(failingStore.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
+        verifyNoInteractions(aiOutputCacheMapper);
+    }
+
+    @Test
+    void saveForPersons_rejectsRestrictedContributorWhenSerializationFails() {
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
+        Person restricted = person(3);
+        restricted.setSuspendedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(restricted);
+        AiOutputCacheStore failingStore = new AiOutputCacheStore(
+                aiOutputCacheMapper, personMapper, objectMapper);
+
+        assertFalse(failingStore.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
+        verifyNoInteractions(aiOutputCacheMapper);
+    }
+
+    @Test
+    void saveForPersons_rejectsInvalidContributorIdsWithoutLockingOrUpserting() {
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", java.util.Arrays.asList(3, null)));
+        verifyNoInteractions(personMapper, aiOutputCacheMapper);
+    }
+
+    @Test
+    void saveForPersons_rejectsNonPositiveContributorIdsWithoutLockingOrUpserting() {
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3, 0)));
+        verifyNoInteractions(personMapper, aiOutputCacheMapper);
+    }
+
+    @Test
+    void saveForPersons_rejectsNullContributorCollectionWithoutLockingOrUpserting() {
+        assertFalse(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", null));
+        verifyNoInteractions(personMapper, aiOutputCacheMapper);
+    }
+
+    @Test
+    void saveForPersons_propagatesDatabaseFailure() {
+        when(personMapper.getVisiblePersonByIdForUpdate(7, 3))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        assertThrows(IllegalStateException.class, () -> store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of(3)));
+        verify(aiOutputCacheMapper, never()).upsert(any());
+    }
+
+    @Test
+    void saveForPersons_upsertsWhenNoContributorIsKnown() {
+        assertTrue(store.saveForPersons(
+                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                "2026-07-09T18:30:00Z", List.of()));
+        verifyNoInteractions(personMapper);
+        verify(aiOutputCacheMapper).upsert(any(AiOutputCache.class));
+    }
+
+    @Test
     void read_roundTripsStoredContent() {
         Optional<DealBriefContent> content = store.read(
                 "{\"sections\":[{\"title\":\"Deal status\",\"body\":\"Proposal sent.\"}]}", DealBriefContent.class);
@@ -123,5 +263,17 @@ class AiOutputCacheStoreTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, personName, context);
         return context;
+    }
+
+    private static Person person(int id) {
+        Person person = new Person();
+        person.setId(id);
+        return person;
+    }
+
+    private static final class SerializationFailure extends JacksonException {
+        private SerializationFailure() {
+            super("serialization failed");
+        }
     }
 }

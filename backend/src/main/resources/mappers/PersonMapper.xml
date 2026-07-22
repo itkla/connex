@@ -179,6 +179,13 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
+  <select id="getVisiblePersonByIdForUpdate" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, p.company_id
+    FROM person p
+    WHERE <include refid="visible"/> AND p.id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getOwnedPersonByIdForUpdate" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
