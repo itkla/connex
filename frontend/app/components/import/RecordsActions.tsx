@@ -92,10 +92,12 @@ export default function RecordsActions(props: RecordsActionsProps) {
     const pathname = usePathname() ?? '';
     const { activeWorkspaceId, switching } = useWorkspace();
     const { pendingIds, run } = useActions();
-    const [importOpen, setImportOpen] = useState(false);
+    const [importRequestInit, setImportRequestInit] = useState<RequestInit>();
+    const [importGeneration, setImportGeneration] = useState(0);
     const [originPathname] = useState(pathname);
     const [originWorkspaceId] = useState(activeWorkspaceId);
     const activeControllerRef = useRef<AbortController | null>(null);
+    const importControllerRef = useRef<AbortController | null>(null);
     const liveExportRef = useRef(onExport);
     const liveScopeRef = useRef({ active: true, activeWorkspaceId, pathname, switching });
     const actionConfig = CURRENT_VIEW_EXPORT_ACTIONS[entity];
@@ -138,8 +140,35 @@ export default function RecordsActions(props: RecordsActionsProps) {
             liveScopeRef.current = { active: false, activeWorkspaceId, pathname, switching };
             activeControllerRef.current?.abort();
             activeControllerRef.current = null;
+            importControllerRef.current?.abort();
+            importControllerRef.current = null;
         };
     }, [activeWorkspaceId, pathname, switching]);
+
+    const importScopeValid =
+        !switching
+        && originWorkspaceId !== null
+        && activeWorkspaceId === originWorkspaceId
+        && pathname === originPathname;
+
+    function openImport() {
+        if (!importScopeValid || originWorkspaceId === null) return;
+        importControllerRef.current?.abort();
+        const controller = new AbortController();
+        importControllerRef.current = controller;
+        setImportRequestInit({
+            signal: controller.signal,
+            headers: { 'X-Workspace-Id': String(originWorkspaceId) },
+        });
+        setImportGeneration((generation) => generation + 1);
+    }
+
+    function handleImportOpenChange(next: boolean) {
+        if (next) return;
+        importControllerRef.current?.abort();
+        importControllerRef.current = null;
+        setImportRequestInit(undefined);
+    }
 
     const exportActions = useMemo<readonly AppAction[]>(
         () => !switching && activeWorkspaceId === originWorkspaceId && pathname === originPathname
@@ -184,7 +213,7 @@ export default function RecordsActions(props: RecordsActionsProps) {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-60">
                         {props.entity !== 'products' && (
-                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setImportOpen(true); }}>
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openImport(); }}>
                                 <ArrowUpTrayIcon className="size-4" />
                                 {t('openImport')}
                             </DropdownMenuItem>
@@ -198,10 +227,12 @@ export default function RecordsActions(props: RecordsActionsProps) {
             </ButtonGroup>
             {props.entity !== 'products' && (
                 <ImportDialog
+                    key={importGeneration}
                     entity={props.entity}
-                    open={importOpen}
-                    onOpenChange={setImportOpen}
+                    open={importRequestInit !== undefined && !importRequestInit.signal?.aborted && importScopeValid}
+                    onOpenChange={handleImportOpenChange}
                     onImported={props.onImported}
+                    requestInit={importRequestInit}
                 />
             )}
         </>

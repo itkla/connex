@@ -89,8 +89,14 @@
     "reviewLinkHint": "Showing the first 100 rows. Use Link to match a row to an existing record.",
     "linkAction": "Link…",
     "linkSearchPlaceholder": "Search existing…",
+    "linkSearchLabel": "Search existing records",
+    "linkSearchPrompt": "Type at least 2 characters",
     "linkSearching": "Searching…",
     "linkNoResults": "No matches",
-    "linkedTo": "Linked: {name}"
+    "linkSearchError": "Couldn’t search.",
+    "linkRetry": "Retry",
+    "linkResults": "{count, plural, one {# match} other {# matches}}",
+    "linkedTo": "Linked: {name}",
+    "linkClear": "Remove link to {name}"
   }
 }
