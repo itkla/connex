@@ -261,6 +261,10 @@ class AiInvocationServiceTest {
 
         AiStructuredOutcome.Malformed<IntroRationaleContent> malformed = asMalformed(outcome);
         assertEquals(AiStructuredOutcome.REASON_MALFORMED, malformed.reason());
+        ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(requestCaptor.capture());
+        assertEquals(AiOutputMode.JSON, requestCaptor.getValue().outputMode());
+        assertEquals(1, requestCaptor.getValue().images().size());
         assertMediaLeaseClosesBeforeTerminalAudit();
     }
 

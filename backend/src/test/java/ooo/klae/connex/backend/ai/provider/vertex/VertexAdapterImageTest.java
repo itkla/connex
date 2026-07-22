@@ -53,12 +53,15 @@ class VertexAdapterImageTest {
                  "usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}
                 """);
 
-        adapter.complete(request("us-central1", "gemini-2.5-pro"));
+        adapter.complete(request("us-central1", "gemini-2.5-pro", AiOutputMode.JSON));
 
-        JsonNode parts = capturedBody().path("contents").path(0).path("parts");
+        JsonNode body = capturedBody();
+        JsonNode parts = body.path("contents").path(0).path("parts");
         assertEquals("image/jpeg", parts.path(0).path("inlineData").path("mimeType").asString());
         assertEquals("/9j/AQ==", parts.path(0).path("inlineData").path("data").asString());
         assertEquals("Read the card", parts.path(1).path("text").asString());
+        assertEquals("application/json",
+                body.path("generationConfig").path("responseMimeType").asString());
     }
 
     @Test
@@ -110,6 +113,11 @@ class VertexAdapterImageTest {
     }
 
     private static AiCompletionRequest request(String region, String modelId) {
+        return request(region, modelId, AiOutputMode.TEXT);
+    }
+
+    private static AiCompletionRequest request(
+            String region, String modelId, AiOutputMode outputMode) {
         return new AiCompletionRequest(
                 new AiProviderTarget(
                         "vertex", region, modelId, null, null, null, "connex1", false),
@@ -117,7 +125,7 @@ class VertexAdapterImageTest {
                 "Extract literal fields",
                 List.of(new AiMessage("user", "Read the card")),
                 List.of(image()),
-                AiOutputMode.TEXT,
+                outputMode,
                 64,
                 0);
     }
