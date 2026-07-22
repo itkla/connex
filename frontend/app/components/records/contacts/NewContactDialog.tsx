@@ -50,6 +50,7 @@ import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClas
 import {
     BusinessCardCapture,
     BusinessCardCompanyChoice,
+    BusinessCardScanTrigger,
 } from '@/app/components/records/contacts/BusinessCardCapture';
 import { useBusinessCardCapture } from '@/app/components/records/contacts/useBusinessCardCapture';
 
@@ -513,6 +514,9 @@ export function NewContactForm({
         || businessCard.recoveryStatus === 'acknowledging'
         || recoveredImport != null
         || recoveryDecisionRequired;
+    const cardEntryAvailable = businessCard.available
+        && !manualRecoveryOverride
+        && !recoveryBlocked;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
     const nameMatches = useDuplicateNameCheck('person', newContactPayload.name);
@@ -523,38 +527,53 @@ export function NewContactForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <div className="ncd-pop relative -mt-12 mb-4 w-fit">
-                    <label
-                        htmlFor="imageUrl"
-                        className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
-                    >
-                        {visibleImagePreview ? (
-                            <Image src={visibleImagePreview} alt="" fill sizes="80px" unoptimized className="object-cover" />
-                        ) : contactInitial ? (
-                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
-                                {contactInitial}
-                            </div>
-                        ) : (
-                            <div className="flex size-full items-center justify-center bg-brand-light">
-                                <UserIcon className="size-7 text-brand-dark/70 transition group-hover:text-brand-dark" />
-                            </div>
-                        )}
+                <div className="mb-4 flex items-end justify-between gap-3">
+                    <div className="ncd-pop relative -mt-12 w-fit">
+                        <label
+                            htmlFor="imageUrl"
+                            className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
+                        >
+                            {visibleImagePreview ? (
+                                <Image src={visibleImagePreview} alt="" fill sizes="80px" unoptimized className="object-cover" />
+                            ) : contactInitial ? (
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
+                                    {contactInitial}
+                                </div>
+                            ) : (
+                                <div className="flex size-full items-center justify-center bg-brand-light">
+                                    <UserIcon className="size-7 text-brand-dark/70 transition group-hover:text-brand-dark" />
+                                </div>
+                            )}
 
-                        {(visibleImagePreview || contactInitial) && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
-                                <CameraIcon className="size-5 text-white" />
-                            </div>
-                        )}
+                            {(visibleImagePreview || contactInitial) && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
+                                    <CameraIcon className="size-5 text-white" />
+                                </div>
+                            )}
 
-                        <input
-                            id="imageUrl"
-                            type="file"
-                            accept={MANAGED_IMAGE_ACCEPT}
-                            disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
-                            onChange={handleImageChange}
-                            className="sr-only"
-                        />
-                    </label>
+                            <input
+                                id="imageUrl"
+                                type="file"
+                                accept={MANAGED_IMAGE_ACCEPT}
+                                disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
+                                onChange={handleImageChange}
+                                className="sr-only"
+                            />
+                        </label>
+                    </div>
+                    {cardEntryAvailable && (
+                        <div className="ncd-rise" style={{ animationDelay: '20ms' }}>
+                            <BusinessCardScanTrigger
+                                hasFile={businessCard.file != null}
+                                disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
+                                onFileSelected={businessCard.selectFile}
+                                onSelectionPendingChange={(pending) => {
+                                    cardSelectionPendingRef.current = pending;
+                                    setCardSelectionPending(pending);
+                                }}
+                            />
+                        </div>
+                    )}
                 </div>
 
                 <div className="ncd-rise mb-5 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
@@ -576,9 +595,7 @@ export function NewContactForm({
                             onRetry={retryRecovery}
                             onContinueManually={continueManuallyAfterRecoveryFailure}
                         />
-                    ) : manualRecoveryOverride ? null : !businessCard.availabilityResolved ? (
-                        <BusinessCardAvailabilityPlaceholder />
-                    ) : businessCard.available ? (
+                    ) : manualRecoveryOverride ? null : businessCard.available ? (
                         <BusinessCardCapture
                             scanAvailable={businessCard.scanAvailable}
                             file={businessCard.file}
@@ -589,13 +606,8 @@ export function NewContactForm({
                             importError={businessCard.importError}
                             requiresExactImportRetry={businessCard.requiresExactImportRetry}
                             disabled={formPending}
-                            onFileSelected={businessCard.selectFile}
                             onCancelScan={businessCard.cancelScan}
                             onRetryScan={businessCard.retryScan}
-                            onSelectionPendingChange={(pending) => {
-                                cardSelectionPendingRef.current = pending;
-                                setCardSelectionPending(pending);
-                            }}
                             onRemove={businessCard.companyMode === 'create'
                                 ? undefined
                                 : businessCard.discardCardImage}
@@ -715,23 +727,6 @@ function BusinessCardRecoveryStorageWarning({
                     {t('cardImportRecoveryContinueManually')}
                 </Button>
             </div>
-        </section>
-    );
-}
-
-function BusinessCardAvailabilityPlaceholder() {
-    const t = useTranslations('ContactsNewContactDialog');
-
-    return (
-        <section className="grid gap-3 rounded-xl border bg-muted/30 p-3">
-            <div className="grid gap-1">
-                <h3 className="text-sm font-medium">{t('businessCard')}</h3>
-                <p className="text-xs leading-relaxed text-muted-foreground">{t('businessCardDescription')}</p>
-            </div>
-            <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                <ArrowPathIcon className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                {t('cardAvailabilityLoading')}
-            </p>
         </section>
     );
 }

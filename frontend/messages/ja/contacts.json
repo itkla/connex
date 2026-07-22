@@ -228,6 +228,7 @@
     "businessCard": "名刺",
     "businessCardDescription": "名刺を撮影するか、JPEG・PNG・WebP画像を選択して、すべての項目を確認してください。自動読み取りは、利用可能な場合はこのConnexインスタンス内で処理されます。利用できない場合は、メタデータを除去した画像が組織で設定されたAIプロバイダーに送信されることがあります。作成すると、メタデータを除去した画像がコンタクトに保存されます。",
     "cardAvailabilityLoading": "名刺機能を確認しています…",
+    "scanBusinessCard": "名刺をスキャン",
     "scanCard": "カメラで撮影",
     "uploadCard": "画像をアップロード",
     "scanAnotherCard": "別の名刺を撮影",

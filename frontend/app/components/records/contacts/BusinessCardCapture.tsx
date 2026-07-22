@@ -2,7 +2,6 @@
 
 import {
     ArrowPathIcon,
-    ArrowUpTrayIcon,
     CameraIcon,
     CheckCircleIcon,
     ExclamationTriangleIcon,
@@ -30,6 +29,13 @@ import { cn } from '@/lib/utils';
 
 type ConfidenceField = 'name' | 'email' | 'phone' | 'title' | 'company';
 
+type BusinessCardScanTriggerProps = {
+    hasFile: boolean;
+    disabled: boolean;
+    onFileSelected: (file: File) => void;
+    onSelectionPendingChange: (pending: boolean) => void;
+};
+
 type BusinessCardCaptureProps = {
     scanAvailable: boolean;
     file: File | null;
@@ -40,10 +46,8 @@ type BusinessCardCaptureProps = {
     importError: BusinessCardRequestErrorKind | null;
     requiresExactImportRetry: boolean;
     disabled: boolean;
-    onFileSelected: (file: File) => void;
     onCancelScan: () => void;
     onRetryScan: () => void;
-    onSelectionPendingChange: (pending: boolean) => void;
     onRemove?: () => void;
     onDiscardImage?: () => void;
 };
@@ -186,26 +190,18 @@ function confidenceLabelKey(field: ConfidenceField) {
     }
 }
 
-export function BusinessCardCapture({
-    scanAvailable,
-    file,
-    previewUrl,
-    result,
-    status,
-    requestError,
-    importError,
-    requiresExactImportRetry,
+/**
+ * The compact business-card entry affordance rendered beside the contact avatar. A single dashed
+ * pill: on coarse-pointer (touch) devices it opens the rear camera; on fine-pointer devices it opens
+ * the file picker. Selection validation and pending state are owned here and surfaced to the caller.
+ */
+export function BusinessCardScanTrigger({
+    hasFile,
     disabled,
     onFileSelected,
-    onCancelScan,
-    onRetryScan,
     onSelectionPendingChange,
-    onRemove,
-    onDiscardImage,
-}: BusinessCardCaptureProps) {
+}: BusinessCardScanTriggerProps) {
     const t = useTranslations('ContactsNewContactDialog');
-    const cameraInputId = useId();
-    const uploadInputId = useId();
     const cameraInputRef = useRef<HTMLInputElement>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const selectionSequenceRef = useRef(0);
@@ -213,7 +209,7 @@ export function BusinessCardCapture({
     const onSelectionPendingChangeRef = useRef(onSelectionPendingChange);
     const [selectionError, setSelectionError] = useState(false);
     const [selectionPending, setSelectionPending] = useState(false);
-    const cardControlsDisabled = disabled || requiresExactImportRetry || selectionPending;
+    const controlsDisabled = disabled || selectionPending;
 
     useLayoutEffect(() => {
         onSelectionPendingChangeRef.current = onSelectionPendingChange;
@@ -256,76 +252,94 @@ export function BusinessCardCapture({
         }
     };
 
-    const handleRemove = () => {
-        selectionSequenceRef.current += 1;
-        setPending(false);
-        setSelectionError(false);
-        onRemove?.();
-    };
+    const label = hasFile ? t('scanAnotherCard') : t('scanBusinessCard');
+
+    return (
+        <div className="flex flex-col items-end gap-1.5">
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="hidden border-dashed text-muted-foreground hover:text-foreground pointer-coarse:inline-flex"
+                disabled={controlsDisabled}
+                onClick={() => cameraInputRef.current?.click()}
+            >
+                <CameraIcon data-icon="inline-start" />
+                {label}
+            </Button>
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-dashed text-muted-foreground hover:text-foreground pointer-coarse:hidden"
+                disabled={controlsDisabled}
+                onClick={() => uploadInputRef.current?.click()}
+            >
+                <CameraIcon data-icon="inline-start" />
+                {label}
+            </Button>
+            <input
+                ref={cameraInputRef}
+                type="file"
+                accept={MANAGED_IMAGE_ACCEPT}
+                capture="environment"
+                disabled={controlsDisabled}
+                onChange={handleFileChange}
+                hidden
+            />
+            <input
+                ref={uploadInputRef}
+                type="file"
+                accept={MANAGED_IMAGE_ACCEPT}
+                disabled={controlsDisabled}
+                onChange={handleFileChange}
+                hidden
+            />
+            {selectionError && (
+                <p className="max-w-[15rem] text-right text-xs leading-relaxed text-destructive" role="alert">
+                    {t('cardSelectionUnsupported')}
+                </p>
+            )}
+        </div>
+    );
+}
+
+/**
+ * The business-card review panel rendered below the form once an image is selected: preview, scan
+ * status, recognition confidence, warnings, and import-error recovery. The entry affordance lives in
+ * {@link BusinessCardScanTrigger}; this renders nothing until there is a card image or import error.
+ */
+export function BusinessCardCapture({
+    scanAvailable,
+    file,
+    previewUrl,
+    result,
+    status,
+    requestError,
+    importError,
+    requiresExactImportRetry,
+    disabled,
+    onCancelScan,
+    onRetryScan,
+    onRemove,
+    onDiscardImage,
+}: BusinessCardCaptureProps) {
+    const t = useTranslations('ContactsNewContactDialog');
+    const cardControlsDisabled = disabled || requiresExactImportRetry;
 
     const confidences = result ? confidenceItems(result) : [];
     const warnings = result
         ? [...new Set(result.warnings.map(warningMessageKey))]
         : [];
 
+    if (!file && !importError) return null;
+
     return (
         <section
             className="grid gap-3 rounded-xl border bg-muted/30 p-3"
-            aria-labelledby={`${cameraInputId}-title`}
+            aria-label={t('businessCard')}
         >
-            <div className="grid gap-1">
-                <h3 id={`${cameraInputId}-title`} className="text-sm font-medium">{t('businessCard')}</h3>
-                <p className="text-xs leading-relaxed text-muted-foreground">{t('businessCardDescription')}</p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="hidden pointer-coarse:inline-flex"
-                    disabled={cardControlsDisabled}
-                    onClick={() => cameraInputRef.current?.click()}
-                >
-                    <CameraIcon data-icon="inline-start" />
-                    {file ? t('scanAnotherCard') : t('scanCard')}
-                </Button>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={cardControlsDisabled}
-                    onClick={() => uploadInputRef.current?.click()}
-                >
-                    <ArrowUpTrayIcon data-icon="inline-start" />
-                    {file ? t('chooseAnotherCard') : t('uploadCard')}
-                </Button>
-                <input
-                    ref={cameraInputRef}
-                    id={cameraInputId}
-                    type="file"
-                    accept={MANAGED_IMAGE_ACCEPT}
-                    capture="environment"
-                    disabled={cardControlsDisabled}
-                    onChange={handleFileChange}
-                    hidden
-                />
-                <input
-                    ref={uploadInputRef}
-                    id={uploadInputId}
-                    type="file"
-                    accept={MANAGED_IMAGE_ACCEPT}
-                    disabled={cardControlsDisabled}
-                    onChange={handleFileChange}
-                    hidden
-                />
-            </div>
-
-            {selectionError && (
-                <p className="text-xs leading-relaxed text-destructive" role="alert">
-                    {t('cardSelectionUnsupported')}
-                </p>
-            )}
+            <p className="text-xs leading-relaxed text-muted-foreground">{t('businessCardDescription')}</p>
 
             {file && (
                 <div className="grid min-w-0 gap-2 rounded-lg bg-background p-2 ring-1 ring-border">
@@ -373,7 +387,7 @@ export function BusinessCardCapture({
                                 variant="ghost"
                                 size="icon-xs"
                                 disabled={cardControlsDisabled}
-                                onClick={handleRemove}
+                                onClick={() => onRemove()}
                                 aria-label={t('removeCard')}
                             >
                                 <XMarkIcon />
@@ -414,12 +428,7 @@ export function BusinessCardCapture({
                             size="xs"
                             className="w-fit"
                             disabled={disabled}
-                            onClick={() => {
-                                selectionSequenceRef.current += 1;
-                                setPending(false);
-                                setSelectionError(false);
-                                onDiscardImage();
-                            }}
+                            onClick={() => onDiscardImage()}
                         >
                             {t('continueWithoutCardImage')}
                         </Button>
