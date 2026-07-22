@@ -98,7 +98,8 @@
       AND IF(e.source_person_id = #{personId},
              target_person.provision_ceased_at, source_person.provision_ceased_at) IS NULL
       AND IF(e.source_person_id = #{personId},
-             target_person.name, source_person.name) REGEXP '[^[:space:]]'
+             target_person.name, source_person.name)
+          REGEXP '[^[:space:]\\x{001C}-\\x{001F}]'
     ORDER BY e.strength DESC, person_name, person_id
     LIMIT #{limit}
   </select>

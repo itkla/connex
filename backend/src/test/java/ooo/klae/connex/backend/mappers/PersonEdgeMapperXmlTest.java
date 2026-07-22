@@ -24,7 +24,7 @@ class PersonEdgeMapperXmlTest {
         int workspaceScope = topConnections.indexOf("e.workspace_id = ?");
         int suspendedFilter = topConnections.lastIndexOf("suspended_at");
         int ceasedFilter = topConnections.lastIndexOf("provision_ceased_at");
-        int nameFilter = topConnections.indexOf("REGEXP '[^[:space:]]'");
+        int nameFilter = topConnections.indexOf("REGEXP '[^[:space:]\\\\x{001C}-\\\\x{001F}]'");
         int ordering = topConnections.indexOf("ORDER BY e.strength DESC, person_name, person_id");
         int limit = topConnections.indexOf("LIMIT ?");
 

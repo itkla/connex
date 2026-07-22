@@ -177,10 +177,12 @@ class AiRelationshipContextTest {
         suspended.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
         PersonConnectionDto ceased = connection("Ceased Person", "knows", 8, "Ceased note");
         ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
+        PersonConnectionDto noBreakSpace = connection("\u00A0", "knows", 8, "No-break-space note");
+        PersonConnectionDto fileSeparator = connection("\u001C", "knows", 8, "File-separator note");
         PersonConnectionDto allowed = connection("Allowed Person", "knows", 7, "Allowed note");
         when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of());
         when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
-            .thenReturn(List.of(suspended, ceased, allowed));
+            .thenReturn(List.of(suspended, ceased, noBreakSpace, fileSeparator, allowed));
 
         StringBuilder prompt = new StringBuilder();
         context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
@@ -190,6 +192,8 @@ class AiRelationshipContextTest {
         assertFalse(out.contains("Suspended note"));
         assertFalse(out.contains("Ceased Person"));
         assertFalse(out.contains("Ceased note"));
+        assertFalse(out.contains("No-break-space note"));
+        assertFalse(out.contains("File-separator note"));
         assertTrue(out.contains("Allowed note"));
         assertEquals(1, countOccurrences(out, "Connection:"));
     }

@@ -50,17 +50,25 @@ class PersonEdgeMapperTest extends AbstractMapperTest {
         Person suspendedSource = person("Blocked Suspended Source");
         Person ceasedSource = person("Blocked Ceased Source");
         Person blankSource = person("\t");
+        Person noBreakSpaceSource = person("\u00A0");
+        Person fileSeparatorSource = person("\u001C");
         Person focal = person("Focal Person");
         Person suspendedTarget = person("Blocked Suspended Target");
         Person ceasedTarget = person("Blocked Ceased Target");
         Person blankTarget = person(" ");
+        Person noBreakSpaceTarget = person("\u00A0");
+        Person fileSeparatorTarget = person("\u001C");
 
         connect(focal, suspendedSource, 3);
         connect(focal, ceasedSource, 3);
         connect(focal, blankSource, 3);
+        connect(focal, noBreakSpaceSource, 3);
+        connect(focal, fileSeparatorSource, 3);
         connect(focal, suspendedTarget, 3);
         connect(focal, ceasedTarget, 3);
         connect(focal, blankTarget, 3);
+        connect(focal, noBreakSpaceTarget, 3);
+        connect(focal, fileSeparatorTarget, 3);
         personMapper.updateProcessingRestrictions(workspace.getId(), suspendedSource.getId(), true, false);
         personMapper.updateProcessingRestrictions(workspace.getId(), ceasedSource.getId(), false, true);
         personMapper.updateProcessingRestrictions(workspace.getId(), suspendedTarget.getId(), true, false);
