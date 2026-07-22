@@ -88,6 +88,7 @@ class NotificationServiceTest {
             42, "unread", null, List.of("task"), null, null,
             "deal", 55, "2026-06-25 00:00:00");
         assertEquals(19L, page.stateVersion());
+        assertEquals("2026-06-25T00:00:00Z", page.asOf());
     }
 
     @Test

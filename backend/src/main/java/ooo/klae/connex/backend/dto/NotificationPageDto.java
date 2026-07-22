@@ -8,6 +8,7 @@ import java.util.List;
 public record NotificationPageDto(
     List<NotificationDto> items,
     long total,
-    long stateVersion
+    long stateVersion,
+    String asOf
 ) {
 }

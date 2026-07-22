@@ -2197,6 +2197,7 @@ export type NotificationMarkAllResult = NotificationCounts & {
 
 export type NotificationPage = Page<Notification> & {
     stateVersion: number;
+    asOf: string;
 };
 
 export type NotificationParams = {
