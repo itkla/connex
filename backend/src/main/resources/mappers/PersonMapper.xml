@@ -26,11 +26,8 @@
   </resultMap>
 
   <resultMap id="PersonWithTagsResult" type="Person" extends="PersonResult">
-    <collection property="tags" ofType="Tag" notNullColumn="tag_id">
-      <id property="id" column="tag_id"/>
-      <result property="name" column="tag_name"/>
-      <result property="color" column="tag_color"/>
-    </collection>
+    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,personId=id}"
+      select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByPersonId"/>
   </resultMap>
 
   <sql id="personColumns">
@@ -135,8 +132,7 @@
   </select>
 
   <select id="getPersonsByCompanyId" resultMap="PersonWithTagsResult">
-    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>,
-           t.id AS tag_id, t.name AS tag_name, t.color AS tag_color
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM (
       SELECT person.*
       FROM person
@@ -145,9 +141,7 @@
       <if test="limit != null">LIMIT #{limit}</if>
     ) p
     <include refid="companyJoin"/>
-    LEFT JOIN person_tag pt ON pt.person_id = p.id
-    LEFT JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
-    ORDER BY p.name, p.id, t.name, t.id
+    ORDER BY p.name, p.id
   </select>
 
   <select id="getCompanyEngagementPeople"

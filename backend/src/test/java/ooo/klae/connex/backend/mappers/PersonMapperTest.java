@@ -395,6 +395,27 @@ class PersonMapperTest extends AbstractMapperTest {
         assertNull(in1.stream().filter(x -> x.getId() == person1.getId()).findFirst().orElseThrow().getNotes());
     }
 
+    /**
+     * A tagged contact must be returned with its tags hydrated. The nested-collection result map
+     * populates the {@code Tag[]} property via a nested select; an inline join maps into a
+     * {@code List} that cannot be assigned to the array, so a tagged contact would otherwise fail.
+     */
+    @Test
+    void getPersonsByCompanyId_hydratesTagsForTaggedContact() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Tag tag1 = newTag();
+        Tag tag2 = newTag();
+        personMapper.addTag(workspace.getId(), person.getId(), tag1.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), tag2.getId());
+
+        List<Person> people = personMapper.getPersonsByCompanyId(workspace.getId(), company.getId(), null);
+
+        Person returned = people.stream().filter(x -> x.getId() == person.getId()).findFirst().orElseThrow();
+        assertNotNull(returned.getTags());
+        assertEquals(2, returned.getTags().length);
+    }
+
     @Test
     void getEngagedPersonIdsExcludesPrivateNoteOnlyContacts() {
         Person privateOnly = newPerson(newCompany());
