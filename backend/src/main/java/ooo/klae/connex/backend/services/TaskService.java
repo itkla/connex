@@ -146,7 +146,7 @@ public class TaskService {
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Task before = taskMapper.getTaskById(workspaceId, id);
+        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         User actor = currentActorOrNull();
         task.setId(id);
@@ -160,7 +160,9 @@ public class TaskService {
         task.setPosition(resolved.equals(beforeStatus)
             ? before.getPosition()
             : taskMapper.nextTaskPosition(workspaceId, resolved));
-        taskMapper.update(task);
+        if (taskMapper.update(task) != 1) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
         auditService.record("task.update", "task", id, task.getDescription(),
             "Updated task " + task.getDescription(),
             auditService.diff(before, task, AUDIT_FIELDS));
@@ -197,7 +199,7 @@ public class TaskService {
     public Task complete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();
-        Task task = taskMapper.getTaskById(workspaceId, id);
+        Task task = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (task == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         if (task.getAssignedTo() == null || task.getAssignedTo().getId() != currentUser.getId()) {
             throw new ForbiddenException("Only the task assignee may complete this task");
@@ -235,7 +237,7 @@ public class TaskService {
         if (status == null || !VALID_STATUSES.contains(status)) {
             throw new BadRequestException("Invalid task status: " + status);
         }
-        Task before = taskMapper.getTaskById(workspaceId, id);
+        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         String oldStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         boolean toDone = STATUS_DONE.equals(status);
@@ -263,7 +265,9 @@ public class TaskService {
             );
         }
 
-        taskMapper.moveTask(workspaceId, id, status, toDone, index);
+        if (taskMapper.moveTask(workspaceId, id, status, toDone, index) != 1) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
         setPositionBatches(
             workspaceId,
             status,
@@ -307,9 +311,11 @@ public class TaskService {
             throw new BadRequestException("Invalid task due date: " + dueDate);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Task before = taskMapper.getTaskById(workspaceId, id);
+        Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
-        taskMapper.updateDueDate(workspaceId, id, dueDate);
+        if (taskMapper.updateDueDate(workspaceId, id, dueDate) != 1) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
         Task after = taskMapper.getTaskById(workspaceId, id);
         auditService.record("task.update", "task", id, after.getDescription(),
             "Rescheduled task " + after.getDescription(),
