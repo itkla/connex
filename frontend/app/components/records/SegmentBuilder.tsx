@@ -433,8 +433,6 @@ function GroupEditor({
                             fields={fields}
                             options={options}
                             advanced={advanced}
-                            allowGroups={allowGroups}
-                            totalConditions={totalConditions}
                             onChange={(next) => setConditions(conditions.map((existing, i) => (i === index ? next : existing)))}
                             onRemove={() => setConditions(conditions.filter((_, i) => i !== index))}
                         />
