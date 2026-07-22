@@ -70,7 +70,8 @@ class TaskMapperXmlTest {
             .getBoundSql(parameters);
         String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
 
-        assertTrue(sql.contains("FROM task WHERE workspace_id = ? AND id = ? FOR UPDATE"));
+        assertTrue(sql.contains(
+            "FROM task FORCE INDEX (uq_task_workspace_id) WHERE workspace_id = ? AND id = ? FOR UPDATE"));
         assertEquals(2, boundSql.getParameterMappings().size());
 
         PreparedStatement statement = mock(PreparedStatement.class);

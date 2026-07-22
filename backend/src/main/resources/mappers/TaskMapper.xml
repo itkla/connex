@@ -147,7 +147,7 @@
 
   <select id="getTaskByIdForUpdate" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
-    FROM task
+    FROM task FORCE INDEX (uq_task_workspace_id)
     WHERE workspace_id = #{workspaceId} AND id = #{id}
     FOR UPDATE
   </select>
