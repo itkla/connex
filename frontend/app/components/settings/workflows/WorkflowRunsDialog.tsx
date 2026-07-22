@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 
 import type { Rule, RuleExecution } from "@/app/lib/types";
 import { getRuleExecutions } from "@/app/lib/api";
-import { formatDateTime } from "@/app/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +18,10 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WORKFLOW_RUN_STATUS_CLASS } from "@/app/components/settings/workflows/workflowRunStatus";
+import {
+    formatWorkflowRunDateTime,
+    WORKFLOW_RUN_STATUS_CLASS,
+} from "@/app/components/settings/workflows/workflowRunStatus";
 
 type LoadState = "loading" | "success" | "error";
 
@@ -127,7 +129,7 @@ export default function WorkflowRunsDialog({
                                             {t(`runs.status.${execution.status}`)}
                                         </Badge>
                                         <time className="text-xs text-muted-foreground" dateTime={execution.executedAt}>
-                                            {formatDateTime(execution.executedAt, locale)}
+                                            {formatWorkflowRunDateTime(execution.executedAt, locale)}
                                         </time>
                                     </div>
                                     <dl className="grid gap-2 text-xs sm:grid-cols-2">

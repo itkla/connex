@@ -17,7 +17,7 @@ import type { Rule, RuleListItem } from "@/app/lib/types";
 import { deleteRule, getRules, updateRule } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
-import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
+import { formatRelativeTime } from "@/app/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,10 @@ import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { ruleSummary, ruleToRequest } from "@/app/components/settings/RulesPanel";
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
-import { WORKFLOW_RUN_STATUS_CLASS } from "@/app/components/settings/workflows/workflowRunStatus";
+import {
+    formatWorkflowRunDateTime,
+    WORKFLOW_RUN_STATUS_CLASS,
+} from "@/app/components/settings/workflows/workflowRunStatus";
 import { useWorkflowDuplication } from "@/app/components/settings/workflows/useWorkflowDuplication";
 
 const rowActionTrigger =
@@ -221,7 +224,10 @@ export default function WorkflowsPanel() {
                                             </Badge>
                                             <time
                                                 dateTime={rule.latestExecution.executedAt}
-                                                title={formatDateTime(rule.latestExecution.executedAt, locale)}
+                                                title={formatWorkflowRunDateTime(
+                                                    rule.latestExecution.executedAt,
+                                                    locale,
+                                                )}
                                             >
                                                 {tw("runs.latest", {
                                                     time: formatRelativeTime(rule.latestExecution.executedAt, locale),

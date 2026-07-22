@@ -181,10 +181,20 @@ class WorkflowMapperXmlTest {
             configuration, RuleMapper.class, "getLatestExecutionsByWorkspace", workspace);
         String latestExecutions = sql(
             configuration, RuleMapper.class, "getLatestExecutionsByWorkspace", workspace);
-        assertTrue(latestExecutions.contains("PARTITION BY rule_id"));
-        assertTrue(latestExecutions.contains("ORDER BY executed_at DESC, id DESC"));
-        assertTrue(latestExecutions.contains("WHERE workspace_id = ?"));
-        assertTrue(latestExecutions.endsWith("WHERE execution_rank = 1 ORDER BY rule_id"));
+        assertTrue(latestExecutions.contains("JOIN LATERAL"));
+        assertTrue(latestExecutions.contains(
+            "re.workspace_id = r.workspace_id AND re.rule_id = r.id"));
+        assertTrue(latestExecutions.contains(
+            "ORDER BY re.executed_at DESC, re.id DESC LIMIT 1"));
+        assertTrue(latestExecutions.endsWith("WHERE r.workspace_id = ? ORDER BY r.id"));
+
+        String latestIndex = resource(
+            "db/migration/tenant/V121__rule_execution_latest_index.sql")
+            .replaceAll("\\s+", " ")
+            .trim();
+        assertTrue(latestIndex.contains("idx_rule_execution_workspace_latest"));
+        assertTrue(latestIndex.contains(
+            "(workspace_id, rule_id, executed_at DESC, id DESC)"));
 
         String linked = sql(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
         assertTrue(linked.contains("WHERE workspace_id = ?"));
