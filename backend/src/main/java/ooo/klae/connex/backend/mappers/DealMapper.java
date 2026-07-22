@@ -67,6 +67,7 @@ public interface DealMapper {
     );
     List<Deal> getDealsPageFiltered(
         @Param("workspaceId") int workspaceId,
+        @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
         @Param("sort") String sort,
         @Param("dir") String dir,
@@ -83,6 +84,7 @@ public interface DealMapper {
     );
     long countDealsFiltered(
         @Param("workspaceId") int workspaceId,
+        @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
         @Param("currency") String currency,
         @Param("pipelineIds") List<Integer> pipelineIds,
@@ -96,6 +98,7 @@ public interface DealMapper {
     /** Full filtered+scoped deal set for CSV export, mirroring the visible list without pagination. */
     List<Deal> getDealsFiltered(
         @Param("workspaceId") int workspaceId,
+        @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
         @Param("currency") String currency,
         @Param("pipelineIds") List<Integer> pipelineIds,
@@ -108,6 +111,7 @@ public interface DealMapper {
     );
     List<DealCurrencyMetricsDto> dealMetricsFiltered(
         @Param("workspaceId") int workspaceId,
+        @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
         @Param("currency") String currency,
         @Param("pipelineIds") List<Integer> pipelineIds,
@@ -120,6 +124,7 @@ public interface DealMapper {
     );
     List<Integer> getFilteredDealIds(
         @Param("workspaceId") int workspaceId,
+        @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
         @Param("currency") String currency,
         @Param("pipelineIds") List<Integer> pipelineIds,

@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -105,9 +106,23 @@ public class ExportService {
     public String exportDeals(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
             List<Integer> companyIds, boolean noCompany, List<String> statuses, List<String> risks,
             MemberScope memberScope) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Deal> deals = dealService.queryDealsForExport(
             query, currency, pipelineIds, stageIds, companyIds, noCompany, statuses, risks, memberScope);
+        return renderDeals(deals);
+    }
+
+    /** CSV of deals matching both a Smart Segment and the complete native list filter. */
+    public String exportSegmentDeals(SegmentDefinition definition, String query, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
+            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+        List<Deal> deals = dealService.querySegmentDealsForExport(
+            definition, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, risks, memberScope);
+        return renderDeals(deals);
+    }
+
+    private String renderDeals(List<Deal> deals) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "deal");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("deal", deals.stream().map(Deal::getId).toList());

@@ -21,6 +21,7 @@ class DealMapperXmlTest {
     private static final List<String> SCOPED_STATEMENTS = List.of(
         "getDealsPageFiltered",
         "countDealsFiltered",
+        "getDealsFiltered",
         "dealMetricsFiltered",
         "getFilteredDealIds"
     );
@@ -66,6 +67,21 @@ class DealMapperXmlTest {
         assertTrue(sql.endsWith("AND id IN ( ? , ? )"));
     }
 
+    @Test
+    void filteredQueriesJoinBoundSegmentMembershipOnlyWhenSupplied() throws Exception {
+        Configuration configuration = configuration();
+
+        for (String statement : SCOPED_STATEMENTS) {
+            String unsegmented = sql(configuration, statement, MemberScope.allTeam());
+            String segmented = sql(configuration, statement, MemberScope.allTeam(), "[17,23]");
+
+            assertFalse(unsegmented.contains("JSON_TABLE"));
+            assertTrue(segmented.contains(
+                "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) segment_ids ON segment_ids.id = d.id"));
+            assertTrue(segmented.indexOf("segment_ids.id = d.id") < segmented.indexOf("d.workspace_id = ?"));
+        }
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -82,8 +98,14 @@ class DealMapperXmlTest {
     }
 
     private static String sql(Configuration configuration, String statement, MemberScope scope) {
+        return sql(configuration, statement, scope, null);
+    }
+
+    private static String sql(
+            Configuration configuration, String statement, MemberScope scope, String segmentIdsJson) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);
+        parameters.put("segmentIdsJson", segmentIdsJson);
         parameters.put("id", 17);
         parameters.put("pipelineId", 13);
         parameters.put("stageId", 19);
