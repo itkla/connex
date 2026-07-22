@@ -1296,7 +1296,10 @@ function TaskRow({
                     ) : null}
                 </div>
 
-                <div
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={ariaOpenLabel}
                     className="relative z-10 shrink-0"
                     onPointerDown={(event) => handleRowPointerDown(event.pointerType)}
                     onPointerCancel={() => {
@@ -1327,7 +1330,7 @@ function TaskRow({
                     ) : (
                         <div className="size-6" />
                     )}
-                </div>
+                </button>
 
                 <div
                     className="relative z-10 shrink-0"
