@@ -512,19 +512,43 @@ export default function TasksBrowser({
         };
         setPendingToggle((prev) => new Set(prev).add(task.id));
         let optimisticTimerId: number | null = null;
+        let requestSettled = false;
+        let timerSettled = !(next && !reduce);
+
+        const finishOperation = () => {
+            if (!requestSettled || !timerSettled) return;
+            if (toggleControllersRef.current.get(task.id) !== controller) return;
+            toggleControllersRef.current.delete(task.id);
+            if (scopeCurrent()) {
+                setPendingToggle((prev) => {
+                    const n = new Set(prev);
+                    n.delete(task.id);
+                    return n;
+                });
+            }
+        };
 
         const commitOptimistic = () => {
             if (optimisticTimerId !== null) {
                 timers.current = timers.current.filter((id) => id !== optimisticTimerId);
                 optimisticTimerId = null;
             }
-            if (controller.signal.aborted || !scopeCurrent()) return;
+            timerSettled = true;
+            if (
+                controller.signal.aborted
+                || !scopeCurrent()
+                || toggleControllersRef.current.get(task.id) !== controller
+            ) {
+                finishOperation();
+                return;
+            }
             setTaskCompleted(task.id, next);
             setCompleting((prev) => {
                 const n = new Set(prev);
                 n.delete(task.id);
                 return n;
             });
+            finishOperation();
         };
 
         if (next && !reduce) {
@@ -559,6 +583,7 @@ export default function TasksBrowser({
                 timers.current = timers.current.filter((id) => id !== optimisticTimerId);
                 optimisticTimerId = null;
             }
+            timerSettled = true;
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
             setTaskCompleted(task.id, !next);
             setCompleting((prev) => {
@@ -567,16 +592,8 @@ export default function TasksBrowser({
                 return n;
             });
         } finally {
-            if (toggleControllersRef.current.get(task.id) === controller) {
-                toggleControllersRef.current.delete(task.id);
-                if (scopeCurrent()) {
-                    setPendingToggle((prev) => {
-                        const n = new Set(prev);
-                        n.delete(task.id);
-                        return n;
-                    });
-                }
-            }
+            requestSettled = true;
+            finishOperation();
         }
     };
 
@@ -1219,7 +1236,7 @@ function TaskRow({
                     <Checkbox
                         checked={checked}
                         onCheckedChange={(value) => onToggle(value === true)}
-                        disabled={pending && !checked}
+                        disabled={pending}
                         aria-label={ariaCompleteLabel}
                         className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                     />
