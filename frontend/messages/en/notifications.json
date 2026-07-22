@@ -67,6 +67,7 @@
     "resultCount": "{count, plural, =0 {No notifications} one {# notification} other {# notifications}}",
     "page": "Page {page} of {pageCount}",
     "completeTask": "Complete task",
+    "completingTask": "Completing task…",
     "workspaceJoinTitle": "Workspace invitation",
     "workspaceJoinBody": "You've been invited to join {workspace}. Accept in Settings to join.",
     "noteMentionTitle": "New mention",

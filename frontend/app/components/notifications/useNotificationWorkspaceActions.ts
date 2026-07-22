@@ -57,7 +57,11 @@ export function useNotificationWorkspaceActions() {
     );
 
     const executeInNotificationWorkspace = useCallback(
-        async (notification: Notification, action: () => Promise<void>) => {
+        async (
+            notification: Notification,
+            action: () => Promise<void>,
+            switchedDestination = "/dashboard",
+        ) => {
             const workspaceId = targetWorkspaceId(notification);
             if (workspaceId == null) return false;
             if (workspaceId === "global") return false;
@@ -66,7 +70,7 @@ export function useNotificationWorkspaceActions() {
                     await action();
                 } finally {
                     if (switched) {
-                        router.replace("/dashboard");
+                        router.replace(switchedDestination);
                         router.refresh();
                     }
                 }

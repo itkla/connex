@@ -54,7 +54,13 @@ function toDatetimeLocal(date: Date): string {
  * date/time. Invokes {@link onSnooze} with the exact request body — a preset or
  * an explicit ISO-UTC instant — each paired with the caller's IANA timezone.
  */
-export function SnoozeMenu({ onSnooze }: { onSnooze: (body: SnoozeRequest) => void }) {
+export function SnoozeMenu({
+    disabled = false,
+    onSnooze,
+}: {
+    disabled?: boolean;
+    onSnooze: (body: SnoozeRequest) => void;
+}) {
     const t = useTranslations("Notifications");
     const [dialogOpen, setDialogOpen] = useState(false);
     const [customValue, setCustomValue] = useState("");
@@ -89,7 +95,7 @@ export function SnoozeMenu({ onSnooze }: { onSnooze: (body: SnoozeRequest) => vo
         <>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" aria-label={t("snooze")}>
+                    <Button variant="ghost" size="icon-sm" aria-label={t("snooze")} disabled={disabled}>
                         <BellSnoozeIcon />
                     </Button>
                 </DropdownMenuTrigger>

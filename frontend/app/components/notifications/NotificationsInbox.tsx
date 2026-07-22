@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import {
     ApiError,
+    completeTask,
     dismissNotification,
     getNotificationFacets,
     getNotifications,
@@ -36,6 +37,7 @@ import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/ap
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
     Pagination,
     PaginationContent,
@@ -45,6 +47,8 @@ import {
 } from "@/components/ui/pagination";
 
 const PAGE_SIZE = 20;
+
+type NotificationRowAction = "complete" | "other";
 
 function matchesState(n: Notification, state: NotificationState, asOf: string): boolean {
     const inactive = Boolean(n.dismissedAt || n.resolvedAt);
@@ -66,9 +70,10 @@ export default function NotificationsInbox() {
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, snoozed, refreshUnread } = useNotifications();
-    const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
+    const { executeInNotificationWorkspace, openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
+    const [pendingActions, setPendingActions] = useState<Map<number, NotificationRowAction>>(new Map());
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [pageAsOf, setPageAsOf] = useState("");
@@ -97,6 +102,14 @@ export default function NotificationsInbox() {
     const inboxSectionRef = useRef<HTMLElement | null>(null);
     const retryingLoadRef = useRef(false);
     const retryingFacetsRef = useRef(false);
+    const pendingRowsRef = useRef<Set<number>>(new Set());
+    const optimisticTotalRef = useRef(0);
+
+    function focusPrimaryFilter() {
+        requestAnimationFrame(() => {
+            filterRegionRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        });
+    }
 
     useEffect(() => {
         serverStateVersionRef.current = 0;
@@ -129,6 +142,7 @@ export default function NotificationsInbox() {
                 setLoadFailure(null);
                 setListRetrying(false);
                 setItems(result.items);
+                optimisticTotalRef.current = result.total;
                 setTotal(result.total);
                 setPageAsOf(result.asOf);
                 if (restoreFocus) {
@@ -236,7 +250,24 @@ export default function NotificationsInbox() {
         [recipientId],
     );
 
+    function startRowAction(itemId: number, action: NotificationRowAction) {
+        if (pendingRowsRef.current.has(itemId)) return false;
+        pendingRowsRef.current.add(itemId);
+        setPendingActions((current) => new Map(current).set(itemId, action));
+        return true;
+    }
+
+    function finishRowAction(itemId: number) {
+        pendingRowsRef.current.delete(itemId);
+        setPendingActions((current) => {
+            const next = new Map(current);
+            next.delete(itemId);
+            return next;
+        });
+    }
+
     async function toggleRead(item: Notification) {
+        if (!startRowAction(item.id, "other")) return;
         try {
             const updated = item.readAt
                 ? await markNotificationUnread(item.id)
@@ -247,26 +278,87 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== updated.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(updated.id);
             }
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
+        } finally {
+            finishRowAction(item.id);
         }
     }
 
     async function dismiss(item: Notification) {
+        if (!startRowAction(item.id, "other")) return;
         try {
             const updated = await dismissNotification(item.id);
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            setTotal((value) => Math.max(0, value - 1));
+            removeNotification(item.id);
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
+        } finally {
+            finishRowAction(item.id);
+        }
+    }
+
+    function removeNotification(itemId: number, restoreFocus = false) {
+        const rowButtons = Array.from(
+            inboxSectionRef.current?.querySelectorAll<HTMLButtonElement>("[data-notification-row]") ?? [],
+        );
+        const itemIndex = rowButtons.findIndex((button) => button.dataset.notificationRow === String(itemId));
+        if (itemIndex < 0) return;
+        const focusTarget = [
+            ...rowButtons.slice(itemIndex + 1),
+            ...rowButtons.slice(0, itemIndex).reverse(),
+        ].find((button) => {
+            const rowId = Number(button.dataset.notificationRow);
+            return !button.disabled && !pendingRowsRef.current.has(rowId);
+        }) ?? null;
+        const nextTotal = Math.max(0, optimisticTotalRef.current - 1);
+        optimisticTotalRef.current = nextTotal;
+        setItems((current) => current.filter((entry) => entry.id !== itemId));
+        setTotal(nextTotal);
+        const nextPageCount = Math.max(1, Math.ceil(nextTotal / PAGE_SIZE));
+        if (page > nextPageCount) {
+            beginQueryChange();
+            retryingLoadRef.current = true;
+            setPage(nextPageCount);
+            return;
+        }
+        if (!restoreFocus) return;
+        requestAnimationFrame(() => {
+            const targetId = Number(focusTarget?.dataset.notificationRow);
+            if (focusTarget?.isConnected
+                    && !focusTarget.disabled
+                    && !pendingRowsRef.current.has(targetId)) focusTarget.focus();
+            else inboxSectionRef.current?.focus();
+        });
+    }
+
+    async function completeFromInbox(item: Notification) {
+        const taskId = item.sourceId;
+        if (
+            item.type !== "task.due" ||
+            item.sourceType !== "task" ||
+            taskId == null ||
+            !startRowAction(item.id, "complete")
+        ) {
+            return;
+        }
+        try {
+            const completed = await executeInNotificationWorkspace(item, async () => {
+                await completeTask(taskId);
+                removeNotification(item.id, true);
+                await refreshUnread();
+            }, "/notifications");
+            if (!completed) toastError(t("completeError"));
+        } catch {
+            toastError(t("completeError"));
+        } finally {
+            finishRowAction(item.id);
         }
     }
 
@@ -300,6 +392,7 @@ export default function NotificationsInbox() {
     }
 
     async function snooze(item: Notification, body: SnoozeRequest) {
+        if (!startRowAction(item.id, "other")) return;
         try {
             const updated = await snoozeNotification(item.id, body);
             if (updated.stateVersion != null) {
@@ -308,8 +401,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== item.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(item.id);
             }
             await refreshUnread();
         } catch (error) {
@@ -322,10 +414,13 @@ export default function NotificationsInbox() {
             } else {
                 toastError(t("actionError"));
             }
+        } finally {
+            finishRowAction(item.id);
         }
     }
 
     async function unsnooze(item: Notification) {
+        if (!startRowAction(item.id, "other")) return;
         try {
             const updated = await unsnoozeNotification(item.id);
             if (updated.stateVersion != null) {
@@ -334,8 +429,7 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== item.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(item.id);
             }
             await refreshUnread();
         } catch (error) {
@@ -345,6 +439,8 @@ export default function NotificationsInbox() {
             } else {
                 toastError(t("actionError"));
             }
+        } finally {
+            finishRowAction(item.id);
         }
     }
 
@@ -361,6 +457,7 @@ export default function NotificationsInbox() {
     }
 
     async function restore(item: Notification) {
+        if (!startRowAction(item.id, "other")) return;
         try {
             const updated = await restoreNotification(item.id);
             if (updated.stateVersion != null) {
@@ -369,12 +466,13 @@ export default function NotificationsInbox() {
             if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
-                setItems((current) => current.filter((entry) => entry.id !== updated.id));
-                setTotal((value) => Math.max(0, value - 1));
+                removeNotification(updated.id);
             }
             await refreshUnread();
         } catch {
             toastError(t("actionError"));
+        } finally {
+            finishRowAction(item.id);
         }
     }
 
@@ -460,12 +558,6 @@ export default function NotificationsInbox() {
         focusPrimaryFilter();
     }
 
-    function focusPrimaryFilter() {
-        requestAnimationFrame(() => {
-            filterRegionRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-        });
-    }
-
     function beginQueryChange() {
         loadGenerationRef.current += 1;
         requestRef.current?.abort();
@@ -477,10 +569,8 @@ export default function NotificationsInbox() {
     }
 
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const loadFailed = loadFailure?.recipientId === recipientId
-        && loadFailure.generation === loadGenerationRef.current;
-    const facetFailed = facetFailure?.recipientId === recipientId
-        && facetFailure.generation === facetGenerationRef.current;
+    const loadFailed = loadFailure?.recipientId === recipientId;
+    const facetFailed = facetFailure?.recipientId === recipientId;
     const hasFacetFilters = categories.size > 0 || severities.size > 0 || workspaceFilter !== "all";
     const categoryLabels = new Map<string, string>([
         ["activity", t("categoryActivity")],
@@ -697,12 +787,19 @@ export default function NotificationsInbox() {
                             const reasons = item.data?.priorityReasons;
                             const hasPriority = Array.isArray(reasons) && reasons.length > 0;
                             const isNudge = item.type === "relationship.cooling";
+                            const isTaskReminder = item.type === "task.due"
+                                && item.sourceType === "task"
+                                && item.sourceId != null;
                             const isSnoozed = isNotificationSnoozedAt(item, pageAsOf);
+                            const pendingAction = pendingActions.get(item.id);
+                            const isCompleting = pendingAction === "complete";
+                            const isPending = pendingAction != null;
                             return (
                                 <article
                                     key={item.id}
+                                    aria-busy={isPending}
                                     className={cn(
-                                        "group flex gap-4 px-5 py-4 transition-colors hover:bg-muted/40",
+                                        "group flex flex-wrap gap-4 px-5 py-4 transition-colors hover:bg-muted/40 sm:flex-nowrap",
                                         !item.readAt && "bg-muted/30",
                                     )}
                                 >
@@ -716,6 +813,8 @@ export default function NotificationsInbox() {
                                     </span>
                                     <button
                                         type="button"
+                                        data-notification-row={item.id}
+                                        disabled={isPending}
                                         onClick={() => void navigate(item)}
                                         className="min-w-0 flex-1 text-left"
                                     >
@@ -740,11 +839,12 @@ export default function NotificationsInbox() {
                                         </div>
                                         {content.body ? <p className="mt-1 text-sm text-muted-foreground">{content.body}</p> : null}
                                     </button>
-                                    <div className="flex shrink-0 items-center gap-1">
+                                    <div className="flex basis-full flex-wrap items-center justify-end gap-1 sm:basis-auto sm:flex-nowrap">
                                         {item.dismissedAt || item.resolvedAt ? (
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
+                                                disabled={isPending}
                                                 onClick={() => void restore(item)}
                                             >
                                                 <ArrowUturnLeftIcon />
@@ -758,6 +858,7 @@ export default function NotificationsInbox() {
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
+                                                    disabled={isPending}
                                                     onClick={() => void unsnooze(item)}
                                                 >
                                                     <BellSnoozeIcon />
@@ -766,10 +867,22 @@ export default function NotificationsInbox() {
                                             </>
                                         ) : (
                                             <>
+                                                {isTaskReminder ? (
+                                                    <Checkbox
+                                                        checked={isCompleting}
+                                                        disabled={isPending}
+                                                        onCheckedChange={(value) => {
+                                                            if (value === true) void completeFromInbox(item);
+                                                        }}
+                                                        aria-label={isCompleting ? t("completingTask") : t("completeTask")}
+                                                        className="mr-1 size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
+                                                    />
+                                                ) : null}
                                                 {isNudge && item.sourceId != null ? (
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
+                                                        disabled={isPending}
                                                         onClick={() => void logTouch(item)}
                                                     >
                                                         {t("logTouch")}
@@ -778,15 +891,20 @@ export default function NotificationsInbox() {
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
+                                                    disabled={isPending}
                                                     onClick={() => void toggleRead(item)}
                                                 >
                                                     {item.readAt ? t("markUnread") : t("markRead")}
                                                 </Button>
-                                                <SnoozeMenu onSnooze={(body) => void snooze(item, body)} />
+                                                <SnoozeMenu
+                                                    disabled={isPending}
+                                                    onSnooze={(body) => void snooze(item, body)}
+                                                />
                                                 <Button
                                                     variant="ghost"
                                                     size="icon-sm"
                                                     aria-label={t("dismiss")}
+                                                    disabled={isPending}
                                                     onClick={() => void dismiss(item)}
                                                 >
                                                     <XMarkIcon />
