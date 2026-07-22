@@ -13,7 +13,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,6 +143,32 @@ class AiInvocationServiceTest {
         assertEquals(0, audits.get(1).get("demaskWarnings"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
+    }
+
+    @Test
+    void complete_strictAttemptAuditFailurePreventsProviderEgress() {
+        AiInvocation invocation = withImage(invocation("Summarize relationship state"));
+        IllegalStateException failure = new IllegalStateException("audit unavailable");
+        doThrow(failure).when(auditService).recordStrictIndependentScoped(
+            eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+            any(), any(), any());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+            () -> service.complete(invocation));
+
+        assertEquals(failure, thrown);
+        ArgumentCaptor<Object> metadataCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(auditService).recordStrictIndependentScoped(
+            eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+            any(), any(), metadataCaptor.capture());
+        Map<?, ?> metadata = metadataMap(metadataCaptor.getValue());
+        assertEquals("attempt", metadata.get("outcome"));
+        assertNoContent(metadata);
+        verify(aiMediaAdmissionService, never()).acquire(anyInt(), anyList());
+        verify(aiProviderRouter, never()).adapterFor(any());
+        verify(aiProvider, never()).complete(any());
+        verify(auditService, never()).recordIndependentScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -374,7 +399,7 @@ class AiInvocationServiceTest {
 
     private void assertMediaLeaseClosesBeforeTerminalAudit() {
         InOrder order = inOrder(auditService, aiProvider, mediaLease);
-        order.verify(auditService).recordIndependentScoped(
+        order.verify(auditService).recordStrictIndependentScoped(
                 eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
                 any(), any(), any());
         order.verify(aiProvider).complete(any());
@@ -385,21 +410,17 @@ class AiInvocationServiceTest {
     }
 
     private Map<?, ?> singleAuditMetadata() {
-        List<Map<?, ?>> audits = auditMetadata(1);
-        return audits.getFirst();
+        ArgumentCaptor<Object> metadataCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(auditService).recordIndependentScoped(eq("ai.llm.call"), eq("ai_call"), isNull(),
+                eq(WORKSPACE_ID), eq(ORG_ID), any(), any(), metadataCaptor.capture());
+        return metadataMap(metadataCaptor.getValue());
     }
 
     private List<Map<?, ?>> auditMetadata() {
-        return auditMetadata(2);
-    }
-
-    private List<Map<?, ?>> auditMetadata(int count) {
-        ArgumentCaptor<Object> metadataCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(auditService, times(count)).recordIndependentScoped(eq("ai.llm.call"), eq("ai_call"), isNull(),
-                eq(WORKSPACE_ID), eq(ORG_ID), any(), any(), metadataCaptor.capture());
-        return metadataCaptor.getAllValues().stream()
-                .<Map<?, ?>>map(AiInvocationServiceTest::metadataMap)
-                .toList();
+        ArgumentCaptor<Object> attemptCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(auditService).recordStrictIndependentScoped(eq("ai.llm.call"), eq("ai_call"), isNull(),
+                eq(WORKSPACE_ID), eq(ORG_ID), any(), any(), attemptCaptor.capture());
+        return List.of(metadataMap(attemptCaptor.getValue()), singleAuditMetadata());
     }
 
     private static Map<?, ?> metadataMap(Object value) {
