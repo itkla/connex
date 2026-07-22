@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -49,6 +50,7 @@ public class SsoConnectionService {
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
@@ -102,7 +104,7 @@ public class SsoConnectionService {
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
-        int orgId = requireAdministrableOrg(workspaceId, actorId);
+        int orgId = lockAdministrableOrg(workspaceId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
@@ -151,6 +153,15 @@ public class SsoConnectionService {
         auditService.record("org.sso_config.save", "organization", orgId, protocol,
                 "Updated SSO configuration", null);
         return getForWorkspace(workspaceId, actorId);
+    }
+
+    private int lockAdministrableOrg(int workspaceId, int actorId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null || organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
+        return orgId;
     }
 
     /**
