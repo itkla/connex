@@ -39,6 +39,16 @@ class ReportPermissionPolicyTest {
     }
 
     @Test
+    void employmentContentRequiresOnlyReportRead() throws JacksonException {
+        for (String measure : List.of("employment_departure_count", "employment_arrival_count")) {
+            ReportConfig config = config("people", measure, "person");
+
+            assertEquals(Set.of(Permission.REPORT_READ), policy.requiredFor(definition(config)));
+            assertEquals(Set.of(Permission.REPORT_READ), policy.requiredFor(document(config)));
+        }
+    }
+
+    @Test
     void networkContentRequiresReportReadAndValidatesCanonicalGroups() throws JacksonException {
         List<ReportWidgetConfig> widgets = List.of(
                 new ReportWidgetConfig(

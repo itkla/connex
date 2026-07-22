@@ -146,6 +146,31 @@ class ReportMapperXmlTest {
             assertNotNull(sql);
             assertTrue(sql.contains("workspace_id = ?"));
         }
+        for (String measure : new String[] {
+                "employment_departure_count", "employment_arrival_count"}) {
+            for (String group : new String[] {"none", "date", "company", "person"}) {
+                String sql = configuration.getMappedStatement(
+                                ReportMapper.class.getName() + ".aggregateEmployment")
+                        .getBoundSql(Map.of("query", query(measure, group)))
+                        .getSql();
+                assertTrue(sql.contains("employment.workspace_id = ?"));
+                assertTrue(sql.contains("person.workspace_id = ?"));
+                assertTrue(sql.contains("person.suspended_at IS NULL"));
+                assertFalse(sql.contains("${"));
+            }
+        }
+        String filteredEmployment = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".aggregateEmployment")
+                .getBoundSql(Map.of("query", query(
+                        "employment_arrival_count", "person",
+                        null, java.util.List.of(2), null, java.util.List.of(3))))
+                .getSql();
+        assertTrue(filteredEmployment.contains("person.owner_id IN"));
+        assertTrue(filteredEmployment.contains("employment_tag.workspace_id = ?"));
+        assertTrue(filteredEmployment.contains("prior_employment.workspace_id = ?"));
+        assertTrue(filteredEmployment.contains("prior_employment.person_id = employment.person_id"));
+        assertTrue(filteredEmployment.contains("prior_employment.id <> employment.id"));
+        assertTrue(filteredEmployment.contains("prior_employment.ended_at <= employment.started_at"));
         assertWorkspaceScoped(configuration, "aggregateCoverageGaps",
                 query("coverage_gap_count", "none"));
         assertWorkspaceScoped(configuration, "aggregateCoverageGaps",
@@ -196,6 +221,14 @@ class ReportMapperXmlTest {
             assertNotNull(input);
             assertFalse(new String(input.readAllBytes(), StandardCharsets.UTF_8).contains("${"));
         }
+    }
+
+    @Test
+    void employmentArrivalMigrationAddsStartedAtRangeIndex() throws Exception {
+        String sql = resourceText("db/migration/tenant/V122__person_employment_started_index.sql");
+
+        assertTrue(sql.contains("idx_person_employment_started"));
+        assertTrue(sql.contains("workspace_id, started_at, person_id"));
     }
 
     private static void assertWorkspaceScoped(
