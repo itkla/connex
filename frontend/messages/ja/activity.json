@@ -392,9 +392,17 @@
     "slashPersonCmdHint": "担当者をリンク",
     "slashDealCmd": "案件",
     "slashDealCmdHint": "案件をリンク",
+    "slashFileCmd": "ファイル",
+    "slashFileCmdHint": "既存のファイルをリンク",
+    "slashCommandMenuAria": "スラッシュコマンド",
+    "slashReferencePickerAria": "参照先の検索結果",
+    "composerAria": "テキストエディター",
     "slashPickerSearching": "検索中…",
     "slashPickerNoResults": "該当なし",
-    "slashPickerPrompt": "入力して検索"
+    "slashPickerPrompt": "入力して検索",
+    "slashPickerSearchError": "検索できませんでした。",
+    "slashPickerRetry": "再試行",
+    "slashPickerResults": "{count}件見つかりました"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

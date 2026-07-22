@@ -392,9 +392,17 @@
     "slashPersonCmdHint": "Link a person",
     "slashDealCmd": "Deal",
     "slashDealCmdHint": "Link a deal",
+    "slashFileCmd": "File",
+    "slashFileCmdHint": "Link an existing file",
+    "slashCommandMenuAria": "Slash commands",
+    "slashReferencePickerAria": "Reference search results",
+    "composerAria": "Text editor",
     "slashPickerSearching": "Searching…",
     "slashPickerNoResults": "No matches",
-    "slashPickerPrompt": "Type to search"
+    "slashPickerPrompt": "Type to search",
+    "slashPickerSearchError": "Couldn’t search.",
+    "slashPickerRetry": "Retry",
+    "slashPickerResults": "{count, plural, one {# match} other {# matches}}"
   },
   "ActivityTaskDetail": {
     "back": "Back to tasks",
