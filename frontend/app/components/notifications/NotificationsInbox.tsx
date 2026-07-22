@@ -29,6 +29,7 @@ import {
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
+import { isNotificationSnoozedAt } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
 import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/app/components/filters";
@@ -45,9 +46,9 @@ import {
 
 const PAGE_SIZE = 20;
 
-function matchesState(n: Notification, state: NotificationState): boolean {
+function matchesState(n: Notification, state: NotificationState, asOf: string): boolean {
     const inactive = Boolean(n.dismissedAt || n.resolvedAt);
-    const snoozed = !inactive && Boolean(n.snoozedUntil);
+    const snoozed = isNotificationSnoozedAt(n, asOf);
     if (state === "snoozed") return snoozed;
     if (state === "unread") return !inactive && !snoozed && !n.readAt;
     if (state === "history") return inactive;
@@ -70,6 +71,7 @@ export default function NotificationsInbox() {
     const [items, setItems] = useState<Notification[]>([]);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
+    const [pageAsOf, setPageAsOf] = useState("");
     const [loading, setLoading] = useState(true);
     const [categories, setCategories] = useState<Set<string>>(new Set());
     const [severities, setSeverities] = useState<Set<string>>(new Set());
@@ -128,6 +130,7 @@ export default function NotificationsInbox() {
                 setListRetrying(false);
                 setItems(result.items);
                 setTotal(result.total);
+                setPageAsOf(result.asOf);
                 if (restoreFocus) {
                     requestAnimationFrame(() => inboxSectionRef.current?.focus());
                 }
@@ -241,7 +244,7 @@ export default function NotificationsInbox() {
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            if (matchesState(updated, state)) {
+            if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
                 setItems((current) => current.filter((entry) => entry.id !== updated.id));
@@ -302,7 +305,7 @@ export default function NotificationsInbox() {
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            if (matchesState(updated, state)) {
+            if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
                 setItems((current) => current.filter((entry) => entry.id !== item.id));
@@ -328,7 +331,7 @@ export default function NotificationsInbox() {
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            if (matchesState(updated, state)) {
+            if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
                 setItems((current) => current.filter((entry) => entry.id !== item.id));
@@ -363,7 +366,7 @@ export default function NotificationsInbox() {
             if (updated.stateVersion != null) {
                 emitNotificationStateChanged(recipientId, updated.stateVersion);
             }
-            if (matchesState(updated, state)) {
+            if (matchesState(updated, state, pageAsOf)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
                 setItems((current) => current.filter((entry) => entry.id !== updated.id));
@@ -694,7 +697,7 @@ export default function NotificationsInbox() {
                             const reasons = item.data?.priorityReasons;
                             const hasPriority = Array.isArray(reasons) && reasons.length > 0;
                             const isNudge = item.type === "relationship.cooling";
-                            const isSnoozed = !item.dismissedAt && !item.resolvedAt && Boolean(item.snoozedUntil);
+                            const isSnoozed = isNotificationSnoozedAt(item, pageAsOf);
                             return (
                                 <article
                                     key={item.id}

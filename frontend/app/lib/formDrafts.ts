@@ -1,4 +1,5 @@
 const DRAFT_PREFIX = 'connex:draft:';
+let draftStoreGeneration = 0;
 
 /** Default freshness window: drafts older than this are treated as expired and swept. */
 export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
@@ -36,6 +37,11 @@ export type StoredDraft<T> = {
     data: T;
 };
 
+/** Returns the current in-memory draft-store generation used to invalidate pending writes after logout. */
+export function getDraftStoreGeneration(): number {
+    return draftStoreGeneration;
+}
+
 /** Prefix that scopes every draft key to one user + workspace, so drafts never leak across either. */
 function ownerPrefix(userId: number | null, workspaceId: number | null): string {
     return `${DRAFT_PREFIX}${userId ?? 'anon'}:${workspaceId ?? 'none'}:`;
@@ -53,6 +59,37 @@ function safeSession(): Storage | null {
     } catch {
         return null;
     }
+}
+
+function parseDraftEnvelope(raw: string): DraftEnvelope<unknown> | null {
+    let value: unknown;
+    try {
+        value = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('v' in value) ||
+        typeof value.v !== 'number' ||
+        !('savedAt' in value) ||
+        typeof value.savedAt !== 'number' ||
+        !('scope' in value) ||
+        typeof value.scope !== 'string' ||
+        !('formType' in value) ||
+        typeof value.formType !== 'string' ||
+        !('data' in value)
+    ) {
+        return null;
+    }
+    return {
+        v: value.v,
+        savedAt: value.savedAt,
+        scope: value.scope,
+        formType: value.formType,
+        data: value.data,
+    };
 }
 
 /** Persists a draft envelope under `key`. No-op when storage is unavailable (SSR, private mode, quota). */
@@ -85,21 +122,27 @@ export function clearDraft(key: string): void {
 }
 
 function isFresh(env: DraftEnvelope<unknown>, expectedVersion: number, freshnessMs: number): boolean {
+    const age = Date.now() - env.savedAt;
     return (
         typeof env === 'object' &&
         env !== null &&
         env.v === expectedVersion &&
         env.data !== null &&
         env.data !== undefined &&
-        typeof env.savedAt === 'number' &&
-        Date.now() - env.savedAt <= freshnessMs
+        Number.isSafeInteger(env.savedAt) &&
+        age >= 0 &&
+        age <= freshnessMs
     );
 }
 
-/** Reads a draft by key, validating version + freshness; drops and returns null if invalid or expired. */
-export function readDraft<T>(key: string, opts: { version: number; freshnessMs?: number }): StoredDraft<T> | null {
+/** Reads a draft by canonical key parts, validating metadata, version, and freshness. */
+export function readDraft(
+    keyParts: DraftKeyParts,
+    opts: { version: number; freshnessMs?: number },
+): StoredDraft<unknown> | null {
     const store = safeSession();
     if (!store) return null;
+    const key = draftKey(keyParts);
     const freshnessMs = opts.freshnessMs ?? DEFAULT_DRAFT_FRESHNESS_MS;
     let raw: string | null = null;
     try {
@@ -108,13 +151,13 @@ export function readDraft<T>(key: string, opts: { version: number; freshnessMs?:
         return null;
     }
     if (raw === null) return null;
-    let env: DraftEnvelope<T> | null = null;
-    try {
-        env = JSON.parse(raw) as DraftEnvelope<T>;
-    } catch {
-        env = null;
-    }
-    if (!env || !isFresh(env, opts.version, freshnessMs)) {
+    const env = parseDraftEnvelope(raw);
+    if (
+        !env ||
+        env.formType !== keyParts.formType ||
+        env.scope !== keyParts.scope ||
+        !isFresh(env, opts.version, freshnessMs)
+    ) {
         clearDraft(key);
         return null;
     }
@@ -150,14 +193,17 @@ export function listFreshDrafts(opts: {
         } catch {
             continue;
         }
-        let env: DraftEnvelope<unknown> | null = null;
-        try {
-            env = raw ? (JSON.parse(raw) as DraftEnvelope<unknown>) : null;
-        } catch {
-            env = null;
-        }
+        const env = raw ? parseDraftEnvelope(raw) : null;
         const expectedVersion = env && typeof env === 'object' ? DRAFT_VERSIONS[env.formType] : undefined;
-        if (!env || expectedVersion === undefined || !isFresh(env, expectedVersion, freshnessMs)) {
+        const expectedKey = env
+            ? draftKey({
+                  userId: opts.userId,
+                  workspaceId: opts.workspaceId,
+                  formType: env.formType,
+                  scope: env.scope,
+              })
+            : null;
+        if (!env || expectedKey !== key || expectedVersion === undefined || !isFresh(env, expectedVersion, freshnessMs)) {
             clearDraft(key);
             continue;
         }
@@ -168,6 +214,7 @@ export function listFreshDrafts(opts: {
 
 /** Removes every draft in the store. Call on logout so note/activity drafts never survive a re-login. */
 export function clearAllDrafts(): void {
+    draftStoreGeneration += 1;
     const store = safeSession();
     if (!store) return;
     let keys: string[] = [];

@@ -103,7 +103,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
-            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
+            getContextNotifications("deal", id, init).catch(() => ({
+                items: [],
+                total: 0,
+                stateVersion: 0,
+                asOf: "1970-01-01T00:00:00Z",
+            })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
