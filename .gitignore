@@ -1,7 +1,6 @@
 .vscode/
 PROJECT.md
 PRODUCT.md
-frontend/pnpm-workspace.yaml
 plans/
 .claude/
 .agents/
