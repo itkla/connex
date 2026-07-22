@@ -235,6 +235,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
     const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
+    const [segmentEvaluationRevision, setSegmentEvaluationRevision] = useState(0);
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
     const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
@@ -246,6 +247,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         failedSegmentKeyRef.current = segmentsKey;
         setSegmentErrorKey(segmentsKey);
     }, [segmentsKey, tSeg]);
+    const clearSegmentFailure = useCallback((key: string) => {
+        if (failedSegmentKeyRef.current === key) failedSegmentKeyRef.current = null;
+        setSegmentErrorKey((current) => current === key ? null : current);
+    }, []);
     useEffect(() => {
         getSegmentFields('deal').then(setSegmentFields).catch(() => {
             setSegmentFields(null);
@@ -286,7 +291,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setDeals(response.items);
             setTotal(response.total);
             setPageRequestError(null);
-            if (hasSegments) setSegmentErrorKey((key) => key === segmentsKey ? null : key);
+            if (hasSegments) clearSegmentFailure(segmentsKey);
             const maxPage = Math.max(1, Math.ceil(response.total / (params.size ?? 25)));
             if ((params.page ?? 1) > maxPage) setPage(maxPage);
         } catch (error: unknown) {
@@ -303,7 +308,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         } finally {
             if (requestId === requestIdRef.current) setLoadingPage(false);
         }
-    }, [evaluable, hasSegments, loadErrorMessage, reportSegmentFailure, segmentsKey]);
+    }, [clearSegmentFailure, evaluable, hasSegments, loadErrorMessage, reportSegmentFailure, segmentsKey]);
     const refreshData = useCallback(() => setDataRevision((revision) => revision + 1), []);
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -522,7 +527,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setMatchedSignature(requestSignature);
         } catch (error: unknown) {
             if (requestId !== selectAllRequestRef.current) return;
-            if (hasSegments) {
+            if (hasSegments && !(error instanceof ApiError && error.status === 400)) {
                 reportSegmentFailure();
             } else {
                 toastError(error instanceof Error ? error.message : t('toastSelectAllFailed'));
@@ -551,6 +556,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 if (!active) return;
                 setDealMetrics(nextMetrics);
                 setMetricsRequestError(null);
+                if (hasSegments) clearSegmentFailure(segmentsKey);
             })
             .catch((error: unknown) => {
                 if (!active) return;
@@ -562,28 +568,32 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 }
             });
         return () => { active = false; };
-    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, metricFilters, evaluable, hasSegments, loadErrorMessage, reportSegmentFailure]);
+    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, metricFilters, clearSegmentFailure, evaluable, hasSegments, loadErrorMessage, reportSegmentFailure, segmentsKey]);
 
+    const kanbanSegmentRequestKey = hasSegments
+        ? JSON.stringify([segmentsKey, dataRevision, activeWorkspaceId, segmentEvaluationRevision])
+        : null;
     const [kanbanSegmentState, setKanbanSegmentState] = useState<{
         key: string | null;
         ids: ReadonlySet<number> | null;
         error: string | null;
     }>({ key: null, ids: null, error: null });
     useEffect(() => {
-        if (!hasSegments) return;
+        if (!hasSegments || kanbanSegmentRequestKey == null) return;
         let active = true;
         evaluateSegments('deal', evaluable)
             .then((result) => {
                 if (!active) return;
-                setKanbanSegmentState({ key: segmentsKey, ids: new Set(result.ids), error: null });
+                setKanbanSegmentState({ key: kanbanSegmentRequestKey, ids: new Set(result.ids), error: null });
+                clearSegmentFailure(segmentsKey);
             })
             .catch(() => {
                 if (!active) return;
-                setKanbanSegmentState({ key: segmentsKey, ids: null, error: tSeg('evaluateFailed') });
+                setKanbanSegmentState({ key: kanbanSegmentRequestKey, ids: null, error: tSeg('evaluateFailed') });
                 reportSegmentFailure();
             });
         return () => { active = false; };
-    }, [dataRevision, evaluable, hasSegments, reportSegmentFailure, segmentsKey, tSeg]);
+    }, [clearSegmentFailure, evaluable, hasSegments, kanbanSegmentRequestKey, reportSegmentFailure, segmentsKey, tSeg]);
 
     useEffect(() => {
         let active = true;
@@ -664,6 +674,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const changeDefinition = useCallback((nextDefinition: SegmentDefinition) => {
         clearSelection();
         setDefinition(nextDefinition);
+        setSegmentEvaluationRevision((revision) => revision + 1);
         setPage(1);
     }, [clearSelection]);
     const refreshRecords = useCallback(() => {
@@ -1125,6 +1136,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 tSeg,
                 (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
                 (id) => memberById.get(Number(id))?.displayName ?? id,
+                (field, value) => {
+                    if (field === 'stage') return stageById.get(Number(value))?.name ?? value;
+                    if (field === 'status'
+                        && (value === 'open' || value === 'won' || value === 'lost')) {
+                        return tSeg(`status.${value}`);
+                    }
+                    return value;
+                },
             ),
             onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
         })),
@@ -1198,6 +1217,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setSortKey(nextSortKey);
             setSortDir(config.sortDirection ?? 'asc');
             setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setSegmentEvaluationRevision((revision) => revision + 1);
             setPage(1);
         },
         [clearSelection, setFilterState, setQuery],
@@ -1447,9 +1467,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             currency={activeCurrency ?? undefined}
                             filters={serverFilters}
                             segmentActive={hasSegments}
-                            segmentIds={kanbanSegmentState.key === segmentsKey ? kanbanSegmentState.ids : null}
-                            segmentLoading={hasSegments && kanbanSegmentState.key !== segmentsKey}
-                            segmentError={kanbanSegmentState.key === segmentsKey ? kanbanSegmentState.error : null}
+                            segmentIds={kanbanSegmentState.key === kanbanSegmentRequestKey ? kanbanSegmentState.ids : null}
+                            segmentLoading={hasSegments && kanbanSegmentState.key !== kanbanSegmentRequestKey}
+                            segmentError={kanbanSegmentState.key === kanbanSegmentRequestKey ? kanbanSegmentState.error : null}
                             currentUserId={currentUserId}
                             revision={dataRevision}
                             reduce={reduce}

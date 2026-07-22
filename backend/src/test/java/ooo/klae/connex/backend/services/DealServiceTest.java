@@ -216,6 +216,34 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void matchingDealIdsRejectMoreThanBulkOperationLimit() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<Deal> deals = IntStream.rangeClosed(1, 1001)
+            .mapToObj(position -> boardDeal(pipeline, stage, position))
+            .toList();
+        dealMapper.insertBatch(deals);
+        SegmentDefinition definition = segmentDefinition(
+            segmentField("name", "starts_with", "Bounded Board "));
+
+        BadRequestException nativeException = assertThrows(BadRequestException.class,
+            () -> dealService.getMatchingDealIds(
+                null, null, null, null, null, false, null, null, MemberScope.allTeam()));
+        BadRequestException segmentException = assertThrows(BadRequestException.class,
+            () -> dealService.getMatchingSegmentDealIds(
+                definition, null, null, null, null, null,
+                false, null, null, MemberScope.allTeam()));
+
+        assertEquals("Too many matching deals; narrow the filters before selecting all",
+            nativeException.getMessage());
+        assertEquals(nativeException.getMessage(), segmentException.getMessage());
+    }
+
+    @Test
     void oversizedBoardRejectsKanbanReordering() {
         Workspace activeWorkspace = newWorkspace();
         workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
