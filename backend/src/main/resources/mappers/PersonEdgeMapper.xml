@@ -97,8 +97,8 @@
              target_person.suspended_at, source_person.suspended_at) IS NULL
       AND IF(e.source_person_id = #{personId},
              target_person.provision_ceased_at, source_person.provision_ceased_at) IS NULL
-      AND NULLIF(TRIM(IF(e.source_person_id = #{personId},
-             target_person.name, source_person.name)), '') IS NOT NULL
+      AND IF(e.source_person_id = #{personId},
+             target_person.name, source_person.name) REGEXP '[^[:space:]]'
     ORDER BY e.strength DESC, person_name, person_id
     LIMIT #{limit}
   </select>

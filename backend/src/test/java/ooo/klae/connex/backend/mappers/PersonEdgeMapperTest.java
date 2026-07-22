@@ -47,22 +47,24 @@ class PersonEdgeMapperTest extends AbstractMapperTest {
 
     @Test
     void topConnectionsFiltersRestrictedAndBlankCounterpartsBeforeLimit() {
+        Person suspendedSource = person("Blocked Suspended Source");
+        Person ceasedSource = person("Blocked Ceased Source");
+        Person blankSource = person("\t");
         Person focal = person("Focal Person");
-        Person suspendedOne = person("Blocked Suspended A");
-        Person suspendedTwo = person("Blocked Suspended B");
-        Person ceasedOne = person("Blocked Ceased A");
-        Person ceasedTwo = person("Blocked Ceased B");
-        Person blank = person(" ");
+        Person suspendedTarget = person("Blocked Suspended Target");
+        Person ceasedTarget = person("Blocked Ceased Target");
+        Person blankTarget = person(" ");
 
-        connect(focal, suspendedOne, 3);
-        connect(focal, suspendedTwo, 3);
-        connect(focal, ceasedOne, 3);
-        connect(focal, ceasedTwo, 3);
-        connect(focal, blank, 3);
-        personMapper.updateProcessingRestrictions(workspace.getId(), suspendedOne.getId(), true, false);
-        personMapper.updateProcessingRestrictions(workspace.getId(), suspendedTwo.getId(), true, false);
-        personMapper.updateProcessingRestrictions(workspace.getId(), ceasedOne.getId(), false, true);
-        personMapper.updateProcessingRestrictions(workspace.getId(), ceasedTwo.getId(), false, true);
+        connect(focal, suspendedSource, 3);
+        connect(focal, ceasedSource, 3);
+        connect(focal, blankSource, 3);
+        connect(focal, suspendedTarget, 3);
+        connect(focal, ceasedTarget, 3);
+        connect(focal, blankTarget, 3);
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspendedSource.getId(), true, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), ceasedSource.getId(), false, true);
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspendedTarget.getId(), true, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), ceasedTarget.getId(), false, true);
 
         for (String suffix : List.of("A", "B", "C", "D", "E")) {
             connect(focal, person("Allowed " + suffix), 2);
