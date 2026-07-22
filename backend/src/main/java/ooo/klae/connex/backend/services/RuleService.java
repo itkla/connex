@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +15,7 @@ import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleExecutionDto;
+import ooo.klae.connex.backend.dto.RuleExecutionSummaryDto;
 import ooo.klae.connex.backend.dto.RulePreviewDto;
 import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -46,8 +50,18 @@ public class RuleService {
 
     @RequirePermission(Permission.RULE_MANAGE)
     public List<RuleDto> list() {
-        return ruleMapper.getByWorkspace(workspaceService.getCurrentWorkspaceId())
-            .stream().map(this::toDto).toList();
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Rule> rules = ruleMapper.getByWorkspace(workspaceId);
+        if (rules.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, RuleExecution> latestByRuleId = ruleMapper
+            .getLatestExecutionsByWorkspace(workspaceId)
+            .stream()
+            .collect(Collectors.toMap(RuleExecution::getRuleId, Function.identity()));
+        return rules.stream()
+            .map(rule -> toDto(rule, latestByRuleId.get(rule.getId())))
+            .toList();
     }
 
     @RequirePermission(Permission.RULE_MANAGE)
@@ -117,6 +131,10 @@ public class RuleService {
     }
 
     private RuleDto toDto(Rule rule) {
+        return toDto(rule, null);
+    }
+
+    private RuleDto toDto(Rule rule, RuleExecution latestExecution) {
         RuleDto dto = new RuleDto();
         dto.setId(rule.getId());
         dto.setName(rule.getName());
@@ -133,6 +151,10 @@ public class RuleService {
         dto.setCreatedById(rule.getCreatedById());
         dto.setCreatedAt(rule.getCreatedAt());
         dto.setUpdatedAt(rule.getUpdatedAt());
+        dto.setLatestExecution(latestExecution == null
+            ? null
+            : new RuleExecutionSummaryDto(
+                latestExecution.getStatus(), latestExecution.getExecutedAt()));
         return dto;
     }
 

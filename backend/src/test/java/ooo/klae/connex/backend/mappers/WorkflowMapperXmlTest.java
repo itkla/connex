@@ -177,6 +177,15 @@ class WorkflowMapperXmlTest {
         assertTrue(sql(configuration, RuleMapper.class, "updateEnabled", lifecycle)
             .contains("enabled <> ?"));
 
+        assertScoped(
+            configuration, RuleMapper.class, "getLatestExecutionsByWorkspace", workspace);
+        String latestExecutions = sql(
+            configuration, RuleMapper.class, "getLatestExecutionsByWorkspace", workspace);
+        assertTrue(latestExecutions.contains("PARTITION BY rule_id"));
+        assertTrue(latestExecutions.contains("ORDER BY executed_at DESC, id DESC"));
+        assertTrue(latestExecutions.contains("WHERE workspace_id = ?"));
+        assertTrue(latestExecutions.endsWith("WHERE execution_rank = 1 ORDER BY rule_id"));
+
         String linked = sql(configuration, WorkflowMapper.class, "countLegacyRuleLinks", workspace);
         assertTrue(linked.contains("WHERE workspace_id = ?"));
         assertTrue(linked.contains("legacy_rule_id IS NOT NULL"));
@@ -219,7 +228,9 @@ class WorkflowMapperXmlTest {
     @Test
     void mapperSqlUsesOnlyBoundParametersAndTenantPlaneTables() throws Exception {
         for (String resource : List.of(
-                "mappers/WorkflowMapper.xml", "mappers/WorkflowVersionMapper.xml")) {
+                "mappers/RuleMapper.xml",
+                "mappers/WorkflowMapper.xml",
+                "mappers/WorkflowVersionMapper.xml")) {
             String xml = resource(resource);
             assertFalse(xml.contains("${"));
             assertFalse(xml.contains("app_user"));

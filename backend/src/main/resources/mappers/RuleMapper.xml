@@ -130,4 +130,19 @@
     LIMIT #{limit}
   </select>
 
+  <select id="getLatestExecutionsByWorkspace" resultType="RuleExecution">
+    SELECT rule_id, status, executed_at
+    FROM (
+      SELECT rule_id, status, executed_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY rule_id
+               ORDER BY executed_at DESC, id DESC
+             ) AS execution_rank
+      FROM rule_execution
+      WHERE workspace_id = #{workspaceId}
+    ) ranked_execution
+    WHERE execution_rank = 1
+    ORDER BY rule_id
+  </select>
+
 </mapper>
