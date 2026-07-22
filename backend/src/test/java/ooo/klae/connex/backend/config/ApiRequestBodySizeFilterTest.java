@@ -29,6 +29,7 @@ class ApiRequestBodySizeFilterTest {
         properties.setImportMaxBodyBytes(16);
         properties.setUploadMaxBodyBytes(12);
         properties.setWebauthnMaxBodyBytes(4);
+        properties.setWorkflowMaxBodyBytes(6);
         properties.setBusinessCardMaxBodyBytes(20);
         filter = new ApiRequestBodySizeFilter(properties);
     }
@@ -325,6 +326,29 @@ class ApiRequestBodySizeFilterTest {
 
         assertEquals(413, response.getStatus());
         assertNull(chain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedWorkflowLimitBeforeJsonParsing() throws Exception {
+        MockHttpServletRequest allowed = jsonRequest(
+            "PUT", "/api/workflows/7/draft", "123456");
+        MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+        MockFilterChain allowedChain = new MockFilterChain();
+
+        filter.doFilter(allowed, allowedResponse, allowedChain);
+
+        assertEquals(200, allowedResponse.getStatus());
+        assertNotNull(allowedChain.getRequest());
+
+        MockHttpServletRequest rejected = jsonRequest(
+            "POST", "/api/workflows", "1234567");
+        MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+        MockFilterChain rejectedChain = new MockFilterChain();
+
+        filter.doFilter(rejected, rejectedResponse, rejectedChain);
+
+        assertEquals(413, rejectedResponse.getStatus());
+        assertNull(rejectedChain.getRequest());
     }
 
     @Test

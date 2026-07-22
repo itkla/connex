@@ -79,6 +79,10 @@ When in doubt, open a reference page and mirror it.
 - Color and contrast come from tokens (which carry the contrast guarantees) — don't hand-pick colors that break it.
 - Respect `prefers-reduced-motion` for animations (the `motion` lib + `review-animations` skill cover this).
 
+## Delegated work is plan-first
+
+Any subagent dispatched to implement frontend work must first return a short plan — components/files to touch, design-system pieces reused, state/URL contracts, i18n keys, and the browser-verification steps — and get it reviewed by the orchestrator before editing code (see the root `AGENTS.md` → *Plan-first dispatch*). Discovery, review, and verification agents are exempt.
+
 ## Definition of Done (frontend)
 
 1. `pnpm lint` and `pnpm exec tsc --noEmit` clean.

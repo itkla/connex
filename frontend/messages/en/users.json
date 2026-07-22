@@ -31,7 +31,14 @@
     "openCount": "{count} open",
     "notesCount": "{count} notes",
     "timeline": "Timeline",
-    "emptyActivity": "No activity yet"
+    "emptyActivity": "No activity yet",
+    "performance": "Performance",
+    "performanceWindow": "Last 90 days",
+    "wonDeals": "Won deals",
+    "winRate": "Win rate",
+    "openDeals": "Open deals",
+    "openTasks": "Open tasks",
+    "viewFullAnalytics": "View full analytics"
   },
   "UsersNewUserDialog": {
     "new": "New",

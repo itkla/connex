@@ -88,7 +88,10 @@ export type OverlayRequest =
     | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
-    | { kind: "create-deal"; defaults?: CreateDefaults };
+    | { kind: "create-deal"; defaults?: CreateDefaults }
+    | { kind: "import-companies" }
+    | { kind: "import-contacts" }
+    | { kind: "import-deals" };
 
 /**
  * The imperative capabilities handed to {@link AppAction.execute}. Kept out of {@link ActionContext}
@@ -117,6 +120,14 @@ export type AppAction = {
     group: ActionGroup;
     /** Key within the `Actions` next-intl namespace that resolves the display label. */
     labelKey: string;
+    /** Key within the `Actions` namespace resolving supporting text shown on richer action surfaces. */
+    descriptionKey?: string;
+    /**
+     * A resolved display label used verbatim when present, taking precedence over {@link labelKey}.
+     * For dynamic actions whose label is data (e.g. a pinned saved view's name) and so cannot be a
+     * translation key; static actions omit it and are localized via {@link labelKey}.
+     */
+    label?: string;
     /** Locale-neutral search aliases (e.g. `csv`, `kanban`). */
     keywords?: readonly string[];
     /** Key within the `Actions` namespace resolving a comma-separated, per-locale alias list. */
@@ -150,10 +161,22 @@ export type ActionsContextValue = {
     context: ActionContext;
     /** Ids currently mid-execute; drive per-item spinners and disabled state. */
     pendingIds: ReadonlySet<ActionId>;
-    /** Runs an action by id: rejects re-entrancy, tracks pending, and toasts unhandled failures. */
-    run: (id: ActionId, options?: { source?: ActionSource }) => Promise<ActionRunResult>;
+    /**
+     * Runs an action by id: rejects re-entrancy, tracks pending, and toasts unhandled failures. Pass
+     * `record` to run the action against a specific record (e.g. a list row) instead of the page's
+     * published record slot; availability and execution both see the override for that one invocation.
+     */
+    run: (
+        id: ActionId,
+        options?: { source?: ActionSource; record?: ActiveRecordRef | null },
+    ) => Promise<ActionRunResult>;
     /** Resolves a live action by id. */
     getAction: (id: ActionId) => AppAction | undefined;
+    /**
+     * Whether an action is available for a specific record without publishing it to the shared slot.
+     * Powers per-row menus, which must reflect the row's record, not the page's focused one.
+     */
+    isAvailableForRecord: (id: ActionId, record: ActiveRecordRef) => boolean;
     /** Opens a shell-owned overlay (e.g. a create form). */
     openOverlay: (request: OverlayRequest) => void;
 };

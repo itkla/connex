@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 /**
@@ -46,27 +48,35 @@ public interface PersonMapper {
     List<Person> getPersonsPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany, @Param("limit") int limit, @Param("offset") int offset);
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit, @Param("offset") int offset);
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies,
-            @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany);
-    /** Same filter predicates as {@code getPersonsPage} but unpaginated, for CSV exports. */
+            @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany,
+            @Param("memberScope") MemberScope memberScope);
+    /** CSV export using the browser filters and member scope, excluding suspended contacts. */
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany);
-    /** Ids only for the same filter predicates as {@code getPersonsPage}; backs "select all matching". */
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope);
+    /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany, @Param("limit") int limit);
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);
+    List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
     List<Integer> getEngagedPersonIds(int workspaceId);
     int insert(Person person);
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);
     int update(Person person);
+    int updateOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("ownerId") Integer ownerId);
     int updateImageUrlIfCurrent(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
@@ -86,6 +96,12 @@ public interface PersonMapper {
         @Param("provisionCeased") boolean provisionCeased
     );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Clears contact ownership held by one member within one workspace. */
+    void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /** Clears contact ownership held by a user across every workspace. */
+    void clearOwnershipAnywhere(@Param("userId") int userId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);

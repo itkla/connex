@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowMapper">
+
+  <sql id="workflowColumns">
+    id, workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+    draft_record_type, draft_execution_mode, draft_run_as_user_id,
+    draft_definition_json, draft_canvas_json, active_version_id,
+    created_by_id, updated_by_id, created_at, updated_at
+  </sql>
+
+  <sql id="legacyRuleColumns">
+    r.id, r.workspace_id, r.name, r.description, r.enabled, r.record_type,
+    r.trigger_type, r.trigger_config, r.condition_json, r.actions_json,
+    r.execution_mode, r.run_as_user_id, r.created_by_id, r.created_at, r.updated_at
+  </sql>
+
+  <select id="listByWorkspace" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="getById" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getByLegacyRuleId" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
+  </select>
+
+  <select id="getByLegacyRuleIdForUpdate" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id = #{legacyRuleId}
+    FOR UPDATE
+  </select>
+
+  <select id="findAffectedByUserAnywhere" resultType="Workflow">
+    SELECT <include refid="workflowColumns"/> FROM workflow w
+    WHERE w.created_by_id = #{userId}
+       OR w.updated_by_id = #{userId}
+       OR w.draft_run_as_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1 FROM workflow_version v
+         WHERE v.workspace_id = w.workspace_id
+           AND v.workflow_id = w.id
+           AND v.id = w.active_version_id
+           AND (v.created_by_id = #{userId}
+             OR v.published_by_id = #{userId}
+             OR v.run_as_user_id = #{userId})
+       )
+       OR EXISTS (
+         SELECT 1 FROM rule r
+         WHERE r.workspace_id = w.workspace_id
+           AND r.id = w.legacy_rule_id
+           AND (r.created_by_id = #{userId} OR r.run_as_user_id = #{userId})
+       )
+    ORDER BY w.workspace_id, w.id
+  </select>
+
+  <select id="listUnpairedLegacyRules" resultType="Rule">
+    SELECT <include refid="legacyRuleColumns"/>
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+    ORDER BY r.id
+  </select>
+
+  <select id="countLegacyRuleLinks" resultType="int">
+    SELECT COUNT(*) FROM workflow
+    WHERE workspace_id = #{workspaceId} AND legacy_rule_id IS NOT NULL
+  </select>
+
+  <select id="countUnpairedLegacyRules" resultType="int">
+    SELECT COUNT(*)
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+  </select>
+
+  <select id="firstUnpairedLegacyRuleId" resultType="int">
+    SELECT r.id
+    FROM rule r
+    WHERE r.workspace_id = #{workspaceId}
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = #{workspaceId}
+          AND w.legacy_rule_id = r.id
+      )
+    ORDER BY r.id
+    LIMIT 1
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow
+      (workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+       draft_record_type, draft_execution_mode, draft_run_as_user_id,
+       draft_definition_json, draft_canvas_json, active_version_id,
+       created_by_id, updated_by_id)
+    VALUES
+      (#{workspaceId}, #{legacyRuleId}, #{name}, #{description}, #{enabled}, #{draftRevision},
+       #{draftRecordType}, #{draftExecutionMode}, #{draftRunAsUserId},
+       #{draftDefinitionJson}, #{draftCanvasJson}, #{activeVersionId},
+       #{createdById}, #{updatedById})
+  </insert>
+
+  <update id="updateDraft">
+    UPDATE workflow
+    SET name = #{workflow.name},
+        description = #{workflow.description},
+        draft_revision = draft_revision + 1,
+        draft_record_type = #{workflow.draftRecordType},
+        draft_execution_mode = #{workflow.draftExecutionMode},
+        draft_run_as_user_id = #{workflow.draftRunAsUserId},
+        draft_definition_json = #{workflow.draftDefinitionJson},
+        draft_canvas_json = #{workflow.draftCanvasJson},
+        updated_by_id = #{workflow.updatedById}
+    WHERE workspace_id = #{workflow.workspaceId}
+      AND id = #{workflow.id}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <update id="assignFirstPublication">
+    UPDATE workflow
+    SET legacy_rule_id = #{legacyRuleId},
+        active_version_id = #{activeVersionId},
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND draft_revision = #{expectedRevision}
+      AND legacy_rule_id IS NULL
+      AND active_version_id IS NULL
+  </update>
+
+  <update id="advancePublication">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND draft_revision = #{expectedRevision}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
+  </update>
+
+  <update id="updateLifecycle">
+    UPDATE workflow
+    SET enabled = #{enabled}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
+  </update>
+
+  <update id="replaceLegacyPublication">
+    UPDATE workflow
+    SET name = #{workflow.name},
+        description = #{workflow.description},
+        enabled = #{workflow.enabled},
+        draft_revision = draft_revision + 1,
+        draft_record_type = #{workflow.draftRecordType},
+        draft_execution_mode = #{workflow.draftExecutionMode},
+        draft_run_as_user_id = #{workflow.draftRunAsUserId},
+        draft_definition_json = #{workflow.draftDefinitionJson},
+        draft_canvas_json = #{workflow.draftCanvasJson},
+        active_version_id = #{activeVersionId},
+        updated_by_id = #{workflow.updatedById}
+    WHERE workspace_id = #{workflow.workspaceId}
+      AND id = #{workflow.id}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <update id="unlinkLegacyRuleForDeletion">
+    UPDATE workflow
+    SET legacy_rule_id = NULL,
+        active_version_id = NULL,
+        enabled = FALSE,
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND legacy_rule_id = #{expectedLegacyRuleId}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM workflow WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <update id="disableForOffboarding">
+    UPDATE workflow SET enabled = FALSE
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled = TRUE
+  </update>
+
+  <update id="redactUserReferences">
+    UPDATE workflow
+    SET draft_run_as_user_id = IF(draft_run_as_user_id = #{userId}, NULL, draft_run_as_user_id),
+        created_by_id = IF(created_by_id = #{userId}, NULL, created_by_id),
+        updated_by_id = IF(updated_by_id = #{userId}, NULL, updated_by_id)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND (draft_run_as_user_id = #{userId}
+        OR created_by_id = #{userId}
+        OR updated_by_id = #{userId})
+  </update>
+
+  <update id="updateActiveVersion">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+</mapper>

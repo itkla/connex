@@ -24,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
@@ -84,6 +85,38 @@ class AzureOpenAiAdapterTest {
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
+    }
+
+    @Test
+    void completeEmbedsImageBytesInTheFirstUserTurn() throws Exception {
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+                .thenReturn(validResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                new AiProviderTarget("azure_openai", null, "gpt-5.2",
+                        "https://connex.openai.azure.com",
+                        "2025-01-01-preview", "contacts-prod", null, false),
+                credentials(),
+                "Extract literal fields",
+                List.of(new AiMessage("user", "Read the card")),
+                List.of(image()),
+                64,
+                0);
+
+        adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(azureOpenAiClient).complete(any(URI.class), any(AiCredentials.class), bodyCaptor.capture());
+        JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
+                .path("messages").path(1).path("content");
+        assertEquals("text", content.path(0).path("type").asString());
+        assertEquals("Read the card", content.path(0).path("text").asString());
+        assertEquals("image_url", content.path(1).path("type").asString());
+        assertEquals("data:image/jpeg;base64,/9j/AQ==",
+                content.path(1).path("image_url").path("url").asString());
+        assertEquals("high", content.path(1).path("image_url").path("detail").asString());
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertEquals(64, body.path("max_completion_tokens").asInt());
+        assertFalse(body.has("temperature"));
     }
 
     @Test
@@ -175,7 +208,7 @@ class AzureOpenAiAdapterTest {
 
     private static AiCompletionRequest validRequest(String endpoint, String systemPrompt) {
         return new AiCompletionRequest(
-                new AiProviderTarget("azure_openai", null, "gpt-5.2", endpoint,
+                new AiProviderTarget("azure_openai", null, "gpt-4o", endpoint,
                         "2025-01-01-preview", "contacts-prod", null, false),
                 credentials(),
                 systemPrompt,
@@ -184,6 +217,11 @@ class AzureOpenAiAdapterTest {
                         new AiMessage("assistant", "Hello.")),
                 64,
                 0.25);
+    }
+
+    private static AiInputImage image() {
+        return new AiInputImage(
+                "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
     }
 
     private static AiCompletionRequest requestWithTarget(AiProviderTarget target) {

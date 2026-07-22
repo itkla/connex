@@ -1,9 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { AtSymbolIcon, CheckIcon, EllipsisHorizontalIcon, EnvelopeIcon, GlobeAltIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
+import {
+    AtSymbolIcon,
+    CheckIcon,
+    EllipsisHorizontalIcon,
+    EnvelopeIcon,
+    GlobeAltIcon,
+    LinkIcon,
+    MagnifyingGlassIcon,
+    TrashIcon,
+} from "@heroicons/react/24/outline";
 
 import type {
     CustomRole,
@@ -53,11 +62,14 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 
 const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
+
+const SEARCH_THRESHOLD = 6;
 
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
@@ -84,9 +96,21 @@ function ListCard({ children }: { children: React.ReactNode }) {
 
 function EmptyRow({ children }: { children: React.ReactNode }) {
     return (
-        <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
             {children}
         </p>
+    );
+}
+
+/** Small heading for a state list nested inside an invite/access tab, with an optional count. */
+function TabListHeading({ title, count }: { title: string; count?: number }) {
+    return (
+        <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-foreground">{title}</h3>
+            {count != null && count > 0 ? (
+                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+            ) : null}
+        </div>
     );
 }
 
@@ -103,6 +127,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
     const [loading, setLoading] = useState(true);
+    const [memberSearch, setMemberSearch] = useState("");
 
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>("member");
@@ -364,456 +389,515 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     const selectableRoles: WorkspaceRole[] = isOwner ? ["member", "admin", "owner"] : ASSIGNABLE;
 
+    const trimmedSearch = memberSearch.trim().toLowerCase();
+    const showSearch = !loading && members.length > SEARCH_THRESHOLD;
+    const visibleMembers = useMemo(() => {
+        if (!showSearch || !trimmedSearch) return members;
+        return members.filter(
+            (m) =>
+                m.displayName.toLowerCase().includes(trimmedSearch) ||
+                m.email.toLowerCase().includes(trimmedSearch),
+        );
+    }, [members, trimmedSearch, showSearch]);
+
     return (
-        <div className="space-y-10">
-            <Rise className="space-y-3">
-                <SectionHeader
+        <div className="space-y-12">
+            <Rise>
+                <SettingsSection
                     title={t("title")}
+                    description={t("subtitle", { workspace: activeWorkspace?.name ?? "" })}
                     action={
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                            {t("count", { count: members.length })}
-                        </span>
+                        !loading ? (
+                            <Badge variant="secondary" className="tabular-nums">
+                                {t("count", { count: members.length })}
+                            </Badge>
+                        ) : null
                     }
-                />
+                >
+                    {showSearch && (
+                        <InputGroup className="max-w-xs">
+                            <InputGroupAddon>
+                                <MagnifyingGlassIcon />
+                            </InputGroupAddon>
+                            <InputGroupInput
+                                value={memberSearch}
+                                onChange={(e) => setMemberSearch(e.target.value)}
+                                placeholder={t("searchPlaceholder")}
+                                aria-label={t("searchPlaceholder")}
+                            />
+                        </InputGroup>
+                    )}
 
-                {loading ? (
-                    <MemberSkeleton />
-                ) : members.length === 0 ? (
-                    <EmptyRow>{t("membersEmpty")}</EmptyRow>
-                ) : (
-                    <ListCard>
-                        {members.map((member) => {
-                            const isSelf = member.id === currentUserId;
-                            const busy = busyMemberId === member.id;
-                            const pending = member.status === "pending";
-                            const editable = isAdmin && (member.roleId == null || isOwner);
-                            return (
-                                <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
-                                    <Avatar>
-                                        {member.profilePictureUrl && (
-                                            <AvatarImage
-                                                src={member.profilePictureUrl}
-                                                alt={member.displayName}
-                                            />
-                                        )}
-                                        <AvatarFallback>{initial(member.displayName)}</AvatarFallback>
-                                    </Avatar>
-                                    <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
-                                            <span className="truncate text-sm font-medium text-foreground">
-                                                {member.displayName}
-                                            </span>
-                                            {isSelf && (
-                                                <Badge variant="outline" className="text-muted-foreground">
-                                                    {t("you")}
-                                                </Badge>
+                    {loading ? (
+                        <MemberSkeleton />
+                    ) : members.length === 0 ? (
+                        <EmptyRow>{t("membersEmpty")}</EmptyRow>
+                    ) : visibleMembers.length === 0 ? (
+                        <EmptyRow>{t("searchNoMatches", { query: memberSearch.trim() })}</EmptyRow>
+                    ) : (
+                        <ListCard>
+                            {visibleMembers.map((member) => {
+                                const isSelf = member.id === currentUserId;
+                                const busy = busyMemberId === member.id;
+                                const pending = member.status === "pending";
+                                const editable = isAdmin && (member.roleId == null || isOwner);
+                                return (
+                                    <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
+                                        <Avatar>
+                                            {member.profilePictureUrl && (
+                                                <AvatarImage src={member.profilePictureUrl} alt={member.displayName} />
                                             )}
-                                            {pending && (
-                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
-                                                    {t("pending")}
-                                                </Badge>
-                                            )}
-                                        </div>
-                                        <p className="truncate text-xs text-muted-foreground">{member.email}</p>
-                                    </div>
-
-                                    {editable ? (
-                                        <Select
-                                            value={member.roleId ? `custom:${member.roleId}` : member.role}
-                                            disabled={busy}
-                                            onValueChange={(value) => {
-                                                if (value.startsWith("custom:")) assignCustom(member.id, Number(value.slice(7)));
-                                                else changeRole(member.id, value as WorkspaceRole);
-                                            }}
-                                        >
-                                            <SelectTrigger size="sm" className="w-auto" aria-label={t("roleLabel")}>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent align="end">
-                                                {selectableRoles.map((r) => (
-                                                    <SelectItem key={r} value={r}>
-                                                        {roleLabel(r)}
-                                                    </SelectItem>
-                                                ))}
-                                                {isOwner && customRoles.length > 0 && (
-                                                    <SelectGroup>
-                                                        <SelectLabel>{t("customRoles")}</SelectLabel>
-                                                        {customRoles.map((r) => (
-                                                            <SelectItem key={r.id} value={`custom:${r.id}`}>
-                                                                {r.name}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectGroup>
+                                            <AvatarFallback>{initial(member.displayName)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="truncate text-sm font-medium text-foreground">
+                                                    {member.displayName}
+                                                </span>
+                                                {isSelf && (
+                                                    <Badge variant="outline" className="text-muted-foreground">
+                                                        {t("you")}
+                                                    </Badge>
                                                 )}
-                                            </SelectContent>
-                                        </Select>
-                                    ) : (
-                                        <RoleBadge role={member.role} label={roleLabel(member.role)} />
-                                    )}
+                                                {pending && (
+                                                    <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                        {t("pending")}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+                                        </div>
 
-                                    {isAdmin && !isSelf && (
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <button
-                                                    type="button"
-                                                    aria-label={t("memberActions")}
-                                                    className={rowActionTrigger}
-                                                >
-                                                    <EllipsisHorizontalIcon className="size-5" />
-                                                </button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-40">
-                                                <DropdownMenuItem
-                                                    variant="destructive"
-                                                    onSelect={() => setRemoveTarget(member)}
-                                                >
-                                                    <TrashIcon className="size-4" />
-                                                    {t("remove")}
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    )}
-                                </li>
-                            );
-                        })}
-                    </ListCard>
-                )}
+                                        {editable ? (
+                                            <Select
+                                                value={member.roleId ? `custom:${member.roleId}` : member.role}
+                                                disabled={busy}
+                                                onValueChange={(value) => {
+                                                    if (value.startsWith("custom:"))
+                                                        assignCustom(member.id, Number(value.slice(7)));
+                                                    else changeRole(member.id, value as WorkspaceRole);
+                                                }}
+                                            >
+                                                <SelectTrigger size="sm" className="w-auto" aria-label={t("roleLabel")}>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent align="end">
+                                                    {selectableRoles.map((r) => (
+                                                        <SelectItem key={r} value={r}>
+                                                            {roleLabel(r)}
+                                                        </SelectItem>
+                                                    ))}
+                                                    {isOwner && customRoles.length > 0 && (
+                                                        <SelectGroup>
+                                                            <SelectLabel>{t("customRoles")}</SelectLabel>
+                                                            {customRoles.map((r) => (
+                                                                <SelectItem key={r.id} value={`custom:${r.id}`}>
+                                                                    {r.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectGroup>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        ) : (
+                                            <RoleBadge role={member.role} label={roleLabel(member.role)} />
+                                        )}
+
+                                        {isAdmin && !isSelf && (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        aria-label={t("memberActions")}
+                                                        className={rowActionTrigger}
+                                                    >
+                                                        <EllipsisHorizontalIcon className="size-5" />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end" className="w-40">
+                                                    <DropdownMenuItem
+                                                        variant="destructive"
+                                                        onSelect={() => setRemoveTarget(member)}
+                                                    >
+                                                        <TrashIcon className="size-4" />
+                                                        {t("remove")}
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ListCard>
+                    )}
+                </SettingsSection>
             </Rise>
 
             {isAdmin && (
-                <Rise className="space-y-4">
-                    <div>
-                        <SectionHeader title={t("inviteTitle")} />
-                        <p className="px-6 text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
-                    </div>
-
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            sendInvite();
-                        }}
-                        className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                    >
-                        <div className="flex-1">
-                            <InputGroup>
-                                <InputGroupAddon>
+                <Rise>
+                    <SettingsSection title={t("inviteAccessTitle")} description={t("inviteAccessSubtitle")}>
+                        <Tabs defaultValue="email" className="gap-5">
+                            <TabsList className="w-full sm:w-auto">
+                                <TabsTrigger value="email">
                                     <EnvelopeIcon />
-                                </InputGroupAddon>
-                                <InputGroupInput
-                                    type="email"
-                                    value={inviteEmail}
-                                    onChange={(e) => {
-                                        setInviteEmail(e.target.value);
-                                        clearError("email");
+                                    {t("inviteTabEmail")}
+                                </TabsTrigger>
+                                <TabsTrigger value="link">
+                                    <LinkIcon />
+                                    {t("inviteTabLink")}
+                                </TabsTrigger>
+                                <TabsTrigger value="domains">
+                                    <GlobeAltIcon />
+                                    {t("inviteTabDomains")}
+                                </TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="email" className="space-y-5">
+                                <p className="max-w-prose text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
+                                <form
+                                    onSubmit={(e) => {
+                                        e.preventDefault();
+                                        sendInvite();
                                     }}
-                                    placeholder={t("emailPlaceholder")}
-                                    aria-label={t("emailLabel")}
-                                    aria-invalid={Boolean(fieldErrors.email)}
-                                />
-                            </InputGroup>
-                            {fieldErrors.email && (
-                                <p className="mt-1.5 text-sm text-destructive">{fieldErrors.email}</p>
-                            )}
-                        </div>
-                        <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as WorkspaceRole)}>
-                            <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent align="end">
-                                {selectableRoles.map((r) => (
-                                    <SelectItem key={r} value={r}>
-                                        {roleLabel(r)}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button
-                            type="submit"
-                            variant="brand"
-                            disabled={sending || inviteEmail.trim().length === 0}
-                            className="min-w-28"
-                        >
-                            {sending ? <Loader2Icon className="size-4 animate-spin" /> : t("sendInvite")}
-                        </Button>
-                    </form>
+                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                                >
+                                    <div className="flex-1">
+                                        <InputGroup>
+                                            <InputGroupAddon>
+                                                <EnvelopeIcon />
+                                            </InputGroupAddon>
+                                            <InputGroupInput
+                                                type="email"
+                                                value={inviteEmail}
+                                                onChange={(e) => {
+                                                    setInviteEmail(e.target.value);
+                                                    clearError("email");
+                                                }}
+                                                placeholder={t("emailPlaceholder")}
+                                                aria-label={t("emailLabel")}
+                                                aria-invalid={Boolean(fieldErrors.email)}
+                                            />
+                                        </InputGroup>
+                                        {fieldErrors.email && (
+                                            <p className="mt-1.5 text-sm text-destructive">{fieldErrors.email}</p>
+                                        )}
+                                    </div>
+                                    <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as WorkspaceRole)}>
+                                        <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent align="end">
+                                            {selectableRoles.map((r) => (
+                                                <SelectItem key={r} value={r}>
+                                                    {roleLabel(r)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        type="submit"
+                                        variant="brand"
+                                        disabled={sending || inviteEmail.trim().length === 0}
+                                        className="min-w-28"
+                                    >
+                                        {sending ? <Loader2Icon className="size-4 animate-spin" /> : t("sendInvite")}
+                                    </Button>
+                                </form>
 
-                    <div className="space-y-2 pt-2">
-                        <SectionHeader title={t("pendingTitle")} />
-                        {invites.length === 0 ? (
-                            <EmptyRow>{t("pendingEmpty")}</EmptyRow>
-                        ) : (
-                            <ListCard>
-                                {invites.map((invite) => {
-                                    const busy = busyInviteId === invite.id;
-                                    return (
-                                        <li key={invite.id} className="group flex items-center gap-3 px-4 py-3">
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="truncate text-sm font-medium text-foreground">
-                                                        {invite.email}
-                                                    </span>
-                                                    <RoleBadge role={invite.role} label={roleLabel(invite.role)} />
-                                                </div>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {t("expires", { date: invite.expiresAt.slice(0, 10) })}
-                                                </p>
-                                            </div>
-                                            {busy ? (
-                                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                            ) : (
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            aria-label={t("inviteActions")}
-                                                            className={rowActionTrigger}
-                                                        >
-                                                            <EllipsisHorizontalIcon className="size-5" />
-                                                        </button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-44">
-                                                        <DropdownMenuItem onSelect={() => copyInviteLink(invite.token)}>
-                                                            <LinkIcon className="size-4" />
-                                                            {t("copyLink")}
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                            variant="destructive"
-                                                            onSelect={() => revoke(invite.id)}
-                                                        >
-                                                            <TrashIcon className="size-4" />
-                                                            {t("revoke")}
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            )}
-                                        </li>
-                                    );
-                                })}
-                            </ListCard>
-                        )}
-                    </div>
+                                <div className="space-y-2">
+                                    <TabListHeading title={t("pendingTitle")} count={invites.length} />
+                                    {invites.length === 0 ? (
+                                        <EmptyRow>{t("pendingEmpty")}</EmptyRow>
+                                    ) : (
+                                        <ListCard>
+                                            {invites.map((invite) => {
+                                                const busy = busyInviteId === invite.id;
+                                                return (
+                                                    <li
+                                                        key={invite.id}
+                                                        className="group flex items-center gap-3 px-4 py-3"
+                                                    >
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="truncate text-sm font-medium text-foreground">
+                                                                    {invite.email}
+                                                                </span>
+                                                                <RoleBadge
+                                                                    role={invite.role}
+                                                                    label={roleLabel(invite.role)}
+                                                                />
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {t("expires", { date: invite.expiresAt.slice(0, 10) })}
+                                                            </p>
+                                                        </div>
+                                                        {busy ? (
+                                                            <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                                        ) : (
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <button
+                                                                        type="button"
+                                                                        aria-label={t("inviteActions")}
+                                                                        className={rowActionTrigger}
+                                                                    >
+                                                                        <EllipsisHorizontalIcon className="size-5" />
+                                                                    </button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end" className="w-44">
+                                                                    <DropdownMenuItem
+                                                                        onSelect={() => copyInviteLink(invite.token)}
+                                                                    >
+                                                                        <LinkIcon className="size-4" />
+                                                                        {t("copyLink")}
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem
+                                                                        variant="destructive"
+                                                                        onSelect={() => revoke(invite.id)}
+                                                                    >
+                                                                        <TrashIcon className="size-4" />
+                                                                        {t("revoke")}
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        )}
+                                                    </li>
+                                                );
+                                            })}
+                                        </ListCard>
+                                    )}
+                                </div>
+                            </TabsContent>
 
-                    <div className="space-y-4 pt-2">
-                        <div>
-                            <SectionHeader title={t("linkTitle")} />
-                            <p className="px-6 text-sm text-muted-foreground">{t("linkSubtitle")}</p>
-                        </div>
-
-                        <form
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                createLink();
-                            }}
-                            className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                        >
-                            <Select value={linkRole} onValueChange={(v) => setLinkRole(v as WorkspaceRole)}>
-                                <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent align="start">
-                                    {selectableRoles.map((r) => (
-                                        <SelectItem key={r} value={r}>
-                                            {roleLabel(r)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Input
-                                type="number"
-                                min={1}
-                                inputMode="numeric"
-                                value={linkExpiry}
-                                onChange={(e) => setLinkExpiry(e.target.value)}
-                                placeholder={t("linkExpiryPlaceholder")}
-                                aria-label={t("linkExpiryLabel")}
-                                className="w-full sm:flex-1"
-                            />
-                            <Input
-                                type="number"
-                                min={1}
-                                inputMode="numeric"
-                                value={linkMaxUses}
-                                onChange={(e) => setLinkMaxUses(e.target.value)}
-                                placeholder={t("linkMaxUsesPlaceholder")}
-                                aria-label={t("linkMaxUsesLabel")}
-                                className="w-full sm:flex-1"
-                            />
-                            <Button
-                                type="submit"
-                                variant="brand"
-                                disabled={creatingLink}
-                                className="min-w-28"
-                            >
-                                {creatingLink ? <Loader2Icon className="size-4 animate-spin" /> : t("createLink")}
-                            </Button>
-                        </form>
-
-                        <div className="space-y-2 pt-2">
-                            <SectionHeader title={t("activeLinksTitle")} />
-                            {inviteLinks.length === 0 ? (
-                                <EmptyRow>{t("activeLinksEmpty")}</EmptyRow>
-                            ) : (
-                                <ListCard>
-                                    {inviteLinks.map((link) => {
-                                        const busy = busyLinkId === link.id;
-                                        const copied = copiedLinkId === link.id;
-                                        return (
-                                            <li key={link.id} className="group flex items-center gap-3 px-4 py-3">
-                                                <span
-                                                    aria-hidden
-                                                    className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
-                                                >
-                                                    <LinkIcon className="size-4" />
-                                                </span>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <RoleBadge role={link.role} label={roleLabel(link.role)} />
-                                                        <span className="text-xs text-muted-foreground tabular-nums">
-                                                            {link.maxUses != null
-                                                                ? t("linkUsesOf", { used: link.usedCount, max: link.maxUses })
-                                                                : t("linkUses", { count: link.usedCount })}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        {t("expires", { date: link.expiresAt.slice(0, 10) })}
-                                                    </p>
-                                                </div>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => copyShareLink(link)}
-                                                    aria-label={t("copyLink")}
-                                                >
-                                                    {copied ? (
-                                                        <CheckIcon className="size-4" />
-                                                    ) : (
-                                                        <LinkIcon className="size-4" />
-                                                    )}
-                                                    {copied ? t("linkCopied") : t("copyLink")}
-                                                </Button>
-                                                {busy ? (
-                                                    <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                                ) : (
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <button
-                                                                type="button"
-                                                                aria-label={t("linkActions")}
-                                                                className={rowActionTrigger}
-                                                            >
-                                                                <EllipsisHorizontalIcon className="size-5" />
-                                                            </button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end" className="w-44">
-                                                            <DropdownMenuItem
-                                                                variant="destructive"
-                                                                onSelect={() => revokeLink(link.id)}
-                                                            >
-                                                                <TrashIcon className="size-4" />
-                                                                {t("revoke")}
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                )}
-                                            </li>
-                                        );
-                                    })}
-                                </ListCard>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="space-y-4 pt-2">
-                        <div>
-                            <SectionHeader title={t("domainsTitle")} />
-                            <p className="px-6 text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
-                        </div>
-
-                        <form
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                addDomain();
-                            }}
-                            className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                        >
-                            <div className="flex-1">
-                                <InputGroup>
-                                    <InputGroupAddon>
-                                        <AtSymbolIcon />
-                                    </InputGroupAddon>
-                                    <InputGroupInput
-                                        value={domainInput}
-                                        onChange={(e) => {
-                                            setDomainInput(e.target.value);
-                                            clearError("domain");
-                                        }}
-                                        placeholder={t("domainPlaceholder")}
-                                        aria-label={t("domainLabel")}
-                                        aria-invalid={Boolean(fieldErrors.domain)}
+                            <TabsContent value="link" className="space-y-5">
+                                <p className="max-w-prose text-sm text-muted-foreground">{t("linkSubtitle")}</p>
+                                <form
+                                    onSubmit={(e) => {
+                                        e.preventDefault();
+                                        createLink();
+                                    }}
+                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                                >
+                                    <Select value={linkRole} onValueChange={(v) => setLinkRole(v as WorkspaceRole)}>
+                                        <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent align="start">
+                                            {selectableRoles.map((r) => (
+                                                <SelectItem key={r} value={r}>
+                                                    {roleLabel(r)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        inputMode="numeric"
+                                        value={linkExpiry}
+                                        onChange={(e) => setLinkExpiry(e.target.value)}
+                                        placeholder={t("linkExpiryPlaceholder")}
+                                        aria-label={t("linkExpiryLabel")}
+                                        className="w-full sm:flex-1"
                                     />
-                                </InputGroup>
-                                {fieldErrors.domain && (
-                                    <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
-                                )}
-                            </div>
-                            <Button
-                                type="submit"
-                                variant="brand"
-                                disabled={addingDomain || domainInput.trim().length === 0}
-                                className="min-w-28"
-                            >
-                                {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
-                            </Button>
-                        </form>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        inputMode="numeric"
+                                        value={linkMaxUses}
+                                        onChange={(e) => setLinkMaxUses(e.target.value)}
+                                        placeholder={t("linkMaxUsesPlaceholder")}
+                                        aria-label={t("linkMaxUsesLabel")}
+                                        className="w-full sm:flex-1"
+                                    />
+                                    <Button type="submit" variant="brand" disabled={creatingLink} className="min-w-28">
+                                        {creatingLink ? (
+                                            <Loader2Icon className="size-4 animate-spin" />
+                                        ) : (
+                                            t("createLink")
+                                        )}
+                                    </Button>
+                                </form>
 
-                        {allowedDomains.length === 0 ? (
-                            <EmptyRow>{t("domainsEmpty")}</EmptyRow>
-                        ) : (
-                            <ListCard>
-                                {allowedDomains.map((domain) => {
-                                    const busy = busyDomain === domain;
-                                    return (
-                                        <li key={domain} className="group flex items-center gap-3 px-4 py-3">
-                                            <span
-                                                aria-hidden
-                                                className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
-                                            >
-                                                <GlobeAltIcon className="size-4" />
-                                            </span>
-                                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                                                {domain}
-                                            </span>
-                                            {busy ? (
-                                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                            ) : (
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <button
+                                <div className="space-y-2">
+                                    <TabListHeading title={t("activeLinksTitle")} count={inviteLinks.length} />
+                                    {inviteLinks.length === 0 ? (
+                                        <EmptyRow>{t("activeLinksEmpty")}</EmptyRow>
+                                    ) : (
+                                        <ListCard>
+                                            {inviteLinks.map((link) => {
+                                                const busy = busyLinkId === link.id;
+                                                const copied = copiedLinkId === link.id;
+                                                return (
+                                                    <li
+                                                        key={link.id}
+                                                        className="group flex items-center gap-3 px-4 py-3"
+                                                    >
+                                                        <span
+                                                            aria-hidden
+                                                            className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+                                                        >
+                                                            <LinkIcon className="size-4" />
+                                                        </span>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <RoleBadge
+                                                                    role={link.role}
+                                                                    label={roleLabel(link.role)}
+                                                                />
+                                                                <span className="text-xs text-muted-foreground tabular-nums">
+                                                                    {link.maxUses != null
+                                                                        ? t("linkUsesOf", {
+                                                                              used: link.usedCount,
+                                                                              max: link.maxUses,
+                                                                          })
+                                                                        : t("linkUses", { count: link.usedCount })}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {t("expires", { date: link.expiresAt.slice(0, 10) })}
+                                                            </p>
+                                                        </div>
+                                                        <Button
                                                             type="button"
-                                                            aria-label={t("removeDomain")}
-                                                            className={rowActionTrigger}
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => copyShareLink(link)}
+                                                            aria-label={t("copyLink")}
                                                         >
-                                                            <EllipsisHorizontalIcon className="size-5" />
-                                                        </button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-44">
-                                                        <DropdownMenuItem
-                                                            variant="destructive"
-                                                            onSelect={() => removeDomain(domain)}
+                                                            {copied ? (
+                                                                <CheckIcon className="size-4" />
+                                                            ) : (
+                                                                <LinkIcon className="size-4" />
+                                                            )}
+                                                            {copied ? t("linkCopied") : t("copyLink")}
+                                                        </Button>
+                                                        {busy ? (
+                                                            <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                                        ) : (
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <button
+                                                                        type="button"
+                                                                        aria-label={t("linkActions")}
+                                                                        className={rowActionTrigger}
+                                                                    >
+                                                                        <EllipsisHorizontalIcon className="size-5" />
+                                                                    </button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end" className="w-44">
+                                                                    <DropdownMenuItem
+                                                                        variant="destructive"
+                                                                        onSelect={() => revokeLink(link.id)}
+                                                                    >
+                                                                        <TrashIcon className="size-4" />
+                                                                        {t("revoke")}
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        )}
+                                                    </li>
+                                                );
+                                            })}
+                                        </ListCard>
+                                    )}
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="domains" className="space-y-5">
+                                <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
+                                <form
+                                    onSubmit={(e) => {
+                                        e.preventDefault();
+                                        addDomain();
+                                    }}
+                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                                >
+                                    <div className="flex-1">
+                                        <InputGroup>
+                                            <InputGroupAddon>
+                                                <AtSymbolIcon />
+                                            </InputGroupAddon>
+                                            <InputGroupInput
+                                                value={domainInput}
+                                                onChange={(e) => {
+                                                    setDomainInput(e.target.value);
+                                                    clearError("domain");
+                                                }}
+                                                placeholder={t("domainPlaceholder")}
+                                                aria-label={t("domainLabel")}
+                                                aria-invalid={Boolean(fieldErrors.domain)}
+                                            />
+                                        </InputGroup>
+                                        {fieldErrors.domain && (
+                                            <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
+                                        )}
+                                    </div>
+                                    <Button
+                                        type="submit"
+                                        variant="brand"
+                                        disabled={addingDomain || domainInput.trim().length === 0}
+                                        className="min-w-28"
+                                    >
+                                        {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
+                                    </Button>
+                                </form>
+
+                                <div className="space-y-2">
+                                    <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />
+                                    {allowedDomains.length === 0 ? (
+                                        <EmptyRow>{t("domainsEmpty")}</EmptyRow>
+                                    ) : (
+                                        <ListCard>
+                                            {allowedDomains.map((domain) => {
+                                                const busy = busyDomain === domain;
+                                                return (
+                                                    <li
+                                                        key={domain}
+                                                        className="group flex items-center gap-3 px-4 py-3"
+                                                    >
+                                                        <span
+                                                            aria-hidden
+                                                            className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
                                                         >
-                                                            <TrashIcon className="size-4" />
-                                                            {t("removeDomain")}
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            )}
-                                        </li>
-                                    );
-                                })}
-                            </ListCard>
-                        )}
-                    </div>
+                                                            <GlobeAltIcon className="size-4" />
+                                                        </span>
+                                                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                                                            {domain}
+                                                        </span>
+                                                        {busy ? (
+                                                            <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                                        ) : (
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <button
+                                                                        type="button"
+                                                                        aria-label={t("removeDomain")}
+                                                                        className={rowActionTrigger}
+                                                                    >
+                                                                        <EllipsisHorizontalIcon className="size-5" />
+                                                                    </button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end" className="w-44">
+                                                                    <DropdownMenuItem
+                                                                        variant="destructive"
+                                                                        onSelect={() => removeDomain(domain)}
+                                                                    >
+                                                                        <TrashIcon className="size-4" />
+                                                                        {t("removeDomain")}
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        )}
+                                                    </li>
+                                                );
+                                            })}
+                                        </ListCard>
+                                    )}
+                                </div>
+                            </TabsContent>
+                        </Tabs>
+                    </SettingsSection>
                 </Rise>
             )}
 

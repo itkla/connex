@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import {
     emitNotificationStateChanged,
@@ -27,6 +28,8 @@ const SEEN_LIMIT = 200;
 type NotificationContextValue = {
     recipientId: number;
     unread: number;
+    snoozed: number;
+    quietHoursActive: boolean;
     refreshUnread: () => Promise<void>;
 };
 
@@ -49,6 +52,8 @@ export function NotificationProvider({
     recipientId: number;
 }) {
     const [unread, setUnread] = useState(0);
+    const [snoozed, setSnoozed] = useState(0);
+    const [quietHoursActive, setQuietHoursActive] = useState(false);
     const [connected, setConnected] = useState(false);
     const requestRef = useRef<AbortController | null>(null);
     const loadingRef = useRef(false);
@@ -80,7 +85,9 @@ export function NotificationProvider({
                 const generation = mutationGenerationRef.current;
                 requestRef.current = controller;
                 try {
+                    const requestStartedAt = performance.now();
                     const counts = await getNotificationCounts({ signal: controller.signal });
+                    const roundTripMs = performance.now() - requestStartedAt;
                     if (generation === mutationGenerationRef.current) {
                         if (counts.stateVersion < observedStateVersionRef.current && staleRetryAvailable) {
                             staleRetryAvailable = false;
@@ -93,16 +100,19 @@ export function NotificationProvider({
                             observedStateVersionRef.current = counts.stateVersion;
                             unreadRef.current = counts.unread;
                             setUnread(counts.unread);
+                            setSnoozed(counts.snoozed);
+                            setQuietHoursActive(counts.quietHoursActive);
                             if (snoozeExpiryTimerRef.current != null) {
                                 window.clearTimeout(snoozeExpiryTimerRef.current);
                                 snoozeExpiryTimerRef.current = null;
                             }
                             if (counts.nextSnoozeExpiry) {
-                                const normalized = counts.nextSnoozeExpiry.includes("T")
-                                    ? counts.nextSnoozeExpiry
-                                    : `${counts.nextSnoozeExpiry.replace(" ", "T")}Z`;
-                                const delay = Date.parse(normalized) - Date.now();
-                                if (Number.isFinite(delay)) {
+                                const delay = notificationSnoozeDelayMs(
+                                    counts.nextSnoozeExpiry,
+                                    counts.asOf,
+                                    roundTripMs,
+                                );
+                                if (delay != null) {
                                     snoozeExpiryTimerRef.current = window.setTimeout(
                                         () => {
                                             snoozeExpiryDueRef.current = true;
@@ -249,7 +259,7 @@ export function NotificationProvider({
     }, [refreshUnread]);
 
     return (
-        <NotificationContext.Provider value={{ recipientId, unread, refreshUnread }}>
+        <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread }}>
             {children}
         </NotificationContext.Provider>
     );

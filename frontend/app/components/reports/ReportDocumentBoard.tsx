@@ -1,22 +1,26 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
     ArrowDownTrayIcon,
     ArrowPathIcon,
+    ChevronDownIcon,
     ClockIcon,
     DocumentTextIcon,
+    ExclamationCircleIcon,
     PencilSquareIcon,
     PhotoIcon,
     PrinterIcon,
+    SparklesIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
+import { useReportLabels } from '@/app/components/reports/reportLabels';
 import ScheduleManager from '@/app/components/reports/ScheduleManager';
 import {
     createReportSnapshot,
@@ -26,6 +30,7 @@ import {
     generateReport,
     getReportSnapshot,
 } from '@/app/lib/api';
+import { recoverAiResult } from '@/app/lib/aiRecovery';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     ReportCitation,
@@ -37,14 +42,50 @@ import type {
     ReportSnapshotSummary,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 type DocumentState =
     | { status: 'loading' }
     | { status: 'error' }
     | { status: 'ready'; document: ReportDocument };
+
+type NarrativeState = 'idle' | 'generating' | 'error';
+
+const FIGURES_TIMEOUT_MS = 30_000;
+const NARRATIVE_TIMEOUT_MS = 90_000;
+
+/**
+ * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
+ * running (its result is cached server-side), so a timeout simply surfaces a retry affordance
+ * instead of leaving the view spinning indefinitely.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), ms);
+        promise.then(
+            (value) => { clearTimeout(timer); resolve(value); },
+            (error) => { clearTimeout(timer); reject(error); },
+        );
+    });
+}
 
 function isValidAttainmentRange(start: string, end: string, cadence: ReportDefinition['cadence']): boolean {
     const match = /^(\d{4})-(\d{2})-01$/.exec(start);
@@ -71,6 +112,7 @@ export default function ReportDocumentBoard({
     const t = useTranslations('Reports');
     const locale = useLocale();
     const [state, setState] = useState<DocumentState>({ status: 'loading' });
+    const [narrativeState, setNarrativeState] = useState<NarrativeState>('idle');
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
     const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(null);
     const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(null);
@@ -79,10 +121,12 @@ export default function ReportDocumentBoard({
     const [refreshKey, setRefreshKey] = useState(0);
     const [snapshotting, setSnapshotting] = useState(false);
     const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
+    const [snapshotPendingDelete, setSnapshotPendingDelete] = useState<ReportSnapshotSummary | null>(null);
     const [exporting, setExporting] = useState(false);
     const [exportingPng, setExportingPng] = useState(false);
     const generationInputRef = useRef<ReportGenerateInput>({});
     const snapshotRequestRef = useRef(0);
+    const generationRef = useRef(0);
     const paperRef = useRef<HTMLElement>(null);
     const hasAttainment = definition.config.widgets.some((widget) => widget.measure === 'attainment');
 
@@ -90,22 +134,71 @@ export default function ReportDocumentBoard({
         ? activeSnapshot?.computedResult ?? null
         : state.status === 'ready' ? state.document : null;
 
-    useEffect(() => {
-        let cancelled = false;
-        generateReport(definition.id, generationInputRef.current)
-            .then((generated) => {
-                if (cancelled) return;
-                setState({ status: 'ready', document: generated });
-                setStart(generated.periodStart);
-                setEnd(generated.periodEnd);
-            })
-            .catch(() => {
-                if (!cancelled) setState({ status: 'error' });
-            });
-        return () => {
-            cancelled = true;
+    /**
+     * Generates the narrative, then recovers from a request that was cut in transit. The server
+     * completes and caches the narrative regardless of whether the client still holds the
+     * connection, so a lost response is resolved by polling the provider-free cached mode rather
+     * than by surfacing an error the reader has to retry by hand.
+     */
+    const runNarrative = useCallback(async (generationId: number) => {
+        setNarrativeState('generating');
+        const apply = (document: ReportDocument) => {
+            setState({ status: 'ready', document });
+            setNarrativeState('idle');
         };
-    }, [definition.id, refreshKey]);
+        try {
+            const full = await withTimeout(
+                generateReport(definition.id, generationInputRef.current, 'full'),
+                NARRATIVE_TIMEOUT_MS,
+            );
+            if (generationRef.current !== generationId) return;
+            apply(full);
+            return;
+        } catch {
+            if (generationRef.current !== generationId) return;
+        }
+        const recovered = await recoverAiResult(
+            () => generateReport(definition.id, generationInputRef.current, 'cached'),
+            (document) => document.narrative.available,
+            () => generationRef.current !== generationId,
+        );
+        if (generationRef.current !== generationId) return;
+        if (recovered) {
+            apply(recovered);
+        } else {
+            setNarrativeState('error');
+        }
+    }, [definition.id]);
+
+    useEffect(() => {
+        const generationId = (generationRef.current += 1);
+        (async () => {
+            let figures: ReportDocument;
+            try {
+                figures = await withTimeout(
+                    generateReport(definition.id, generationInputRef.current, 'cached'),
+                    FIGURES_TIMEOUT_MS,
+                );
+            } catch {
+                if (generationRef.current === generationId) setState({ status: 'error' });
+                return;
+            }
+            if (generationRef.current !== generationId) return;
+            setState({ status: 'ready', document: figures });
+            setStart(figures.periodStart);
+            setEnd(figures.periodEnd);
+            if (figures.narrative.reason === 'not_cached') {
+                void runNarrative(generationId);
+            }
+        })();
+        return () => {
+            generationRef.current += 1;
+        };
+    }, [definition.id, refreshKey, runNarrative]);
+
+    const retryNarrative = () => {
+        void runNarrative(generationRef.current);
+    };
 
     const generationInput = (): ReportGenerateInput | null => {
         if ((start && !end) || (!start && end)) {
@@ -127,6 +220,7 @@ export default function ReportDocumentBoard({
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
         setState({ status: 'loading' });
+        setNarrativeState('idle');
         setRefreshKey((key) => key + 1);
     };
 
@@ -147,8 +241,9 @@ export default function ReportDocumentBoard({
         }
     };
 
-    const removeSnapshot = async (snapshot: ReportSnapshotSummary) => {
-        if (!window.confirm(t('document.deleteSnapshotConfirm'))) return;
+    const confirmDeleteSnapshot = async () => {
+        const snapshot = snapshotPendingDelete;
+        if (!snapshot) return;
         setDeletingSnapshotId(snapshot.id);
         if (activeSnapshotId === snapshot.id) {
             snapshotRequestRef.current += 1;
@@ -161,6 +256,7 @@ export default function ReportDocumentBoard({
                 setActiveSnapshot(null);
             }
             toastSuccess(t('document.snapshotDeleted'));
+            setSnapshotPendingDelete(null);
         } catch (error) {
             toastError(error instanceof Error ? error.message : t('common.requestFailed'));
         } finally {
@@ -244,18 +340,29 @@ export default function ReportDocumentBoard({
                             <ArchiveBoxArrowDownIcon />
                             {snapshotting ? t('document.snapshotting') : t('document.snapshot')}
                         </Button>
-                        <Button variant="outline" onClick={exportCsv} disabled={!document || exporting}>
-                            <ArrowDownTrayIcon />
-                            {t('document.csv')}
-                        </Button>
-                        <Button variant="outline" onClick={exportPng} disabled={!document || exportingPng}>
-                            <PhotoIcon />
-                            {exportingPng ? t('document.exportingPng') : t('document.png')}
-                        </Button>
-                        <Button variant="outline" onClick={() => window.print()} disabled={!document}>
-                            <PrinterIcon />
-                            {t('document.pdf')}
-                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" disabled={!document || exporting || exportingPng}>
+                                    <ArrowDownTrayIcon />
+                                    {exporting || exportingPng ? t('document.exporting') : t('document.export')}
+                                    <ChevronDownIcon className="size-4 opacity-60" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
+                                    <ArrowDownTrayIcon />
+                                    {t('document.csv')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
+                                    <PhotoIcon />
+                                    {t('document.png')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => window.print()}>
+                                    <PrinterIcon />
+                                    {t('document.pdf')}
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                         {canUpdateReports ? (
                             <Button asChild variant="brand">
                                 <Link href={`/overview/reports/${definition.id}/edit`}>
@@ -285,32 +392,40 @@ export default function ReportDocumentBoard({
                             >
                                 {t('document.live')}
                             </Button>
-                            {snapshots.map((snapshot) => (
-                                <div key={snapshot.id} className="flex shrink-0 items-center rounded-md border border-border">
-                                    <button
-                                        type="button"
-                                        onClick={() => openSnapshot(snapshot)}
-                                        aria-pressed={activeSnapshotId === snapshot.id}
-                                        className={activeSnapshotId === snapshot.id
-                                            ? 'bg-muted px-3 py-1.5 text-sm font-medium text-foreground'
-                                            : 'px-3 py-1.5 text-sm text-foreground hover:bg-muted'}
+                            {snapshots.map((snapshot) => {
+                                const active = activeSnapshotId === snapshot.id;
+                                const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+                                    .format(new Date(snapshot.generatedAt));
+                                return (
+                                    <div
+                                        key={snapshot.id}
+                                        className={cn(
+                                            'flex shrink-0 items-center rounded-full border',
+                                            active ? 'border-brand/40 bg-secondary' : 'border-border',
+                                        )}
                                     >
-                                        {new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(snapshot.generatedAt))}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeSnapshot(snapshot)}
-                                        disabled={deletingSnapshotId === snapshot.id}
-                                        aria-label={t('document.deleteSnapshotNamed', {
-                                            date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-                                                .format(new Date(snapshot.generatedAt)),
-                                        })}
-                                        className="border-l border-border p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                    >
-                                        <TrashIcon className="size-3.5" />
-                                    </button>
-                                </div>
-                            ))}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => openSnapshot(snapshot)}
+                                            aria-pressed={active}
+                                            className="rounded-l-full rounded-r-none hover:bg-transparent"
+                                        >
+                                            {dateLabel}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            onClick={() => setSnapshotPendingDelete(snapshot)}
+                                            disabled={deletingSnapshotId === snapshot.id}
+                                            aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
+                                            className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                        >
+                                            <TrashIcon className="size-3.5" />
+                                        </Button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </section>
                 ) : null}
@@ -330,9 +445,47 @@ export default function ReportDocumentBoard({
                         </Button>
                     </div>
                 ) : document ? (
-                    <ReportPaper document={document} snapshot={activeSnapshot} paperRef={paperRef} />
+                    <ReportPaper
+                        document={document}
+                        snapshot={activeSnapshot}
+                        paperRef={paperRef}
+                        narrativePhase={activeSnapshot != null
+                            ? null
+                            : narrativeState === 'generating'
+                                ? 'generating'
+                                : narrativeState === 'error'
+                                    || document.narrative.reason === 'rate_limited'
+                                    || document.narrative.reason === 'provider_error'
+                                    ? 'error'
+                                    : null}
+                        onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
+                    />
                 ) : null}
             </div>
+
+            <Dialog
+                open={snapshotPendingDelete !== null}
+                onOpenChange={(open) => !open && deletingSnapshotId === null && setSnapshotPendingDelete(null)}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t('document.deleteSnapshotTitle')}</DialogTitle>
+                        <DialogDescription>{t('document.deleteSnapshotConfirm')}</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline" disabled={deletingSnapshotId !== null}>{t('common.cancel')}</Button>
+                        </DialogClose>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmDeleteSnapshot}
+                            disabled={deletingSnapshotId !== null}
+                        >
+                            {deletingSnapshotId !== null ? t('common.deleting') : t('common.delete')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -341,13 +494,18 @@ function ReportPaper({
     document,
     snapshot,
     paperRef,
+    narrativePhase,
+    onRetryNarrative,
 }: {
     document: ReportDocument;
     snapshot: ReportSnapshot | null;
     paperRef: RefObject<HTMLElement | null>;
+    narrativePhase: 'generating' | 'error' | null;
+    onRetryNarrative?: () => void;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const { localizeLabel } = useReportLabels();
     const citationIndex = new Map(document.citations.map((citation, index) => [citation.sourceId, index + 1]));
     const layoutById = new Map(document.definition.config.layout.map((item) => [item.widgetId, item]));
     const measureLabelByWidgetId = new Map(
@@ -373,49 +531,8 @@ function ReportPaper({
     const hasPriorRows = document.appendix.some((row) =>
         measureByWidgetId.get(row.widgetId) !== 'attainment' && row.priorValue != null);
     const hasComparisonRows = document.appendix.some((row) => row.priorValue != null);
-    const localizedSourceLabel = (label: string, widgetId: string) => {
-        const display = sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId));
-        const separator = display.lastIndexOf(' · ');
-        const prefix = separator >= 0 ? display.slice(0, separator + 3) : '';
-        const value = separator >= 0 ? display.slice(separator + 3) : display;
-        const key = value.trim().toLowerCase().replaceAll(' ', '_');
-        if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(value)) {
-            const date = new Date(`${value}${value.length === 7 ? '-01' : ''}T00:00:00Z`);
-            return prefix + new Intl.DateTimeFormat(locale, {
-                timeZone: 'UTC',
-                year: 'numeric',
-                month: 'short',
-                ...(value.length === 10 ? { day: 'numeric' } : {}),
-            }).format(date);
-        }
-        const translated = (() => {
-            switch (key) {
-                case 'open': return t('status.open');
-                case 'won': return t('status.won');
-                case 'lost': return t('status.lost');
-                case 'todo': return t('status.todo');
-                case 'in_progress': return t('status.in_progress');
-                case 'done': return t('status.done');
-                case 'hot': return t('warmth.hot');
-                case 'warm': return t('warmth.warm');
-                case 'cool': return t('warmth.cool');
-                case 'cold': return t('warmth.cold');
-                case 'high': return t('risk.high');
-                case 'medium': return t('risk.medium');
-                case 'low': return t('risk.low');
-                case 'rising': return t('trend.rising');
-                case 'steady': return t('trend.steady');
-                case 'cooling': return t('trend.cooling');
-                case 'total': return t('label.total');
-                case 'unassigned': return t('label.unassigned');
-                case 'unspecified': return t('label.unspecified');
-                case 'other': return t('label.other');
-                case 'workspace-wide': return t('label.workspaceWide');
-                default: return value;
-            }
-        })();
-        return prefix + translated;
-    };
+    const localizedSourceLabel = (label: string, widgetId: string) =>
+        localizeLabel(sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId)));
     return (
         <article ref={paperRef} className="report-paper mx-auto max-w-6xl rounded-2xl border border-border bg-card px-6 py-10 shadow-sm sm:px-10 lg:px-16">
             <header className="border-b border-border pb-8">
@@ -484,6 +601,34 @@ function ReportPaper({
                                 ))}
                             </div>
                         </aside>
+                    </div>
+                ) : narrativePhase === 'generating' ? (
+                    <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed border-border px-5 py-8">
+                        <SparklesIcon className="mt-0.5 size-5 shrink-0 animate-pulse text-brand-dark motion-reduce:animate-none" aria-hidden />
+                        <div>
+                            <p className="text-sm font-medium text-foreground">{t('document.narrativeGenerating')}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('document.narrativeGeneratingBody')}</p>
+                        </div>
+                    </div>
+                ) : narrativePhase === 'error' ? (
+                    <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">
+                        <div className="flex items-start gap-3">
+                            <ExclamationCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+                            <div>
+                                <p className="text-sm font-medium text-foreground">{t('document.narrativeErrorTitle')}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    {document.narrative.reason === 'rate_limited'
+                                        ? t('document.narrativeRateLimitedBody')
+                                        : t('document.narrativeErrorBody')}
+                                </p>
+                            </div>
+                        </div>
+                        {onRetryNarrative ? (
+                            <Button className="mt-4" size="sm" variant="outline" onClick={onRetryNarrative}>
+                                <ArrowPathIcon />
+                                {t('common.retry')}
+                            </Button>
+                        ) : null}
                     </div>
                 ) : (
                     <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">

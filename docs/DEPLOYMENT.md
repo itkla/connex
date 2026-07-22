@@ -25,7 +25,7 @@ gateway mode prevents the OCR-only container from reaching the host or external 
 authenticated raw JPEG/PNG/WebP bytes from the backend, returns bounded recognized lines, and has no Caddy route.
 Paddle models are fetched from pinned BOS artifacts with SHA-256 verification while the image is
 built, then baked into the image under an explicit model-cache path; the runtime filesystem is
-read-only, and production inference never downloads models or calls an external OCR/AI provider.
+read-only, and the Paddle runtime never downloads models or calls an external OCR/AI provider.
 
 ## Prerequisites
 
@@ -76,13 +76,45 @@ docker compose up -d
 
 The same token is supplied to the backend through `.env` and to the OCR container by Compose.
 Leaving `COMPOSE_PROFILES` empty does not start the sidecar. Keeping the profile in `.env` ensures
-ordinary `pull`, `up`, `stop`, and migration commands continue to include OCR. Leaving scanning
-disabled or losing OCR readiness disables automatic extraction while
-manual image retention and reviewed import remain available when private storage is ready. Losing
+ordinary `pull`, `up`, `stop`, and migration commands continue to include OCR. Leaving local scanning
+disabled or losing OCR readiness moves eligible users to the configured-provider fallback; without an
+enabled organization provider and `AI_USE`, automatic extraction remains unavailable while manual
+image retention and reviewed import remain available when private storage is ready. Losing
 private binary-storage readiness disables both scanning and import. The OCR container is capped at two
 CPUs, 2 GiB memory, 128 processes, one concurrent inference, and eight bounded HTTP handlers by
 default (`CONNEX_OCR_MAX_REQUEST_HANDLERS`). Excess concurrent inference receives `429`, excess
-connections receive `503`, and a slow request cannot hold the inference slot. The backend uses the bearer-authenticated `/ready`
+connections receive `503`, and a slow request cannot hold the inference slot. If Paddle is unavailable,
+an authorized member may use the organization's enabled, no-training-attested AI provider as a fallback
+when instance AI is enabled. Before permitting external fallback, a scan joins or starts the local
+readiness probe for up to `CONNEX_OCR_LOCAL_FIRST_WAIT` (2 seconds by default); availability polling
+remains non-blocking. The fallback sends only the metadata-free canonical JPEG, accepts no remote image
+URL, limits it to 3.5 MB and 4096 pixels per dimension, and returns review-only structured fields.
+Readiness accepts only the explicit image-capable targets supported by each adapter: the maintained
+Bedrock Claude allowlist; exact, currently supported Vertex Claude and Gemini model/location pairs;
+and maintained OpenAI-compatible Chat Completions GPT, o-series, Gemini, and multimodal Gemma aliases
+or snapshots. Vertex global and multi-region location routes are not supported. Gemini 3.5 Flash is
+excluded because its ordinary PayGo routes require those unsupported endpoint forms, while its
+single-region routes require provider-side Provisioned Throughput that Connex configuration cannot
+verify. Provider-specific text/audio-only, retired, grandfathered, Responses-only,
+sampling-incompatible, unknown, and differently cased ids are excluded. Azure OpenAI image fallback
+remains disabled because an arbitrary deployment alias cannot be verified against the separately
+configured model id. The exact resolved provider/model/location snapshot is checked again before
+egress; unknown, text-only, retired, or location-incompatible targets degrade to manual entry without
+sending pixels. Embedded-media provider calls default to two concurrent requests globally, one per
+organization, and an exact shared 64 MiB estimated expansion budget
+(`CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS`, `CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG`, and
+`CONNEX_AI_MAX_MEDIA_WORKING_BYTES`) held through provider response parsing and released before the
+terminal audit write. OpenAI-compatible runtime readiness performs structural URL checks without DNS;
+configuration-time address validation is separately deadline- and concurrency-bounded.
+OpenAI-compatible, Bedrock, Vertex, and Google OAuth production transports pin the final validated
+address and enforce `CONNEX_AI_REQUEST_TIMEOUT_MS` as one hard wall-clock deadline covering bounded
+DNS resolution and the HTTP exchange, in addition to socket inactivity limits; Vertex token exchange
+and model invocation share that same deadline. Resolver pools are intentionally capped and fail
+closed when saturated. If native resolver calls never return, the affected fixed-host or
+organization-configured pool remains unavailable until resolution recovers or the backend restarts,
+without retaining the request's media lease past its deadline. Bedrock retries at most once under
+that same deadline, using bounded full-jitter delay for transient `500`, `503`, `429`, and retryable
+transport failures. The backend uses the bearer-authenticated `/ready`
 probe, while Docker's unauthenticated `/health` probe exposes only readiness, active-inference state,
 and an opaque per-inference generation. A persistent supervisor continuously probes the worker, terminates native startup that has
 not become ready within `CONNEX_OCR_STARTUP_TIMEOUT_SECONDS=180`, and hard-kills an active or

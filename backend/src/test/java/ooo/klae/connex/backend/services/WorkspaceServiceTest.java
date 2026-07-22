@@ -67,6 +67,18 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void lockAndRequireMember_passesForActiveMemberAndThrowsForNonMember() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Lock", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        User outsider = newUser();
+
+        assertDoesNotThrow(() -> workspaceService.lockAndRequireMember(ws.getId(), member.getId()));
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.lockAndRequireMember(ws.getId(), outsider.getId()));
+    }
+
+    @Test
     void requireRole_enforcesHierarchy() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Roles", currentUser.getId());
 

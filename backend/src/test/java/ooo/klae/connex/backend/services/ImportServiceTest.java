@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +17,9 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealStageHistory;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -23,6 +29,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.ColumnMapping;
+import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
 import ooo.klae.connex.backend.dto.ImportRequest;
 import ooo.klae.connex.backend.dto.ImportResult;
@@ -32,6 +39,8 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
     @Autowired ExportService exportService;
+    @Autowired DealLineItemService dealLineItemService;
+    @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
     @Autowired CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Autowired RoleService roleService;
@@ -58,6 +67,27 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getCreated());
         assertEquals(0, result.getUpdated());
         assertEquals(2, result.getFailed().size());
+    }
+
+    @Test
+    void recordImportsAssignNewRowsToTheCurrentActor() {
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Owned Import Person", "Email", "owned.import@x.test")),
+            "fill_empty"));
+        importService.commitCompanies(req(
+            List.of(map("Company", "name"), map("Web", "website")),
+            List.of(Map.of("Company", "Owned Import Company", "Web", "https://owned-import.test")),
+            "fill_empty"));
+
+        Person matched = personMapper.findByEmails(
+            workspace.getId(), List.of("owned.import@x.test")).getFirst();
+        Person person = personMapper.getPersonById(workspace.getId(), matched.getId());
+        Company company = companyMapper.getAllCompanies(workspace.getId()).stream()
+            .filter(candidate -> candidate.getName().equals("Owned Import Company"))
+            .findFirst().orElseThrow();
+        assertEquals(currentUser.getId(), person.getOwnerId());
+        assertEquals(currentUser.getId(), company.getOwnerId());
     }
 
     @Test
@@ -129,6 +159,82 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void dealImportPreservesValueWhenMatchedDealHasLineItems() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setName("Imported deal line " + unique());
+        lineItem.setUnitPrice(new BigDecimal("25.00"));
+        lineItem.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), lineItem);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Close", "expectedCloseDate"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Value", "2500.00",
+                "Close", "2027-12-31",
+                "Company", company.getName())),
+            "overwrite"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(1, result.getUpdated());
+        assertTrue(result.getFailed().isEmpty());
+        assertEquals(1000.0, updated.getValue());
+        assertEquals("2027-12-31", updated.getExpectedCloseDate());
+    }
+
+    @Test
+    void dealImport_closedAtIngestStage_recordsConversionIneligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage wonStage = new Stage();
+        wonStage.setName("Won " + unique());
+        wonStage.setPipeline(pipeline);
+        wonStage.setPosition(0);
+        wonStage.setWorkspaceId(workspace.getId());
+        wonStage.setSuccess(true);
+        pipelineMapper.insertStage(wonStage);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of("Deal", "Closed Import " + unique(), "Pipe", pipeline.getName(), "Stage", wonStage.getName())),
+            "fill_empty"));
+        assertEquals(1, result.getCreated());
+
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertEquals(Boolean.TRUE, deals.get(0).getWon());
+        List<DealStageHistory> history = dealStageHistoryService.getHistory(deals.get(0).getId());
+        assertEquals(1, history.size());
+        assertFalse(history.get(0).isConversionEligible());
+    }
+
+    @Test
+    void dealImport_openStage_recordsConversionEligibleInitialHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of("Deal", "Open Import " + unique(), "Pipe", pipeline.getName(), "Stage", stage.getName())),
+            "fill_empty"));
+        assertEquals(1, result.getCreated());
+
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertNull(deals.get(0).getWon());
+        List<DealStageHistory> history = dealStageHistoryService.getHistory(deals.get(0).getId());
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).isConversionEligible());
+    }
+
+    @Test
     void dealImport_reportsUnknownStage() {
         newPipeline();
         ImportResult result = importService.commitDeals(req(
@@ -152,7 +258,8 @@ class ImportServiceTest extends AbstractServiceTest {
     void exportCompanies_byIdsReturnsOnlySelected() {
         Company a = newCompany();
         Company b = newCompany();
-        String csv = exportService.exportCompanies(null, List.of(a.getId()));
+        String csv = exportService.exportCompanies(
+            null, null, false, List.of(a.getId()), MemberScope.allTeam());
         assertTrue(csv.contains(a.getName()), "selected company present");
         assertTrue(!csv.contains(b.getName()), "unselected company absent");
     }
@@ -164,7 +271,7 @@ class ImportServiceTest extends AbstractServiceTest {
             List.of(Map.of("Name", "=SUM(A1:A2)", "Email", "danger@x.test")),
             "fill_empty"));
 
-        String csv = exportService.exportPersons(null, null, null, false);
+        String csv = exportService.exportPersons(null, null, null, false, MemberScope.allTeam());
 
         assertTrue(csv.startsWith("id,name,email"), "header present");
         assertTrue(csv.contains("'=SUM(A1:A2)"), "formula prefixed with apostrophe");

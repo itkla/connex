@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.RowError;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -62,6 +63,7 @@ public class ImportService {
     private final CompanyMapper companyMapper;
     private final CompanyService companyService;
     private final DealMapper dealMapper;
+    private final DealLineItemMapper dealLineItemMapper;
     private final TagMapper tagMapper;
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
@@ -135,6 +137,7 @@ public class ImportService {
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportResult commitPersons(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzePersons(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
@@ -159,6 +162,7 @@ public class ImportService {
             }
             Person bean = new Person();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));
@@ -270,6 +274,7 @@ public class ImportService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportResult commitCompanies(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzeCompanies(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
@@ -293,6 +298,7 @@ public class ImportService {
             }
             Company bean = new Company();
             bean.setWorkspaceId(workspaceId);
+            bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setWebsite(row.std.get("website"));
             bean.setIndustry(row.std.get("industry"));
@@ -435,8 +441,8 @@ public class ImportService {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
                 if (bean.getStageId() != null) {
-                    dealStageHistoryService.recordTransition(
-                        workspaceId, bean.getId(), bean.getStageId(), null, bean.getWon());
+                    dealStageHistoryService.recordInitial(
+                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon());
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
@@ -483,7 +489,7 @@ public class ImportService {
     private void applyDealUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName, Map<String, Integer> companyByName,
             Map<String, Integer> personByEmail, Map<Integer, String> stageOutcome) {
-        Deal existing = dealMapper.getDealById(workspaceId, row.matchedId);
+        Deal existing = dealMapper.getDealByIdForUpdate(workspaceId, row.matchedId);
         if (existing == null) return;
         Integer beforeStageId = existing.getStageId();
         Boolean beforeOutcome = existing.getWon();
@@ -491,7 +497,8 @@ public class ImportService {
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
         String value = row.std.get("value");
-        if (value != null && (OVERWRITE.equals(action) || existing.getValue() == 0d)) {
+        boolean shouldUpdateValue = value != null && (OVERWRITE.equals(action) || existing.getValue() == 0d);
+        if (shouldUpdateValue && dealLineItemMapper.countByDealIdForUpdate(workspaceId, existing.getId()) == 0) {
             existing.setValue(parseValue(value));
         }
         Integer companyId = companyByName.get(normName(row.companyName));

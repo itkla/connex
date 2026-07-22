@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 /**
@@ -17,7 +18,7 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 public interface NotificationMapper {
     default List<Notification> findPage(
         int recipientId,
-        String state,
+        String status,
         String category,
         String contextType,
         Integer contextId,
@@ -26,8 +27,11 @@ public interface NotificationMapper {
     ) {
         return findPage(
             recipientId,
-            state,
-            category,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
             contextType,
             contextId,
             getDatabaseUtcTimestamp(),
@@ -38,8 +42,11 @@ public interface NotificationMapper {
 
     List<Notification> findPage(
         @Param("recipientId") int recipientId,
-        @Param("state") String state,
-        @Param("category") String category,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
         @Param("contextType") String contextType,
         @Param("contextId") Integer contextId,
         @Param("asOf") String asOf,
@@ -47,17 +54,45 @@ public interface NotificationMapper {
         @Param("offset") int offset
     );
 
+    default List<Notification> findPage(
+        int recipientId,
+        String status,
+        String category,
+        String contextType,
+        Integer contextId,
+        String asOf,
+        int limit,
+        int offset
+    ) {
+        return findPage(
+            recipientId,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
+            contextType,
+            contextId,
+            asOf,
+            limit,
+            offset
+        );
+    }
+
     default long countPage(
         int recipientId,
-        String state,
+        String status,
         String category,
         String contextType,
         Integer contextId
     ) {
         return countPage(
             recipientId,
-            state,
-            category,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
             contextType,
             contextId,
             getDatabaseUtcTimestamp()
@@ -66,12 +101,36 @@ public interface NotificationMapper {
 
     long countPage(
         @Param("recipientId") int recipientId,
-        @Param("state") String state,
-        @Param("category") String category,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
         @Param("contextType") String contextType,
         @Param("contextId") Integer contextId,
         @Param("asOf") String asOf
     );
+
+    default long countPage(
+        int recipientId,
+        String status,
+        String category,
+        String contextType,
+        Integer contextId,
+        String asOf
+    ) {
+        return countPage(
+            recipientId,
+            status,
+            null,
+            category == null ? null : List.of(category),
+            null,
+            null,
+            contextType,
+            contextId,
+            asOf
+        );
+    }
 
     NotificationCountsDto getUnreadCounts(
         @Param("recipientId") int recipientId,
@@ -81,6 +140,12 @@ public interface NotificationMapper {
     default NotificationCountsDto getUnreadCounts(int recipientId) {
         return getUnreadCounts(recipientId, getDatabaseUtcTimestamp());
     }
+
+    List<FacetCount> countsByCategory(@Param("recipientId") int recipientId);
+
+    List<FacetCount> countsBySeverity(@Param("recipientId") int recipientId);
+
+    List<FacetCount> countsByWorkspace(@Param("recipientId") int recipientId);
 
     String getNextSnoozeExpiry(
         @Param("recipientId") int recipientId,
@@ -98,6 +163,11 @@ public interface NotificationMapper {
     String getDatabaseUtcTimestamp();
 
     Notification findById(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
+    Notification findByIdForUpdate(
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
@@ -122,10 +192,20 @@ public interface NotificationMapper {
         @Param("id") int id
     );
 
+    default int snooze(int recipientId, int id, String snoozedUntil) {
+        return snooze(recipientId, id, snoozedUntil, "UTC");
+    }
+
     int snooze(
         @Param("recipientId") int recipientId,
         @Param("id") int id,
-        @Param("snoozedUntil") String snoozedUntil
+        @Param("snoozedUntil") String snoozedUntil,
+        @Param("snoozeTimezone") String snoozeTimezone
+    );
+
+    int unsnooze(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
     );
 
     int markAllRead(
@@ -136,9 +216,14 @@ public interface NotificationMapper {
 
     int upsert(Notification notification);
 
+    int claimEmailDelivery(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("dedupeKey") String dedupeKey
+    );
+
     /**
-     * Slim projection of an existing notification matched by dedupe key: only
-     * {@code id}, {@code severity} and {@code resolvedAt} are populated — enough to
+     * Returns an existing notification matched by dedupe key so delivery can
      * classify a re-delivery as brand-new, materially changed, or an idempotent
      * no-op. Returns {@code null} when no row matches.
      */

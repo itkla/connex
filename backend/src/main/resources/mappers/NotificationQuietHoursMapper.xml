@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper">
+
+  <resultMap id="NotificationQuietHoursResult" type="NotificationQuietHours">
+    <id property="userId" column="user_id"/>
+    <result property="enabled" column="enabled"/>
+    <result property="timezone" column="timezone"/>
+    <result property="startLocal" column="start_local"/>
+    <result property="endLocal" column="end_local"/>
+    <result property="daysMask" column="days_mask"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="findByUserId" resultMap="NotificationQuietHoursResult">
+    SELECT user_id, enabled, timezone,
+           DATE_FORMAT(start_local, '%H:%i') AS start_local,
+           DATE_FORMAT(end_local, '%H:%i') AS end_local,
+           days_mask, created_at, updated_at
+    FROM notification_quiet_hours
+    WHERE user_id = #{userId}
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO notification_quiet_hours (
+      user_id, enabled, timezone, start_local, end_local, days_mask
+    )
+    VALUES (
+      #{userId}, #{enabled}, #{timezone}, #{startLocal}, #{endLocal}, #{daysMask}
+    ) AS incoming
+    ON DUPLICATE KEY UPDATE
+      enabled = incoming.enabled,
+      timezone = incoming.timezone,
+      start_local = incoming.start_local,
+      end_local = incoming.end_local,
+      days_mask = incoming.days_mask
+  </insert>
+</mapper>

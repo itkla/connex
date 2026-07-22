@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -12,18 +16,25 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class WorkspaceNotificationLockOrderTest {
     @Mock private WorkspaceMapper workspaceMapper;
+    @Mock private UserMapper userMapper;
     @Mock private OrganizationMapper organizationMapper;
     @Mock private OrgMemberService orgMemberService;
     @Mock private OrgAllowedDomainService orgAllowedDomainService;
@@ -115,23 +126,261 @@ class WorkspaceNotificationLockOrderTest {
     }
 
     @Test
-    void ownerDemotionUsesTheSameWorkspaceMembershipOwnerOrder() {
-        MemberDto target = new MemberDto();
-        target.setDisplayName("Target");
-        target.setRole("owner");
-        when(workspaceMapper.getMember(7, 9)).thenReturn(target);
-        when(workspaceMapper.getMemberRoleId(7, 1)).thenReturn(null);
-        when(workspaceMapper.getRole(7, 1)).thenReturn("owner");
-        when(workspaceMapper.workspaceIdsOwnedBy(9)).thenReturn(List.of(3, 7));
+    void accountDeletionLocksOwnedAndWorkflowWorkspaceRootsInOneAscendingOrder() {
+        service.lockAccountWorkspaceRoots(List.of(9, 3), List.of(7, 2, 9));
+
+        InOrder order = inOrder(workspaceMapper);
+        order.verify(workspaceMapper).lockWorkspaceForShare(2);
+        order.verify(workspaceMapper).lockWorkspace(3);
+        order.verify(workspaceMapper).lockWorkspaceForShare(7);
+        order.verify(workspaceMapper).lockWorkspace(9);
+    }
+
+    @Test
+    void ownerPromotionLocksSortedUsersWorkspaceAndSortedMembershipsBeforeRoleEvaluation() {
+        stubOwnerActor();
+        stubRoleMutationTarget("member");
+
+        service.changeMemberRole(7, 1, 9, "owner");
+
+        InOrder order = inOrder(workspaceMapper, userMapper, sessionSecurityService);
+        order.verify(workspaceMapper).getMemberRoleId(7, 1);
+        order.verify(workspaceMapper).getRole(7, 1);
+        order.verify(sessionSecurityService).requireRecentAuthentication(1);
+        order.verify(userMapper).lockById(1);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).updateMemberRole(7, 9, "owner");
+    }
+
+    @Test
+    void builtInRoleChangeLocksUserWorkspaceAndMembershipBeforeMutation() {
+        stubOwnerActor();
+        stubRoleMutationTarget("member");
+
+        service.changeMemberRole(7, 1, 9, "admin");
+
+        InOrder order = inOrder(workspaceMapper, userMapper, sessionSecurityService);
+        order.verify(workspaceMapper).getMemberRoleId(7, 1);
+        order.verify(workspaceMapper).getRole(7, 1);
+        order.verify(sessionSecurityService).requireRecentAuthentication(1);
+        order.verify(userMapper).lockById(1);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(workspaceMapper).updateMemberRole(7, 9, "admin");
+    }
+
+    @Test
+    void customRoleAssignmentLocksSortedUsersMembershipsRolesAndCurrentPermissions() {
+        WorkspaceMember targetMembership = membership(1, "member", null, "active");
+        WorkspaceMember actorMembership = membership(9, "member", 11, "active");
+        MemberDto target = member("Target", "member", "active");
+        when(workspaceMapper.getMemberRoleId(7, 9)).thenReturn(11);
+        when(roleMapper.findPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 1)).thenReturn(targetMembership);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(7, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+        when(roleMapper.lockPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(workspaceMapper.getMember(7, 1)).thenReturn(target);
+
+        service.assignCustomRole(7, 9, 1, 5);
+
+        InOrder order = inOrder(workspaceMapper, userMapper, roleMapper, sessionSecurityService);
+        order.verify(workspaceMapper).getMemberRoleId(7, 9);
+        order.verify(roleMapper).findPermissions(7, 11);
+        order.verify(sessionSecurityService).requireRecentAuthentication(9);
+        order.verify(userMapper).lockById(1);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(roleMapper).lockRole(7, 5);
+        order.verify(roleMapper).lockRole(7, 11);
+        order.verify(roleMapper).lockPermissions(7, 5);
+        order.verify(roleMapper).lockPermissions(7, 11);
+        order.verify(workspaceMapper).getMember(7, 1);
+        order.verify(workspaceMapper).setMemberCustomRole(7, 1, 5);
+    }
+
+    @Test
+    void roleDeletionAuthorizationLocksActorWorkspaceMembershipRolesAndPermissions() {
+        WorkspaceMember actorMembership = membership(9, "member", 11, "active");
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(7, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+        when(roleMapper.lockPermissions(7, 11)).thenReturn(List.of(Permission.ROLE_MANAGE.name()));
+
+        service.lockRoleDeletionAuthorization(7, 9, 5);
+
+        InOrder order = inOrder(workspaceMapper, userMapper, roleMapper);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(roleMapper).lockRole(7, 5);
+        order.verify(roleMapper).lockRole(7, 11);
+        order.verify(roleMapper).lockPermissions(7, 5);
+        order.verify(roleMapper).lockPermissions(7, 11);
+    }
+
+    @Test
+    void roleDeletionAuthorizationDistinguishesMissingTargetRole() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, "owner", null, "active"));
+        when(roleMapper.lockRole(7, 5)).thenReturn(null);
+
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> service.lockRoleDeletionAuthorization(7, 9, 5));
+
+        verify(roleMapper, never()).lockPermissions(7, 5);
+    }
+
+    @Test
+    void roleDeletionAuthorizationFailsClosedOnRevokedCurrentPermission() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, "member", 11, "active"));
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(7, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+        when(roleMapper.lockPermissions(7, 11)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> service.lockRoleDeletionAuthorization(7, 9, 5));
+    }
+
+    @Test
+    void ownerDemotionUsesExactUserWorkspaceMembershipOwnerOrder() {
+        stubOwnerActor();
+        stubRoleMutationTarget("owner");
         when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(1, 9));
 
         service.changeMemberRole(7, 1, 9, "member");
 
-        InOrder order = inOrder(workspaceMapper, notificationMapper);
-        order.verify(workspaceMapper).lockWorkspace(3);
+        InOrder order = inOrder(workspaceMapper, userMapper);
+        order.verify(userMapper).lockById(1);
+        order.verify(userMapper).lockById(9);
         order.verify(workspaceMapper).lockWorkspace(7);
-        order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(workspaceMapper).lockOwnerIds(7);
         order.verify(workspaceMapper).updateMemberRole(7, 9, "member");
+        verify(workspaceMapper, never()).workspaceIdsOwnedBy(9);
+        verifyNoInteractions(notificationMapper);
+    }
+
+    @Test
+    void approveMembershipLocksUserWorkspaceAndPendingMembershipBeforeActivation() {
+        WorkspaceMember membership = membership(9, "member", null, "pending");
+        MemberDto pending = member("Pending", "member", "pending");
+        pending.setEmail("pending@example.com");
+        WorkspaceMembershipDto activated = new WorkspaceMembershipDto(7, "Workspace", "workspace", "member");
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(membership);
+        when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
+        when(workspaceMapper.getOrgId(7)).thenReturn(3);
+        when(orgAllowedDomainService.isJoinAllowed(3, "pending@example.com")).thenReturn(true);
+        when(workspaceMapper.activateMember(7, 9)).thenReturn(1);
+        when(workspaceMapper.getMembershipsForUser(9)).thenReturn(List.of(activated));
+
+        service.approveMembership(7, 9);
+
+        InOrder order = inOrder(
+            userMapper,
+            workspaceMapper,
+            orgAllowedDomainService,
+            stateVersionService,
+            auditService);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(workspaceMapper).getOrgId(7);
+        order.verify(orgAllowedDomainService).isJoinAllowed(3, "pending@example.com");
+        order.verify(workspaceMapper).activateMember(7, 9);
+        order.verify(stateVersionService).markChanged(9);
+        order.verify(auditService).record(
+            "workspace.member.join", "workspace", 7, null, "Accepted invitation", null);
+    }
+
+    @Test
+    void approveMembershipRejectsCurrentActiveMembershipBeforeDomainOrActivation() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, "member", null, "active"));
+
+        assertThrows(ResourceNotFoundException.class, () -> service.approveMembership(7, 9));
+
+        verifyNoInteractions(orgAllowedDomainService);
+        verify(workspaceMapper, never()).activateMember(7, 9);
+    }
+
+    @Test
+    void approveMembershipFailsClosedWhenLockedPendingMemberCannotBeLoaded() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, "member", null, "pending"));
+
+        assertThrows(ResourceNotFoundException.class, () -> service.approveMembership(7, 9));
+
+        verifyNoInteractions(orgAllowedDomainService);
+        verify(workspaceMapper, never()).activateMember(7, 9);
+    }
+
+    private void stubOwnerActor() {
+        when(workspaceMapper.getMemberRoleId(7, 1)).thenReturn(null);
+        when(workspaceMapper.getRole(7, 1)).thenReturn("owner");
+        when(userMapper.lockById(1)).thenReturn(1);
+        when(workspaceMapper.lockAuthorizationMembership(7, 1))
+            .thenReturn(membership(1, "owner", null, "active"));
+    }
+
+    private void stubRoleMutationTarget(String role) {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, role, null, "active"));
+        when(workspaceMapper.getMember(7, 9)).thenReturn(member("Target", role, "active"));
+    }
+
+    private static WorkspaceMember membership(
+            int userId, String role, Integer roleId, String status) {
+        WorkspaceMember membership = new WorkspaceMember();
+        membership.setWorkspaceId(7);
+        membership.setUserId(userId);
+        membership.setRole(role);
+        membership.setRoleId(roleId);
+        membership.setStatus(status);
+        return membership;
+    }
+
+    private static MemberDto member(String displayName, String role, String status) {
+        MemberDto member = new MemberDto();
+        member.setDisplayName(displayName);
+        member.setRole(role);
+        member.setStatus(status);
+        return member;
     }
 }

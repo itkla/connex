@@ -14,6 +14,7 @@ public class RequestBodySizeProperties {
     private long uploadMaxBodyBytes = 27L * 1024L * 1024L;
     private long businessCardMaxBodyBytes = 12L * 1024L * 1024L;
     private long webauthnMaxBodyBytes = 64L * 1024L;
+    private long workflowMaxBodyBytes = 96L * 1024L;
     private long formMaxBodyBytes = 1L * 1024L * 1024L;
 
     public long getMaxBodyBytes() {
@@ -44,6 +45,14 @@ public class RequestBodySizeProperties {
         return webauthnMaxBodyBytes;
     }
 
+    public long getWorkflowMaxBodyBytes() {
+        return workflowMaxBodyBytes;
+    }
+
+    public void setWorkflowMaxBodyBytes(long workflowMaxBodyBytes) {
+        this.workflowMaxBodyBytes = workflowMaxBodyBytes;
+    }
+
     public long getUploadMaxBodyBytes() {
         return uploadMaxBodyBytes;
     }
@@ -65,6 +74,8 @@ public class RequestBodySizeProperties {
     }
 
     public long getLargestBodyLimit() {
-        return Math.max(Math.max(maxBodyBytes, importMaxBodyBytes), webauthnMaxBodyBytes);
+        return Math.max(
+            Math.max(Math.max(maxBodyBytes, importMaxBodyBytes), webauthnMaxBodyBytes),
+            workflowMaxBodyBytes);
     }
 }

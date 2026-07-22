@@ -172,7 +172,9 @@ public class SecurityConfig {
                     .ignoringRequestMatchers(
                         "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                         "/api/auth/forgot-password", "/api/auth/reset-password",
-                        "/api/auth/webauthn/authenticate/**");
+                        "/api/auth/webauthn/authenticate/**",
+                        "/api/delivery/unsubscribe/**",
+                        "/api/delivery/webhooks/**");
                 if (oauthEnabled) {
                     csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm");
                 }
@@ -188,6 +190,8 @@ public class SecurityConfig {
                 auth.requestMatchers(HttpMethod.GET, "/api/version").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
+                    .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
+                    .requestMatchers("/api/delivery/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers("/api/auth/**").permitAll();

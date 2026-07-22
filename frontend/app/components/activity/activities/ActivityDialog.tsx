@@ -1,11 +1,11 @@
 'use client';
 
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 import {
     ResponsiveDialog,
@@ -24,6 +24,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import { ACTIVITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import {
     DialogStatusCover,
@@ -34,15 +40,26 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createActivity, isFieldError } from '@/app/lib/api';
+import { ApiError, createActivity, createTask, isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
+import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
     ACTIVITY_TYPES,
     ActivityTypePicker,
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
 import type { Contact, Deal } from '@/app/lib/types';
+
+/** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
+export type ActivityDraftData = {
+    type: ActivityType;
+    subject: string;
+    notes: string;
+    personId: number | null;
+    dealId: number | null;
+};
 
 type Props = {
     open: boolean;
@@ -60,6 +77,7 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    requestInit?: RequestInit;
 };
 
 function nowLocalValue(): string {
@@ -67,6 +85,20 @@ function nowLocalValue(): string {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** Formats a Date as the `YYYY-MM-DD` local calendar value an `<input type="date">` expects. */
+function toDateInputValue(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Relative-due-date presets for the follow-up task, in days from today. */
+const FOLLOW_UP_PRESETS = [
+    { key: 'today', days: 0 },
+    { key: 'tomorrow', days: 1 },
+    { key: 'inThreeDays', days: 3 },
+    { key: 'nextWeek', days: 7 },
+] as const;
 
 export default function ActivityDialog({
     open,
@@ -80,13 +112,26 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requestInit,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
+    const { activeWorkspaceId } = useWorkspace();
     const submittingRef = useRef(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
+    const draft = useFormDraft<ActivityDraftData>({
+        keyParts: {
+            userId: currentUserId,
+            workspaceId: activeWorkspaceId,
+            formType: 'activity',
+            scope: 'global',
+        },
+        version: DRAFT_VERSIONS.activity,
+    });
 
     const handleOpenChange = (next: boolean) => {
         if (!next && submittingRef.current) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const [prevOpen, setPrevOpen] = useState(open);
@@ -94,32 +139,47 @@ export default function ActivityDialog({
     if (open !== prevOpen) {
         setPrevOpen(open);
         if (open) setOpenCount((count) => count + 1);
+        else setIsDirty(false);
     }
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
-                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
-                <ActivityDialogForm
-                    key={openCount}
-                    persons={persons}
-                    deals={deals}
-                    currentUserId={currentUserId}
-                    defaultPerson={defaultPerson}
-                    defaultDeal={defaultDeal}
-                    defaultTimestamp={defaultTimestamp}
-                    defaultType={defaultType}
-                    defaultSubject={defaultSubject}
-                    defaultNotes={defaultNotes}
-                    onSubmittingChange={(value) => {
-                        submittingRef.current = value;
-                    }}
-                    onCancel={() => onOpenChange(false)}
-                    onClose={() => onOpenChange(false)}
-                />
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                    <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                    <ActivityDialogForm
+                        key={openCount}
+                        persons={persons}
+                        deals={deals}
+                        currentUserId={currentUserId}
+                        defaultPerson={defaultPerson}
+                        defaultDeal={defaultDeal}
+                        defaultTimestamp={defaultTimestamp}
+                        defaultType={defaultType}
+                        defaultSubject={defaultSubject}
+                        defaultNotes={defaultNotes}
+                        requestInit={requestInit}
+                        onSubmittingChange={(value) => {
+                            submittingRef.current = value;
+                        }}
+                        onDirtyChange={setIsDirty}
+                        onPersistDraft={draft.persist}
+                        onClearDraft={draft.clear}
+                        onCancel={guard.requestClose}
+                        onClose={() => onOpenChange(false)}
+                    />
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={() => {
+                    draft.clear();
+                    guard.confirm.onDiscard();
+                }}
+            />
+        </>
     );
 }
 
@@ -133,7 +193,14 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
+    onDirtyChange?: (dirty: boolean) => void;
+    /** Persists the current draft snapshot; called while the form holds unsaved edits. */
+    onPersistDraft?: (data: ActivityDraftData) => void;
+    /** Clears the persisted draft; called once the create succeeds. */
+    onClearDraft?: () => void;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
     /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
@@ -155,7 +222,11 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requestInit,
     onSubmittingChange,
+    onDirtyChange,
+    onPersistDraft,
+    onClearDraft,
     onCancel,
     onClose,
 }: ActivityDialogFormProps) {
@@ -170,7 +241,55 @@ export function ActivityDialogForm({
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [followUpEnabled, setFollowUpEnabled] = useState(false);
+    const [followUpDescription, setFollowUpDescription] = useState('');
+    const [followUpDueDate, setFollowUpDueDate] = useState('');
+    const [followUpFailed, setFollowUpFailed] = useState(false);
+    const activityCreatedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const enableFollowUp = () => {
+        setFollowUpEnabled(true);
+        if (!followUpDescription) setFollowUpDescription(subject);
+    };
+
+    const [initial] = useState(() => ({
+        subject,
+        notes,
+        type,
+        when,
+        personId: selectedPerson?.id ?? null,
+        dealId: selectedDeal?.id ?? null,
+    }));
+    const dirty =
+        !submitting &&
+        !succeeded &&
+        !followUpFailed &&
+        (subject !== initial.subject ||
+            notes !== initial.notes ||
+            type !== initial.type ||
+            when !== initial.when ||
+            (selectedPerson?.id ?? null) !== initial.personId ||
+            (selectedDeal?.id ?? null) !== initial.dealId ||
+            followUpEnabled);
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
+
+    useEffect(() => {
+        if (!dirty || (!subject.trim() && !notes.trim())) return;
+        onPersistDraft?.({
+            type,
+            subject,
+            notes,
+            personId: selectedPerson?.id ?? null,
+            dealId: selectedDeal?.id ?? null,
+        });
+    }, [dirty, type, subject, notes, selectedPerson, selectedDeal, onPersistDraft]);
+
+    useEffect(() => {
+        if (succeeded || followUpFailed) onClearDraft?.();
+    }, [succeeded, followUpFailed, onClearDraft]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -184,20 +303,51 @@ export function ActivityDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createActivity({
-                type,
-                subject: subject.trim(),
-                notes: notes.trim() || undefined,
-                createdById: currentUserId,
-                timestamp: when ? toMysqlDateTime(when) : undefined,
-                personId: selectedPerson?.id ?? undefined,
-                dealId: selectedDeal?.id ?? undefined,
-            });
-            toastSuccess(t('toastCreated'));
+            if (!activityCreatedRef.current) {
+                await createActivity(
+                    {
+                        type,
+                        subject: subject.trim(),
+                        notes: notes.trim() || undefined,
+                        createdById: currentUserId,
+                        timestamp: when ? toMysqlDateTime(when) : undefined,
+                        personId: selectedPerson?.id ?? undefined,
+                        dealId: selectedDeal?.id ?? undefined,
+                    },
+                    requestInit,
+                );
+                if (requestInit?.signal?.aborted) return;
+                activityCreatedRef.current = true;
+            }
+            if (followUpEnabled) {
+                try {
+                    await createTask(
+                        {
+                            description: (followUpDescription.trim() || subject.trim()),
+                            dueDate: followUpDueDate || undefined,
+                            assignedToId: currentUserId,
+                            personId: selectedPerson?.id ?? undefined,
+                            dealId: selectedDeal?.id ?? undefined,
+                        },
+                        requestInit,
+                    );
+                    if (requestInit?.signal?.aborted) return;
+                } catch (taskErr) {
+                    if (requestInit?.signal?.aborted) return;
+                    setFollowUpFailed(true);
+                    const message = taskErr instanceof ApiError ? taskErr.message : t('toastFollowUpFailed');
+                    toastError(message);
+                    router.refresh();
+                    return;
+                }
+            }
+            setFollowUpFailed(false);
+            toastSuccess(followUpEnabled ? t('toastCreatedWithTask') : t('toastCreated'));
             setSucceeded(true);
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
+            if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
                     const firstKey = Object.keys(err.fieldErrors)[0];
@@ -211,8 +361,10 @@ export function ActivityDialogForm({
                 err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
             toastError(message);
         } finally {
-            setSubmitting(false);
-            onSubmittingChange(false);
+            if (!requestInit?.signal?.aborted) {
+                setSubmitting(false);
+                onSubmittingChange(false);
+            }
         }
     };
 
@@ -236,13 +388,23 @@ export function ActivityDialogForm({
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDown={(e) => {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded) {
+                            e.preventDefault();
+                            e.currentTarget.requestSubmit();
+                        }
+                    }}
+                    className="grid gap-5"
+                >
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label>{t('typeLabel')}</Label>
                         <ActivityTypePicker
                             value={type}
                             onChange={setType}
                             getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                            disabled={followUpFailed}
                         />
                     </div>
 
@@ -262,6 +424,7 @@ export function ActivityDialogForm({
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.subject && fieldErrorClass)}
                                 aria-invalid={Boolean(fieldErrors.subject)}
                                 aria-describedby={fieldErrors.subject ? 'activity-subject-error' : undefined}
+                                disabled={followUpFailed}
                                 autoFocus
                                 required
                             />
@@ -278,6 +441,7 @@ export function ActivityDialogForm({
                                 type="datetime-local"
                                 value={when}
                                 onChange={(e) => setWhen(e.target.value)}
+                                disabled={followUpFailed}
                                 className={cn(fieldInputClass, 'pl-9 pr-3')}
                             />
                         </div>
@@ -285,13 +449,17 @@ export function ActivityDialogForm({
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                         <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
-                        <div className="group relative">
+                        <div className={cn('group relative', followUpFailed && 'pointer-events-none opacity-60')}>
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
                             <MentionEditor
                                 id="activity-notes"
                                 value={notes}
                                 onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
+                                commands={ACTIVITY_COMMANDS}
+                                onRunAction={(actionId) => {
+                                    if (actionId === 'followUp') enableFollowUp();
+                                }}
                                 className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
@@ -309,6 +477,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-person"
                                     placeholder={t('personPlaceholder')}
+                                    disabled={followUpFailed}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -339,6 +508,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-deal"
                                     placeholder={t('dealPlaceholder')}
+                                    disabled={followUpFailed}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -359,6 +529,82 @@ export function ActivityDialogForm({
                         </div>
                     </div>
 
+                    <div className="ncd-rise grid gap-2" style={{ animationDelay: '315ms' }}>
+                        {!followUpEnabled ? (
+                            <button
+                                type="button"
+                                onClick={enableFollowUp}
+                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            >
+                                <CheckCircleIcon className="size-4" />
+                                {t('followUpAdd')}
+                            </button>
+                        ) : (
+                            <div className="grid gap-3 rounded-xl border border-border bg-muted/40 p-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                        <CheckCircleIcon className="size-4 text-brand" />
+                                        {t('followUpTitle')}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setFollowUpEnabled(false);
+                                            setFollowUpFailed(false);
+                                        }}
+                                        className="text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
+                                    >
+                                        {t('followUpRemove')}
+                                    </button>
+                                </div>
+                                {followUpFailed && (
+                                    <p className="rounded-lg bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">{t('followUpFailedNote')}</p>
+                                )}
+                                <input
+                                    type="text"
+                                    value={followUpDescription}
+                                    onChange={(e) => setFollowUpDescription(e.target.value)}
+                                    placeholder={t('followUpDescriptionPlaceholder')}
+                                    className={cn(fieldInputClass, 'px-3')}
+                                    aria-label={t('followUpDescriptionLabel')}
+                                />
+                                <div className="flex flex-col gap-2">
+                                    <span className="text-xs text-muted-foreground">{t('followUpDueLabel')}</span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        {FOLLOW_UP_PRESETS.map((preset) => {
+                                            const value = toDateInputValue(addDays(startOfDay(new Date()), preset.days));
+                                            const active = followUpDueDate === value;
+                                            return (
+                                                <button
+                                                    key={preset.key}
+                                                    type="button"
+                                                    onClick={() => setFollowUpDueDate(active ? '' : value)}
+                                                    aria-pressed={active}
+                                                    className={cn(
+                                                        'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+                                                        active ? 'bg-brand-light text-brand-dark ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
+                                                    )}
+                                                >
+                                                    {t(`followUp_${preset.key}` as 'followUp_today')}
+                                                </button>
+                                            );
+                                        })}
+                                        <div className="group relative">
+                                            <ClockIcon className={fieldLeadIconClass} />
+                                            <input
+                                                type="date"
+                                                value={followUpDueDate}
+                                                onChange={(e) => setFollowUpDueDate(e.target.value)}
+                                                aria-label={t('followUpDueLabel')}
+                                                className={cn(fieldInputClass, 'h-8 w-40 pl-8 pr-2 text-xs')}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
                         <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
                             {t('cancel')}
@@ -369,7 +615,15 @@ export function ActivityDialogForm({
                             disabled={submitting || succeeded}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
+                            {submitting ? (
+                                <Loader2Icon className="size-4 animate-spin" />
+                            ) : followUpFailed ? (
+                                t('retryFollowUp')
+                            ) : followUpEnabled ? (
+                                t('createWithTask')
+                            ) : (
+                                t('create')
+                            )}
                         </Button>
                     </div>
                 </form>

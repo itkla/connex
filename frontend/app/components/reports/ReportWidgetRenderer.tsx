@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     Area,
@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
+import { useReportLabels } from '@/app/components/reports/reportLabels';
 import type { ReportWidgetData } from '@/app/lib/types';
 import {
     ChartContainer,
@@ -74,46 +75,7 @@ function pointUnit(key: string, widgetUnit: string | null): string | null {
 export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetData }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
-    const localizeLabel = useCallback((label: string) => {
-        const separator = label.lastIndexOf(' · ');
-        const prefix = separator >= 0 ? label.slice(0, separator + 3) : '';
-        const value = separator >= 0 ? label.slice(separator + 3) : label;
-        if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(value)) {
-            const date = new Date(`${value}${value.length === 7 ? '-01' : ''}T00:00:00Z`);
-            return prefix + new Intl.DateTimeFormat(locale, {
-                timeZone: 'UTC',
-                year: 'numeric',
-                month: 'short',
-                ...(value.length === 10 ? { day: 'numeric' } : {}),
-            }).format(date);
-        }
-        let translated: string;
-        switch (value.trim().toLowerCase().replaceAll(' ', '_')) {
-            case 'open': translated = t('status.open'); break;
-            case 'won': translated = t('status.won'); break;
-            case 'lost': translated = t('status.lost'); break;
-            case 'todo': translated = t('status.todo'); break;
-            case 'in_progress': translated = t('status.in_progress'); break;
-            case 'done': translated = t('status.done'); break;
-            case 'hot': translated = t('warmth.hot'); break;
-            case 'warm': translated = t('warmth.warm'); break;
-            case 'cool': translated = t('warmth.cool'); break;
-            case 'cold': translated = t('warmth.cold'); break;
-            case 'high': translated = t('risk.high'); break;
-            case 'medium': translated = t('risk.medium'); break;
-            case 'low': translated = t('risk.low'); break;
-            case 'rising': translated = t('trend.rising'); break;
-            case 'steady': translated = t('trend.steady'); break;
-            case 'cooling': translated = t('trend.cooling'); break;
-            case 'total': translated = t('label.total'); break;
-            case 'unassigned': translated = t('label.unassigned'); break;
-            case 'unspecified': translated = t('label.unspecified'); break;
-            case 'other': translated = t('label.other'); break;
-            case 'workspace-wide': translated = t('label.workspaceWide'); break;
-            default: translated = value;
-        }
-        return prefix + translated;
-    }, [locale, t]);
+    const { localizeLabel } = useReportLabels();
     const data = useMemo(
         () => widget.points.map((point) => ({
             ...point,

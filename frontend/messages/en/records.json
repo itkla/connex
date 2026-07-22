@@ -40,7 +40,12 @@
       "stage": "Stage",
       "owner": "Owner",
       "status": "Status",
-      "close_date": "Close date"
+      "close_date": "Close date",
+      "website": "Website",
+      "phone": "Phone",
+      "created": "Created",
+      "updated": "Updated",
+      "actual_value": "Actual value"
     },
     "op": {
       "is": "is",
@@ -101,7 +106,99 @@
     "pickStatus": "Choose a status",
     "pickOwner": "Choose an owner",
     "pickCompany": "Choose a company",
-    "pickStage": "Choose a stage"
+    "pickStage": "Choose a stage",
+    "catalogFailed": "Could not load the segment builder.",
+    "loading": "Loading…",
+    "has_open_task": {
+      "label": "Has an open task",
+      "labelNot": "No open task",
+      "description": "At least one task is still incomplete."
+    },
+    "overdue_task": {
+      "label": "Has an overdue task",
+      "labelNot": "No overdue task",
+      "description": "An incomplete task is past its due date."
+    },
+    "recent_meeting": {
+      "label": "Met recently",
+      "labelNot": "No recent meeting",
+      "description": "A meeting was logged in the last 30 days."
+    },
+    "has_note": {
+      "label": "Has a note",
+      "labelNot": "No notes",
+      "description": "At least one workspace-visible note exists."
+    },
+    "has_attachment": {
+      "label": "Has an attachment",
+      "labelNot": "No attachments",
+      "description": "At least one file is attached."
+    },
+    "warmth_hot": {
+      "label": "Hot",
+      "labelNot": "Not hot",
+      "description": "Relationship warmth is hot."
+    },
+    "warmth_warm": {
+      "label": "Warm",
+      "labelNot": "Not warm",
+      "description": "Relationship warmth is warm."
+    },
+    "warmth_cool": {
+      "label": "Cool",
+      "labelNot": "Not cool",
+      "description": "Relationship warmth is cool."
+    },
+    "warmth_cold": {
+      "label": "Cold",
+      "labelNot": "Not cold",
+      "description": "Relationship warmth is cold."
+    },
+    "warmth_rising": {
+      "label": "Warming up",
+      "labelNot": "Not warming up",
+      "description": "Relationship warmth is trending up."
+    },
+    "going_cold": {
+      "label": "Going cold soon",
+      "labelNot": "Not going cold soon",
+      "description": "Predicted to reach cold within the chosen window."
+    },
+    "at_risk": {
+      "label": "At risk",
+      "labelNot": "Not at risk",
+      "description": "Deal risk is high or medium."
+    },
+    "risk_high": {
+      "label": "High risk",
+      "labelNot": "Not high risk",
+      "description": "Deal risk level is high."
+    },
+    "risk_close_overdue": {
+      "label": "Close date overdue",
+      "labelNot": "Close date not overdue",
+      "description": "The expected close date has passed."
+    },
+    "risk_closing_soon": {
+      "label": "Closing soon but quiet",
+      "labelNot": "Not closing-soon-quiet",
+      "description": "Closing soon with no recent activity."
+    },
+    "risk_stalled": {
+      "label": "Stalled",
+      "labelNot": "Not stalled",
+      "description": "No recent activity on the deal."
+    },
+    "risk_stakeholder_cold": {
+      "label": "Stakeholder cold",
+      "labelNot": "No cold stakeholder",
+      "description": "A key stakeholder has gone cold."
+    },
+    "risk_no_stakeholders": {
+      "label": "No stakeholders",
+      "labelNot": "Has stakeholders",
+      "description": "No contacts are linked to the deal."
+    }
   },
   "SavedViews": {
     "all": "All",
@@ -122,7 +219,29 @@
     "nameDescription": "Give this view a name so you can switch back to it.",
     "nameLabel": "Name",
     "namePlaceholder": "e.g. Hot prospects",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "shared": "Shared",
+    "pin": "Pin to sidebar",
+    "unpin": "Unpin from sidebar",
+    "pinned": "Pinned to sidebar",
+    "unpinned": "Unpinned",
+    "setDefault": "Set as default",
+    "clearDefault": "Clear default",
+    "defaultSet": "Set as your default view",
+    "defaultCleared": "Default view cleared",
+    "makePrivate": "Make private",
+    "shareWorkspace": "Share with workspace",
+    "madeShared": "Shared with the workspace",
+    "madePrivate": "View is now private",
+    "copyLink": "Copy link",
+    "copyLinkFailed": "Could not copy the link.",
+    "linkCopied": "Link copied to clipboard",
+    "viewUnavailable": "That view is no longer available.",
+    "actionFailed": "Something went wrong. Please try again.",
+    "switchWorkspaceTitle": "Switch workspace?",
+    "switchWorkspacePrompt": "This view belongs to another workspace. Switch to it to open the view?",
+    "switchWorkspaceConfirm": "Switch",
+    "switchWorkspaceCancel": "Stay here"
   },
   "RecordCustomFields": {
     "heading": "Custom fields",
@@ -157,11 +276,16 @@
     "revokeFailed": "Could not revoke sharing.",
     "loadFailed": "Could not load shares."
   },
+  "RecordInlineEdit": {
+    "doubleClickToEdit": "Double-click to edit",
+    "saveFailed": "Couldn't save your change"
+  },
   "RecordsRenderView": {
     "selectAllAria": "Select all {entityLabel}s",
     "selectItemAria": "Select {name}",
     "copiedToast": "{label} copied",
     "copyFailedToast": "Failed to copy {label}",
+    "editFieldAria": "Edit {field} for {name}",
     "selectedLabel": "selected",
     "clearSelection": "Clear selection",
     "rowActionsAria": "Actions for {name}",
@@ -234,15 +358,15 @@
     "toastFailed": "Couldn't update the records"
   },
   "RecordsBulkOwnerDialog": {
-    "title": "Assign owner to {count} deals",
-    "description": "Set the owner for every selected deal.",
+    "title": "Assign owner to {count, plural, one {# record} other {# records}}",
+    "description": "Set the owner for every selected record.",
     "ownerLabel": "Owner",
     "unassignedPlaceholder": "Unassigned",
     "noMembersFound": "No members found",
     "unassignHint": "Leave empty to remove the owner.",
     "cancel": "Cancel",
     "apply": "Assign",
-    "toastFailed": "Couldn't update the deals"
+    "toastFailed": "Couldn't update the records"
   },
   "RecordsBulkStageDialog": {
     "title": "Move {count} deals to a stage",
@@ -255,5 +379,43 @@
     "apply": "Move",
     "close": "Close",
     "toastFailed": "Couldn't move the deals"
+  },
+  "RecordPeek": {
+    "type_company": "Company",
+    "type_person": "Contact",
+    "type_deal": "Deal",
+    "loading": "Loading…",
+    "previous": "Previous record",
+    "next": "Next record",
+    "goToNext": "Go to next record",
+    "error_notFound": "This record no longer exists.",
+    "error_forbidden": "You don't have access to this record.",
+    "error_failed": "Couldn't load this record.",
+    "openFull": "Open record",
+    "addNote": "Add note",
+    "createTask": "Create task",
+    "copyLink": "Copy link",
+    "email": "Email",
+    "phone": "Phone",
+    "company": "Company",
+    "openDeals": "Open deals",
+    "industry": "Industry",
+    "website": "Website",
+    "people": "People",
+    "openTasks": "Open tasks",
+    "projectedRevenue": "Projected revenue",
+    "stage": "Stage",
+    "value": "Value",
+    "owner": "Owner",
+    "openTasksTitle": "Open tasks",
+    "noOpenTasks": "No open tasks",
+    "latestActivityTitle": "Latest activity",
+    "noActivity": "No recent activity"
+  },
+  "RecordActionMenu": {
+    "menuAria": "Actions for {name}",
+    "peek": "Peek",
+    "quickEdit": "Quick edit",
+    "delete": "Delete"
   }
 }

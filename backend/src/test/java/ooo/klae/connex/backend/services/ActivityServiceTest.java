@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 
@@ -128,7 +129,7 @@ class ActivityServiceTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE activity SET timestamp = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?",
             foreignUpcoming.getId());
 
-        List<ActivityVolumeBucketDto> volume = activityService.getActivityVolume(30);
+        List<ActivityVolumeBucketDto> volume = activityService.getActivityVolume(30, MemberScope.allTeam());
         List<TeamLeaderboardEntryDto> leaderboard = activityService.getTeamLeaderboard(30);
 
         assertEquals(6, volume.size());

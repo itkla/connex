@@ -1,3 +1,4 @@
+import type { Viewport } from "next";
 import Sidebar from "@/app/components/Sidebar";
 import ContentShell from "@/app/components/ContentShell";
 import { getCurrentUserFromCookie, getMyWorkspacesFromCookie } from "@/app/lib/api";
@@ -7,9 +8,20 @@ import { NotificationProvider } from "@/app/hooks/useNotifications";
 import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
+import { PinnedViewsProvider } from "@/app/hooks/usePinnedViews";
+import { RecentRecordsProvider } from "@/app/hooks/useRecentRecords";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
+import PinnedViewsActionsBridge from "@/app/components/actions/PinnedViewsActionsBridge";
+import RecentRecordsActionsBridge from "@/app/components/actions/RecentRecordsActionsBridge";
+import DraftResumeBridge from "@/app/components/DraftResumeBridge";
+import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
+
+/** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
+export const viewport: Viewport = {
+    viewportFit: "cover",
+};
 
 export default async function AppLayout({
     children,
@@ -41,16 +53,25 @@ export default async function AppLayout({
                             userLocale={resolveLocale(user.locale)}
                             cookieLocale={localePreferenceFromCookieHeader(cookie)}
                         />
-                        <ContentShell
-                            sidebar={
-                                <Sidebar
-                                    user={user}
-                                    className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
-                                />
-                            }
-                        >
-                            {children}
-                        </ContentShell>
+                        <DraftResumeBridge />
+                        <PinnedViewsProvider>
+                            <PinnedViewsActionsBridge />
+                            <RecentRecordsProvider>
+                                <RecentRecordsActionsBridge />
+                                <SidebarModeProvider>
+                                    <ContentShell
+                                        sidebar={
+                                            <Sidebar
+                                                user={user}
+                                                className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
+                                            />
+                                        }
+                                    >
+                                        {children}
+                                    </ContentShell>
+                                </SidebarModeProvider>
+                            </RecentRecordsProvider>
+                        </PinnedViewsProvider>
                     </ActionProvider>
                 </NavTrailProvider>
             </NotificationProvider>

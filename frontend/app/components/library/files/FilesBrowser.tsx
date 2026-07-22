@@ -152,7 +152,7 @@ export default function FilesBrowser() {
     const { items, total, loading, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
         Attachment,
         AttachmentsPageParams
-    >(getAttachmentsPage, extraParams, PAGE_SIZE);
+    >(getAttachmentsPage, extraParams, { defaultSize: PAGE_SIZE });
 
     // seed the search box + deep-linked file from the URL once on mount
     useEffect(() => {

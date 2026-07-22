@@ -53,7 +53,7 @@ export default function NotificationsCard({
             if (!forceRefresh && requiredVersion <= reconciledVersion) return;
             const requestGeneration = ++generation;
             try {
-                const page = await getNotifications({ state: 'unread', page: 1, size: 6 });
+                const page = await getNotifications({ status: 'unread', page: 1, size: 6 });
                 if (!active || requestGeneration !== generation) return;
                 if (page.stateVersion < requiredVersion && canRetry) {
                     retryId = window.setTimeout(

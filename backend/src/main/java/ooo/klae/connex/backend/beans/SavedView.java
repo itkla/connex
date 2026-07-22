@@ -2,13 +2,12 @@ package ooo.klae.connex.backend.beans;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import tools.jackson.databind.JsonNode;
 
 /**
- * A user's saved view of a records list — a named bundle of filter/sort/search/display
- * configuration, scoped to one {@code recordType} ({@code company}, {@code person}, or
- * {@code deal}). Personal to the owning user within a workspace. {@code configJson} is an
- * opaque JSON blob owned by the client; the backend stores and returns it verbatim.
- * Mapped via {@code SavedViewMapper} / {@code SavedViewMapper.xml}.
+ * A versioned records-list configuration owned by one workspace member and optionally visible to
+ * every active member of that workspace. Caller-relative pin/default projections are populated by
+ * saved-view mapper reads.
  */
 @Data
 @NoArgsConstructor
@@ -18,8 +17,13 @@ public class SavedView {
     private int userId;
     private String recordType;
     private String name;
-    private String configJson;
+    private JsonNode config;
+    private String visibility;
     private int position;
+    private boolean ownedByCurrentUser;
+    private boolean pinned;
+    private Integer pinPosition;
+    private boolean defaultView;
     private String createdAt;
     private String updatedAt;
 }
