@@ -55,6 +55,9 @@ import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -159,6 +162,85 @@ class DealServiceTest extends AbstractServiceTest {
             multiFilteredPage.items().stream().map(Deal::getId).toList());
         assertEquals(2, multiFilteredMetrics.totalCount());
         assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
+    }
+
+    @Test
+    void segmentReadsIntersectNativeFiltersAndFailClosedWhenEmpty() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        String segmentName = "Segment " + unique();
+        updateDeal(newDeal(pipeline, stage, company), segmentName, 100.0, 0.0, "JPY", null);
+        Deal won = updateDeal(
+            newDeal(pipeline, stage, company), segmentName, 200.0, 180.0, "JPY", true);
+        SegmentDefinition definition = segmentDefinition(
+            segmentField("name", "equals", segmentName));
+        SegmentDefinition empty = segmentDefinition(
+            segmentField("name", "equals", "Missing " + unique()));
+        MemberScope scope = MemberScope.allTeam();
+
+        PageResponse<Deal> page = dealService.querySegmentDealsPage(
+            definition, null, null, null, null, null, null, null,
+            false, List.of("won"), null, scope, 25, 0);
+        DealMetricsDto metrics = dealService.querySegmentDealMetrics(
+            definition, null, null, null, null, null,
+            false, List.of("won"), null, scope);
+        List<Integer> ids = dealService.getMatchingSegmentDealIds(
+            definition, null, null, null, null, null,
+            false, List.of("won"), null, scope);
+        List<Deal> export = dealService.querySegmentDealsForExport(
+            definition, null, null, null, null, null,
+            false, List.of("won"), null, scope);
+
+        assertEquals(List.of(won.getId()), page.items().stream().map(Deal::getId).toList());
+        assertEquals(1, page.total());
+        assertEquals(1, metrics.totalCount());
+        assertEquals(List.of(won.getId()), ids);
+        assertEquals(List.of(won.getId()), export.stream().map(Deal::getId).toList());
+        assertEquals(0, dealService.querySegmentDealsPage(
+            empty, null, null, null, null, null, null, null,
+            false, null, null, scope, 25, 0).total());
+        assertEquals(0, dealService.querySegmentDealMetrics(
+            empty, null, null, null, null, null,
+            false, null, null, scope).totalCount());
+        assertTrue(dealService.getMatchingSegmentDealIds(
+            empty, null, null, null, null, null,
+            false, null, null, scope).isEmpty());
+        assertTrue(dealService.querySegmentDealsForExport(
+            empty, null, null, null, null, null,
+            false, null, null, scope).isEmpty());
+    }
+
+    @Test
+    void matchingDealIdsRejectMoreThanBulkOperationLimit() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<Deal> deals = IntStream.rangeClosed(1, 1001)
+            .mapToObj(position -> boardDeal(pipeline, stage, position))
+            .toList();
+        dealMapper.insertBatch(deals);
+        SegmentDefinition definition = segmentDefinition(
+            segmentField("name", "starts_with", "Bounded Board "));
+
+        BadRequestException nativeException = assertThrows(BadRequestException.class,
+            () -> dealService.getMatchingDealIds(
+                null, null, null, null, null, false, null, null, MemberScope.allTeam()));
+        BadRequestException segmentException = assertThrows(BadRequestException.class,
+            () -> dealService.getMatchingSegmentDealIds(
+                definition, null, null, null, null, null,
+                false, null, null, MemberScope.allTeam()));
+
+        assertEquals("Too many matching deals; narrow the filters before selecting all",
+            nativeException.getMessage());
+        assertEquals(nativeException.getMessage(), segmentException.getMessage());
     }
 
     @Test
@@ -1216,6 +1298,22 @@ class DealServiceTest extends AbstractServiceTest {
         deal.setStageId(stage.getId());
         deal.setPosition(position - 1);
         return deal;
+    }
+
+    private static SegmentCondition segmentField(String field, String op, String value) {
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("field");
+        condition.setField(field);
+        condition.setOp(op);
+        condition.setValue(value);
+        return condition;
+    }
+
+    private static SegmentDefinition segmentDefinition(SegmentCondition... conditions) {
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(conditions));
+        return definition;
     }
 
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,

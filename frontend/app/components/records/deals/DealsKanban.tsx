@@ -27,6 +27,10 @@ interface DealsKanbanProps {
     query: string;
     currency?: string;
     filters: DealFilterParams;
+    segmentActive: boolean;
+    segmentIds: ReadonlySet<number> | null;
+    segmentLoading: boolean;
+    segmentError: string | null;
     currentUserId: number;
     revision: number;
     reduce: boolean;
@@ -73,6 +77,10 @@ export default function DealsKanban({
     query,
     currency,
     filters,
+    segmentActive,
+    segmentIds,
+    segmentLoading,
+    segmentError,
     currentUserId,
     revision,
     reduce,
@@ -208,6 +216,7 @@ export default function DealsKanban({
     const boardRiskError = boardRiskState.key === boardKey ? boardRiskState.error : null;
 
     const matchesBoardDeal = useCallback((deal: Deal) => {
+        if (segmentActive && !segmentIds?.has(deal.id)) return false;
         const normalizedQuery = query.trim().toLocaleLowerCase();
         if (normalizedQuery) {
             const values = [
@@ -243,7 +252,7 @@ export default function DealsKanban({
         if (filters.scope === 'members'
             && (deal.ownerId == null || !filters.memberIds?.includes(deal.ownerId))) return false;
         return true;
-    }, [boardRisks, currency, currentUserId, filters, pipelineById, query, resolvedCompanyById, stageById]);
+    }, [boardRisks, currency, currentUserId, filters, pipelineById, query, resolvedCompanyById, segmentActive, segmentIds, stageById]);
 
     const columns: KanbanColumnDef[] = useMemo(() => {
         const stages = selectedPipelineId != null ? stagesByPipeline[selectedPipelineId] ?? [] : [];
@@ -324,13 +333,13 @@ export default function DealsKanban({
     }
 
     const selectedPipeline = pipelineById.get(selectedPipelineId);
-    const boardContent = boardLoading || boardRiskLoading ? (
+    const boardContent = boardLoading || boardRiskLoading || segmentLoading ? (
         <div aria-busy="true" className="rounded-2xl border border-border px-6 py-12 text-center text-sm text-muted-foreground">
             {t('loading')}
         </div>
-    ) : boardError || (filters.risk?.length && boardRiskError) ? (
+    ) : boardError || segmentError || (filters.risk?.length && boardRiskError) ? (
         <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center text-sm text-destructive">
-            {boardError ?? boardRiskError}
+            {boardError ?? segmentError ?? boardRiskError}
         </div>
     ) : (
         <KanbanBoard<Deal>

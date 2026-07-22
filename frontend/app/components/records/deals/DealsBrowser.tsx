@@ -32,6 +32,7 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
+import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
@@ -41,7 +42,7 @@ import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
-import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
@@ -56,9 +57,14 @@ import {
     updateDealValue,
     getCompaniesByIds,
     getDealsPage,
+    getDealsSegmentPage,
+    getDealIds,
+    getDealSegmentIds,
     getDealMetrics,
+    getDealSegmentMetrics,
     getDealFacets,
     exportDealsCsv,
+    exportDealSegmentCsv,
     getDealRevenueTimeseries,
     getDealStageDistribution,
     getPipelines,
@@ -66,6 +72,8 @@ import {
     getDealPrimaryContacts,
     getDealRisks,
     getTags,
+    getSegmentFields,
+    evaluateSegments,
     getActiveWorkspaceMembers,
     bulkAddTagToDeals,
     bulkRemoveTagFromDeals,
@@ -91,6 +99,10 @@ import {
     type DealRevenueSeries,
     type DealStageDistribution,
     type DealsPageParams,
+    type SegmentDefinition,
+    type SegmentCondition,
+    type SegmentFields,
+    type RuleBuilderOptions,
     type Pipeline,
     type Stage,
     type Contact,
@@ -104,6 +116,13 @@ import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
 import DealsRevenueChart from '@/app/components/records/deals/DealsRevenueChart';
 import StageRatio from '@/app/components/records/deals/StageRatio';
+import {
+    evaluableSegmentDefinition,
+    hasSegmentConditions,
+    normalizeSegmentDefinition,
+    removeSegmentCondition,
+    segmentConditionEntries,
+} from '@/app/lib/segmentDefinition';
 
 function toDraft(d: Deal): DealDraft {
     return {
@@ -204,17 +223,57 @@ function normalizeDealFilters(filters: FilterState): FilterState {
     return normalized;
 }
 
+function dealSegmentChipCondition(
+    condition: SegmentCondition,
+    stageById: ReadonlyMap<number, Stage>,
+    localizeStatus: (status: 'open' | 'won' | 'lost') => string,
+): SegmentCondition {
+    if (condition.type !== 'field' || condition.value == null) return condition;
+    if (condition.field === 'stage') {
+        return { ...condition, value: stageById.get(Number(condition.value))?.name ?? condition.value };
+    }
+    if (condition.field === 'status'
+        && (condition.value === 'open' || condition.value === 'won' || condition.value === 'lost')) {
+        return { ...condition, value: localizeStatus(condition.value) };
+    }
+    return condition;
+}
+
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; timezone: string; currentUserId: number }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
+    const tSeg = useTranslations('SmartSegments');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
+    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
+    const [segmentEvaluationRevision, setSegmentEvaluationRevision] = useState(0);
+    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
+    const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
+    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
+    const hasSegments = hasSegmentConditions(evaluable);
+    const failedSegmentKeyRef = useRef<string | null>(null);
+    const [segmentErrorKey, setSegmentErrorKey] = useState<string | null>(null);
+    const reportSegmentFailure = useCallback(() => {
+        if (failedSegmentKeyRef.current !== segmentsKey) toastError(tSeg('evaluateFailed'));
+        failedSegmentKeyRef.current = segmentsKey;
+        setSegmentErrorKey(segmentsKey);
+    }, [segmentsKey, tSeg]);
+    const clearSegmentFailure = useCallback((key: string) => {
+        if (failedSegmentKeyRef.current === key) failedSegmentKeyRef.current = null;
+        setSegmentErrorKey((current) => current === key ? null : current);
+    }, []);
+    useEffect(() => {
+        getSegmentFields('deal').then(setSegmentFields).catch(() => {
+            setSegmentFields(null);
+            toastError(tSeg('fieldsFailed'));
+        });
+    }, [tSeg]);
     const [deals, setDeals] = useState(initialDeals);
     const patchDeal = useCallback((id: number, partial: Partial<Deal>) => {
         setDeals((prev) => prev.map((deal) => (deal.id === id ? { ...deal, ...partial } : deal)));
@@ -242,22 +301,31 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         requestIdRef.current = requestId;
         setLoadingPage(true);
         try {
-            const response = await getDealsPage(params);
+            const response = hasSegments
+                ? await getDealsSegmentPage({ ...params, definition: evaluable })
+                : await getDealsPage(params);
             if (requestId !== requestIdRef.current) return;
             setDeals(response.items);
             setTotal(response.total);
             setPageRequestError(null);
+            if (hasSegments) clearSegmentFailure(segmentsKey);
             const maxPage = Math.max(1, Math.ceil(response.total / (params.size ?? 25)));
             if ((params.page ?? 1) > maxPage) setPage(maxPage);
         } catch (error: unknown) {
             if (requestId !== requestIdRef.current) return;
             const message = loadErrorMessage(error, (params.risk?.length ?? 0) > 0);
             setPageRequestError(message);
-            toastError(message);
+            if (hasSegments) {
+                setDeals([]);
+                setTotal(0);
+                reportSegmentFailure();
+            } else {
+                toastError(message);
+            }
         } finally {
             if (requestId === requestIdRef.current) setLoadingPage(false);
         }
-    }, [loadErrorMessage]);
+    }, [clearSegmentFailure, evaluable, hasSegments, loadErrorMessage, reportSegmentFailure, segmentsKey]);
     const refreshData = useCallback(() => setDataRevision((revision) => revision + 1), []);
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -425,29 +493,130 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
     const deferredQuery = useDeferredValue(query.trim());
+    const metricFilters = useMemo<DealFilterParams>(() => ({
+        ...serverFilters,
+        q: deferredQuery || undefined,
+    }), [deferredQuery, serverFilters]);
+    const currentDealFilters = useMemo<DealFilterParams>(() => ({
+        ...metricFilters,
+        currency: activeCurrency ?? undefined,
+    }), [activeCurrency, metricFilters]);
+    const filterSignature = useMemo(
+        () => JSON.stringify([currentDealFilters, hasSegments ? segmentsKey : null, segmentErrorKey === segmentsKey]),
+        [currentDealFilters, hasSegments, segmentErrorKey, segmentsKey],
+    );
+    const filterSignatureRef = useRef(filterSignature);
+    useEffect(() => {
+        filterSignatureRef.current = filterSignature;
+    }, [filterSignature]);
+    const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
+    const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const selectAllRequestRef = useRef(0);
+    useEffect(() => {
+        selectAllRequestRef.current += 1;
+    }, [filterSignature]);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const resetSelectionState = useCallback(() => {
+        setSelectingAll(false);
+        setMatchedSignature(null);
+        setSelectedIds(new Set());
+    }, [setSelectedIds]);
+    const clearSelection = useCallback(() => {
+        selectAllRequestRef.current += 1;
+        resetSelectionState();
+    }, [resetSelectionState]);
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        selectAllRequestRef.current += 1;
+        setMatchedSignature(null);
+        setSelectedIds(allMatchingActive ? new Set() : ids);
+    }, [allMatchingActive, setSelectedIds]);
+    const selectAllMatching = useCallback(async () => {
+        const requestId = selectAllRequestRef.current + 1;
+        selectAllRequestRef.current = requestId;
+        const requestSignature = filterSignature;
+        setSelectingAll(true);
+        try {
+            const ids = hasSegments
+                ? await getDealSegmentIds({ ...currentDealFilters, definition: evaluable })
+                : await getDealIds(currentDealFilters);
+            if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
+            setSelectedIds(new Set(ids));
+            setMatchedSignature(requestSignature);
+        } catch (error: unknown) {
+            if (requestId !== selectAllRequestRef.current) return;
+            const selectionLimit = error instanceof ApiError
+                && error.status === 400
+                && (error.message.startsWith('Too many matching deals')
+                    || error.message.startsWith('Risk filter matches too many deals'));
+            if (selectionLimit) {
+                toastError(serverFilters.risk?.length ? t('riskFilterTooBroad') : t('selectAllTooBroad'));
+            } else if (hasSegments) {
+                reportSegmentFailure();
+            } else {
+                toastError(error instanceof Error ? error.message : t('toastSelectAllFailed'));
+            }
+        } finally {
+            if (requestId === selectAllRequestRef.current) setSelectingAll(false);
+        }
+    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
     const exportDeals = useCallback(
-        (signal: AbortSignal, workspaceId: number) => exportDealsCsv(
-            { ...serverFilters, currency: activeCurrency ?? undefined, q: deferredQuery || undefined },
-            { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
-        ),
-        [activeCurrency, deferredQuery, serverFilters],
+        (signal: AbortSignal, workspaceId: number) => {
+            const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
+            return hasSegments
+                ? exportDealSegmentCsv({ ...currentDealFilters, definition: evaluable }, init)
+                : exportDealsCsv(currentDealFilters, init);
+        },
+        [currentDealFilters, evaluable, hasSegments],
     );
 
     useEffect(() => {
         let active = true;
-        getDealMetrics({ ...serverFilters, q: deferredQuery || undefined })
+        const request = hasSegments
+            ? getDealSegmentMetrics({ ...metricFilters, definition: evaluable })
+            : getDealMetrics(metricFilters);
+        request
             .then((nextMetrics) => {
                 if (!active) return;
                 setDealMetrics(nextMetrics);
                 setMetricsRequestError(null);
+                if (hasSegments) clearSegmentFailure(segmentsKey);
             })
             .catch((error: unknown) => {
                 if (!active) return;
                 const message = loadErrorMessage(error, (serverFilters.risk?.length ?? 0) > 0);
                 setMetricsRequestError(message);
+                if (hasSegments) {
+                    setDealMetrics(EMPTY_DEAL_METRICS);
+                    reportSegmentFailure();
+                }
             });
         return () => { active = false; };
-    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, loadErrorMessage]);
+    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, metricFilters, clearSegmentFailure, evaluable, hasSegments, loadErrorMessage, reportSegmentFailure, segmentsKey]);
+
+    const kanbanSegmentRequestKey = hasSegments
+        ? JSON.stringify([segmentsKey, dataRevision, activeWorkspaceId, segmentEvaluationRevision])
+        : null;
+    const [kanbanSegmentState, setKanbanSegmentState] = useState<{
+        key: string | null;
+        ids: ReadonlySet<number> | null;
+        error: string | null;
+    }>({ key: null, ids: null, error: null });
+    useEffect(() => {
+        if (!hasSegments || kanbanSegmentRequestKey == null) return;
+        let active = true;
+        evaluateSegments('deal', evaluable)
+            .then((result) => {
+                if (!active) return;
+                setKanbanSegmentState({ key: kanbanSegmentRequestKey, ids: new Set(result.ids), error: null });
+                clearSegmentFailure(segmentsKey);
+            })
+            .catch(() => {
+                if (!active) return;
+                setKanbanSegmentState({ key: kanbanSegmentRequestKey, ids: null, error: tSeg('evaluateFailed') });
+                reportSegmentFailure();
+            });
+        return () => { active = false; };
+    }, [clearSegmentFailure, evaluable, hasSegments, kanbanSegmentRequestKey, reportSegmentFailure, segmentsKey, tSeg]);
 
     useEffect(() => {
         let active = true;
@@ -476,54 +645,68 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         writeListStateToUrl(pathname, { sort: sortKey, dir: sortDir, page, size }, 25);
     }, [pathname, sortKey, sortDir, page, size]);
 
+    const selectionScope = `${page}:${size}:${sortKey ?? ''}:${sortDir}:${dataRevision}:${filterSignature}`;
+    const previousSelectionScopeRef = useRef(selectionScope);
+    useEffect(() => {
+        const scopeChanged = previousSelectionScopeRef.current !== selectionScope;
+        previousSelectionScopeRef.current = selectionScope;
+        if (scopeChanged && !allMatchingActive) clearSelection();
+    }, [allMatchingActive, clearSelection, selectionScope]);
+
     const workspaceRef = useRef(activeWorkspaceId);
     useEffect(() => {
         if (workspaceRef.current === activeWorkspaceId) return;
         workspaceRef.current = activeWorkspaceId;
+        clearSelection();
         setPage(1); setSize(25); setSortKey(null); setSortDir('asc');
-    }, [activeWorkspaceId]);
+        setDefinition(EMPTY_DEFINITION);
+    }, [activeWorkspaceId, clearSelection]);
 
     const changePage = useCallback((nextPage: number) => {
-        setSelectedIds(new Set());
         setPage(nextPage);
-    }, [setSelectedIds]);
+    }, []);
     const changePageSize = useCallback((nextSize: number) => {
-        setSelectedIds(new Set());
         setSize(nextSize);
         setPage(1);
-    }, [setSelectedIds]);
+    }, []);
     const changeQuery = useCallback((nextQuery: string) => {
-        setSelectedIds(new Set());
+        clearSelection();
         setQuery(nextQuery);
         setPage(1);
-    }, [setQuery, setSelectedIds]);
+    }, [clearSelection, setQuery]);
     const changeFilters = useCallback((nextFilters: FilterState) => {
-        setSelectedIds(new Set());
+        resetSelectionState();
         setFilterState(normalizeDealFilters(nextFilters));
         setPage(1);
-    }, [setFilterState, setSelectedIds]);
+    }, [resetSelectionState, setFilterState]);
     const handleSortChange = useCallback((columnKey: string) => {
         if (!DEAL_SORT_TOKENS[columnKey]) return;
         const nextDir: 'asc' | 'desc' = sortKey === columnKey && sortDir === 'asc' ? 'desc' : 'asc';
-        setSelectedIds(new Set());
+        if (!allMatchingActive) clearSelection();
         setSortKey(columnKey);
         setSortDir(nextDir);
         setPage(1);
-    }, [sortKey, sortDir, setSelectedIds]);
+    }, [allMatchingActive, clearSelection, sortKey, sortDir]);
     const changeCurrency = useCallback((currency: string) => {
-        setSelectedIds(new Set());
+        clearSelection();
         setRevenueSeries({ closed: [], projected: [] });
         setStageDistribution([]);
         setSelectedCurrency(currency);
         setPage(1);
-    }, [setSelectedIds]);
+    }, [clearSelection]);
+    const changeDefinition = useCallback((nextDefinition: SegmentDefinition) => {
+        clearSelection();
+        setDefinition(nextDefinition);
+        setSegmentEvaluationRevision((revision) => revision + 1);
+        setPage(1);
+    }, [clearSelection]);
     const refreshRecords = useCallback(() => {
-        setSelectedIds(new Set());
+        clearSelection();
         setDealMetrics(EMPTY_DEAL_METRICS);
         setRevenueSeries({ closed: [], projected: [] });
         setStageDistribution([]);
         refreshData();
-    }, [setSelectedIds, refreshData]);
+    }, [clearSelection, refreshData]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -640,19 +823,22 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const quickEditOne = useCallback((deal: Deal) => {
+        clearSelection();
         setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
         setDrafts({ [deal.id]: toDraft(deal) });
         setEditSheetOpen(true);
-    }, [setSelectedIds]);
+    }, [clearSelection, setSelectedIds]);
 
     const deleteOne = useCallback((deal: Deal) => {
+        clearSelection();
         setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
         setDeleteDialogOpen(true);
-    }, [setSelectedIds, setDeleteDialogOpen]);
+    }, [clearSelection, setSelectedIds, setDeleteDialogOpen]);
 
-    const selectedDealIds = useMemo(() => selectedDeals.map((d) => d.id), [selectedDeals]);
+    const selectedDealIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
+    const allSelectedDealsLoaded = selectedDealIds.length > 0 && selectedDealIds.length === selectedDeals.length;
 
     const confirmDelete = async () => {
         if (selectedDealIds.length === 0) return;
@@ -694,6 +880,17 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [dataRevision, deals]);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
+    const segmentOptions = useMemo<RuleBuilderOptions>(() => ({
+        stages: pipelines.flatMap((pipeline) =>
+            (stagesByPipeline[pipeline.id] ?? []).map((stage) => ({
+                id: stage.id,
+                name: stage.name,
+                pipeline: pipeline.name,
+            }))),
+        owners: activeMembers.map((member) => ({ id: member.id, name: member.displayName })),
+        companies: [],
+    }), [activeMembers, pipelines, stagesByPipeline]);
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
@@ -918,13 +1115,15 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         });
         return result;
     }, [dealFacets, companyById, pipelineById, stageById, levelLabel, t]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(activeFilterState) > 0;
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(activeFilterState) > 0 || hasSegments;
     const clearAll = useCallback(() => {
-        changeQuery('');
-        changeFilters({});
-    }, [changeQuery, changeFilters]);
+        clearSelection();
+        setQuery('');
+        setFilterState({});
+        setDefinition(EMPTY_DEFINITION);
+        setPage(1);
+    }, [clearSelection, setFilterState, setQuery]);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
-    const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
     const ownerCounts = useMemo(
         () => new Map(dealFacets.owners?.map((facet) => [facet.key, facet.count]) ?? []),
         [dealFacets.owners],
@@ -953,18 +1152,39 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => changeQuery('') }] : []),
         ...ownerChips,
         ...facetChips(facets, activeFilterState, changeFilters),
+        ...segmentConditionEntries(definition).map(({ condition, groupPath, conditionIndex }) => {
+            const displayCondition = dealSegmentChipCondition(
+                condition,
+                stageById,
+                (status) => tSeg(`status.${status}`),
+            );
+            return {
+                id: `segment:${[...groupPath, conditionIndex].join(':')}`,
+                label: segmentConditionLabel(
+                    displayCondition,
+                    tSeg,
+                    (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
+                    (id) => memberById.get(Number(id))?.displayName ?? id,
+                ),
+                onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
+            };
+        }),
     ];
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={viewSelected}>
-                <EyeIcon className="size-4" />
-                {t('view')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                <PencilIcon className="size-4" />
-                {t('quickEdit')}
-            </Button>
+            {allSelectedDealsLoaded && (
+                <>
+                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                        <EyeIcon className="size-4" />
+                        {t('view')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                        <PencilIcon className="size-4" />
+                        {t('quickEdit')}
+                    </Button>
+                </>
+            )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -972,10 +1192,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkStageOpen(true); }}>
-                        <Bars3BottomLeftIcon />
-                        {t('changeStage')}
-                    </DropdownMenuItem>
+                    {allSelectedDealsLoaded && (
+                        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkStageOpen(true); }}>
+                            <Bars3BottomLeftIcon />
+                            {t('changeStage')}
+                        </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
                         <UserCircleIcon />
                         {t('assignOwner')}
@@ -999,20 +1221,28 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: activeFilterState, query, sortKey, sortDirection: sortDir }),
-        [activeFilterState, query, sortKey, sortDir],
+        () => ({
+            filters: activeFilterState,
+            query,
+            sortKey,
+            sortDirection: sortDir,
+            segments: hasSegments ? evaluable : undefined,
+        }),
+        [activeFilterState, evaluable, hasSegments, query, sortKey, sortDir],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
-            changeFilters(config.filters ?? {});
-            changeQuery(config.query ?? '');
+            clearSelection();
+            setFilterState(normalizeDealFilters(config.filters ?? {}));
+            setQuery(config.query ?? '');
             const nextSortKey = config.sortKey && DEAL_SORT_TOKENS[config.sortKey] ? config.sortKey : null;
             setSortKey(nextSortKey);
             setSortDir(config.sortDirection ?? 'asc');
-            setSelectedIds(new Set());
+            setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setSegmentEvaluationRevision((revision) => revision + 1);
             setPage(1);
         },
-        [changeFilters, changeQuery, setSelectedIds],
+        [clearSelection, setFilterState, setQuery],
     );
 
     return (
@@ -1130,6 +1360,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         }
                         trailing={
                             <div className="flex items-center gap-2">
+                            <SegmentBuilder
+                                definition={definition}
+                                fields={segmentFields}
+                                options={segmentOptions}
+                                recordType="deal"
+                                allowGroups
+                                onChange={changeDefinition}
+                            />
                             <div
                                 role="group"
                                 aria-label={t('displayMode')}
@@ -1189,6 +1427,42 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     </FilterBar>
                 </Rise>
 
+                {(() => {
+                    const pageFullySelected = visibleDeals.length > 0
+                        && visibleDeals.every((deal) => selectedIds.has(deal.id));
+                    const allMatchingSelected = allMatchingActive
+                        && total > visibleDeals.length
+                        && selectedIds.size >= total;
+                    const canSelectAllMatching = pageFullySelected
+                        && total > visibleDeals.length
+                        && selectedIds.size < total;
+                    if (!canSelectAllMatching && !allMatchingSelected) return null;
+                    return (
+                        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
+                            {allMatchingSelected ? (
+                                <>
+                                    <span>{t('allMatchingSelected', { total })}</span>
+                                    <button type="button" onClick={clearSelection} className="font-medium text-brand transition hover:underline">
+                                        {t('clearSelection')}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{t('pageSelected', { count: selectedDealIds.length })}</span>
+                                    <button
+                                        type="button"
+                                        onClick={selectAllMatching}
+                                        disabled={selectingAll || loadingPage}
+                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                    >
+                                        {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    );
+                })()}
+
                 {requestError && (
                     <div
                         role="alert"
@@ -1214,6 +1488,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             query={deferredQuery}
                             currency={activeCurrency ?? undefined}
                             filters={serverFilters}
+                            segmentActive={hasSegments}
+                            segmentIds={kanbanSegmentState.key === kanbanSegmentRequestKey ? kanbanSegmentState.ids : null}
+                            segmentLoading={hasSegments && kanbanSegmentState.key !== kanbanSegmentRequestKey}
+                            segmentError={kanbanSegmentState.key === kanbanSegmentRequestKey ? kanbanSegmentState.error : null}
                             currentUserId={currentUserId}
                             revision={dataRevision}
                             reduce={reduce}
@@ -1254,7 +1532,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             displayMode={displayMode}
                             density={density}
                             selectedIds={selectedIds}
-                            onSelectedIdsChange={setSelectedIds}
+                            onSelectedIdsChange={handleSelectedIdsChange}
                             onQuickEdit={quickEditOne}
                             onDelete={deleteOne}
                             gridClassName="grid grid-cols-1 gap-3"

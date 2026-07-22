@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -155,6 +156,20 @@ public class DealController {
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
 
+    /** Returns one bounded deal page intersected with a Smart Segment definition. */
+    @PostMapping("/segment/page")
+    public PageResponse<DealDto> getSegmentDealsPage(
+            @Valid @RequestBody DealSegmentQueryRequest request) {
+        PageBounds bounds = PageBounds.of(request.getPage(), request.getSize());
+        SegmentDealFilters filters = segmentFilters(request);
+        PageResponse<Deal> result = dealService.querySegmentDealsPage(
+            request.getDefinition(), filters.query(), request.getSort(), filters.direction(),
+            filters.currency(), filters.pipelineIds(), filters.stageIds(), filters.companyIds(),
+            request.isNoCompany(), filters.statuses(), filters.risks(), filters.memberScope(),
+            bounds.size(), bounds.offset());
+        return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
+    }
+
     /**
      * GET endpoint for filtered deal summary metrics grouped by currency.
      */
@@ -179,6 +194,49 @@ public class DealController {
             normalizeIds(companyId, "companyId"),
             noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(scope, memberIds));
+    }
+
+    /** Returns current-list deal metrics intersected with a Smart Segment definition. */
+    @PostMapping("/segment/metrics")
+    public DealMetricsDto getSegmentDealMetrics(
+            @Valid @RequestBody DealSegmentQueryRequest request) {
+        SegmentDealFilters filters = segmentFilters(request);
+        return dealService.querySegmentDealMetrics(
+            request.getDefinition(), filters.query(), filters.currency(), filters.pipelineIds(),
+            filters.stageIds(), filters.companyIds(), request.isNoCompany(), filters.statuses(),
+            filters.risks(), filters.memberScope());
+    }
+
+    /** Returns a bounded id set matching the current native deal filters. */
+    @GetMapping("/ids")
+    public List<Integer> getDealIds(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) List<Integer> pipelineId,
+            @RequestParam(required = false) List<Integer> stageId,
+            @RequestParam(required = false) List<Integer> companyId,
+            @RequestParam(defaultValue = "false") boolean noCompany,
+            @RequestParam(required = false) List<String> status,
+            @RequestParam(required = false) List<String> risk,
+            @RequestParam(required = false) String scope,
+            @RequestParam(required = false) List<Integer> memberIds) {
+        String query = q == null || q.isBlank() ? null : LikePattern.containing(q);
+        return dealService.getMatchingDealIds(
+            query, blankToNull(currency), normalizeIds(pipelineId, "pipelineId"),
+            normalizeIds(stageId, "stageId"), normalizeIds(companyId, "companyId"), noCompany,
+            normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
+            resolveMemberScope(scope, memberIds));
+    }
+
+    /** Returns a bounded id set matching the segment and current native deal filters. */
+    @PostMapping("/segment/ids")
+    public List<Integer> getSegmentDealIds(
+            @Valid @RequestBody DealSegmentQueryRequest request) {
+        SegmentDealFilters filters = segmentFilters(request);
+        return dealService.getMatchingSegmentDealIds(
+            request.getDefinition(), filters.query(), filters.currency(), filters.pipelineIds(),
+            filters.stageIds(), filters.companyIds(), request.isNoCompany(), filters.statuses(),
+            filters.risks(), filters.memberScope());
     }
 
     /**
@@ -336,6 +394,38 @@ public class DealController {
 
     private static List<Integer> normalizeIds(List<Integer> values, String parameter) {
         return DealFilterNormalizer.normalizeIds(values, parameter);
+    }
+
+    private SegmentDealFilters segmentFilters(DealSegmentQueryRequest request) {
+        return new SegmentDealFilters(
+            request.getQ() == null || request.getQ().isBlank()
+                ? null
+                : LikePattern.containing(request.getQ()),
+            validateOptionalValue(request.getDir(), SORT_DIRECTIONS, "dir"),
+            blankToNull(request.getCurrency()),
+            normalizeIds(request.getPipelineId(), "pipelineId"),
+            normalizeIds(request.getStageId(), "stageId"),
+            normalizeIds(request.getCompanyId(), "companyId"),
+            normalizeStatuses(request.getStatus()),
+            normalizeValues(request.getRisk(), DealFilterNormalizer.DEAL_RISKS, "risk"),
+            resolveMemberScope(request.getScope(), request.getMemberIds()));
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private record SegmentDealFilters(
+        String query,
+        String direction,
+        String currency,
+        List<Integer> pipelineIds,
+        List<Integer> stageIds,
+        List<Integer> companyIds,
+        List<String> statuses,
+        List<String> risks,
+        MemberScope memberScope
+    ) {
     }
 
     private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {

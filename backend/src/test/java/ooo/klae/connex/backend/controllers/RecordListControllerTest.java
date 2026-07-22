@@ -31,9 +31,11 @@ import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
+import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
+import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
@@ -466,6 +468,61 @@ class RecordListControllerTest {
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
             1, 25, null, null, null, null, List.of(0), null, null, false, null, null,
             null, null));
+    }
+
+    @Test
+    void dealSegmentEndpointsPreserveAndNormalizeTheCompleteListScope() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of());
+        DealSegmentQueryRequest request = new DealSegmentQueryRequest();
+        request.setPage(0);
+        request.setSize(500);
+        request.setQ("Acme");
+        request.setSort("value");
+        request.setDir("desc");
+        request.setCurrency("JPY");
+        request.setPipelineId(List.of(2, 3, 2));
+        request.setCompanyId(List.of(5, 5));
+        request.setNoCompany(true);
+        request.setStatus(List.of("closed", "open", "closed"));
+        request.setRisk(List.of("high", "none", "high"));
+        request.setScope("members");
+        request.setMemberIds(List.of(8, 9));
+        request.setDefinition(definition);
+        MemberScope memberScope = MemberScope.fromRequest("members", List.of(8, 9), 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve("members", List.of(8, 9), 7)).thenReturn(memberScope);
+        when(dealService.querySegmentDealsPage(
+            definition, "%Acme%", "value", "desc", "JPY", List.of(2, 3), null,
+            List.of(5), true, List.of("won", "lost", "open"), List.of("high", "none"),
+            memberScope, 100, 0)).thenReturn(new PageResponse<>(List.of(), 9));
+        when(dealService.querySegmentDealMetrics(
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            List.of("won", "lost", "open"), List.of("high", "none"), memberScope))
+            .thenReturn(new DealMetricsDto(List.of(), 0));
+        when(dealService.getMatchingSegmentDealIds(
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            List.of("won", "lost", "open"), List.of("high", "none"), memberScope))
+            .thenReturn(List.of(11));
+
+        assertEquals(9, controller.getSegmentDealsPage(request).total());
+        assertEquals(0, controller.getSegmentDealMetrics(request).totalCount());
+        assertEquals(List.of(11), controller.getSegmentDealIds(request));
+
+        verify(dealService).querySegmentDealsPage(
+            definition, "%Acme%", "value", "desc", "JPY", List.of(2, 3), null,
+            List.of(5), true, List.of("won", "lost", "open"), List.of("high", "none"),
+            memberScope, 100, 0);
+        verify(dealService).querySegmentDealMetrics(
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            List.of("won", "lost", "open"), List.of("high", "none"), memberScope);
+        verify(dealService).getMatchingSegmentDealIds(
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            List.of("won", "lost", "open"), List.of("high", "none"), memberScope);
     }
 
     @Test

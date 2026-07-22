@@ -2297,6 +2297,10 @@ export type DealFilterParams = MemberScopeParams & {
 
 export type DealsPageParams = PageParams & DealFilterParams;
 
+export type DealSegmentPageParams = DealsPageParams & {
+    definition: SegmentDefinition;
+};
+
 export type DealCurrencyMetrics = {
     currency: string;
     openCount: number;

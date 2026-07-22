@@ -222,12 +222,12 @@ class DealMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE deal SET company_id = ? WHERE id = ?", foreignCompany.getId(), targetDeal.getId());
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
-            target.getId(), "%" + foreignCompany.getName() + "%", null, null, null,
+            target.getId(), null, "%" + foreignCompany.getName() + "%", null, null, null,
             null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
-            target.getId(), "%" + foreignCompany.getName() + "%", null,
+            target.getId(), null, "%" + foreignCompany.getName() + "%", null,
             null, null, null, false, null, null, allTeamScope()));
     }
 
@@ -255,8 +255,48 @@ class DealMapperTest extends AbstractMapperTest {
             filteredDealIds(target, MemberScope.fromRequest("members", List.of(7, 9), 7)));
     }
 
+    @Test
+    void filteredDealQueriesIntersectBoundSegmentMembershipWithinWorkspace() {
+        Workspace target = newWorkspace();
+        Pipeline pipeline = newPipelineIn(target);
+        Stage stage = newStageIn(target, pipeline, 0);
+        Deal included = newDealIn(target, pipeline, stage);
+        Deal excluded = newDealIn(target, pipeline, stage);
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        Deal foreign = newDealIn(foreignWorkspace, foreignPipeline, foreignStage);
+        String segmentIdsJson = "[" + included.getId() + "," + foreign.getId() + "]";
+        MemberScope scope = allTeamScope();
+
+        List<Deal> page = dealMapper.getDealsPageFiltered(
+            target.getId(), segmentIdsJson, null, null, null, null,
+            null, null, null, false, null, null, scope, 25, 0);
+        long count = dealMapper.countDealsFiltered(
+            target.getId(), segmentIdsJson, null, null, null,
+            null, null, false, null, null, scope);
+        List<Deal> export = dealMapper.getDealsFiltered(
+            target.getId(), segmentIdsJson, null, null,
+            null, null, null, false, null, null, scope);
+        List<DealCurrencyMetricsDto> metrics = dealMapper.dealMetricsFiltered(
+            target.getId(), segmentIdsJson, null, null,
+            null, null, null, false, null, null, scope);
+        List<Integer> ids = dealMapper.getFilteredDealIds(
+            target.getId(), segmentIdsJson, null, null,
+            null, null, null, false, null, null, scope, 1001);
+
+        assertEquals(List.of(included.getId()), page.stream().map(Deal::getId).toList());
+        assertEquals(1, count);
+        assertEquals(List.of(included.getId()), export.stream().map(Deal::getId).toList());
+        assertEquals(1, metrics.stream().mapToLong(DealCurrencyMetricsDto::openCount).sum());
+        assertEquals(List.of(included.getId()), ids);
+        assertFalse(ids.contains(excluded.getId()));
+        assertFalse(ids.contains(foreign.getId()));
+    }
+
     private List<Integer> filteredDealIds(Workspace ws, MemberScope scope) {
-        return dealMapper.getDealsFiltered(ws.getId(), null, null, null, null, null, false, null, null, scope)
+        return dealMapper.getDealsFiltered(
+            ws.getId(), null, null, null, null, null, null, false, null, null, scope)
             .stream().map(Deal::getId).toList();
     }
 
@@ -270,12 +310,12 @@ class DealMapperTest extends AbstractMapperTest {
         newDealIn(target, foreignPipeline, mismatchedStage);
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
-            target.getId(), "%" + stageName + "%", null, null, null,
+            target.getId(), null, "%" + stageName + "%", null, null, null,
             null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
-            target.getId(), "%" + stageName + "%", null,
+            target.getId(), null, "%" + stageName + "%", null,
             null, null, null, false, null, null, allTeamScope()));
     }
 

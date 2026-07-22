@@ -172,6 +172,13 @@
     </where>
   </sql>
 
+  <sql id="segmentIdsJoin">
+    <if test="segmentIdsJson != null">
+      JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+        ON segment_ids.id = d.id
+    </if>
+  </sql>
+
   <sql id="dealSortDirection">
     <choose>
       <when test="dir == 'desc'">DESC</when>
@@ -340,6 +347,7 @@
   <select id="getDealsPageFiltered" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
+    <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
@@ -352,6 +360,7 @@
   <select id="getDealsFiltered" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
+    <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
@@ -363,6 +372,7 @@
   <select id="countDealsFiltered" resultType="long">
     SELECT COUNT(*)
     FROM deal d
+    <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
@@ -380,6 +390,7 @@
            COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
            COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count
     FROM deal d
+    <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
@@ -392,6 +403,7 @@
   <select id="getFilteredDealIds" resultType="int">
     SELECT d.id
     FROM deal d
+    <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id

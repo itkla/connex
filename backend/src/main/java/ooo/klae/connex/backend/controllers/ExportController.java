@@ -7,11 +7,15 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
@@ -96,6 +100,27 @@ public class ExportController {
             noCompany,
             DealFilterNormalizer.normalizeStatuses(status),
             DealFilterNormalizer.normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
+            memberScope));
+    }
+
+    /** Export deals matching both a Smart Segment and the complete native list filter. */
+    @PostMapping("/deals/segment")
+    public ResponseEntity<byte[]> exportSegmentDeals(
+            @Valid @RequestBody DealSegmentQueryRequest request) {
+        String query = request.getQ() == null || request.getQ().isBlank()
+            ? null
+            : LikePattern.containing(request.getQ());
+        MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
+        return csv("deals.csv", exportService.exportSegmentDeals(
+            request.getDefinition(), query,
+            request.getCurrency() == null || request.getCurrency().isBlank() ? null : request.getCurrency(),
+            DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
+            DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
+            DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),
+            request.isNoCompany(),
+            DealFilterNormalizer.normalizeStatuses(request.getStatus()),
+            DealFilterNormalizer.normalizeValues(
+                request.getRisk(), DealFilterNormalizer.DEAL_RISKS, "risk"),
             memberScope));
     }
 
