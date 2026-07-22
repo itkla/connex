@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -255,11 +254,19 @@ public class TaskService {
         if (statusChanged) {
             List<Integer> source = taskMapper.getTaskIdsInStatusOrdered(workspaceId, oldStatus);
             source.removeIf(existing -> existing == id);
-            setPositions(workspaceId, oldStatus, source);
+            setPositionBatches(
+                workspaceId,
+                oldStatus,
+                BoardPositionBatches.fromOrderedIds(source, POSITION_BATCH_SIZE)
+            );
         }
 
         taskMapper.moveTask(workspaceId, id, status, toDone, index);
-        setPositions(workspaceId, status, target);
+        setPositionBatches(
+            workspaceId,
+            status,
+            BoardPositionBatches.fromOrderedIdsExcluding(target, id, POSITION_BATCH_SIZE)
+        );
 
         Task moved = taskMapper.getTaskById(workspaceId, id);
         auditService.record("task.update", "task", id, before.getDescription(),
@@ -273,13 +280,9 @@ public class TaskService {
         return hydrate(workspaceId, moved);
     }
 
-    private void setPositions(int workspaceId, String status, List<Integer> ids) {
-        for (int start = 0; start < ids.size(); start += POSITION_BATCH_SIZE) {
-            int end = Math.min(start + POSITION_BATCH_SIZE, ids.size());
-            List<BoardPositionUpdate> positions = new ArrayList<>(end - start);
-            for (int index = start; index < end; index++) {
-                positions.add(new BoardPositionUpdate(ids.get(index), index));
-            }
+    private void setPositionBatches(
+            int workspaceId, String status, List<List<BoardPositionUpdate>> batches) {
+        for (List<BoardPositionUpdate> positions : batches) {
             taskMapper.setPositions(workspaceId, status, positions);
         }
     }

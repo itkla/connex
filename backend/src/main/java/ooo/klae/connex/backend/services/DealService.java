@@ -1334,7 +1334,11 @@ public class DealService {
         if (stageChanged && oldStageId != null) {
             List<Integer> source = dealMapper.getDealIdsInStageOrdered(workspaceId, oldStageId);
             source.removeIf(existing -> existing == dealId);
-            setPositions(workspaceId, oldStageId, source);
+            setPositionBatches(
+                workspaceId,
+                oldStageId,
+                BoardPositionBatches.fromOrderedIds(source, POSITION_BATCH_SIZE)
+            );
         }
 
         Deal deal = mutableCopy(before);
@@ -1346,7 +1350,11 @@ public class DealService {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon());
         }
-        setPositions(workspaceId, stageId, target);
+        setPositionBatches(
+            workspaceId,
+            stageId,
+            BoardPositionBatches.fromOrderedIdsExcluding(target, dealId, POSITION_BATCH_SIZE)
+        );
 
         auditService.record("deal.update", "deal", dealId, deal.getName(),
             publishStageChanged ? "Moved deal " + deal.getName() + " to " + stage.getName()
@@ -1357,13 +1365,9 @@ public class DealService {
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
-    private void setPositions(int workspaceId, int stageId, List<Integer> ids) {
-        for (int start = 0; start < ids.size(); start += POSITION_BATCH_SIZE) {
-            int end = Math.min(start + POSITION_BATCH_SIZE, ids.size());
-            List<BoardPositionUpdate> positions = new ArrayList<>(end - start);
-            for (int index = start; index < end; index++) {
-                positions.add(new BoardPositionUpdate(ids.get(index), index));
-            }
+    private void setPositionBatches(
+            int workspaceId, int stageId, List<List<BoardPositionUpdate>> batches) {
+        for (List<BoardPositionUpdate> positions : batches) {
             dealMapper.setPositions(workspaceId, stageId, positions);
         }
     }
