@@ -125,7 +125,10 @@ public class ImportService {
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportPreviewResult previewPersons(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return summarize(analyzePersons(request, workspaceId), request.getOnDuplicate());
+        String action = resolveAction(request.getOnDuplicate());
+        List<PlanRow> plan = analyzePersons(request, workspaceId);
+        preflightPreview("person", workspaceId, request.getMapping(), plan, action, Permission.PERSON_UPDATE);
+        return summarize(plan, action);
     }
 
     /**
@@ -142,7 +145,8 @@ public class ImportService {
         List<PlanRow> plan = analyzePersons(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
 
-        Map<String, Integer> columnToDef = resolveCustomDefinitions("person", request.getMapping());
+        Map<String, Integer> columnToDef = resolveCustomDefinitions(
+            "person", request.getMapping(), plan, action);
         Map<String, Integer> tagByName = resolveTags(plan, action);
         Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan, action);
 
@@ -264,7 +268,10 @@ public class ImportService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportPreviewResult previewCompanies(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return summarize(analyzeCompanies(request, workspaceId), request.getOnDuplicate());
+        String action = resolveAction(request.getOnDuplicate());
+        List<PlanRow> plan = analyzeCompanies(request, workspaceId);
+        preflightPreview("company", workspaceId, request.getMapping(), plan, action, Permission.COMPANY_UPDATE);
+        return summarize(plan, action);
     }
 
     /**
@@ -279,7 +286,8 @@ public class ImportService {
         List<PlanRow> plan = analyzeCompanies(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
 
-        Map<String, Integer> columnToDef = resolveCustomDefinitions("company", request.getMapping());
+        Map<String, Integer> columnToDef = resolveCustomDefinitions(
+            "company", request.getMapping(), plan, action);
         Map<String, Integer> tagByName = resolveTags(plan, action);
 
         List<PlanRow> toCreate = new ArrayList<>();
@@ -382,7 +390,10 @@ public class ImportService {
     @RequirePermission(Permission.DEAL_CREATE)
     public ImportPreviewResult previewDeals(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return summarize(analyzeDeals(request, workspaceId), request.getOnDuplicate());
+        String action = resolveAction(request.getOnDuplicate());
+        List<PlanRow> plan = analyzeDeals(request, workspaceId);
+        preflightPreview("deal", workspaceId, request.getMapping(), plan, action, Permission.DEAL_UPDATE);
+        return summarize(plan, action);
     }
 
     /**
@@ -398,7 +409,8 @@ public class ImportService {
         List<PlanRow> plan = analyzeDeals(request, workspaceId);
         requireUpdatePermission(plan, action, Permission.DEAL_UPDATE);
 
-        Map<String, Integer> columnToDef = resolveCustomDefinitions("deal", request.getMapping());
+        Map<String, Integer> columnToDef = resolveCustomDefinitions(
+            "deal", request.getMapping(), plan, action);
         Map<String, Integer> tagByName = resolveTags(plan, action);
         Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan, action);
         Map<String, Integer> personByEmail = resolveDealPeople(workspaceId, plan, action);
@@ -731,8 +743,10 @@ public class ImportService {
         return result;
     }
 
-    private Map<String, Integer> resolveCustomDefinitions(String entityType, List<ColumnMapping> mapping) {
+    private Map<String, Integer> resolveCustomDefinitions(String entityType, List<ColumnMapping> mapping,
+            List<PlanRow> plan, String action) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Set<String> usedNewColumns = usedNewCustomFieldColumns(plan, action);
         Map<Integer, CustomFieldDefinition> byId = new HashMap<>();
         for (CustomFieldDefinition def : customFieldDefinitionMapper.getByEntityType(workspaceId, entityType)) {
             if (!def.isArchived()) byId.put(def.getId(), def);
@@ -744,7 +758,7 @@ public class ImportService {
             if (field != null && field.startsWith("custom:")) {
                 int id = parseCustomId(field);
                 if (byId.containsKey(id)) columnToDef.put(cm.getColumn(), id);
-            } else if (Boolean.TRUE.equals(cm.getCreateCustomField())) {
+            } else if (Boolean.TRUE.equals(cm.getCreateCustomField()) && usedNewColumns.contains(cm.getColumn())) {
                 String prior = newFieldKeys.putIfAbsent(slug(customLabel(cm)), cm.getColumn());
                 if (prior != null) {
                     throw new BadRequestException(
@@ -809,6 +823,63 @@ public class ImportService {
     private static boolean willWrite(PlanRow row, String action) {
         if (INVALID.equals(row.status) || SKIP.equals(row.status)) return false;
         return !(MATCH.equals(row.status) && SKIP.equals(action));
+    }
+
+    private void preflightPreview(String entityType, int workspaceId, List<ColumnMapping> mapping,
+            List<PlanRow> plan, String action, Permission updatePermission) {
+        requireUpdatePermission(plan, action, updatePermission);
+        requireCustomFieldPermission(entityType, workspaceId, mapping, plan, action);
+        requireTagPermission(workspaceId, plan, action);
+        requireCompanyPermission(workspaceId, plan, action);
+    }
+
+    private void requireCustomFieldPermission(String entityType, int workspaceId, List<ColumnMapping> mapping,
+            List<PlanRow> plan, String action) {
+        Set<String> usedNewColumns = usedNewCustomFieldColumns(plan, action);
+        for (ColumnMapping cm : mapping) {
+            if (!Boolean.TRUE.equals(cm.getCreateCustomField()) || !usedNewColumns.contains(cm.getColumn())) {
+                continue;
+            }
+            String key = slug(customLabel(cm));
+            if (customFieldDefinitionMapper.getByKey(workspaceId, entityType, key) == null) {
+                workspaceService.requirePermission(Permission.CUSTOM_FIELD_MANAGE);
+                return;
+            }
+        }
+    }
+
+    private void requireTagPermission(int workspaceId, List<PlanRow> plan, String action) {
+        Set<String> names = new LinkedHashSet<>();
+        for (PlanRow row : plan) {
+            if (willWrite(row, action)) names.addAll(row.tagNames);
+        }
+        for (String name : names) {
+            String trimmed = name.trim();
+            if (!trimmed.isEmpty() && tagMapper.getTagByName(workspaceId, trimmed) == null) {
+                workspaceService.requirePermission(Permission.TAG_MANAGE);
+                return;
+            }
+        }
+    }
+
+    private void requireCompanyPermission(int workspaceId, List<PlanRow> plan, String action) {
+        Map<String, Integer> existing = existingCompanyIds(workspaceId);
+        for (PlanRow row : plan) {
+            if (!willWrite(row, action)) continue;
+            String name = normName(row.companyName);
+            if (name != null && !existing.containsKey(name)) {
+                workspaceService.requirePermission(Permission.COMPANY_CREATE);
+                return;
+            }
+        }
+    }
+
+    private static Set<String> usedNewCustomFieldColumns(List<PlanRow> plan, String action) {
+        Set<String> columns = new HashSet<>();
+        for (PlanRow row : plan) {
+            if (willWrite(row, action)) columns.addAll(row.custom.keySet());
+        }
+        return columns;
     }
 
     // ===================================================================================
