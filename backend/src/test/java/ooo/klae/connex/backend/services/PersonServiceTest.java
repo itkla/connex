@@ -94,7 +94,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void ceasingProvisionRevokesStandingSharesAndAuditsTheCount() {
         Person person = newPerson(newCompany());
         Workspace grantee = newWorkspaceInSameOrg();
-        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(),
+            currentUser.getId(), false, List.of(workspace.getId(), grantee.getId()));
         assertEquals(1, shareMapper.listPersonShares(workspace.getId(), person.getId()).size());
 
         personService.updateProcessingRestrictions(person.getId(), false, true);
@@ -306,7 +307,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void updateEvaluationExclusions_rejectsSharedInContact() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
-        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(),
+            currentUser.getId(), true, List.of(other.getId(), workspace.getId()));
 
         assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
@@ -328,7 +330,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Person shared = personInWorkspace(ownerWorkspace);
         shareMapper.sharePerson(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+            List.of(ownerWorkspace.getId(), workspace.getId()));
         Tag tag = newTag();
         int employmentBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
@@ -372,7 +375,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Activity activeActivity = activityInWorkspace(workspace, shared);
         Task activeTask = taskInWorkspace(workspace, shared);
         Note activeNote = noteInWorkspace(workspace, shared);
-        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(),
+            currentUser.getId(), true, List.of(ownerWorkspace.getId(), workspace.getId()));
 
         Person detail = personService.getPersonById(shared.getId());
 

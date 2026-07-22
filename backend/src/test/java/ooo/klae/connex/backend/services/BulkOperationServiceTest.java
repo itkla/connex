@@ -86,7 +86,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     void deletePersons_skipsRecordsMerelySharedIntoTheWorkspace() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
-        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(),
+            currentUser.getId(), true, List.of(other.getId(), workspace.getId()));
 
         assertTrue(personMapper.exists(workspace.getId(), foreign.getId()),
             "a shared-in record is read-visible");

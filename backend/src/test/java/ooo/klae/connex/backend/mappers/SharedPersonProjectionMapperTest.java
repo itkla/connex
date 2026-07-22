@@ -51,7 +51,8 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         Company foreignCompany = companyIn(sibling, "Sibling Company");
         Person shared = personIn(sibling, foreignCompany, "Alpha Shared Contact");
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false));
+            shared.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false,
+            List.of(sibling.getId(), workspace.getId())));
         assertEquals(1, dealMapper.addPerson(
             workspace.getId(), deal.getId(), shared.getId(), "champion"));
         Task task = taskFor(recipient, shared, deal);
@@ -70,7 +71,8 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
             .anyMatch(candidate -> candidate.getPersonId() == shared.getId()));
 
         assertEquals(1, shareMapper.shareCompany(
-            foreignCompany.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false));
+            foreignCompany.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false,
+            List.of(sibling.getId(), workspace.getId())));
         assertEquals(foreignCompany.getId(),
             sharedDealPerson(deal, shared).getPerson().getCompany().getId());
         assertEquals(foreignCompany.getId(), sharedPersonForDeal(deal, shared).getCompany().getId());

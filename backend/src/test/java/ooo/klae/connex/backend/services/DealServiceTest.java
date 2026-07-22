@@ -1207,7 +1207,8 @@ class DealServiceTest extends AbstractServiceTest {
         shared.setName("Shared " + unique());
         personMapper.insert(shared);
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+            List.of(sibling.getId(), workspace.getId())));
         dealService.addPerson(deal.getId(), shared.getId(), "champion");
         assertEquals(1, shareMapper.unsharePerson(
             shared.getId(), sibling.getId(), workspace.getId()));

@@ -19,17 +19,17 @@ import org.w3c.dom.NodeList;
 /**
  * Organization-ceiling backstop for the sharing control plane (#97, #313 §0.5).
  * The same-org invariant lives in hand-written SQL — the {@code INSERT..SELECT}
- * grants in {@code ShareMapper.xml} (write path) and the {@code EXISTS} share
- * branches of the owned-or-shared visibility predicates in the entity mappers
- * (read path). The workspace-predicate scan cannot see either (it only checks
- * {@code #{workspaceId}} is bound). These tests assert both paths carry the
- * org-equality join, so a future shareable entity type copied without the
- * ceiling fails the build instead of silently degrading cross-org protection to
- * the service layer alone.
+ * grants in {@code ShareMapper.xml} enforce the control-plane workspace
+ * snapshot allowlist on the write path, while the {@code EXISTS} share branches
+ * of entity visibility predicates retain their org-equality joins on the read
+ * path. The workspace-predicate scan cannot see either structural ceiling.
  */
 class OrgShareCeilingArchTest {
 
-    private static final Pattern ORG_CEILING = Pattern.compile("tw\\.org_id\\s*=\\s*ow\\.org_id");
+    private static final Pattern TARGET_ALLOWLIST =
+        Pattern.compile("#\\{targetWorkspaceId}\\s+IN");
+    private static final Pattern OWNER_ANCHOR =
+        Pattern.compile("workspace_id\\s*=\\s*#\\{workspaceId}");
     private static final Pattern READ_CEILING = Pattern.compile("ows\\.org_id\\s*=\\s*vws\\.org_id");
 
     /**
@@ -80,7 +80,7 @@ class OrgShareCeilingArchTest {
     }
 
     @Test
-    void every_share_grant_enforces_the_same_org_ceiling() throws Exception {
+    void every_share_grant_enforces_the_control_snapshot_allowlist() throws Exception {
         Document doc = loadShareMapper();
         List<String> violations = new ArrayList<>();
         int grants = 0;
@@ -94,8 +94,20 @@ class OrgShareCeilingArchTest {
             }
             grants++;
             String sql = insert.getTextContent();
-            if (!ORG_CEILING.matcher(sql).find()) {
-                violations.add(id);
+            boolean workspaceAllowlist = false;
+            NodeList foreachElements = insert.getElementsByTagName("foreach");
+            for (int j = 0; j < foreachElements.getLength(); j++) {
+                Element foreach = (Element) foreachElements.item(j);
+                if ("workspaceIds".equals(foreach.getAttribute("collection"))
+                        && "allowedWorkspaceId".equals(foreach.getAttribute("item"))) {
+                    workspaceAllowlist = true;
+                }
+            }
+            if (!workspaceAllowlist || !TARGET_ALLOWLIST.matcher(sql).find()
+                    || !OWNER_ANCHOR.matcher(sql).find()) {
+                violations.add(id + " [workspaceAllowlist=" + workspaceAllowlist
+                    + ", targetBound=" + TARGET_ALLOWLIST.matcher(sql).find()
+                    + ", ownerAnchored=" + OWNER_ANCHOR.matcher(sql).find() + "]");
             }
         }
 
@@ -103,8 +115,8 @@ class OrgShareCeilingArchTest {
             "Only " + grants + " share-grant inserts found in ShareMapper.xml — the scan looks "
                 + "misconfigured and this guard would pass vacuously.");
         assertTrue(violations.isEmpty(),
-            "These share-grant statements are missing the same-organization ceiling "
-                + "(JOIN workspace tw ... tw.org_id = ow.org_id): " + violations);
+            "These share-grant statements do not bind the target through the trusted organization "
+                + "workspace allowlist while anchoring record ownership: " + violations);
     }
 
     private Document loadShareMapper() throws Exception {

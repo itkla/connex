@@ -172,7 +172,8 @@ class ImportServiceTest extends AbstractServiceTest {
         Company ownerCompany = companyInWorkspace(ownerWorkspace);
         Person shared = personInWorkspace(ownerWorkspace, ownerCompany);
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+            List.of(ownerWorkspace.getId(), workspace.getId())));
         Company activeCompany = newCompany();
         Tag activeTag = newTag();
         CustomFieldDefinition custom = customDefinition("person");
@@ -224,7 +225,8 @@ class ImportServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company shared = companyInWorkspace(ownerWorkspace);
         assertEquals(1, shareMapper.shareCompany(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+            List.of(ownerWorkspace.getId(), workspace.getId())));
         Tag activeTag = newTag();
         CustomFieldDefinition custom = customDefinition("company");
         List<ColumnMapping> mapping = List.of(

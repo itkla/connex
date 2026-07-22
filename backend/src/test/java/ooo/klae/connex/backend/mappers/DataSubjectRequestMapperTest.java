@@ -130,8 +130,10 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         newEdge(overlayWorkspace.getId(), subject, counterpart, "subject edge");
         newEdge(overlayWorkspace.getId(), other, third, "other edge");
 
-        shareMapper.sharePerson(subject.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false);
-        shareMapper.sharePerson(other.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false);
+        shareMapper.sharePerson(subject.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(),
+            actor.getId(), false, List.of(ownerWorkspace.getId(), overlayWorkspace.getId()));
+        shareMapper.sharePerson(other.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(),
+            actor.getId(), false, List.of(ownerWorkspace.getId(), overlayWorkspace.getId()));
         jdbcTemplate.update(
             "INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
             subject.getId(), foreignWorkspace.getId(), actor.getId(), false);
