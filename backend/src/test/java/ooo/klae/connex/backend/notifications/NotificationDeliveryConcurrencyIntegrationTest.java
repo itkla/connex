@@ -105,21 +105,24 @@ class NotificationDeliveryConcurrencyIntegrationTest {
             return existing;
         }).when(notificationMapper).findByDedupe(workspace.getId(), recipient.getId(), dedupeKey);
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
             Future<?> first = executor.submit(() -> delivery.deliver(notification(dedupeKey)));
             Future<?> second = executor.submit(() -> delivery.deliver(notification(dedupeKey)));
-            try {
-                first.get(20, TimeUnit.SECONDS);
-                second.get(20, TimeUnit.SECONDS);
-            } finally {
-                bothMissing.countDown();
-                bothMissing.countDown();
-            }
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+        } finally {
+            bothMissing.countDown();
+            bothMissing.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
 
         Notification persisted = notificationMapper.findByDedupe(
             workspace.getId(), recipient.getId(), dedupeKey);
         assertNotNull(persisted);
+        verify(notificationMapper, times(2)).claimEmailDelivery(
+            workspace.getId(), recipient.getId(), dedupeKey);
         assertEquals(1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM notification WHERE workspace_id = ? AND recipient_id = ? AND dedupe_key = ?",
             Integer.class,
