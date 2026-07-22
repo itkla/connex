@@ -68,14 +68,14 @@ class UserOffboardingOrderTest {
 
     @Test
     void freshMembershipPurgesSavedViewDataWhenNoMembershipRemains() {
-        when(workspaceMapper.isMemberIncludingPending(7, 9)).thenReturn(false);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(null);
 
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
             workspaceMapper, savedViewPreferenceMapper, savedViewMapper,
             notificationMapper, dealMapper);
-        order.verify(workspaceMapper).isMemberIncludingPending(7, 9);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
