@@ -202,15 +202,26 @@ class SegmentMapperTest extends AbstractMapperTest {
         Person ownedCompanyPerson = newPerson(ownedCompany);
         Workspace sibling = newSiblingWorkspace();
         Company sharedCompany = newCompany(sibling);
-        Person sharedCompanyPerson = newPerson(sharedCompany);
         workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
         assertTrue(shareMapper.shareCompany(
             sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+        Person sharedCompanyPerson = newPerson(sharedCompany);
+        Person restrictedSharedCompanyPerson = newPerson(sharedCompany);
+        personMapper.updateProcessingRestrictions(
+            workspace.getId(), restrictedSharedCompanyPerson.getId(), true, false);
 
         assertTrue(personMatchesCompany(ownedCompany.getId()).contains(ownedCompanyPerson.getId()));
         assertTrue(personMatchesCompany(sharedCompany.getId()).contains(sharedCompanyPerson.getId()));
+        assertFalse(personMatchesCompany(sharedCompany.getId()).contains(restrictedSharedCompanyPerson.getId()));
         assertTrue(personMatchesCompanyIncludingRestricted(sharedCompany.getId())
             .contains(sharedCompanyPerson.getId()));
+        assertTrue(personMatchesCompanyIncludingRestricted(sharedCompany.getId())
+            .contains(restrictedSharedCompanyPerson.getId()));
+        assertTrue(personMatchesCompanies(List.of(ownedCompany.getId(), sharedCompany.getId()))
+            .contains(sharedCompanyPerson.getId()));
+        assertTrue(personMatchesCompaniesIncludingRestricted(
+            List.of(ownedCompany.getId(), sharedCompany.getId()))
+            .contains(restrictedSharedCompanyPerson.getId()));
 
         assertTrue(shareMapper.unshareCompany(
             sharedCompany.getId(), sibling.getId(), workspace.getId()) > 0);
@@ -218,6 +229,13 @@ class SegmentMapperTest extends AbstractMapperTest {
         assertFalse(personMatchesCompany(sharedCompany.getId()).contains(sharedCompanyPerson.getId()));
         assertFalse(personMatchesCompanyIncludingRestricted(sharedCompany.getId())
             .contains(sharedCompanyPerson.getId()));
+        assertFalse(personMatchesCompanies(List.of(ownedCompany.getId(), sharedCompany.getId()))
+            .contains(sharedCompanyPerson.getId()));
+        assertFalse(personMatchesCompaniesIncludingRestricted(
+            List.of(ownedCompany.getId(), sharedCompany.getId()))
+            .contains(restrictedSharedCompanyPerson.getId()));
+        assertTrue(personMatchesCompanies(List.of(ownedCompany.getId(), sharedCompany.getId()))
+            .contains(ownedCompanyPerson.getId()));
     }
 
     private Map<String, Object> existenceParams(String predicate) {
@@ -236,12 +254,28 @@ class SegmentMapperTest extends AbstractMapperTest {
         return segmentMapper.personIdsMatchingIncludingRestricted(companyParams(companyId));
     }
 
+    private List<Integer> personMatchesCompanies(List<Integer> companyIds) {
+        return segmentMapper.personIdsMatching(companiesParams(companyIds));
+    }
+
+    private List<Integer> personMatchesCompaniesIncludingRestricted(List<Integer> companyIds) {
+        return segmentMapper.personIdsMatchingIncludingRestricted(companiesParams(companyIds));
+    }
+
     private Map<String, Object> companyParams(int companyId) {
         return Map.of(
             "workspaceId", workspace.getId(),
             "field", "company",
             "op", "is",
             "id", companyId);
+    }
+
+    private Map<String, Object> companiesParams(List<Integer> companyIds) {
+        return Map.of(
+            "workspaceId", workspace.getId(),
+            "field", "company",
+            "op", "in",
+            "ids", companyIds);
     }
 
     private Workspace newSiblingWorkspace() {

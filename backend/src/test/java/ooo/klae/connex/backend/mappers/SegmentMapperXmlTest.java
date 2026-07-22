@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -54,9 +55,15 @@ class SegmentMapperXmlTest {
 
         String normalSql = sql(configuration, "personIdsMatching", parameters);
         String restrictedSql = sql(configuration, "personIdsMatchingIncludingRestricted", parameters);
+        parameters.put("op", "in");
+        parameters.put("ids", List.of(17, 19));
+        String inSql = sql(configuration, "personIdsMatching", parameters);
 
         assertCompanyVisibility(normalSql);
         assertCompanyVisibility(restrictedSql);
+        assertCompanyVisibility(inSql);
+        assertTrue(normalSql.contains("AND company_id = ?"));
+        assertTrue(inSql.contains("AND company_id IN ( ? , ? )"));
     }
 
     private static String sql(Configuration configuration, String statement, String predicate) {
@@ -78,7 +85,6 @@ class SegmentMapperXmlTest {
     }
 
     private static void assertCompanyVisibility(String sql) {
-        assertTrue(sql.contains("AND company_id = ?"));
         assertTrue(sql.contains("visible_company.id = person.company_id"));
         assertTrue(sql.contains("visible_company.workspace_id = ?"));
         assertTrue(sql.contains("visible_share.workspace_id = ?"));
