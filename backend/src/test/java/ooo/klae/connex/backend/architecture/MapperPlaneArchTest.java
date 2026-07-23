@@ -60,8 +60,7 @@ class MapperPlaneArchTest {
         Map.entry("ReportMapper", Set.of("workspace")),
         Map.entry("RoleMapper", Set.of("workspace_role", "workspace_role_permission")),
         Map.entry("SegmentMapper", Set.of("workspace")),
-        Map.entry("ShareMapper", Set.of("workspace")),
-        Map.entry("TaskMapper", Set.of("workspace")));
+        Map.entry("ShareMapper", Set.of("workspace")));
 
     @Test
     void crossPlaneStatementReferencesStayWithinTheBaseline() throws IOException {

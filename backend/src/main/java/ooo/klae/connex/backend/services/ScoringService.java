@@ -272,7 +272,7 @@ public class ScoringService {
         List<Note> notes = noteMapper.getWorkspaceNotesByCompanyIds(workspaceId, visibleIds).stream()
             .filter(ScoringService::isSharedNote)
             .toList();
-        List<Task> tasks = taskMapper.getTasksByCompanyIds(workspaceId, visibleIds);
+        List<Task> tasks = companyTasks(workspaceId, persons, visibleIds);
         Map<Integer, Integer> personCompany = personCompanyMap(persons);
         Map<Integer, Integer> dealCompany = dealCompanyMap(deals);
         Map<Integer, List<Touch>> byCompany = new HashMap<>();
@@ -292,6 +292,23 @@ public class ScoringService {
                 reference, reference));
         }
         return requested.stream().map(scores::get).filter(java.util.Objects::nonNull).toList();
+    }
+
+    private List<Task> companyTasks(
+            int workspaceId, List<Person> persons, List<Integer> companyIds) {
+        Map<Integer, Task> tasks = new LinkedHashMap<>();
+        List<Integer> authorizedPersonIds = persons.stream().map(Person::getId).distinct().toList();
+        for (int from = 0; from < authorizedPersonIds.size(); from += MAX_BATCH_CONTACTS) {
+            int to = Math.min(authorizedPersonIds.size(), from + MAX_BATCH_CONTACTS);
+            for (Task task : taskMapper.getTasksByPersonCompanyIds(
+                    workspaceId, authorizedPersonIds.subList(from, to), companyIds)) {
+                tasks.putIfAbsent(task.getId(), task);
+            }
+        }
+        for (Task task : taskMapper.getTasksByDealCompanyIds(workspaceId, companyIds)) {
+            tasks.putIfAbsent(task.getId(), task);
+        }
+        return List.copyOf(tasks.values());
     }
 
     private List<Activity> companyActivities(

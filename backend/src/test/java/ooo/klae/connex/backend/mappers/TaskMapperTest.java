@@ -144,6 +144,49 @@ class TaskMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getTasksByPersonCompanyIdsRechecksCurrentCompany() {
+        User user = newUser();
+        Company includedCompany = newCompany();
+        Company excludedCompany = newCompany();
+        Person includedPerson = newPerson(includedCompany);
+        Person excludedPerson = newPerson(excludedCompany);
+        Task included = build("included", user, includedPerson, null);
+        Task excluded = build("excluded", user, excludedPerson, null);
+        taskMapper.insert(included);
+        taskMapper.insert(excluded);
+
+        List<Task> tasks = taskMapper.getTasksByPersonCompanyIds(
+            workspace.getId(), List.of(includedPerson.getId(), excludedPerson.getId()),
+            List.of(includedCompany.getId()));
+
+        assertEquals(List.of(included.getId()), tasks.stream().map(Task::getId).toList());
+    }
+
+    @Test
+    void getTasksByDealCompanyIdsFiltersByCompanyAndWorkspace() {
+        User user = newUser();
+        Company includedCompany = newCompany();
+        Company excludedCompany = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal includedDeal = newDeal(pipeline, stage, includedCompany);
+        Deal excludedDeal = newDeal(pipeline, stage, excludedCompany);
+        Task included = build("included", user, null, includedDeal);
+        Task excluded = build("excluded", user, null, excludedDeal);
+        Workspace other = newWorkspace();
+        Task foreign = build("foreign", user, null, includedDeal);
+        foreign.setWorkspaceId(other.getId());
+        taskMapper.insert(included);
+        taskMapper.insert(excluded);
+        taskMapper.insert(foreign);
+
+        List<Task> tasks = taskMapper.getTasksByDealCompanyIds(
+            workspace.getId(), List.of(includedCompany.getId()));
+
+        assertEquals(List.of(included.getId()), tasks.stream().map(Task::getId).toList());
+    }
+
+    @Test
     void getTasksPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         User user = newUser();
