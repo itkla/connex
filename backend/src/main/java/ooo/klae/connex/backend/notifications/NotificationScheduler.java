@@ -7,7 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
@@ -28,7 +28,7 @@ import ooo.klae.connex.backend.services.NotificationReconciliationService;
 public class NotificationScheduler {
     private static final Logger log = LoggerFactory.getLogger(NotificationScheduler.class);
 
-    private final NotificationMapper notificationMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final TenantWorkScope tenantWorkScope;
     private final NotificationReconciliationService reconciliationService;
 
@@ -37,7 +37,7 @@ public class NotificationScheduler {
         initialDelayString = "${connex.notifications.initial-delay-ms:300000}"
     )
     public void reconcileAndPurge() {
-        for (Integer workspaceId : tenantWorkScope.unrouted(notificationMapper::findWorkspaceIds)) {
+        for (Integer workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {
                     reconciliationService.reconcileWorkspace(workspaceId, true);
