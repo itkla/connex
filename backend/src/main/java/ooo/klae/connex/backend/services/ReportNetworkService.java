@@ -29,7 +29,6 @@ import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
-import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 
@@ -65,14 +64,15 @@ public class ReportNetworkService {
 
     private final ReportMapper reportMapper;
     private final PersonMapper personMapper;
-    private final PersonEdgeMapper personEdgeMapper;
+    private final PersonEdgeReadService personEdgeReader;
     private final IntroductionMapper introductionMapper;
     private final ScoringService scoringService;
 
     NetworkSnapshot snapshot(ReportAggregateQuery query, boolean includeReverseIntros) {
         int workspaceId = query.workspaceId();
         List<Person> people = personMapper.getPersonsForNetworkReport(workspaceId, MAX_VISIBLE_PEOPLE + 1);
-        List<PersonEdge> edges = personEdgeMapper.getEdgesForNetworkReport(workspaceId, MAX_VISIBLE_EDGES + 1);
+        List<PersonEdge> edges = personEdgeReader.getEdgesForNetworkReport(
+                workspaceId, MAX_VISIBLE_EDGES + 1);
         List<Introduction> existingPairs = introductionMapper.findExistingPairsForReport(
                 workspaceId, MAX_NETWORK_EXISTING_PAIRS + 1);
         List<ReportNetworkAccountRow> accountValues = reportMapper.getNetworkAccountValues(
@@ -102,7 +102,7 @@ public class ReportNetworkService {
         Set<Integer> candidateIdSet = Set.copyOf(candidateIds);
         return rankReverseIntroSuggestions(
                 candidates,
-                personEdgeMapper.getEdgesForReverseIntroReport(
+                personEdgeReader.getEdgesForReverseIntroReport(
                         workspaceId, candidateIds, MAX_REVERSE_EDGES + 1),
                 introductionMapper.findWorkspaceEmploymentForReport(
                         workspaceId, candidateIds, MAX_REVERSE_EMPLOYMENT_ROWS + 1),

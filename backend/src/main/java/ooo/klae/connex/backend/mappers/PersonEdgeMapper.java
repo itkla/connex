@@ -18,15 +18,22 @@ public interface PersonEdgeMapper {
     int delete(@Param("workspaceId") int workspaceId, @Param("sourcePersonId") int sourcePersonId,
             @Param("targetPersonId") int targetPersonId);
     List<PersonConnectionDto> getConnections(@Param("workspaceId") int workspaceId,
-            @Param("personId") int personId);
+            @Param("personId") int personId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<PersonConnectionDto> getTopConnections(@Param("workspaceId") int workspaceId,
-            @Param("personId") int personId, @Param("limit") int limit);
-    List<PersonEdge> getAllEdges(int workspaceId);
+            @Param("personId") int personId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+            @Param("limit") int limit);
+    List<PersonEdge> getAllEdges(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<PersonEdge> getEdgesForNetworkReport(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("limit") int limit);
     List<PersonEdge> getEdgesForReverseIntroReport(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("personIds") List<Integer> personIds,
             @Param("limit") int limit);
 }

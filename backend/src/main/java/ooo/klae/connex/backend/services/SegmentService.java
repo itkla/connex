@@ -23,7 +23,6 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -57,7 +56,7 @@ public class SegmentService {
     private final ScoringService scoringService;
     private final DealRiskService dealRiskService;
     private final SegmentMapper segmentMapper;
-    private final PersonEdgeMapper edgeMapper;
+    private final PersonEdgeReadService edgeReader;
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
     private final SegmentCatalog catalog;
@@ -573,7 +572,7 @@ public class SegmentService {
             return new HashSet<>();
         }
         Set<Integer> warmlyConnected = new HashSet<>();
-        for (PersonEdge edge : edgeMapper.getAllEdges(workspaceId)) {
+        for (PersonEdge edge : edgeReader.getAllEdges(workspaceId)) {
             if (edge.getStrength() < STRONG_EDGE || edge.getSourcePersonId() == edge.getTargetPersonId()) {
                 continue;
             }

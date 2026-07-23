@@ -40,6 +40,7 @@ class IntroductionServiceTest extends AbstractServiceTest {
 
     @Autowired private IntroductionService introductionService;
     @Autowired private PersonEdgeMapper personEdgeMapper;
+    @Autowired private PersonEdgeReadService personEdgeReader;
     @Autowired private IntroductionMapper introductionMapper;
     @Autowired private PersonEmploymentMapper personEmploymentMapper;
 
@@ -257,7 +258,7 @@ class IntroductionServiceTest extends AbstractServiceTest {
 
         introductionService.createIntroduction(p1.getId(), p2.getId(), null);
 
-        PersonEdge edge = personEdgeMapper.getAllEdges(workspace.getId()).stream()
+        PersonEdge edge = personEdgeReader.getAllEdges(workspace.getId()).stream()
             .filter(e -> e.getSourcePersonId() == Math.min(p1.getId(), p2.getId())
                 && e.getTargetPersonId() == Math.max(p1.getId(), p2.getId()))
             .findFirst().orElseThrow();
@@ -385,7 +386,7 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     private boolean edgeExists(int a, int b) {
-        return personEdgeMapper.getAllEdges(workspace.getId()).stream()
+        return personEdgeReader.getAllEdges(workspace.getId()).stream()
             .anyMatch(e -> e.getSourcePersonId() == Math.min(a, b)
                 && e.getTargetPersonId() == Math.max(a, b));
     }

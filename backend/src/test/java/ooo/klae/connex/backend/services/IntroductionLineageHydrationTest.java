@@ -35,6 +35,7 @@ class IntroductionLineageHydrationTest {
     @Mock private IntroductionMapper introductionMapper;
     @Mock private UserMapper userMapper;
     @Mock private PersonEdgeMapper edgeMapper;
+    @Mock private PersonEdgeReadService edgeReader;
     @Mock private PersonMapper personMapper;
     @Mock private ScoringService scoringService;
     @Mock private WarmPathService warmPathService;
@@ -59,6 +60,7 @@ class IntroductionLineageHydrationTest {
             introductionMapper,
             userMapper,
             edgeMapper,
+            edgeReader,
             personMapper,
             scoringService,
             warmPathService,

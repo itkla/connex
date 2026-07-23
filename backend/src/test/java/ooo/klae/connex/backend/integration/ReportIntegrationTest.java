@@ -63,6 +63,8 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -485,11 +487,16 @@ class ReportIntegrationTest {
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
     @MockitoBean private Clock clock;
+    @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        OrganizationWorkspaceScopeControlOperations scopeOperations =
+                new OrganizationWorkspaceScopeControlOperations(workspaceMapper);
+        when(workspaceScopeControlAccess.getForWorkspace(anyInt())).thenAnswer(invocation ->
+                scopeOperations.getForWorkspace(invocation.getArgument(0, Integer.class)));
         when(clock.instant()).thenReturn(FIXED_NOW);
         when(clock.millis()).thenReturn(FIXED_NOW.toEpochMilli());
         when(clock.getZone()).thenReturn(ZoneOffset.UTC);

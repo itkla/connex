@@ -37,7 +37,7 @@ class PersonEdgeMapperTest extends AbstractMapperTest {
         connect(focal, topHotel, 1);
 
         List<PersonConnectionDto> connections = personEdgeMapper.getTopConnections(
-            workspace.getId(), focal.getId(), 5);
+            workspace.getId(), focal.getId(), workspaceIdsJson(), 5);
 
         assertEquals(List.of("Top Alpha", "Top Bravo", "Top Charlie", "Top Delta", "Top Echo"),
             connections.stream().map(PersonConnectionDto::getPersonName).toList());
@@ -79,7 +79,7 @@ class PersonEdgeMapperTest extends AbstractMapperTest {
         }
 
         List<PersonConnectionDto> connections = personEdgeMapper.getTopConnections(
-            workspace.getId(), focal.getId(), 5);
+            workspace.getId(), focal.getId(), workspaceIdsJson(), 5);
 
         assertEquals(List.of("Allowed A", "Allowed B", "Allowed C", "Allowed D", "Allowed E"),
             connections.stream().map(PersonConnectionDto::getPersonName).toList());
@@ -101,5 +101,9 @@ class PersonEdgeMapperTest extends AbstractMapperTest {
         edge.setType("knows");
         edge.setStrength(strength);
         personEdgeMapper.upsert(edge);
+    }
+
+    private String workspaceIdsJson() {
+        return "[" + workspace.getId() + "]";
     }
 }

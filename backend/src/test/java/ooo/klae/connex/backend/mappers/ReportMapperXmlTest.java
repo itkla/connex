@@ -75,7 +75,11 @@ class ReportMapperXmlTest {
         assertTrue(peopleSql.contains("LIMIT ?"));
         String edgeSql = configuration.getMappedStatement(
                         PersonEdgeMapper.class.getName() + ".getEdgesForReverseIntroReport")
-                .getBoundSql(Map.of("workspaceId", 7, "personIds", java.util.List.of(1, 2), "limit", 101))
+                .getBoundSql(Map.of(
+                        "workspaceId", 7,
+                        "orgWorkspaceIdsJson", "[7]",
+                        "personIds", java.util.List.of(1, 2),
+                        "limit", 101))
                 .getSql();
         assertTrue(edgeSql.contains("e.workspace_id = ?"));
         assertTrue(edgeSql.contains("e.source_person_id IN"));

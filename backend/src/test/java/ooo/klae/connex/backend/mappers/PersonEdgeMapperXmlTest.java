@@ -19,6 +19,7 @@ class PersonEdgeMapperXmlTest {
         String topConnections = sql(configuration, "getTopConnections", Map.of(
             "workspaceId", 7,
             "personId", 11,
+            "orgWorkspaceIdsJson", "[7]",
             "limit", 5));
 
         int workspaceScope = topConnections.indexOf("e.workspace_id = ?");
@@ -34,13 +35,17 @@ class PersonEdgeMapperXmlTest {
         assertTrue(nameFilter > ceasedFilter);
         assertTrue(ordering > nameFilter);
         assertTrue(limit > ordering);
+        assertTrue(topConnections.contains("JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$'))"));
+        assertFalse(topConnections.contains("JOIN workspace"));
 
         String allConnections = sql(configuration, "getConnections", Map.of(
             "workspaceId", 7,
-            "personId", 11));
+            "personId", 11,
+            "orgWorkspaceIdsJson", "[7]"));
         assertFalse(allConnections.contains("REGEXP"));
         assertFalse(allConnections.contains("LIMIT"));
         assertTrue(allConnections.endsWith("ORDER BY e.strength DESC, person_name"));
+        assertFalse(allConnections.contains("JOIN workspace"));
     }
 
     private static Configuration configuration() throws Exception {
