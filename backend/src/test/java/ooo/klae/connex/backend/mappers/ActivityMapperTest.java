@@ -246,6 +246,30 @@ class ActivityMapperTest extends AbstractMapperTest {
         assertTrue(matched.stream().noneMatch(x -> x.getId() == activity2.getId()));
     }
 
+    @Test
+    void getActivitiesByDealCompanyIdsFiltersByCompanyAndWorkspace() {
+        User user = newUser();
+        Company includedCompany = newCompany();
+        Company excludedCompany = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal includedDeal = newDeal(pipeline, stage, includedCompany);
+        Deal excludedDeal = newDeal(pipeline, stage, excludedCompany);
+        Activity included = build("call", "included", null, includedDeal, user);
+        Activity excluded = build("call", "excluded", null, excludedDeal, user);
+        Workspace other = newWorkspace();
+        Activity foreign = build("call", "foreign", null, includedDeal, user);
+        foreign.setWorkspaceId(other.getId());
+        activityMapper.insert(included);
+        activityMapper.insert(excluded);
+        activityMapper.insert(foreign);
+
+        List<Activity> activities = activityMapper.getActivitiesByDealCompanyIds(
+            workspace.getId(), List.of(includedCompany.getId()));
+
+        assertEquals(List.of(included.getId()), activities.stream().map(Activity::getId).toList());
+    }
+
     /**
      * Gets activities by created by ID and checks if the returned list includes the inserted activity.
      */

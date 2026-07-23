@@ -33,10 +33,15 @@ public interface TaskMapper {
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
             @Param("personIds") List<Integer> personIds);
+    List<Task> getTasksByPersonCompanyIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("personIds") List<Integer> personIds,
+        @Param("companyIds") List<Integer> companyIds
+    );
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Task> getCompanyTasks(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
-    List<Task> getTasksByCompanyIds(@Param("workspaceId") int workspaceId,
+    List<Task> getTasksByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Task getTaskByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);

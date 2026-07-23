@@ -46,7 +46,6 @@ class MapperPlaneArchTest {
      * mapper. Every entry is Phase 4 rewrite work (or a documented exception).
      */
     private static final Map<String, Set<String>> BASELINE_CROSSINGS = Map.ofEntries(
-        Map.entry("ActivityMapper", Set.of("workspace")),
         Map.entry("AiOutputCacheMapper", Set.of("workspace")),
         Map.entry("AttachmentMapper", Set.of("app_user")),
         Map.entry("AuditLogMapper", Set.of("app_user", "audit_log")),
@@ -61,8 +60,7 @@ class MapperPlaneArchTest {
         Map.entry("ReportMapper", Set.of("workspace")),
         Map.entry("RoleMapper", Set.of("workspace_role", "workspace_role_permission")),
         Map.entry("SegmentMapper", Set.of("workspace")),
-        Map.entry("ShareMapper", Set.of("workspace")),
-        Map.entry("TaskMapper", Set.of("workspace")));
+        Map.entry("ShareMapper", Set.of("workspace")));
 
     @Test
     void crossPlaneStatementReferencesStayWithinTheBaseline() throws IOException {
