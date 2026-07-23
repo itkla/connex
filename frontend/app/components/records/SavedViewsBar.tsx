@@ -58,7 +58,7 @@ import {
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { publishSavedViewMutation } from "@/app/lib/saved-view-events";
 import { parseSavedViewToken, savedViewRecordPath, savedViewToken } from "@/app/lib/savedViewLink";
-import { writeSavedViewToUrl } from "@/app/hooks/listStateUrl";
+import { writeSavedViewToUrl, writeWorkspaceSavedViewToUrl } from "@/app/hooks/listStateUrl";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import type { SavedView, SavedViewConfig, SavedViewRecordType } from "@/app/lib/types";
 
@@ -124,7 +124,7 @@ export default function SavedViewsBar({
 }) {
     const t = useTranslations("SavedViews");
     const pathname = usePathname();
-    const { activeWorkspaceId, workspaces, runInWorkspace } = useWorkspace();
+    const { activeWorkspaceId, workspaces, switching, runInWorkspace } = useWorkspace();
     const [views, setViews] = useState(initialViews);
     const [activeId, setActiveId] = useState<number | null>(null);
     const [dialog, setDialog] = useState<{ mode: "create" | "rename"; view?: SavedView } | null>(null);
@@ -252,11 +252,19 @@ export default function SavedViewsBar({
     }, [modified, pathname]);
 
     const confirmSwitchWorkspace = async () => {
-        if (!switchPrompt) return;
+        if (!switchPrompt || switching) return;
         const target = switchPrompt.workspaceId;
-        setSwitchPrompt(null);
-        const switched = await runInWorkspace(target, async () => {});
-        if (switched) window.location.reload();
+        const targetSv = switchPrompt.sv;
+        try {
+            const switched = await runInWorkspace(target, async () => {
+                writeWorkspaceSavedViewToUrl(pathname, targetSv);
+            });
+            if (!switched) return;
+            setSwitchPrompt(null);
+            window.location.reload();
+        } catch (err) {
+            toastError(err instanceof ApiError ? err.message : t("actionFailed"));
+        }
     };
     const declineSwitchWorkspace = () => {
         setSwitchPrompt(null);
@@ -477,17 +485,20 @@ export default function SavedViewsBar({
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={switchPrompt !== null} onOpenChange={(open) => { if (!open) declineSwitchWorkspace(); }}>
+            <Dialog
+                open={switchPrompt !== null}
+                onOpenChange={(open) => { if (!open && !switching) declineSwitchWorkspace(); }}
+            >
                 <DialogContent className="sm:max-w-sm">
                     <DialogHeader>
                         <DialogTitle>{t("switchWorkspaceTitle")}</DialogTitle>
                         <DialogDescription>{t("switchWorkspacePrompt")}</DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
-                        <Button type="button" variant="outline" onClick={declineSwitchWorkspace}>
+                        <Button type="button" variant="outline" onClick={declineSwitchWorkspace} disabled={switching}>
                             {t("switchWorkspaceCancel")}
                         </Button>
-                        <Button type="button" variant="brand" onClick={confirmSwitchWorkspace}>
+                        <Button type="button" variant="brand" onClick={confirmSwitchWorkspace} disabled={switching}>
                             {t("switchWorkspaceConfirm")}
                         </Button>
                     </DialogFooter>

@@ -47,6 +47,7 @@ import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
+import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
@@ -459,6 +460,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         items: deals,
         storageKey: 'deals:view',
         searchFields,
+        restoreUrlQuery: true,
     });
     const [selectedBoardDeal, setSelectedBoardDeal] = useState<Deal | null>(null);
     const selectedDeals = useMemo(() => {
@@ -1247,6 +1249,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
+            <DealsQueryUrlSync
+                query={query}
+                deferredQuery={deferredQuery}
+                onExternalQuery={changeQuery}
+            />
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
                 <Rise>
                     <div className="flex items-center justify-between">

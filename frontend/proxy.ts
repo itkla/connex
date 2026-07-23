@@ -1,22 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PROTECTED_PREFIXES = [
-    '/account',
-    '/activity',
-    '/admin',
-    '/dashboard',
-    '/library',
-    '/me',
-    '/notifications',
-    '/organization',
-    '/overview',
-    '/records',
-    '/search',
-    '/settings',
-    '/users',
-    '/workflows',
-];
+import { isProtectedPath } from '@/app/lib/protectedRoutes';
 
 const SESSION_COOKIE = 'JSESSIONID';
 const WORKSPACE_COOKIE = 'connex_workspace';
@@ -27,12 +12,6 @@ const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/reset-password',
     '/auth/confirm-email',
 ]);
-
-function isProtectedPath(pathname: string) {
-    return PROTECTED_PREFIXES.some(
-        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-    );
-}
 
 export function proxy(request: NextRequest) {
     const { pathname, search, searchParams } = request.nextUrl;
@@ -98,6 +77,7 @@ export const config = {
         '/admin/:path*',
         '/dashboard/:path*',
         '/library/:path*',
+        '/marketing/:path*',
         '/me/:path*',
         '/notifications/:path*',
         '/organization/:path*',
@@ -106,6 +86,7 @@ export const config = {
         '/search/:path*',
         '/settings/:path*',
         '/users/:path*',
+        '/workflows/:path*',
         '/onboarding',
         '/invite/:path*',
         '/invite-link/:path*',

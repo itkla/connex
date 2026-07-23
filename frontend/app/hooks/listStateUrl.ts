@@ -12,6 +12,11 @@ export const MAX_URL_PAGE_SIZE = 100;
  * SavedViewsBar — a third list-state writer alongside the query/sort and facet-filter writers. */
 export const SAVED_VIEW_URL_KEY = 'sv';
 
+/** Normalizes a URL-supplied list query so empty and whitespace-only values share one canonical form. */
+export function parseListQuery(value: string | null): string {
+    return value?.trim() ?? '';
+}
+
 /**
  * Reflects the active saved-view pointer into the URL via shallow `history.replaceState`, following the
  * same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
@@ -29,6 +34,31 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
     window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+}
+
+/** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
+export function writeListQueryToUrl(pathname: string, query: string): void {
+    const params = new URLSearchParams(window.location.search);
+    if (query) params.set('q', query);
+    else params.delete('q');
+    const next = params.toString();
+    if (next === window.location.search.replace(/^\?/, '')) return;
+    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+}
+
+/**
+ * Prepares a cross-workspace saved-view reload by retaining only the target saved-view pointer. All
+ * other record-browser URL state belongs to the old workspace and must be removed synchronously before
+ * the reload can restore state in the target workspace.
+ *
+ * @param pathname - the record-browser path that will reload in the target workspace
+ * @param sv - the target workspace's saved-view pointer
+ */
+export function writeWorkspaceSavedViewToUrl(pathname: string, sv: string): void {
+    const params = new URLSearchParams({ [SAVED_VIEW_URL_KEY]: sv });
+    const next = params.toString();
+    if (next === window.location.search.replace(/^\?/, '')) return;
+    window.history.replaceState(null, '', `${pathname}?${next}`);
 }
 
 /**
