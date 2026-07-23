@@ -66,6 +66,9 @@ import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
 
+/** Maximum number of recent records surfaced in the sidebar; the store retains more for the palette. */
+const SIDEBAR_RECENTS_LIMIT = 5;
+
 type NavItem = {
     label: string;
     href: string;
@@ -517,7 +520,7 @@ export default function Sidebar({
         return {
             id: "recent-records",
             label: t("sectionRecent"),
-            items: recents.map((entry) => {
+            items: recents.slice(0, SIDEBAR_RECENTS_LIMIT).map((entry) => {
                 const href = recentRecordHref(entry.t, entry.id);
                 return {
                     label: entry.label,
@@ -592,6 +595,9 @@ export default function Sidebar({
                             navigationKey={navigationKey}
                             onCollapsedChange={setCollapsed}
                         />
+                    )}
+                    {recentSection && (
+                        <hr className="-my-1 border-t border-sidebar-border" />
                     )}
                     {sections.map((section) => (
                         <NavGroup
