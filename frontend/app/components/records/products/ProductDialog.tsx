@@ -1,18 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
+import {
+    TagIcon,
+    HashtagIcon,
+    CubeIcon,
+    BanknotesIcon,
+    ReceiptPercentIcon,
+} from '@heroicons/react/24/outline';
 
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+} from '@/components/ui/responsive-dialog';
 import {
     Select,
     SelectContent,
@@ -21,9 +25,18 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import {
+    DialogStatusCover,
+    resolveDialogStatus,
+    fieldInputClass,
+    fieldErrorClass,
+    fieldLeadIconClass,
+} from '@/components/ui/dialog-status-cover';
+import { cn } from '@/lib/utils';
+import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { toastError } from '@/app/lib/toast';
 import { createProduct, updateProduct, ApiError } from '@/app/lib/api';
 import { CURRENCY_CODES } from '@/app/lib/currencies';
@@ -49,6 +62,9 @@ type Draft = {
     active: boolean;
 };
 
+const selectFieldClass =
+    'h-auto w-full rounded-lg border-0 bg-muted py-2 text-sm shadow-none ring-1 ring-border transition focus-visible:ring-2 focus-visible:ring-brand data-[size=default]:h-9';
+
 function toDraft(product?: Product | null): Draft {
     return {
         sku: product?.sku ?? '',
@@ -65,20 +81,24 @@ function toDraft(product?: Product | null): Draft {
 
 /**
  * Create/edit form for a catalog product. Money fields are plain numeric inputs sent to the
- * server, which owns all monetary arithmetic — this dialog never computes totals.
+ * server, which owns all monetary arithmetic — this dialog never computes totals. Renders as a
+ * centered dialog on desktop and a bottom drawer on mobile.
  */
 export default function ProductDialog({ open, onOpenChange, mode, product, onSaved }: Props) {
     const t = useTranslations('ProductDialog');
     const [draft, setDraft] = useState<Draft>(() => toDraft(product));
     const [saving, setSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [nameError, setNameError] = useState(false);
+    const nameRef = useRef<HTMLInputElement>(null);
 
     const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));
 
     const submit = async () => {
         const name = draft.name.trim();
         if (!name) {
-            toastError(t('nameRequired'));
+            setNameError(true);
+            requestAnimationFrame(() => nameRef.current?.focus());
             return;
         }
         setSaving(true);
@@ -110,55 +130,106 @@ export default function ProductDialog({ open, onOpenChange, mode, product, onSav
         }
     };
 
-    const status = resolveDialogStatus({ isLoading: saving, isSuccess: succeeded });
+    const handleSubmit = (e: FormEvent) => {
+        e.preventDefault();
+        if (!saving && !succeeded) submit();
+    };
+
+    const status = resolveDialogStatus({ isLoading: saving, hasErrors: nameError, isSuccess: succeeded });
 
     return (
-        <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <ResponsiveDialogTitle className="sr-only">
+                    {mode === 'create' ? t('createTitle') : t('editTitle')}
+                </ResponsiveDialogTitle>
+                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+
                 <DialogStatusCover status={status} />
+
                 <div className="px-6 pb-6">
-                    <DialogHeader className="-mt-12 mb-5">
-                        <DialogTitle className="text-xl font-semibold tracking-tight">
+                    <div className="ncd-rise -mt-12 mb-5 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
+                        <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">
                             {mode === 'create' ? t('createTitle') : t('editTitle')}
-                        </DialogTitle>
-                        <DialogDescription>{t('description')}</DialogDescription>
-                    </DialogHeader>
+                        </h2>
+                        <p className="text-sm text-muted-foreground">{t('description')}</p>
+                    </div>
 
                     <form
-                        onSubmit={(e) => { e.preventDefault(); if (!saving) submit(); }}
-                        className="grid gap-4"
+                        onSubmit={handleSubmit}
+                        onKeyDown={(e) => {
+                            if (isSubmitShortcut(e) && !saving && !succeeded) {
+                                e.preventDefault();
+                                e.currentTarget.requestSubmit();
+                            }
+                        }}
+                        className="grid gap-5"
                     >
-                        <div className="grid gap-1.5">
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="product-name">{t('name')}</Label>
-                            <Input id="product-name" value={draft.name} maxLength={255}
-                                onChange={(e) => patch({ name: e.target.value })} autoFocus />
+                            <div className="group relative">
+                                <TagIcon className={fieldLeadIconClass} />
+                                <input
+                                    id="product-name"
+                                    ref={nameRef}
+                                    type="text"
+                                    value={draft.name}
+                                    maxLength={255}
+                                    onChange={(e) => {
+                                        patch({ name: e.target.value });
+                                        if (nameError) setNameError(false);
+                                    }}
+                                    className={cn(fieldInputClass, 'pl-9 pr-3', nameError && fieldErrorClass)}
+                                    placeholder={t('namePlaceholder')}
+                                    aria-invalid={nameError}
+                                    aria-describedby={nameError ? 'product-name-error' : undefined}
+                                    autoFocus
+                                />
+                            </div>
+                            {nameError && (
+                                <p id="product-name-error" className="text-sm text-destructive">{t('nameRequired')}</p>
+                            )}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '140ms' }}>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="product-sku">{t('sku')}</Label>
-                                <Input id="product-sku" value={draft.sku} maxLength={64}
-                                    onChange={(e) => patch({ sku: e.target.value })} />
+                                <div className="group relative">
+                                    <HashtagIcon className={fieldLeadIconClass} />
+                                    <input id="product-sku" type="text" value={draft.sku} maxLength={64}
+                                        onChange={(e) => patch({ sku: e.target.value })}
+                                        placeholder={t('skuPlaceholder')}
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')} />
+                                </div>
                             </div>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="product-unit">{t('unit')}</Label>
-                                <Input id="product-unit" value={draft.unit} maxLength={32}
-                                    placeholder={t('unitPlaceholder')}
-                                    onChange={(e) => patch({ unit: e.target.value })} />
+                                <div className="group relative">
+                                    <CubeIcon className={fieldLeadIconClass} />
+                                    <input id="product-unit" type="text" value={draft.unit} maxLength={32}
+                                        placeholder={t('unitPlaceholder')}
+                                        onChange={(e) => patch({ unit: e.target.value })}
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')} />
+                                </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="ncd-rise grid grid-cols-[1fr_120px] gap-3" style={{ animationDelay: '190ms' }}>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="product-price">{t('unitPrice')}</Label>
-                                <Input id="product-price" type="number" min="0" step="0.01" inputMode="decimal"
-                                    value={draft.unitPrice}
-                                    onChange={(e) => patch({ unitPrice: e.target.value })} />
+                                <div className="group relative">
+                                    <BanknotesIcon className={fieldLeadIconClass} />
+                                    <input id="product-price" type="number" min="0" step="0.01" inputMode="decimal"
+                                        value={draft.unitPrice}
+                                        onChange={(e) => patch({ unitPrice: e.target.value })}
+                                        placeholder="0.00"
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')} />
+                                </div>
                             </div>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="product-currency">{t('currency')}</Label>
                                 <Select value={draft.currency} onValueChange={(v) => patch({ currency: v })}>
-                                    <SelectTrigger id="product-currency"><SelectValue /></SelectTrigger>
+                                    <SelectTrigger id="product-currency" className={selectFieldClass}><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         {CURRENCY_CODES.map((c) => (
                                             <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -166,49 +237,63 @@ export default function ProductDialog({ open, onOpenChange, mode, product, onSav
                                     </SelectContent>
                                 </Select>
                             </div>
+                        </div>
+
+                        <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '240ms' }}>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="product-tax">{t('taxRate')}</Label>
-                                <Input id="product-tax" type="number" min="0" step="0.001" inputMode="decimal"
-                                    value={draft.taxRate}
-                                    onChange={(e) => patch({ taxRate: e.target.value })} />
+                                <div className="group relative">
+                                    <ReceiptPercentIcon className={fieldLeadIconClass} />
+                                    <input id="product-tax" type="number" min="0" step="0.001" inputMode="decimal"
+                                        value={draft.taxRate}
+                                        onChange={(e) => patch({ taxRate: e.target.value })}
+                                        placeholder="0"
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')} />
+                                </div>
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="product-billing">{t('billingFrequency')}</Label>
+                                <Select value={draft.billingFrequency}
+                                    onValueChange={(v) => patch({ billingFrequency: v as BillingFrequency })}>
+                                    <SelectTrigger id="product-billing" className={selectFieldClass}><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="one_time">{t('oneTime')}</SelectItem>
+                                        <SelectItem value="recurring">{t('recurring')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                         </div>
 
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="product-billing">{t('billingFrequency')}</Label>
-                            <Select value={draft.billingFrequency}
-                                onValueChange={(v) => patch({ billingFrequency: v as BillingFrequency })}>
-                                <SelectTrigger id="product-billing"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="one_time">{t('oneTime')}</SelectItem>
-                                    <SelectItem value="recurring">{t('recurring')}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="grid gap-1.5">
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '290ms' }}>
                             <Label htmlFor="product-description">{t('descriptionLabel')}</Label>
-                            <Input id="product-description" value={draft.description} maxLength={1024}
-                                onChange={(e) => patch({ description: e.target.value })} />
+                            <Textarea id="product-description" value={draft.description} maxLength={1024} rows={3}
+                                placeholder={t('descriptionPlaceholder')}
+                                onChange={(e) => patch({ description: e.target.value })}
+                                className="rounded-lg border-0 bg-muted ring-1 ring-border focus-visible:ring-2 focus-visible:ring-brand dark:bg-muted" />
                         </div>
 
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <input type="checkbox" checked={draft.active}
-                                onChange={(e) => patch({ active: e.target.checked })} />
-                            {t('active')}
-                        </label>
+                        <div className="ncd-rise flex items-center justify-between gap-4 rounded-lg bg-muted/60 px-3.5 py-3 ring-1 ring-border" style={{ animationDelay: '340ms' }}>
+                            <div className="grid gap-0.5">
+                                <Label htmlFor="product-active" className="cursor-pointer">{t('activeLabel')}</Label>
+                                <p className="text-xs text-muted-foreground">{t('activeHelp')}</p>
+                            </div>
+                            <Switch id="product-active" checked={draft.active}
+                                onCheckedChange={(v) => patch({ active: v })} />
+                        </div>
 
-                        <DialogFooter className="mt-2">
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline" disabled={saving}>{t('cancel')}</Button>
-                            </DialogClose>
-                            <Button type="submit" variant="brand" disabled={saving || succeeded} className="min-w-24">
+                        <div className="ncd-rise mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '390ms' }}>
+                            <Button type="button" variant="outline" disabled={saving}
+                                onClick={() => { if (!saving) onOpenChange(false); }}>
+                                {t('cancel')}
+                            </Button>
+                            <Button type="submit" variant="brand" disabled={saving || succeeded}
+                                className="min-w-24 shadow-sm transition hover:shadow-md">
                                 {saving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                             </Button>
-                        </DialogFooter>
+                        </div>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }
