@@ -97,6 +97,7 @@ jobs:
   frontend:
     name: Frontend — typecheck & lint
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -138,3 +139,7 @@ jobs:
           echo "$CHANGED"
           mapfile -t FILES <<< "$CHANGED"
           node_modules/.bin/eslint "${FILES[@]}"
+      - name: Build deployable frontend image
+        run: docker build --tag connex-frontend-ci frontend
+      - name: Smoke-test standalone image optimization
+        run: bash frontend/ci/smoke_image.sh connex-frontend-ci

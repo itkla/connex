@@ -5,6 +5,12 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  outputFileTracingIncludes: {
+    "/*": [
+      "node_modules/.pnpm/sharp@*/node_modules/@img/sharp-*/**/*",
+      "node_modules/.pnpm/@img+sharp-*/node_modules/@img/sharp-*/**/*",
+    ],
+  },
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   async rewrites() {
     return [
