@@ -31,7 +31,6 @@ import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
-import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 
@@ -370,11 +369,11 @@ class ReportNetworkServiceTest {
     void reverseOnlyGenerationStopsAtBoundedCandidatesBeforeOtherReads() {
         ReportMapper reportMapper = mock(ReportMapper.class);
         PersonMapper personMapper = mock(PersonMapper.class);
-        PersonEdgeMapper edgeMapper = mock(PersonEdgeMapper.class);
+        PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         ScoringService scoringService = mock(ScoringService.class);
         ReportNetworkService service = new ReportNetworkService(
-                reportMapper, personMapper, edgeMapper, introductionMapper, scoringService);
+                reportMapper, personMapper, edgeReader, introductionMapper, scoringService);
         List<IntroCandidatePerson> candidates = new ArrayList<>();
         for (int id = 1; id <= 501; id++) {
             IntroCandidatePerson candidate = new IntroCandidatePerson();
@@ -389,18 +388,18 @@ class ReportNetworkServiceTest {
         verify(introductionMapper, never()).findWorkspaceEmploymentForReport(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList(),
                 org.mockito.ArgumentMatchers.anyInt());
-        verifyNoInteractions(edgeMapper, scoringService, reportMapper, personMapper);
+        verifyNoInteractions(edgeReader, scoringService, reportMapper, personMapper);
     }
 
     @Test
     void warmGenerationStopsBeforeScoringWhenBoundedSourceSignalsOverflow() {
         ReportMapper reportMapper = mock(ReportMapper.class);
         PersonMapper personMapper = mock(PersonMapper.class);
-        PersonEdgeMapper edgeMapper = mock(PersonEdgeMapper.class);
+        PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         ScoringService scoringService = mock(ScoringService.class);
         ReportNetworkService service = new ReportNetworkService(
-                reportMapper, personMapper, edgeMapper, introductionMapper, scoringService);
+                reportMapper, personMapper, edgeReader, introductionMapper, scoringService);
         ReportAggregateQuery query = mock(ReportAggregateQuery.class);
         when(query.workspaceId()).thenReturn(7);
         List<Person> people = new ArrayList<>();
@@ -408,7 +407,7 @@ class ReportNetworkServiceTest {
             people.add(person(id, "Person " + id, null, false));
         }
         when(personMapper.getPersonsForNetworkReport(7, 10_001)).thenReturn(people);
-        when(edgeMapper.getEdgesForNetworkReport(7, 100_001)).thenReturn(List.of());
+        when(edgeReader.getEdgesForNetworkReport(7, 100_001)).thenReturn(List.of());
         when(introductionMapper.findExistingPairsForReport(7, 250_001)).thenReturn(List.of());
         when(reportMapper.getNetworkAccountValues(query, 50_001)).thenReturn(List.of());
 
@@ -416,7 +415,7 @@ class ReportNetworkServiceTest {
 
         verifyNoInteractions(scoringService);
         verify(personMapper).getPersonsForNetworkReport(7, 10_001);
-        verify(edgeMapper).getEdgesForNetworkReport(7, 100_001);
+        verify(edgeReader).getEdgesForNetworkReport(7, 100_001);
         verify(introductionMapper).findExistingPairsForReport(7, 250_001);
         verify(reportMapper).getNetworkAccountValues(query, 50_001);
     }

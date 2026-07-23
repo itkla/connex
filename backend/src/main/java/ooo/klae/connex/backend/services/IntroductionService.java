@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class IntroductionService {
     private final IntroductionMapper introductionMapper;
     private final PersonEdgeMapper edgeMapper;
+    private final PersonEdgeReadService edgeReader;
     private final PersonMapper personMapper;
     private final ScoringService scoringService;
     private final WarmPathService warmPathService;
@@ -151,7 +152,7 @@ public class IntroductionService {
         if (candidates.size() < 2) {
             return List.of();
         }
-        List<PersonEdge> edges = edgeMapper.getAllEdges(workspaceId);
+        List<PersonEdge> edges = edgeReader.getAllEdges(workspaceId);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         Set<Long> existing = new HashSet<>();
         for (Introduction pair : introductionMapper.findExistingPairs(workspaceId)) {

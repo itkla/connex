@@ -21,21 +21,24 @@ import org.w3c.dom.NodeList;
  * The same-org invariant lives in hand-written SQL — the {@code INSERT..SELECT}
  * grants in {@code ShareMapper.xml} (write path) and the {@code EXISTS} share
  * branches of the owned-or-shared visibility predicates in the entity mappers
- * (read path). The workspace-predicate scan cannot see either (it only checks
- * {@code #{workspaceId}} is bound). These tests assert both paths carry the
- * org-equality join, so a future shareable entity type copied without the
- * ceiling fails the build instead of silently degrading cross-org protection to
- * the service layer alone.
+ * (read path). Plane-split mappers may receive the same ceiling as a trusted
+ * control-derived workspace allowlist instead of joining the control table.
+ * The workspace-predicate scan cannot see either model (it only checks
+ * {@code #{workspaceId}} is bound). These tests assert both paths carry their
+ * reviewed ceiling, so a future shareable entity type copied without it fails
+ * the build instead of silently degrading cross-org protection.
  */
 class OrgShareCeilingArchTest {
 
     private static final Pattern ORG_CEILING = Pattern.compile("tw\\.org_id\\s*=\\s*ow\\.org_id");
     private static final Pattern READ_CEILING = Pattern.compile("ows\\.org_id\\s*=\\s*vws\\.org_id");
+    private static final Pattern CONTROL_DERIVED_READ_CEILING = Pattern.compile(
+        "JOIN\\s+JSON_TABLE\\s*\\(\\s*#\\{orgWorkspaceIdsJson}", Pattern.CASE_INSENSITIVE);
 
     /**
      * Every entity mapper whose visibility predicate reads a {@code *_share} table
-     * must pair each such read with the read-path org ceiling. Keyed by mapper
-     * resource to the share table it references.
+     * must pair each such read with the reviewed read-path organization ceiling.
+     * Keyed by mapper resource to the share table it references.
      */
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
@@ -51,12 +54,15 @@ class OrgShareCeilingArchTest {
         for (var entry : SHARE_READERS.entrySet()) {
             String xml = loadMapperText(entry.getKey());
             int shareReads = count(entry.getValue(), xml);
-            int ceilings = count(READ_CEILING, xml);
+            Pattern ceiling = entry.getKey().equals("mappers/PersonEdgeMapper.xml")
+                ? CONTROL_DERIVED_READ_CEILING
+                : READ_CEILING;
+            int ceilings = count(ceiling, xml);
             if (shareReads < 1) {
                 violations.add(entry.getKey() + " references its share table 0 times — the scan is misconfigured");
             } else if (ceilings != shareReads) {
                 violations.add(entry.getKey() + " has " + shareReads + " share-table reads but " + ceilings
-                    + " org ceilings (ows.org_id = vws.org_id); every share read must be same-org gated");
+                    + " reviewed org ceilings; every share read must be same-org gated");
             }
         }
         assertTrue(violations.isEmpty(),

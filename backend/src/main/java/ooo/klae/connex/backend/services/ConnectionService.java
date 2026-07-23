@@ -36,6 +36,7 @@ public class ConnectionService {
     private static final int MAX_TOP_CONNECTIONS = 5;
 
     private final PersonEdgeMapper edgeMapper;
+    private final PersonEdgeReadService edgeReader;
     private final PersonMapper personMapper;
     private final WorkspaceService workspaceService;
 
@@ -46,7 +47,7 @@ public class ConnectionService {
     public List<PersonConnectionDto> getConnections(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return edgeMapper.getConnections(workspaceId, personId);
+        return edgeReader.getConnections(workspaceId, personId);
     }
 
     /** A contact's strongest processable direct connections, capped for bounded context assembly. */
@@ -56,7 +57,8 @@ public class ConnectionService {
         if (limit <= 0) {
             return List.of();
         }
-        return edgeMapper.getTopConnections(workspaceId, personId, Math.min(limit, MAX_TOP_CONNECTIONS));
+        return edgeReader.getTopConnections(
+            workspaceId, personId, Math.min(limit, MAX_TOP_CONNECTIONS));
     }
 
     /** Connects two contacts (idempotent; re-adding edits the existing edge). */
@@ -146,7 +148,7 @@ public class ConnectionService {
 
     private Map<Integer, List<Neighbor>> buildAdjacency(int workspaceId) {
         Map<Integer, List<Neighbor>> adjacency = new HashMap<>();
-        for (PersonEdge edge : edgeMapper.getAllEdges(workspaceId)) {
+        for (PersonEdge edge : edgeReader.getAllEdges(workspaceId)) {
             adjacency.computeIfAbsent(edge.getSourcePersonId(), k -> new ArrayList<>())
                 .add(new Neighbor(edge.getTargetPersonId(), edge.getType()));
             adjacency.computeIfAbsent(edge.getTargetPersonId(), k -> new ArrayList<>())

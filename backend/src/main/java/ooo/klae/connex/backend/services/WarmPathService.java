@@ -29,7 +29,6 @@ import ooo.klae.connex.backend.dto.WarmPathDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
-import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -52,7 +51,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class WarmPathService {
     private final IntroductionMapper introductionMapper;
-    private final PersonEdgeMapper edgeMapper;
+    private final PersonEdgeReadService edgeReader;
     private final PersonMapper personMapper;
     private final ScoringService scoringService;
     private final WorkspaceService workspaceService;
@@ -125,7 +124,7 @@ public class WarmPathService {
         if (candidates.size() < 2) {
             return List.of();
         }
-        List<PersonEdge> edges = edgeMapper.getAllEdges(workspaceId);
+        List<PersonEdge> edges = edgeReader.getAllEdges(workspaceId);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         List<WarmPathDismissal> dismissals = introductionMapper.findWarmPathDismissals(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
