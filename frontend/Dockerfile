@@ -6,11 +6,17 @@ ARG SOURCE_DATE_EPOCH
 FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN npm pack --ignore-scripts --silent pnpm@11.9.0 \
+    && printf '%s  %s\n' \
+        'bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b' \
+        'pnpm-11.9.0.tgz' \
+        | sha512sum -c - \
+    && npm install --global ./pnpm-11.9.0.tgz --ignore-scripts --no-audit --no-fund \
+    && rm pnpm-11.9.0.tgz
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml .pnpmfile.cjs ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs ./
 RUN --mount=type=cache,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 
