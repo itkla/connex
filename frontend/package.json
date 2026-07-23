@@ -36,7 +36,7 @@
     "d3": "^7.9.0",
     "lucide-react": "^1.25.0",
     "motion": "^12.40.0",
-    "next": "16.2.9",
+    "next": "16.2.11",
     "next-intl": "^4.13.0",
     "next-themes": "^0.4.6",
     "papaparse": "^5.5.4",
@@ -61,5 +61,14 @@
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "sharp": ">=0.35.0",
+      "js-yaml": ">=4.3.0",
+      "fast-uri": ">=3.1.4",
+      "brace-expansion@1": ">=1.1.16",
+      "brace-expansion@>=3": ">=5.0.7"
+    }
   }
 }
