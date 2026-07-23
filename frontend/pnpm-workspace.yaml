@@ -1,3 +1,8 @@
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  sharp: true
+  unrs-resolver: true
 overrides:
   sharp: ^0.35.0
   fast-uri: ^3.1.4
