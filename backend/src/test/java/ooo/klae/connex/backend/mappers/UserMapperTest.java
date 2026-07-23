@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 
 class UserMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -77,6 +78,21 @@ class UserMapperTest extends AbstractMapperTest {
         List<User> all = userMapper.getAllUsers();
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == user.getId()));
+    }
+
+    @Test
+    void getActiveWorkspaceMemberDisplayNamesByIdsExcludesPendingAndNonmembers() {
+        User active = newUser();
+        User pending = newUnassignedUser();
+        User nonmember = newUnassignedUser();
+        workspaceMapper.addPendingMember(workspace.getId(), pending.getId(), "member");
+
+        List<UserDisplayNameDto> labels = userMapper
+            .getActiveWorkspaceMemberDisplayNamesByIds(
+                workspace.getId(), List.of(active.getId(), pending.getId(), nonmember.getId()));
+
+        assertEquals(
+            List.of(new UserDisplayNameDto(active.getId(), active.getDisplayName())), labels);
     }
 
     /**
@@ -200,5 +216,17 @@ class UserMapperTest extends AbstractMapperTest {
         assertNotNull(userMapper.getUserByUsername("__connex_system__"));
         assertTrue(userMapper.getAllUsers().size() > userMapper.countUsers(),
             "the seeded system actor is present but excluded from the count");
+    }
+
+    private User newUnassignedUser() {
+        String suffix = unique();
+        User user = new User();
+        user.setUsername("unassigned_" + suffix);
+        user.setDisplayName("Unassigned " + suffix);
+        user.setEmail(suffix + "@unassigned.example.com");
+        user.setPasswordHash("hash_" + suffix);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        return user;
     }
 }

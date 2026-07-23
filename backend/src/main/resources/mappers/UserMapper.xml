@@ -20,6 +20,18 @@
     ORDER BY id
   </select>
 
+  <select id="getActiveWorkspaceMemberDisplayNamesByIds"
+      resultType="ooo.klae.connex.backend.dto.UserDisplayNameDto">
+    SELECT u.id, u.display_name
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId}
+      AND wm.status = 'active'
+      AND u.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY u.id
+  </select>
+
   <select id="getUserById" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user WHERE id = #{id}
