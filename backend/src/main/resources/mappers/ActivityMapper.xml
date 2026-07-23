@@ -178,22 +178,13 @@
     LIMIT #{limit}
   </select>
 
-  <select id="getActivitiesByCompanyIds" resultMap="ActivityResult">
+  <select id="getActivitiesByDealCompanyIds" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity a
     WHERE a.workspace_id = #{workspaceId}
-      AND (EXISTS (SELECT 1 FROM person p
-          WHERE p.id = a.person_id
-            AND (p.workspace_id = #{workspaceId}
-              OR EXISTS (SELECT 1 FROM person_share ps
-                JOIN workspace vws ON vws.id = ps.workspace_id
-                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
-                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
-            AND p.company_id IN
-            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
-        OR EXISTS (SELECT 1 FROM deal d
-          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id
-            AND d.company_id IN
-            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+      AND EXISTS (SELECT 1 FROM deal d
+        WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id
+          AND d.company_id IN
+          <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
     ORDER BY a.timestamp DESC, a.id DESC
   </select>
 

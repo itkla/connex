@@ -48,7 +48,7 @@ public interface ActivityMapper {
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     List<Activity> getCompanyActivities(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
-    List<Activity> getActivitiesByCompanyIds(@Param("workspaceId") int workspaceId,
+    List<Activity> getActivitiesByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
