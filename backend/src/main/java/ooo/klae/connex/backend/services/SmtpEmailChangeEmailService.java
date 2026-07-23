@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +26,9 @@ import ooo.klae.connex.backend.mail.MailService;
 @RequiredArgsConstructor
 public class SmtpEmailChangeEmailService implements EmailChangeEmailService {
 
+    private static final String ENGLISH_SUBJECT = "Confirm your new Connex email";
+    private static final String JAPANESE_SUBJECT = "Connex の新しいメールアドレスを確認";
+
     private final MailService mailService;
     private final EmailTemplateRenderer templateRenderer;
 
@@ -36,16 +40,18 @@ public class SmtpEmailChangeEmailService implements EmailChangeEmailService {
 
     @Override
     public void sendVerificationEmail(User user, String newEmail, String rawToken) {
+        Locale locale = LocaleSupport.resolve(user.getLocale());
         String link = UriComponentsBuilder.fromUriString(baseUrl)
                 .path("/auth/verify-email")
                 .queryParam("token", rawToken)
                 .build()
                 .toUriString();
-        String body = templateRenderer.render("email-change", "en", Map.of(
+        String body = templateRenderer.render("email-change", locale.getLanguage(), Map.of(
                 "displayName", user.getDisplayName(),
                 "newEmail", newEmail,
                 "verifyUrl", link,
                 "expiryMinutes", String.valueOf(tokenExpiryMinutes)));
-        mailService.sendInstance(MailMessage.html(newEmail, "Confirm your new Connex email", body));
+        String subject = Locale.JAPANESE.equals(locale) ? JAPANESE_SUBJECT : ENGLISH_SUBJECT;
+        mailService.sendInstance(MailMessage.html(newEmail, subject, body));
     }
 }

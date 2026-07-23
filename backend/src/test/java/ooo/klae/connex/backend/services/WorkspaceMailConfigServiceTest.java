@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
+import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
@@ -63,8 +64,12 @@ class WorkspaceMailConfigServiceTest {
     }
 
     private WorkspaceMailConfigService service() {
+        return service(templateRenderer);
+    }
+
+    private WorkspaceMailConfigService service(EmailTemplateRenderer renderer) {
         return new WorkspaceMailConfigService(mailConfigMapper, workspaceService, auditService,
-                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper,
+                secretCipher, mailConfigResolver, mailService, renderer, userMapper,
                 sessionSecurityService, new SmtpDestinationGuard(mailProperties), mailProperties);
     }
 
@@ -299,6 +304,46 @@ class WorkspaceMailConfigServiceTest {
 
         assertFalse(service().sendTest(3, 9).success());
         verify(mailService, never()).sendNow(any(), any());
+    }
+
+    @Test
+    void sendTest_localizesJapaneseActorMessage() {
+        User actor = new User();
+        actor.setEmail("owner@test");
+        actor.setLocale("ja");
+        when(userMapper.getUserById(9)).thenReturn(actor);
+        ResolvedMailConfig config = new ResolvedMailConfig("smtp.test", 587, null, null,
+                "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000, true);
+        when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(config);
+
+        assertTrue(service(new EmailTemplateRenderer()).sendTest(3, 9).success());
+
+        ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
+        verify(mailService).sendNow(eq(config), message.capture());
+        assertEquals("Connex テストメール", message.getValue().subject());
+        assertTrue(message.getValue().htmlBody().contains("lang=\"ja\""));
+        assertTrue(message.getValue().htmlBody().contains("メール設定は正常です"));
+        assertFalse(message.getValue().htmlBody().contains("{{"));
+    }
+
+    @Test
+    void sendTest_fallsBackToEnglishForUntrustedStoredLocale() {
+        User actor = new User();
+        actor.setEmail("owner@test");
+        actor.setLocale("../../ja");
+        when(userMapper.getUserById(9)).thenReturn(actor);
+        ResolvedMailConfig config = new ResolvedMailConfig("smtp.test", 587, null, null,
+                "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000, true);
+        when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(config);
+
+        assertTrue(service(new EmailTemplateRenderer()).sendTest(3, 9).success());
+
+        ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
+        verify(mailService).sendNow(eq(config), message.capture());
+        assertEquals("Connex email test", message.getValue().subject());
+        assertTrue(message.getValue().htmlBody().contains("lang=\"en\""));
+        assertTrue(message.getValue().htmlBody().contains("Your email settings work"));
+        assertFalse(message.getValue().htmlBody().contains("{{"));
     }
 
     @Test

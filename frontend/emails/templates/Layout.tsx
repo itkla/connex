@@ -35,6 +35,9 @@ const styles = {
     },
 } as const;
 
+const japaneseFontFamily =
+    "-apple-system,BlinkMacSystemFont,'Noto Sans JP','Segoe UI',sans-serif";
+
 type LayoutProps = {
     preview: string;
     eyebrow: string;
@@ -53,7 +56,12 @@ export function Layout({ preview, eyebrow, lang = "en", footer, children }: Layo
         <Html lang={lang}>
             <Head />
             <Preview>{preview}</Preview>
-            <Body style={styles.body}>
+            <Body
+                style={{
+                    ...styles.body,
+                    fontFamily: lang === "ja" ? japaneseFontFamily : styles.body.fontFamily,
+                }}
+            >
                 <Section style={styles.outer}>
                     <Container style={styles.card}>
                         <Text style={styles.eyebrow}>{eyebrow}</Text>
