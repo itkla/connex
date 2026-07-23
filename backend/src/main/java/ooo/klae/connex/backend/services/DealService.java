@@ -63,6 +63,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -114,6 +115,7 @@ public class DealService {
     private final ObjectMapper objectMapper;
     private final DealRiskService dealRiskService;
     private final SegmentService segmentService;
+    private final DealCollaboratorControlAccess collaboratorControlAccess;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -1526,17 +1528,18 @@ public class DealService {
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
-    public List<User> getCollaborators(int dealId) {
+    public List<UserDto> getCollaborators(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
-        return dealMapper.getCollaborators(workspaceId, dealId);
+        return collaboratorControlAccess.getProfiles(
+            workspaceId, dealMapper.getCollaboratorIds(workspaceId, dealId));
     }
 
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
-    public List<User> replaceCollaborators(int dealId, List<Integer> userIds) {
+    public List<UserDto> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
@@ -1548,17 +1551,17 @@ public class DealService {
         normalized = normalized.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
-        List<Integer> before = dealMapper.getCollaborators(workspaceId, dealId).stream()
-            .map(User::getId)
-            .toList();
+        List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);
         dealMapper.clearCollaborators(workspaceId, dealId);
         if (!normalized.isEmpty()) {
             dealMapper.insertCollaborators(workspaceId, dealId, normalized);
         }
-        List<User> after = dealMapper.getCollaborators(workspaceId, dealId);
+        List<Integer> afterIds = dealMapper.getCollaboratorIds(workspaceId, dealId);
+        List<UserDto> after = collaboratorControlAccess
+            .getProfiles(workspaceId, afterIds);
         auditService.record("deal.updateCollaborators", "deal", dealId, deal.getName(),
             "Updated collaborators on " + deal.getName(),
-            auditService.singleChange("collaboratorIds", before, after.stream().map(User::getId).toList()));
+            auditService.singleChange("collaboratorIds", before, afterIds));
         notificationChanges.publish(workspaceId, "deal", dealId);
         return after;
     }

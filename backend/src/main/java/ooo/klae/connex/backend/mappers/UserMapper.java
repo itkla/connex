@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 
 import java.util.List;
 
@@ -14,6 +15,10 @@ import java.util.List;
 
 public interface UserMapper {
     List<User> getAllUsers();
+    /** API-safe profiles and collation keys for requested workspace members. */
+    List<UserProfileHydrationRow> getWorkspaceProfileHydrationRowsByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     User getUserById(int id);
     User getUserByIdForShare(int id);
     Integer lockById(int id);

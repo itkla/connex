@@ -362,7 +362,7 @@ public interface DealMapper {
         @Param("dealId") int dealId,
         @Param("riskExcluded") boolean riskExcluded
     );
-    List<User> getCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Integer> getCollaboratorIds(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int clearCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int removeCollaborator(
         @Param("workspaceId") int workspaceId,

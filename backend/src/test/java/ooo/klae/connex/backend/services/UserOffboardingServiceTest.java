@@ -126,7 +126,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(personMapper.getPersonById(
             otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
-        assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
+        assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
         assertNull(savedViewMapper.getAccessibleById(workspace.getId(), target.getId(), view.getId()));
         assertNull(savedViewPreferenceMapper.getPin(
@@ -185,7 +185,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             companyMapper.getCompanyById(otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
         assertEquals(member.getId(),
             personMapper.getPersonById(otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
-        assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
+        assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
         assertNull(campaignMapper.getCampaign(workspace.getId(), campaign.getId()).getOwnerUserId());
