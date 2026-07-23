@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -160,6 +161,28 @@ class OrganizationWorkspaceScopeControlAccessTest {
                 assertNull(tenantContext.getCatalog());
             });
             assertEquals(2, transactionManager.beginCount());
+        }
+    }
+
+    @Test
+    void resolvedTenantMustMatchWorkspaceAndOrganizationScope() {
+        TenantWorkScope tenantWorkScope = new TenantWorkScope(
+            tenantContext, tenantCatalogResolver, workspaceMapper);
+        TestTransactionManager transactionManager = new TestTransactionManager();
+        when(workspaceMapper.getOrgId(7)).thenReturn(900);
+        when(workspaceMapper.findByOrgId(900)).thenReturn(List.of(workspace(7, 900)));
+
+        try (AnnotationConfigApplicationContext context = controlContext(transactionManager)) {
+            OrganizationWorkspaceScopeControlAccess controlAccess =
+                new OrganizationWorkspaceScopeControlAccess(
+                    context.getBean(OrganizationWorkspaceScopeControlOperations.class),
+                    tenantWorkScope, tenantContext, transactionManager);
+
+            tenantContext.set(11, 900, 42, "member", "cnx_tenant");
+            assertThrows(IllegalStateException.class, () -> controlAccess.getForWorkspace(7));
+
+            tenantContext.set(7, 901, 42, "member", "cnx_tenant");
+            assertThrows(IllegalStateException.class, () -> controlAccess.getForWorkspace(7));
         }
     }
 

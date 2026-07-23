@@ -6,10 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -34,6 +38,15 @@ class ConnectionServiceTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PersonEdgeMapper personEdgeMapper;
     @Autowired private ShareMapper shareMapper;
+    @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+
+    @BeforeEach
+    void useTransactionalOrganizationWorkspaceScope() {
+        OrganizationWorkspaceScopeControlOperations scopeOperations =
+            new OrganizationWorkspaceScopeControlOperations(workspaceMapper);
+        when(workspaceScopeControlAccess.getForWorkspace(anyInt())).thenAnswer(invocation ->
+            scopeOperations.getForWorkspace(invocation.getArgument(0, Integer.class)));
+    }
 
     @Test
     void directConnectionsRedactCompanyAndDisappearAfterPersonRevocationButRemainRemovable() {
