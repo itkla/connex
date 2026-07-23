@@ -51,7 +51,7 @@ class MapperPlaneArchTest {
         Map.entry("AttachmentMapper", Set.of("app_user")),
         Map.entry("AuditLogMapper", Set.of("app_user", "audit_log")),
         Map.entry("CompanyMapper", Set.of("workspace")),
-        Map.entry("DealMapper", Set.of("app_user", "workspace", "workspace_member")),
+        Map.entry("DealMapper", Set.of("workspace", "workspace_member")),
         Map.entry("IntroductionMapper", Set.of("app_user", "workspace")),
         Map.entry("NoteMapper", Set.of("app_user", "workspace")),
         Map.entry("NotificationMapper", Set.of("app_user", "notification_recipient_state", "workspace", "workspace_member")),

@@ -58,6 +58,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -75,6 +76,62 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
     @MockitoSpyBean DealMapper dealMapperSpy;
+
+    @Test
+    void collaboratorProfilesStayOrderedCompleteAndForgedRowSafe() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User zulu = newUser();
+        zulu.setDisplayName("Zulu " + unique());
+        userMapper.update(zulu);
+        User alpha = newUser();
+        alpha.setDisplayName("Alpha " + unique());
+        userMapper.update(alpha);
+        User alphaTwin = newUser();
+        alphaTwin.setDisplayName(alpha.getDisplayName());
+        userMapper.update(alphaTwin);
+        String alphaPicture = "https://example.com/" + unique() + ".png";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(
+            alpha.getId(), null, alphaPicture));
+
+        List<UserDto> replaced = dealService.replaceCollaborators(
+            deal.getId(), List.of(zulu.getId(), alphaTwin.getId(), alpha.getId(), alpha.getId(),
+                currentUser.getId()));
+
+        assertEquals(List.of(alpha.getId(), alphaTwin.getId(), zulu.getId()),
+            replaced.stream().map(UserDto::getId).toList());
+        assertEquals(alpha.getUsername(), replaced.getFirst().getUsername());
+        assertEquals(alpha.getEmail(), replaced.getFirst().getEmail());
+        assertEquals(alphaPicture, replaced.getFirst().getProfilePictureUrl());
+        assertEquals("UTC", replaced.getFirst().getTimezone());
+        assertNotNull(replaced.getFirst().getCreatedAt());
+
+        int missingUserId = 2_000_000_000;
+        assertNull(userMapper.getUserById(missingUserId));
+        User formerMember = newUser();
+        workspaceMapper.removeMember(workspace.getId(), formerMember.getId());
+        User pendingMember = newPendingMember();
+        jdbcTemplate.update(
+            "INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) "
+                + "VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)",
+            workspace.getId(), deal.getId(), missingUserId,
+            workspace.getId(), deal.getId(), formerMember.getId(),
+            workspace.getId(), deal.getId(), pendingMember.getId());
+
+        List<UserDto> loaded = dealService.getCollaborators(deal.getId());
+
+        assertEquals(List.of(alpha.getId(), alphaTwin.getId(), zulu.getId()),
+            loaded.stream().map(UserDto::getId).toList());
+
+        List<Integer> beforeIds = dealMapper.getCollaboratorIds(workspace.getId(), deal.getId());
+        dealService.replaceCollaborators(
+            deal.getId(), List.of(alpha.getId(), alphaTwin.getId(), zulu.getId()));
+        JsonNode auditedBefore = auditChanges(deal.getId(), "deal.updateCollaborators")
+            .path("collaboratorIds").path("old");
+        assertEquals(beforeIds, IntStream.range(0, auditedBefore.size())
+            .mapToObj(index -> auditedBefore.get(index).asInt())
+            .toList());
+    }
 
     @Test
     void aggregateReadsAreAssembledAndIsolatedByWorkspace() {

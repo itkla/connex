@@ -82,6 +82,16 @@ class DealMapperXmlTest {
         }
     }
 
+    @Test
+    void collaboratorLookupReadsOnlyTenantRelationshipIds() throws Exception {
+        String sql = sql(configuration(), "getCollaboratorIds", MemberScope.allTeam());
+
+        assertTrue(sql.startsWith("SELECT dc.user_id FROM deal_collaborator dc"));
+        assertTrue(sql.endsWith(
+            "WHERE dc.workspace_id = ? AND dc.deal_id = ? ORDER BY dc.user_id"));
+        assertFalse(sql.contains("app_user"));
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -107,6 +117,7 @@ class DealMapperXmlTest {
         parameters.put("workspaceId", 11);
         parameters.put("segmentIdsJson", segmentIdsJson);
         parameters.put("id", 17);
+        parameters.put("dealId", 17);
         parameters.put("pipelineId", 13);
         parameters.put("stageId", 19);
         parameters.put("positions", List.of(

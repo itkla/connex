@@ -117,7 +117,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         workspaceService.removeMember(workspace.getId(), currentUser.getId(), member.getId());
 
         assertEquals(0, recipientNotificationCount(member.getId()));
-        assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
+        assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());
     }
 
     @Test

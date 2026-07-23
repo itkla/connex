@@ -1046,13 +1046,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{dealId}
   </update>
 
-  <select id="getCollaborators" resultType="User">
-    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone, u.locale,
-           u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
+  <select id="getCollaboratorIds" resultType="java.lang.Integer">
+    SELECT dc.user_id
     FROM deal_collaborator dc
-    JOIN app_user u ON u.id = dc.user_id
     WHERE dc.workspace_id = #{workspaceId} AND dc.deal_id = #{dealId}
-    ORDER BY u.display_name, u.id
+    ORDER BY dc.user_id
   </select>
 
   <delete id="clearCollaborators">

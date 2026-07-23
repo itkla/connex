@@ -12,6 +12,34 @@
     FROM app_user
   </select>
 
+  <resultMap id="userProfileHydrationResult"
+             type="ooo.klae.connex.backend.dto.UserProfileHydrationRow">
+    <id property="id" column="id"/>
+    <association property="profile" javaType="ooo.klae.connex.backend.dto.UserDto">
+      <id property="id" column="id"/>
+      <result property="username" column="username"/>
+      <result property="displayName" column="display_name"/>
+      <result property="email" column="email"/>
+      <result property="timezone" column="timezone"/>
+      <result property="locale" column="locale"/>
+      <result property="createdAt" column="created_at"/>
+      <result property="updatedAt" column="updated_at"/>
+      <result property="lastLoginAt" column="last_login_at"/>
+      <result property="profilePictureUrl" column="profile_picture_url"/>
+    </association>
+    <result property="displaySortKey" column="display_sort_key"/>
+  </resultMap>
+
+  <select id="getWorkspaceProfileHydrationRowsByIds" resultMap="userProfileHydrationResult">
+    SELECT u.id, u.username, u.display_name, u.email, u.timezone, u.locale, u.created_at, u.updated_at,
+           u.last_login_at, u.profile_picture_url, WEIGHT_STRING(u.display_name) AS display_sort_key
+    FROM app_user u
+    JOIN workspace_member wm ON wm.workspace_id = #{workspaceId} AND wm.user_id = u.id
+      AND wm.status = 'active'
+    WHERE u.id IN
+    <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="getUserById" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user WHERE id = #{id}
