@@ -527,8 +527,8 @@ export function NewContactForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <div className="mb-4 flex items-end justify-between gap-3">
-                    <div className="ncd-pop relative -mt-12 w-fit">
+                <div className="-mt-12 mb-4 flex items-center justify-between gap-3">
+                    <div className="ncd-pop relative w-fit">
                         <label
                             htmlFor="imageUrl"
                             className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
