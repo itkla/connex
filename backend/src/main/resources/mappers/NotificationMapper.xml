@@ -779,12 +779,6 @@
     ORDER BY d.id, recipients.recipient_id
   </select>
 
-  <select id="findWorkspaceIds" resultType="int">
-    SELECT id
-    FROM workspace
-    ORDER BY id
-  </select>
-
   <select id="findWorkspaceRecipientIds" resultType="int">
     SELECT user_id
     FROM workspace_member
