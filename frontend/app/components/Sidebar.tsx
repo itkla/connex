@@ -573,7 +573,14 @@ export default function Sidebar({
 
                 <QuickCreateLauncher compact={rail} />
 
-                <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
+                <nav
+                    className={cn(
+                        "flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto",
+                        rail
+                            ? "overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                            : "pr-1",
+                    )}
+                >
                     {pinnedSection && (
                         <NavGroup
                             key={pinnedSection.id}
