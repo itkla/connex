@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
-import { SAVED_VIEW_URL_KEY } from './listStateUrl';
+import { parseListQuery, SAVED_VIEW_URL_KEY } from './listStateUrl';
 
 /** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
  * deep link, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
@@ -17,6 +17,7 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     storageKey: string;
     searchFields: (item: T) => (string | undefined | null)[];
     initialDisplayMode?: DisplayMode;
+    restoreUrlQuery?: boolean;
 }
 
 /**
@@ -25,10 +26,17 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
  * @param storageKey - the key to store the display mode in localStorage
  * @param searchFields - the fields to search for in the records
  * @param initialDisplayMode - the initial display mode to use
+ * @param restoreUrlQuery - whether to initialize the query from the URL's sanitized `q` value
  * @returns 
  */
 export function useRecordsBrowser<T extends { id: SelectionId }>(
-    { items, storageKey, searchFields, initialDisplayMode = 'table' }: UseRecordsBrowserOptions<T>,
+    {
+        items,
+        storageKey,
+        searchFields,
+        initialDisplayMode = 'table',
+        restoreUrlQuery = false,
+    }: UseRecordsBrowserOptions<T>,
 ) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -38,7 +46,9 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         isDisplayMode(urlView) ? urlView : initialDisplayMode,
     );
     const [initialized, setInitialized] = useState(false);
-    const [query, setQuery] = useState('');
+    const [query, setQuery] = useState(() => (
+        restoreUrlQuery ? parseListQuery(searchParams.get('q')) : ''
+    ));
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
