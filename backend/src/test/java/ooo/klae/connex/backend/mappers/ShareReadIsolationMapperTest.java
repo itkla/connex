@@ -1,8 +1,17 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import javax.sql.DataSource;
 
@@ -10,12 +19,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.services.ScoringService;
 
 /**
  * Read-path org-ceiling proof (#316): the owned-or-shared visibility predicates
@@ -26,8 +40,13 @@ import ooo.klae.connex.backend.beans.Workspace;
  */
 class ShareReadIsolationMapperTest extends AbstractMapperTest {
 
+    private static final DateTimeFormatter MYSQL_DATETIME =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    @Autowired private ActivityMapper activityMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PipelineMapper pipelineMapper;
+    @Autowired private ScoringService scoringService;
     @Autowired private DataSource dataSource;
 
     private JdbcTemplate jdbc() {
@@ -80,6 +99,38 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
 
         assertTrue(personMapper.getProcessablePersonIds(
             workspace.getId(), java.util.List.of(person.getId())).contains(person.getId()));
+    }
+
+    @Test
+    void companyScoringAcceptsSameOrgPersonShareAndRejectsCrossOrgShare() {
+        User creator = newUser();
+        Company sameOrgCompany = newCompanyIn(workspace);
+        Company crossOrgCompany = newCompanyIn(workspace);
+        Company dealCompany = newCompanyIn(workspace);
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
+        Person sameOrgPerson = newPersonIn(sibling, sameOrgCompany);
+        Person crossOrgPerson = newPersonIn(foreign, crossOrgCompany);
+        insertShare("person_share", "person_id", sameOrgPerson.getId(), workspace.getId());
+        insertShare("person_share", "person_id", crossOrgPerson.getId(), workspace.getId());
+        activityMapper.insert(newActivity(sameOrgPerson, null, creator));
+        activityMapper.insert(newActivity(crossOrgPerson, null, creator));
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, dealCompany);
+        activityMapper.insert(newActivity(null, deal, creator));
+
+        List<RelationshipTemperatureDto> scores = scoringService.scoreCompanies(
+            workspace.getId(), Set.of(
+                sameOrgCompany.getId(), crossOrgCompany.getId(), dealCompany.getId()));
+        Map<Integer, RelationshipTemperatureDto> scoresByCompany = scores.stream()
+            .collect(Collectors.toMap(RelationshipTemperatureDto::getId, score -> score));
+
+        assertEquals(3, scores.size());
+        assertEquals(1, scoresByCompany.get(sameOrgCompany.getId()).getTouchCount());
+        assertEquals(0, scoresByCompany.get(crossOrgCompany.getId()).getTouchCount());
+        assertEquals(1, scoresByCompany.get(dealCompany.getId()).getTouchCount());
     }
 
     @Test
@@ -146,11 +197,28 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
     }
 
     private Person newPersonIn(Workspace ws) {
+        return newPersonIn(ws, null);
+    }
+
+    private Person newPersonIn(Workspace ws, Company company) {
         Person person = new Person();
         person.setName("Person " + unique());
         person.setWorkspaceId(ws.getId());
+        person.setCompany(company);
         personMapper.insert(person);
         return person;
+    }
+
+    private Activity newActivity(Person person, Deal deal, User creator) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("Activity " + unique());
+        activity.setPerson(person);
+        activity.setDeal(deal);
+        activity.setCreatedBy(creator);
+        activity.setTimestamp(LocalDateTime.now(ZoneOffset.UTC).minusHours(1).format(MYSQL_DATETIME));
+        return activity;
     }
 
     private Pipeline newPipelineIn(Workspace ws) {

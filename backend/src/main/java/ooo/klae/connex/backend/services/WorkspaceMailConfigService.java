@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Locale;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -39,6 +40,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 public class WorkspaceMailConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceMailConfigService.class);
+    private static final String ENGLISH_TEST_SUBJECT = "Connex email test";
+    private static final String JAPANESE_TEST_SUBJECT = "Connex テストメール";
 
     private final MailConfigMapper mailConfigMapper;
     private final WorkspaceService workspaceService;
@@ -159,8 +162,11 @@ public class WorkspaceMailConfigService {
                 return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
             }
             smtpDestinationGuard.requirePublicDestination(config.host(), config.port());
-            String body = templateRenderer.render("test", "en", Map.of("recipient", actor.getEmail()));
-            mailService.sendNow(config, MailMessage.html(actor.getEmail(), "Connex email test", body));
+            Locale locale = LocaleSupport.resolve(actor.getLocale());
+            String body = templateRenderer.render(
+                    "test", locale.getLanguage(), Map.of("recipient", actor.getEmail()));
+            String subject = Locale.JAPANESE.equals(locale) ? JAPANESE_TEST_SUBJECT : ENGLISH_TEST_SUBJECT;
+            mailService.sendNow(config, MailMessage.html(actor.getEmail(), subject, body));
             auditService.record("workspace.mail_config.test", "workspace", workspaceId, actor.getEmail(),
                     "Sent a test email", null);
             return MailTestResult.ok();

@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.Introduction;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.PersonEmployment;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.IntroOverviewDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
@@ -57,6 +58,7 @@ class IntroductionServiceTest extends AbstractServiceTest {
             p1.getId(), p2.getId(), "Met at conference");
         assertNotNull(recorded);
         assertEquals("Met at conference", recorded.getNote());
+        assertEquals(currentUser.getDisplayName(), recorded.getIntroducerName());
 
         assertTrue(lineageHasPair(p1.getId(), p2.getId()));
         assertTrue(edgeExists(p1.getId(), p2.getId()));
@@ -209,6 +211,39 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void lineagePreservesTheDisplayNameOfADepartedIntroducer() {
+        User departed = newUser();
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Introduction introduction = introduction(p1, p2, departed.getId());
+        introductionMapper.recordMade(introduction);
+        workspaceMapper.removeMember(workspace.getId(), departed.getId());
+
+        IntroductionDto recorded = introductionService.getLineage(1, 50).items().stream()
+            .filter(item -> matchesPair(item, p1.getId(), p2.getId()))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(departed.getDisplayName(), recorded.getIntroducerName());
+    }
+
+    @Test
+    void lineageKeepsRowsWhoseIntroducerAccountIsMissing() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        int missingUserId = 2_000_000_000;
+        introductionMapper.recordMade(introduction(p1, p2, missingUserId));
+
+        IntroductionDto recorded = introductionService.getLineage(1, 50).items().stream()
+            .filter(item -> matchesPair(item, p1.getId(), p2.getId()))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(missingUserId, recorded.getIntroducerId());
+        assertEquals(null, recorded.getIntroducerName());
+    }
+
+    @Test
     void recordIntroductionDoesNotDowngradeExistingStrongerEdge() {
         Company acme = newCompany();
         Person p1 = engagedPerson(acme);
@@ -268,6 +303,16 @@ class IntroductionServiceTest extends AbstractServiceTest {
         edge.setType("knows");
         edge.setStrength(2);
         personEdgeMapper.upsert(edge);
+    }
+
+    private Introduction introduction(Person first, Person second, int introducerId) {
+        Introduction introduction = new Introduction();
+        introduction.setWorkspaceId(workspace.getId());
+        introduction.setIntroducerUserId(introducerId);
+        introduction.setPersonAId(Math.min(first.getId(), second.getId()));
+        introduction.setPersonBId(Math.max(first.getId(), second.getId()));
+        introduction.setIntroducedAt("2026-07-01 00:00:00");
+        return introduction;
     }
 
     private void addEmployment(Person person, Company company) {

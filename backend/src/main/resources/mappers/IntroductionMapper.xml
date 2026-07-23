@@ -41,7 +41,6 @@
            cb.name           AS person_b_company,
            pb.image_url      AS person_b_image_url,
            i.introducer_user_id AS introducer_id,
-           u.display_name    AS introducer_name,
            i.note            AS note,
            i.introduced_at   AS introduced_at
     FROM introduction i
@@ -49,7 +48,6 @@
     JOIN person pb ON pb.id = i.person_b_id AND pb.workspace_id = i.workspace_id
     LEFT JOIN company ca ON ca.id = pa.company_id AND ca.workspace_id = i.workspace_id
     LEFT JOIN company cb ON cb.id = pb.company_id AND cb.workspace_id = i.workspace_id
-    LEFT JOIN app_user u ON u.id = i.introducer_user_id
   </sql>
 
   <select id="findLineage" resultType="ooo.klae.connex.backend.dto.IntroductionDto">

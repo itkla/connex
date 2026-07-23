@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 
 import java.util.List;
 
@@ -14,6 +15,12 @@ import java.util.List;
 
 public interface UserMapper {
     List<User> getAllUsers();
+    /** Current display labels for the requested control-plane user ids. */
+    List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
+    /** Current display labels for requested active members of one workspace. */
+    List<UserDisplayNameDto> getActiveWorkspaceMemberDisplayNamesByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     User getUserById(int id);
     User getUserByIdForShare(int id);
     Integer lockById(int id);

@@ -272,8 +272,6 @@ public interface NotificationMapper {
      */
     List<OpenDealRecipient> findOpenDealRecipients(@Param("workspaceId") int workspaceId);
 
-    List<Integer> findWorkspaceIds();
-
     List<Integer> findWorkspaceRecipientIds(@Param("workspaceId") int workspaceId);
 
     List<Integer> findPurgeRecipientIds(

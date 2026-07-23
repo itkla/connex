@@ -83,7 +83,6 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.getDatabaseUtcTimestamp",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findByIdForUpdate",
-        "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",

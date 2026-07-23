@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,9 @@ import ooo.klae.connex.backend.mail.MailService;
 @RequiredArgsConstructor
 public class SmtpPasswordResetEmailService implements PasswordResetEmailService {
 
+    private static final String ENGLISH_SUBJECT = "Reset your Connex password";
+    private static final String JAPANESE_SUBJECT = "Connex パスワードのリセット";
+
     private final MailService mailService;
     private final EmailTemplateRenderer templateRenderer;
 
@@ -38,15 +42,17 @@ public class SmtpPasswordResetEmailService implements PasswordResetEmailService 
 
     @Override
     public void sendResetEmail(User user, String rawToken) {
+        Locale locale = LocaleSupport.resolve(user.getLocale());
         String link = UriComponentsBuilder.fromUriString(baseUrl)
                 .path("/auth/reset-password")
                 .queryParam("token", rawToken)
                 .build()
                 .toUriString();
-        String body = templateRenderer.render("password-reset", "en", Map.of(
+        String body = templateRenderer.render("password-reset", locale.getLanguage(), Map.of(
                 "displayName", user.getDisplayName(),
                 "resetUrl", link,
                 "expiryMinutes", String.valueOf(tokenExpiryMinutes)));
-        mailService.sendInstance(MailMessage.html(user.getEmail(), "Reset your Connex password", body));
+        String subject = Locale.JAPANESE.equals(locale) ? JAPANESE_SUBJECT : ENGLISH_SUBJECT;
+        mailService.sendInstance(MailMessage.html(user.getEmail(), subject, body));
     }
 }

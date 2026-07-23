@@ -38,6 +38,8 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { instant, springSnappy } from "@/app/lib/motion";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -63,6 +65,9 @@ import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken
 import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
+
+/** Maximum number of recent records surfaced in the sidebar; the store retains more for the palette. */
+const SIDEBAR_RECENTS_LIMIT = 5;
 
 type NavItem = {
     label: string;
@@ -246,6 +251,7 @@ function NavGroup({
 
 function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail: boolean }) {
     const Icon = item.icon;
+    const reduce = useReducedMotion();
     if (rail) {
         const link = (
             <Link
@@ -256,13 +262,20 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             >
                 <span
                     className={cn(
-                        "flex size-9 items-center justify-center rounded-lg transition-colors",
+                        "relative flex size-9 items-center justify-center rounded-lg transition-colors",
                         active
-                            ? "bg-brand-light text-brand-dark"
+                            ? "text-brand-dark"
                             : "text-muted-foreground group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground",
                     )}
                 >
-                    <Icon className="size-4 shrink-0" />
+                    {active && (
+                        <motion.span
+                            layoutId="sidebar-rail-pill"
+                            className="absolute inset-0 z-0 rounded-lg bg-brand-light"
+                            transition={reduce ? instant : springSnappy}
+                        />
+                    )}
+                    <Icon className="relative z-10 size-4 shrink-0" />
                 </span>
             </Link>
         );
@@ -280,16 +293,23 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <Link
                 href={item.disabled ? "#" : item.href}
                 aria-current={active ? "page" : undefined}
-                className={`group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${active
-                    ? "bg-brand-light text-brand-dark font-medium"
+                className={`group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${active
+                    ? "text-brand-dark font-medium"
                     : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     }`}
             >
+                {active && (
+                    <motion.span
+                        layoutId="sidebar-nav-pill"
+                        className="absolute inset-0 z-0 rounded-md bg-brand-light"
+                        transition={reduce ? instant : springSnappy}
+                    />
+                )}
                 <Icon
-                    className={`size-4 shrink-0 ${active ? "text-brand-dark" : "text-muted-foreground group-hover:text-current"
+                    className={`relative z-10 size-4 shrink-0 ${active ? "text-brand-dark" : "text-muted-foreground group-hover:text-current"
                         }`}
                 />
-                <span>{item.label}</span>
+                <span className="relative z-10">{item.label}</span>
             </Link>
         </li>
     );
@@ -500,7 +520,7 @@ export default function Sidebar({
         return {
             id: "recent-records",
             label: t("sectionRecent"),
-            items: recents.map((entry) => {
+            items: recents.slice(0, SIDEBAR_RECENTS_LIMIT).map((entry) => {
                 const href = recentRecordHref(entry.t, entry.id);
                 return {
                     label: entry.label,
@@ -575,6 +595,9 @@ export default function Sidebar({
                             navigationKey={navigationKey}
                             onCollapsedChange={setCollapsed}
                         />
+                    )}
+                    {recentSection && (
+                        <hr className="-my-1 border-t border-sidebar-border" />
                     )}
                     {sections.map((section) => (
                         <NavGroup

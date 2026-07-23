@@ -4,6 +4,7 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { isProtectedPath } from "@/app/lib/protectedRoutes";
 
 import type {
     AuthenticationResponseJSON,
@@ -85,6 +86,12 @@ if (typeof window !== "undefined") {
             if (event.newValue?.startsWith("logout:")) {
                 clearAllDrafts();
                 window.location.reload();
+            } else if (event.newValue?.startsWith("workspace:")) {
+                if (isProtectedPath(window.location.pathname)) {
+                    window.location.replace("/dashboard");
+                } else {
+                    window.location.reload();
+                }
             } else if (event.newValue?.startsWith("refresh:")) {
                 window.location.reload();
             }
@@ -148,7 +155,7 @@ function invalidateClientRequestIdentity() {
     inFlightReportRequests.clear();
 }
 
-type ClientIdentityTransition = "invalidate" | "refresh" | "logout";
+type ClientIdentityTransition = "invalidate" | "refresh" | "logout" | "workspace";
 
 function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
@@ -2991,11 +2998,17 @@ export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<
 }
 
 export function createWorkspace(name: string) {
-    return withClientRequestIdentityReset(() => postJson<Types.Workspace>(`/api/workspaces`, { name }));
+    return withClientRequestIdentityReset(
+        () => postJson<Types.Workspace>(`/api/workspaces`, { name }),
+        "workspace",
+    );
 }
 
 export function switchWorkspace(id: number) {
-    return withClientRequestIdentityReset(() => postJson<void>(`/api/workspaces/${id}/switch`, {}));
+    return withClientRequestIdentityReset(
+        () => postJson<void>(`/api/workspaces/${id}/switch`, {}),
+        "workspace",
+    );
 }
 
 export function getPendingWorkspaces(init: RequestInit = {}) {
@@ -3003,7 +3016,10 @@ export function getPendingWorkspaces(init: RequestInit = {}) {
 }
 
 export function acceptWorkspace(id: number) {
-    return withClientRequestIdentityReset(() => postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {}));
+    return withClientRequestIdentityReset(
+        () => postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {}),
+        "workspace",
+    );
 }
 
 export function declineWorkspace(id: number) {
@@ -3011,7 +3027,10 @@ export function declineWorkspace(id: number) {
 }
 
 export function leaveWorkspace(id: number) {
-    return withClientRequestIdentityReset(() => postJson<void>(`/api/workspaces/${id}/leave`, {}));
+    return withClientRequestIdentityReset(
+        () => postJson<void>(`/api/workspaces/${id}/leave`, {}),
+        "workspace",
+    );
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
@@ -3680,6 +3699,7 @@ export function getInvitePreview(token: string, init: RequestInit = {}) {
 export function acceptInvite(token: string) {
     return withClientRequestIdentityReset(
         () => postJson<Types.Workspace>(`/api/invites/${token}/accept`, {}),
+        "workspace",
     );
 }
 
@@ -3705,6 +3725,7 @@ export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
 export function acceptInviteLink(token: string) {
     return withClientRequestIdentityReset(
         () => postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {}),
+        "workspace",
     );
 }
 

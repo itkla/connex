@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -33,14 +34,17 @@ import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.ReferenceDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * The "give side" of the relationship graph (issue #43): surfaces pairs of contacts the team is
@@ -50,12 +54,14 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * <p>Suggestions are ranked deterministically from graph signals only: shared employers, mutual
  * connections, and how warm each side's relationship is. Recording an introduction also creates the
  * resulting {@code person_edge}, so the new connection strengthens both relationships, shows on the
- * map, and is never suggested again. Every read and write is workspace-scoped.
+ * map, and is never suggested again. Tenant data stays workspace-scoped; introducer labels are
+ * resolved separately from the control plane using ids stored on the workspace-owned lineage.
  */
 @Service
 @RequiredArgsConstructor
 public class IntroductionService {
     private final IntroductionMapper introductionMapper;
+    private final UserMapper userMapper;
     private final PersonEdgeMapper edgeMapper;
     private final PersonEdgeReadService edgeReader;
     private final PersonMapper personMapper;
@@ -68,6 +74,7 @@ public class IntroductionService {
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
+    private final TenantWorkScope tenantWorkScope;
 
     private static final String MENTION_TYPE = "introduction.mention";
     private static final String MENTION_CATEGORY = "introduction";
@@ -407,6 +414,7 @@ public class IntroductionService {
         edgeMapper.insertIfAbsent(edge);
 
         IntroductionDto dto = introductionMapper.findByPair(workspaceId, lower, higher);
+        dto.setIntroducerName(actor.getDisplayName());
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId(), dto.getNote());
         notifyMentions(workspaceId, dto, mentioned, actor);
@@ -441,9 +449,29 @@ public class IntroductionService {
         int limit = size <= 0 ? DEFAULT_SUGGESTION_LIMIT : Math.min(size, MAX_PAGE_SIZE);
         int offset = (Math.max(1, page) - 1) * limit;
         List<IntroductionDto> items = introductionMapper.findLineage(workspaceId, limit, offset);
+        hydrateIntroducerNames(items);
         hydrateReferences(workspaceId, items);
         long total = introductionMapper.countLineage(workspaceId);
         return new PageResponse<>(items, total);
+    }
+
+    private void hydrateIntroducerNames(List<IntroductionDto> items) {
+        List<Integer> introducerIds = items.stream()
+            .map(IntroductionDto::getIntroducerId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        if (introducerIds.isEmpty()) {
+            return;
+        }
+        Map<Integer, String> namesById = new HashMap<>();
+        for (UserDisplayNameDto user :
+                tenantWorkScope.unrouted(() -> userMapper.getDisplayNamesByIds(introducerIds))) {
+            namesById.put(user.id(), user.displayName());
+        }
+        for (IntroductionDto item : items) {
+            item.setIntroducerName(namesById.get(item.getIntroducerId()));
+        }
     }
 
     private void hydrateReferences(int workspaceId, List<IntroductionDto> items) {

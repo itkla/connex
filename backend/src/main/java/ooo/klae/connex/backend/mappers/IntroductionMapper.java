@@ -23,7 +23,7 @@ public interface IntroductionMapper {
     /** Dismisses a suggested pair; never downgrades an already-{@code made} pair. */
     int recordDismissed(Introduction introduction);
 
-    /** The lineage feed: made introductions, newest first, with both contacts and the introducer. */
+    /** The lineage feed: made introductions, newest first, with both contacts and the introducer id. */
     List<IntroductionDto> findLineage(@Param("workspaceId") int workspaceId,
             @Param("limit") int limit, @Param("offset") int offset);
 

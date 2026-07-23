@@ -14,9 +14,9 @@ ships to any runtime.
 | Component | Rendered file | Sent by |
 | --- | --- | --- |
 | `Invite.tsx` | `invite.en.html` | `InviteEmailService` |
-| `PasswordReset.tsx` | `password-reset.en.html` | `SmtpPasswordResetEmailService` |
-| `EmailChange.tsx` | `email-change.en.html` | `SmtpEmailChangeEmailService` |
-| `Test.tsx` | `test.en.html` | `WorkspaceMailConfigService#sendTest` |
+| `PasswordReset.tsx` | `password-reset.en.html`, `password-reset.ja.html` | `SmtpPasswordResetEmailService` |
+| `EmailChange.tsx` | `email-change.en.html`, `email-change.ja.html` | `SmtpEmailChangeEmailService` |
+| `Test.tsx` | `test.en.html`, `test.ja.html` | `WorkspaceMailConfigService#sendTest` |
 | `NotificationEmail.tsx` | `notification.en.html` | `EmailNotificationDispatcher` |
 | `ReportDelivery.tsx` | `report-delivery.en.html`, `report-delivery.ja.html` | `ReportDeliveryScheduler` |
 
@@ -31,13 +31,17 @@ services pass (e.g. `Invite` → `workspaceName`, `inviterName`, `role`, `accept
 
 ```bash
 pnpm install          # esbuild's build (needed by tsx) is pre-approved in pnpm-workspace.yaml
-pnpm dev              # live preview at http://localhost:3000
+pnpm render           # compile the templates into backend resources
 ```
+
+The live-preview script is currently unavailable because its CLI dependency is
+not installed; restoration is tracked in GitHub issue #836.
 
 ## Regenerate the backend templates
 
 ```bash
-pnpm render           # writes ../../backend/src/main/resources/templates/emails/*.en.html
+pnpm render           # writes every registered backend email template
+pnpm render -- test.ja.html  # writes only the named template
 ```
 
 Commit both the components and the regenerated HTML. After changing a template,
@@ -49,6 +53,7 @@ re-render and confirm the `{{token}}` markers survived (`grep '{{' ...`).
   deprecation notice; `pnpm audit` reports no vulnerabilities. It remains the
   standard React Email import and is build-only. Revisit if React Email
   consolidates the package.
-- Scheduled report delivery selects the English or Japanese template from each
-  recipient's persisted account locale. Other transactional email services still
-  use their current template-specific locale behavior.
+- Password reset, email-change verification, SMTP test, and scheduled report
+  delivery select the English or Japanese template from the recipient's persisted
+  account locale. Invitation, registration verification, and notification emails
+  retain their current English-only behavior.
