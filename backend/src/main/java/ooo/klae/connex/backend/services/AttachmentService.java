@@ -9,16 +9,13 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AttachmentFacets;
+import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
-import ooo.klae.connex.backend.mappers.CompanyMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
-import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -38,10 +35,9 @@ public class AttachmentService {
     private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
 
     private final AttachmentMapper attachmentMapper;
+    private final AttachmentReadService attachmentReadService;
+    private final AttachmentWriteOperations attachmentWriteOperations;
     private final TagMapper tagMapper;
-    private final CompanyMapper companyMapper;
-    private final PersonMapper personMapper;
-    private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
@@ -57,28 +53,13 @@ public class AttachmentService {
         return entityType.trim().toLowerCase();
     }
 
-    /**
-     * Rejects attachment URLs that are neither an app-relative path nor an http(s)
-     * URL, blocking script-bearing schemes such as {@code javascript:} from being
-     * stored and later rendered into an anchor href.
-     * @param url the candidate attachment url
-     */
-    private void validateUrl(String url) {
-        if (url == null || url.chars().anyMatch(c -> c < 0x20 || c == 0x7F)
-                || url.startsWith("//") || url.startsWith("/\\")
-                || !(url.startsWith("/")
-                    || url.regionMatches(true, 0, "http://", 0, 7)
-                    || url.regionMatches(true, 0, "https://", 0, 8))) {
-            throw new BadRequestException("Attachment url must be an app-relative path or an http(s) URL");
-        }
-    }
-
     public List<Attachment> getByEntity(String entityType, int entityId) {
-        return attachmentMapper.getByEntity(workspaceService.getCurrentWorkspaceId(), normalizeType(entityType), entityId);
+        return attachmentReadService.getByEntity(
+            workspaceService.getCurrentWorkspaceId(), normalizeType(entityType), entityId);
     }
 
     public List<Attachment> getAll() {
-        return attachmentMapper.getAll(workspaceService.getCurrentWorkspaceId());
+        return attachmentReadService.getAll(workspaceService.getCurrentWorkspaceId());
     }
 
     public List<Attachment> getPage(String query, String sort, List<String> types, List<String> kinds,
@@ -158,7 +139,10 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Attachment attachment = getById(attachmentId);
+        Attachment attachment = attachmentMapper.getMetadataById(workspaceId, attachmentId);
+        if (attachment == null) {
+            throw new ResourceNotFoundException("Attachment not found with id: " + attachmentId);
+        }
         List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
         attachmentMapper.clearTags(workspaceId, attachmentId);
         if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceId, attachmentId, tagIds);
@@ -175,7 +159,8 @@ public class AttachmentService {
      * @return
      */
     public Attachment getById(int id) {
-        Attachment attachment = attachmentMapper.getById(workspaceService.getCurrentWorkspaceId(), id);
+        Attachment attachment = attachmentReadService.getById(
+            workspaceService.getCurrentWorkspaceId(), id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
         return attachment;
     }
@@ -183,7 +168,7 @@ public class AttachmentService {
     public ManagedContent getManagedContent(String token) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String url = "/api/attachments/content/" + token;
-        Attachment attachment = attachmentMapper.getByUrl(workspaceId, url);
+        Attachment attachment = attachmentMapper.getMetadataByUrl(workspaceId, url);
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found for managed content");
         }
@@ -201,7 +186,8 @@ public class AttachmentService {
      */
     @RequirePermission(Permission.ATTACHMENT_DELETE)
     public Attachment getByUrl(String url) {
-        Attachment attachment = attachmentMapper.getByUrl(workspaceService.getCurrentWorkspaceId(), url);
+        Attachment attachment = attachmentReadService.getByUrl(
+            workspaceService.getCurrentWorkspaceId(), url);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
         return attachment;
     }
@@ -217,7 +203,10 @@ public class AttachmentService {
         if (attachment.getUrl() != null && attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
             throw new BadRequestException("Managed attachment references cannot be submitted directly");
         }
-        return persist(workspaceId, attachment, false);
+        UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
+        Attachment created = attachmentWriteOperations.createExternal(workspaceId, attachment);
+        return attachmentReadService.hydrateKnown(
+            workspaceId, created, attachment.getUploadedBy(), targetLabel);
     }
 
     /**
@@ -232,56 +221,42 @@ public class AttachmentService {
         if (attachment.getUrl() == null || !attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
             throw new BadRequestException("Managed attachment reference is invalid");
         }
-        return persist(workspaceId, attachment, true);
+        UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
+        Attachment created = attachmentWriteOperations.createManaged(workspaceId, attachment);
+        return attachmentReadService.hydrateKnown(
+            workspaceId, created, attachment.getUploadedBy(), targetLabel);
     }
 
-    @Transactional
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment upload(String entityType, int entityId, UploadSource source, User uploader) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String normalizedType = normalizeType(entityType);
-        requireVisibleTarget(workspaceId, normalizedType, entityId);
-        StoredBinary stored = managedObjectService.storeAttachment(workspaceId, source);
-
-        Attachment attachment = new Attachment();
-        attachment.setEntityType(normalizedType);
-        attachment.setEntityId(entityId);
-        attachment.setFileName(stored.fileName());
-        attachment.setUrl(stored.url());
-        attachment.setContentType(stored.contentType());
-        attachment.setSize(stored.size());
-        attachment.setUploadedBy(uploader);
-        return persist(workspaceId, attachment, true);
+        UserDisplayNameDto targetLabel = requireVisibleUserTarget(
+            workspaceId, normalizedType, entityId);
+        Attachment attachment = attachmentWriteOperations.upload(
+            workspaceId, normalizedType, entityId, source, uploader);
+        return attachmentReadService.hydrateKnown(
+            workspaceId, attachment, uploader, targetLabel);
     }
 
-    private Attachment persist(int workspaceId, Attachment attachment, boolean managed) {
+    private UserDisplayNameDto prepareTarget(int workspaceId, Attachment attachment) {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
-        validateUrl(attachment.getUrl());
-        if (managed && attachmentMapper.countUrl(workspaceId, attachment.getUrl()) > 0) {
-            throw new BadRequestException("That managed attachment reference is already in use");
-        }
-        if (!managed && attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
-            throw new BadRequestException("That attachment url is already in use");
-        }
-        attachmentMapper.insert(attachment);
-        auditService.record("attachment.create", "attachment", attachment.getId(), attachment.getFileName(),
-            "Uploaded attachment " + attachment.getFileName(),
-            auditService.diff(null, attachment, AUDIT_FIELDS));
-        return attachmentMapper.getById(workspaceId, attachment.getId());
+        return requireVisibleUserTarget(
+            workspaceId, attachment.getEntityType(), attachment.getEntityId());
     }
 
-    private void requireVisibleTarget(int workspaceId, String entityType, int entityId) {
-        boolean exists = switch (entityType) {
-            case "company" -> companyMapper.exists(workspaceId, entityId);
-            case "person" -> personMapper.exists(workspaceId, entityId);
-            case "deal" -> dealMapper.exists(workspaceId, entityId);
-            case "user" -> workspaceService.isMember(workspaceId, entityId);
-            default -> throw new BadRequestException("Unsupported attachment entity type");
-        };
-        if (!exists) {
+    private UserDisplayNameDto requireVisibleUserTarget(
+            int workspaceId, String entityType, int entityId) {
+        if (!"user".equals(entityType)) {
+            return null;
+        }
+        UserDisplayNameDto target = attachmentReadService.getActiveWorkspaceMemberLabel(
+            workspaceId, entityId);
+        if (target == null) {
             throw new ResourceNotFoundException("Attachment target was not found");
         }
+        return target;
     }
 
     /**
@@ -292,7 +267,7 @@ public class AttachmentService {
     @Transactional
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Attachment before = attachmentMapper.getById(workspaceId, id);
+        Attachment before = attachmentMapper.getMetadataById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
         List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
         if (!referenceIds.contains(id)) {

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -61,6 +62,31 @@ class AttachmentMapperTest extends AbstractMapperTest {
         assertEquals("company", found.getEntityType());
         assertEquals(7, found.getEntityId());
         assertEquals(user.getId(), found.getUploadedBy().getId());
+        assertNull(found.getUploadedBy().getDisplayName());
+    }
+
+    @Test
+    void hydrationSensitiveReadsKeepLocalLabelsAndLeaveUserLabelsUnresolved() {
+        User user = newUser();
+        Company company = newCompany();
+        Attachment companyAttachment = build(
+            workspace.getId(), "company.pdf", "company", company.getId(), user);
+        Attachment userAttachment = build(
+            workspace.getId(), "user.pdf", "user", user.getId(), user);
+        attachmentMapper.insert(companyAttachment);
+        attachmentMapper.insert(userAttachment);
+
+        Attachment companyResult = attachmentMapper.getById(
+            workspace.getId(), companyAttachment.getId());
+        Attachment userResult = attachmentMapper.getById(
+            workspace.getId(), userAttachment.getId());
+
+        assertNotNull(companyResult);
+        assertEquals(company.getName(), companyResult.getEntityLabel());
+        assertNull(companyResult.getUploadedBy().getDisplayName());
+        assertNotNull(userResult);
+        assertNull(userResult.getEntityLabel());
+        assertNull(userResult.getUploadedBy().getDisplayName());
     }
 
     /**

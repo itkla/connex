@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -30,9 +31,10 @@ class AttachmentServiceTest extends AbstractServiceTest {
     @Autowired ShareMapper shareMapper;
 
     private Attachment attachmentWithUrl(String url) {
+        Company company = newCompany();
         Attachment attachment = new Attachment();
         attachment.setEntityType("company");
-        attachment.setEntityId(1);
+        attachment.setEntityId(company.getId());
         attachment.setFileName("file.png");
         attachment.setUrl(url);
         return attachment;
@@ -69,6 +71,29 @@ class AttachmentServiceTest extends AbstractServiceTest {
         for (String url : safe) {
             assertDoesNotThrow(() -> attachmentService.create(attachmentWithUrl(url)), url);
         }
+    }
+
+    @Test
+    void createHydratesAuthenticatedUploaderAndTenantTargetInsideCallerTransaction() {
+        Attachment attachment = attachmentWithUrl("/attachments/user/" + unique() + ".pdf");
+        attachment.setUploadedBy(currentUser);
+
+        Attachment created = attachmentService.create(attachment);
+
+        assertEquals(currentUser.getId(), created.getUploadedBy().getId());
+        assertEquals(currentUser.getDisplayName(), created.getUploadedBy().getDisplayName());
+        assertNotNull(created.getEntityLabel());
+    }
+
+    @Test
+    void createRejectsUserTargetValidationInsideExistingTenantTransaction() {
+        Attachment attachment = attachmentWithUrl(
+            "/attachments/user/current-" + unique() + ".pdf");
+        attachment.setEntityType("user");
+        attachment.setEntityId(currentUser.getId());
+
+        assertThrows(IllegalStateException.class,
+            () -> attachmentService.create(attachment));
     }
 
     @Test

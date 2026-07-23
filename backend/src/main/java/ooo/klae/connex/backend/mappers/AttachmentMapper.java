@@ -14,8 +14,11 @@ public interface AttachmentMapper {
     List<Attachment> getByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
     List<Attachment> getAll(int workspaceId);
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Attachment getCreatedById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Attachment getMetadataById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    Attachment getMetadataByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     /** Locks every same-workspace attachment reference for an exact URL. */
