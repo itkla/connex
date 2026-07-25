@@ -146,7 +146,8 @@ wait_for_frontend() {
 }
 
 prune_artifacts() {
-    ls -t "$ART_DIR"/backend-????????*.jar 2>/dev/null | tail -n +6 | xargs -r rm -f
+    find "$ART_DIR" -maxdepth 1 -name 'backend-*.jar' -printf '%T@ %p\n' \
+        | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs -r rm -f
 }
 
 build_backend() {
