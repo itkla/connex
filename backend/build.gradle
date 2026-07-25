@@ -21,6 +21,15 @@ springBoot {
 				time.set(releaseBuildTime)
 			}
 		}
+		def gitSha = providers.gradleProperty('gitSha')
+				.orElse(providers.exec {
+					commandLine 'git', 'rev-parse', 'HEAD'
+					ignoreExitValue = true
+				}.standardOutput.asText.map { it.trim() })
+				.map { sha -> sha.isEmpty() ? 'unknown' : sha }
+		properties {
+			additional.put('gitSha', gitSha)
+		}
 	}
 }
 

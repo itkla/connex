@@ -32,16 +32,17 @@ public class VersionController {
     public VersionResponse version() {
         BuildProperties properties = buildProperties.getIfAvailable();
         if (properties == null) {
-            return new VersionResponse("dev", null);
+            return new VersionResponse("dev", null, null);
         }
 
         Instant buildTime = properties.getTime();
         return new VersionResponse(
                 Objects.requireNonNullElse(properties.getVersion(), "dev"),
-                buildTime == null ? null : buildTime.toString());
+                buildTime == null ? null : buildTime.toString(),
+                properties.get("gitSha"));
     }
 
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record VersionResponse(String version, String buildTime) {
+    public record VersionResponse(String version, String buildTime, String gitSha) {
     }
 }
