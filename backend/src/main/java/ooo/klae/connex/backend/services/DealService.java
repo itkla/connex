@@ -50,11 +50,14 @@ import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto;
+import ooo.klae.connex.backend.dto.DealPeriodTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
 import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -80,6 +83,8 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -669,8 +674,85 @@ public class DealService {
         );
     }
 
+    public DealKpisDto getDealKpis(
+            String currency,
+            Window window,
+            List<AnalyticsPeriod> periods,
+            MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        DealKpiPeriodDto current = dealMapper.dealKpiWindow(
+            workspaceId, currency, window.startUtc(), window.endUtc(), memberScope);
+        DealKpiPeriodDto previous = dealMapper.dealKpiWindow(
+            workspaceId, currency, window.previousStartUtc(), window.previousEndUtc(), memberScope);
+
+        List<Double> wonSeries = emptyKpiSeries(periods.size());
+        List<Double> winRateSeries = emptyKpiSeries(periods.size());
+        List<Double> avgCycleSeries = emptyKpiSeries(periods.size());
+        for (DealKpiClosedBucketDto bucket : dealMapper.dealKpiClosedSeriesByBoundaries(
+                workspaceId, currency, window.startUtc(), window.endUtc(), periods, memberScope)) {
+            int index = bucket.bucketIndex();
+            wonSeries.set(index, bucket.wonValue());
+            long closedCount = bucket.wonCount() + bucket.lostCount();
+            winRateSeries.set(index, closedCount == 0 ? 0.0 : bucket.wonCount() * 100.0 / closedCount);
+            avgCycleSeries.set(index, bucket.avgCycleDays());
+        }
+
+        List<Double> newPipelineSeries = emptyKpiSeries(periods.size());
+        for (DealBucketValueDto bucket : dealMapper.dealKpiNewPipelineSeriesByBoundaries(
+                workspaceId, currency, window.startUtc(), window.endUtc(), periods, memberScope)) {
+            newPipelineSeries.set(bucket.bucketIndex(), bucket.value());
+        }
+
+        long previousClosedCount = previous.wonCount() + previous.lostCount();
+        return new DealKpisDto(
+            current.wonRevenue(),
+            previous.wonCount() == 0 ? null : previous.wonRevenue(),
+            current.newPipeline(),
+            previous.newPipelineCount() == 0 ? null : previous.newPipeline(),
+            current.wonCount(),
+            current.lostCount(),
+            current.wonRevenue(),
+            current.lostValue(),
+            previousClosedCount == 0 ? null : previous.wonCount(),
+            previousClosedCount == 0 ? null : previous.lostCount(),
+            current.avgCycleDays(),
+            previous.wonCount() == 0 ? null : previous.avgCycleDays(),
+            wonSeries,
+            newPipelineSeries,
+            winRateSeries,
+            avgCycleSeries
+        );
+    }
+
     public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days, MemberScope memberScope) {
         return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days, memberScope);
+    }
+
+    public List<DealPipelineValueDto> getDealPipelineValue(
+            String currency, Window window, MemberScope memberScope) {
+        return dealMapper.dealPipelineValueWindow(
+            workspaceService.getCurrentWorkspaceId(),
+            currency,
+            window.startUtc(),
+            window.endUtc(),
+            memberScope);
+    }
+
+    public DealRevenuePeriodSeriesDto getRevenueSeries(
+            String currency,
+            Window window,
+            List<AnalyticsPeriod> periods,
+            MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<DealPeriodDecimalTotalDto> closed = dealMapper.revenueClosedByPeriods(
+            workspaceId, currency, window.startUtc(), window.endUtc(), periods, memberScope);
+        List<DealPeriodDecimalTotalDto> scheduled = dealMapper.revenueScheduledClosedByPeriods(
+            workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
+        List<DealPeriodDecimalTotalDto> projected = dealMapper.revenueProjectedByPeriods(
+            workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
+        return new DealRevenuePeriodSeriesDto(
+            publicPeriodTotals(periods, closed, scheduled),
+            publicPeriodTotals(periods, projected));
     }
 
     public List<DealAgingDto> getDealAging(String currency, MemberScope memberScope) {
@@ -699,7 +781,30 @@ public class DealService {
     }
 
     private static List<Double> emptyKpiSeries() {
-        return new ArrayList<>(Collections.nCopies(KPI_SERIES_BUCKETS, 0.0));
+        return emptyKpiSeries(KPI_SERIES_BUCKETS);
+    }
+
+    private static List<Double> emptyKpiSeries(int bucketCount) {
+        return new ArrayList<>(Collections.nCopies(bucketCount, 0.0));
+    }
+
+    @SafeVarargs
+    private static List<DealPeriodTotalDto> publicPeriodTotals(
+            List<AnalyticsPeriod> periods,
+            List<DealPeriodDecimalTotalDto>... totalsBySource) {
+        List<BigDecimal> totals = new ArrayList<>(Collections.nCopies(periods.size(), BigDecimal.ZERO));
+        for (List<DealPeriodDecimalTotalDto> source : totalsBySource) {
+            for (DealPeriodDecimalTotalDto total : source) {
+                BigDecimal value = total.total() == null ? BigDecimal.ZERO : total.total();
+                totals.set(total.bucketIndex(), totals.get(total.bucketIndex()).add(value));
+            }
+        }
+        List<DealPeriodTotalDto> publicTotals = new ArrayList<>(periods.size());
+        for (AnalyticsPeriod period : periods) {
+            publicTotals.add(new DealPeriodTotalDto(
+                period.startDate().toString(), totals.get(period.index()).doubleValue()));
+        }
+        return List.copyOf(publicTotals);
     }
 
     /**

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -49,6 +50,7 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
+import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -63,6 +65,8 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.util.AnalyticsPeriods;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 @RecordApplicationEvents
 class DealServiceTest extends AbstractServiceTest {
@@ -476,6 +480,88 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(10.0, withWon.avgCycleDaysPrev(), 0.0001);
         assertEquals(1L, withWon.wonCountPrev());
         assertEquals(1L, withWon.lostCountPrev());
+    }
+
+    @Test
+    void windowedAnalyticsAggregateAlignedPeriodsWithoutNowOrTenantLeakage() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        windowDeal(activeWorkspace, pipeline, stage, company, "Previous Won",
+            70.0, 40.0, "JPY", true,
+            LocalDateTime.of(2027, 2, 28, 0, 0),
+            LocalDateTime.of(2027, 3, 2, 12, 0), null);
+        windowDeal(activeWorkspace, pipeline, stage, company, "Scheduled Won",
+            100.0, 80.0, "JPY", true,
+            LocalDateTime.of(2027, 3, 5, 10, 0),
+            LocalDateTime.of(2027, 3, 6, 12, 0), "2027-03-07");
+        windowDeal(activeWorkspace, pipeline, stage, company, "Lost",
+            50.0, 25.0, "JPY", false,
+            LocalDateTime.of(2027, 3, 6, 10, 0),
+            LocalDateTime.of(2027, 3, 8, 12, 0), null);
+        windowDeal(activeWorkspace, pipeline, stage, company, "Unscheduled Won",
+            120.0, 90.0, "JPY", true,
+            LocalDateTime.of(2027, 3, 4, 10, 0),
+            LocalDateTime.of(2027, 3, 10, 12, 0), null);
+        windowDeal(activeWorkspace, pipeline, stage, company, "Open",
+            30.0, 0.0, "JPY", null,
+            LocalDateTime.of(2027, 3, 9, 10, 0), null, "2027-03-09");
+        windowDeal(activeWorkspace, pipeline, stage, company, "Exclusive End",
+            999.0, 999.0, "JPY", true,
+            LocalDateTime.of(2027, 3, 11, 0, 0),
+            LocalDateTime.of(2027, 3, 11, 0, 0), null);
+        windowDeal(activeWorkspace, pipeline, stage, company, "Other Currency",
+            800.0, 700.0, "USD", true,
+            LocalDateTime.of(2027, 3, 5, 10, 0),
+            LocalDateTime.of(2027, 3, 6, 10, 0), null);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline);
+        Company foreignCompany = newCompanyIn(foreignWorkspace);
+        windowDeal(foreignWorkspace, foreignPipeline, foreignStage, foreignCompany, "Foreign",
+            5000.0, 4000.0, "JPY", true,
+            LocalDateTime.of(2027, 3, 5, 10, 0),
+            LocalDateTime.of(2027, 3, 6, 10, 0), null);
+
+        Window window = AnalyticsPeriods.requiredWindow(
+            "2027-03-05", "2027-03-10", "UTC", null);
+        var periods = AnalyticsPeriods.periods(window, "day");
+        DealKpisDto kpis = dealService.getDealKpis(
+            "JPY", window, periods, MemberScope.allTeam());
+        List<DealPipelineValueDto> pipelineValues = dealService.getDealPipelineValue(
+            "JPY", window, MemberScope.allTeam());
+        DealRevenuePeriodSeriesDto revenue = dealService.getRevenueSeries(
+            "JPY", window, periods, MemberScope.allTeam());
+
+        assertEquals(170.0, kpis.wonRevenue(), 0.0001);
+        assertEquals(40.0, kpis.wonRevenuePrev(), 0.0001);
+        assertEquals(180.0, kpis.newPipeline(), 0.0001);
+        assertEquals(190.0, kpis.newPipelinePrev(), 0.0001);
+        assertEquals(2, kpis.wonCount());
+        assertEquals(1, kpis.lostCount());
+        assertEquals(3.5, kpis.avgCycleDays(), 0.0001);
+        assertEquals(6, kpis.wonSeries().size());
+        assertEquals(List.of(0.0, 80.0, 0.0, 0.0, 0.0, 90.0), kpis.wonSeries());
+        assertEquals(100.0, kpis.winRateSeries().get(1), 0.0001);
+        assertEquals(1, pipelineValues.size());
+        assertEquals(170.0, pipelineValues.getFirst().wonValue(), 0.0001);
+        assertEquals(30.0, pipelineValues.getFirst().openValue(), 0.0001);
+        assertEquals(1, pipelineValues.getFirst().openCount());
+        assertEquals(
+            List.of("2027-03-05", "2027-03-06", "2027-03-07",
+                "2027-03-08", "2027-03-09", "2027-03-10"),
+            revenue.realized().stream().map(total -> total.periodStart()).toList());
+        assertEquals(
+            List.of(0.0, 0.0, 80.0, 25.0, 0.0, 90.0),
+            revenue.realized().stream().map(total -> total.total()).toList());
+        assertEquals(
+            List.of(0.0, 0.0, 100.0, 0.0, 30.0, 0.0),
+            revenue.projected().stream().map(total -> total.total()).toList());
     }
 
     @Test
@@ -1375,6 +1461,39 @@ class DealServiceTest extends AbstractServiceTest {
                 WHERE workspace_id = ? AND id = ?
                 """, createdDaysAgo, closedDaysAgo, updatedDaysAgo, targetWorkspace.getId(), deal.getId());
         }
+        return deal;
+    }
+
+    private Deal windowDeal(
+            Workspace targetWorkspace,
+            Pipeline pipeline,
+            Stage stage,
+            Company company,
+            String name,
+            double value,
+            double actualValue,
+            String currency,
+            Boolean won,
+            LocalDateTime createdAt,
+            LocalDateTime closedAt,
+            String expectedCloseDate) {
+        Deal deal = new Deal();
+        deal.setWorkspaceId(targetWorkspace.getId());
+        deal.setOwnerId(targetWorkspace.getId() == workspace.getId() ? currentUser.getId() : null);
+        deal.setName(name);
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        deal.setWon(won);
+        deal.setClosedAt(closedAt == null ? null : closedAt.toString().replace('T', ' '));
+        deal.setExpectedCloseDate(expectedCloseDate);
+        dealMapper.insert(deal);
+        jdbcTemplate.update(
+            "UPDATE deal SET created_at = ? WHERE workspace_id = ? AND id = ?",
+            createdAt, targetWorkspace.getId(), deal.getId());
         return deal;
     }
 
