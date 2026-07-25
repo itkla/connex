@@ -22,13 +22,14 @@ springBoot {
 			}
 		}
 		def gitSha = providers.gradleProperty('gitSha')
-				.orElse(providers.exec {
-					commandLine 'git', 'rev-parse', 'HEAD'
-					ignoreExitValue = true
-				}.standardOutput.asText.map { it.trim() })
-				.map { sha -> sha.isEmpty() ? 'unknown' : sha }
+		if (!gitSha.isPresent() && new File(projectDir.parentFile, '.git').exists()) {
+			gitSha = providers.exec {
+				commandLine 'git', 'rev-parse', 'HEAD'
+				ignoreExitValue = true
+			}.standardOutput.asText.map { it.trim() }
+		}
 		properties {
-			additional.put('gitSha', gitSha)
+			additional.put('gitSha', gitSha.map { sha -> sha.isEmpty() ? 'unknown' : sha }.orElse('unknown'))
 		}
 	}
 }

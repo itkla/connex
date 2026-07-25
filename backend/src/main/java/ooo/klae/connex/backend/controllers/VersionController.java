@@ -42,6 +42,14 @@ public class VersionController {
                 properties.get("gitSha"));
     }
 
+    /**
+     * Product build information served to any caller.
+     *
+     * @param version   the packaged product version, or {@code "dev"} when unavailable
+     * @param buildTime the ISO-8601 build timestamp, or null when unavailable
+     * @param gitSha    the git commit the artifact was built from ({@code "unknown"} when the
+     *                  build ran without a repository), or null when build metadata is absent
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record VersionResponse(String version, String buildTime, String gitSha) {
     }

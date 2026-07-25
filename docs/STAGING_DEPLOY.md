@@ -31,7 +31,11 @@ reviewed, in-repo script
    `/opt/connex-staging/.staging/artifacts/backend-<sha>.jar`, plus a `rollback.jar` snapshot
    of the previously live JAR.
 3. **Builds both artifacts before restarting anything**, so a frontend build failure can no
-   longer strand a half-deployed backend.
+   longer strand a half-deployed backend. The frontend builds into `.next-new`
+   (`NEXT_DIST_DIR`) and is swapped into `.next` only after the backend health gate passes,
+   so the live frontend never serves a half-written build directory; on a failed frontend
+   restart the previous build is swapped back. A backend already serving the target sha is
+   not rebuilt or restarted.
 4. **Health-gates the backend restart.** After `systemctl restart connex-staging-backend` it
    polls unit state + `http://127.0.0.1:8081/api/version` (bounded, 300s) until the served
    `gitSha` equals the target commit, then rechecks the same MainPID, unit health, and HTTP
@@ -69,7 +73,9 @@ code boots — e.g. the 5aa90472 legacy-upload migration). For those:
 1. Read the release/PR notes for required env or manual migration steps **before** merging to
    `main`; staging deploys within ~5 minutes of the merge.
 2. Apply required environment changes to `/etc/connex-staging/backend.env` /
-   `frontend.env` (root) first.
+   `frontend.env` (root) first. Env-only changes do **not** trigger a deploy cycle —
+   restart the affected service yourself (`sudo systemctl restart connex-staging-backend`
+   / `connex-staging-frontend`).
 3. If the new backend fails its health gate, the deploy rolls back to the previous JAR and
    retries every cycle — fix forward (or apply the missing step) rather than expecting the
    failed deploy to have stopped the timer.

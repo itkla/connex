@@ -10,11 +10,14 @@
 #   - Gates on a deployed-sha marker, not on HEAD, so a failed build is retried on the
 #     next cycle instead of being silently skipped.
 #   - Builds the backend with `clean bootJar` and stamps the git sha into build info,
-#     so the running JAR is verifiable via GET /api/version.
-#   - Builds both artifacts before restarting anything.
+#     so the running JAR is verifiable via GET /api/version. Skips the backend step
+#     entirely when the running backend already serves the target sha.
+#   - Builds both artifacts before restarting anything; the frontend builds into
+#     .next-new (NEXT_DIST_DIR) and is swapped into .next only after the backend
+#     passes its health gate, so the live frontend keeps a consistent build dir.
 #   - Restarts the backend, then polls unit + HTTP health with a bounded timeout and
 #     verifies the served gitSha equals the target commit; rechecks the same PID after
-#     a stability interval. Only then restarts the frontend.
+#     a stability interval. Only then swaps and restarts the frontend.
 #   - On backend health failure: restores the previous JAR, restarts, and exits
 #     nonzero without touching the frontend or the marker.
 #
@@ -34,6 +37,7 @@ ART_DIR="$STATE_DIR/artifacts"
 MARKER="$STATE_DIR/deployed-sha"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
 ROLLBACK_JAR="$ART_DIR/rollback.jar"
+FRONTEND_ENV=/etc/connex-staging/frontend.env
 
 BACKEND_URL=http://127.0.0.1:8081
 FRONTEND_URL=http://127.0.0.1:3001
@@ -61,7 +65,7 @@ backend_pid() {
 
 served_git_sha() {
     curl -fsS --max-time 5 "$BACKEND_URL/api/version" 2>/dev/null \
-        | sed -n 's/.*"gitSha":"\([0-9a-f]\{40\}\)".*/\1/p'
+        | sed -n 's/.*"gitSha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p'
 }
 
 backend_http_healthy() {
@@ -116,11 +120,12 @@ verify_backend_stability() {
 rollback_backend() {
     if [ ! -f "$ROLLBACK_JAR" ]; then
         log "No rollback artifact at $ROLLBACK_JAR — backend left as-is; manual intervention required"
-        return 1
+        return 0
     fi
     log "Rolling back backend to previous JAR..."
     cp -f "$ROLLBACK_JAR" "$LIVE_JAR"
-    sudo systemctl restart connex-staging-backend
+    sudo systemctl restart connex-staging-backend \
+        || log "Rollback restart command failed (unit state: $(backend_unit_state))"
     if wait_for_backend_http "$ROLLBACK_HEALTH_TIMEOUT"; then
         log "Rollback complete: previous backend restored and answering"
     else
@@ -165,15 +170,65 @@ build_backend() {
 
 build_frontend() {
     cd "$STAGING_DIR/frontend"
-    log "Building frontend..."
-    set -a; source /etc/connex-staging/frontend.env; set +a
+    log "Building frontend (into .next-new)..."
+    set -a; source "$FRONTEND_ENV"; set +a
     "$PNPM" install --frozen-lockfile --silent
-    "$PNPM" build
+    rm -rf .next-new
+    NEXT_DIST_DIR=.next-new "$PNPM" build
+}
+
+swap_frontend_build() {
+    cd "$STAGING_DIR/frontend"
+    rm -rf .next-old
+    if [ -d .next ]; then
+        mv .next .next-old
+    fi
+    mv .next-new .next
+}
+
+restore_frontend_build() {
+    cd "$STAGING_DIR/frontend"
+    if [ -d .next-old ]; then
+        rm -rf .next
+        mv .next-old .next
+        sudo systemctl restart connex-staging-frontend \
+            || log "Frontend restore restart command failed"
+        log "Frontend restored to previous build"
+    fi
+}
+
+deploy_backend() {
+    local target="$1"
+    if [ "$(served_git_sha || true)" = "$target" ]; then
+        log "Backend already serving sha ${target:0:8}; skipping backend build/restart"
+        return 0
+    fi
+    build_backend "$target"
+    log "Restarting backend..."
+    if ! sudo systemctl restart connex-staging-backend \
+        || ! wait_for_backend_sha "$target" \
+        || ! verify_backend_stability "$target"; then
+        rollback_backend
+        return 1
+    fi
+    log "Backend healthy and serving sha ${target:0:8}"
+}
+
+deploy_frontend() {
+    swap_frontend_build
+    log "Restarting frontend..."
+    if ! sudo systemctl restart connex-staging-frontend || ! wait_for_frontend; then
+        log "Frontend did not answer on $FRONTEND_URL within ${FRONTEND_HEALTH_TIMEOUT}s after restart; restoring previous build"
+        restore_frontend_build
+        return 1
+    fi
 }
 
 main() {
-    exec 9>"$LOCK_FILE"
-    flock -n 9 || { log "Deploy already in progress, skipping"; exit 0; }
+    if [ "${CONNEX_DEPLOY_LOCK_HELD:-0}" != "1" ]; then
+        exec 9>"$LOCK_FILE"
+        flock -n 9 || { log "Deploy already in progress, skipping"; exit 0; }
+    fi
 
     cd "$STAGING_DIR"
     git fetch origin main --quiet
@@ -184,26 +239,22 @@ main() {
         exit 0
     fi
 
+    if [ ! -r "$FRONTEND_ENV" ]; then
+        log "Deploy FAILED: $FRONTEND_ENV is missing or unreadable"
+        exit 1
+    fi
+
     mkdir -p "$ART_DIR"
     log "Deploying ${target:0:8} (previously deployed: ${deployed:0:8})..."
     git reset --hard "$target" --quiet
 
-    build_backend "$target"
     build_frontend
-
-    log "Restarting backend..."
-    sudo systemctl restart connex-staging-backend
-    if ! wait_for_backend_sha "$target" || ! verify_backend_stability "$target"; then
-        rollback_backend
+    if ! deploy_backend "$target"; then
         log "Deploy of ${target:0:8} FAILED at the backend health gate; frontend untouched, will retry next cycle"
         exit 1
     fi
-    log "Backend healthy and serving sha ${target:0:8}"
-
-    log "Restarting frontend..."
-    sudo systemctl restart connex-staging-frontend
-    if ! wait_for_frontend; then
-        log "Frontend did not answer on $FRONTEND_URL within ${FRONTEND_HEALTH_TIMEOUT}s after restart; marker not updated, will retry next cycle"
+    if ! deploy_frontend; then
+        log "Deploy of ${target:0:8} FAILED at the frontend; marker not updated, will retry next cycle"
         exit 1
     fi
 

@@ -23,4 +23,5 @@ cd "$STAGING_DIR"
 git fetch origin main --quiet
 git reset --hard origin/main --quiet
 
+export CONNEX_DEPLOY_LOCK_HELD=1
 exec bash "$STAGING_DIR/deploy/staging/connex-staging-deploy.sh"
