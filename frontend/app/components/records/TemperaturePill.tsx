@@ -20,7 +20,7 @@ export default function TemperaturePill({ temp }: { temp?: RelationshipTemperatu
 
     if (!temp) return <span className="text-sm text-muted-foreground">—</span>;
 
-    if (temp.lastTouchAt == null) {
+    if (!temp.lastTouchAt) {
         return (
             <Tooltip>
                 <TooltipTrigger asChild>
