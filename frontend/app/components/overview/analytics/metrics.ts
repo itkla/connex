@@ -1,5 +1,5 @@
 import { type Deal } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { fixedOffsetSeconds, parseMysqlDateTime } from '@/app/lib/utils';
 
 export type RollingRangeKey = '30d' | '90d' | '12m';
 export type CalendarRangeKey = 'this-week' | 'this-month' | 'last-month' | 'this-quarter';
@@ -260,6 +260,11 @@ function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
 }
 
 function todayAnchor(now: number, timezone: string): Date {
+    const offsetSeconds = fixedOffsetSeconds(timezone);
+    if (offsetSeconds != null) {
+        const shifted = new Date(now + offsetSeconds * 1000);
+        return utcDateFromParts(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
+    }
     try {
         const iso = new Intl.DateTimeFormat('en-CA', {
             timeZone: timezone,
