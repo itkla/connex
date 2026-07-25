@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,6 +38,7 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
+import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
@@ -62,6 +66,7 @@ import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 @ExtendWith(MockitoExtension.class)
 class RecordListControllerTest {
@@ -587,7 +592,7 @@ class RecordListControllerTest {
         verify(dealService).getRevenueTimeseries("JPY", "America/New_York", allTeam);
         verify(dealService).getRevenueTimeseries("JPY", "+09:00", allTeam);
         verify(dealService).getStageDistribution("JPY", allTeam);
-        verify(dealService).getRevenueTimeseries(null, null, allTeam);
+        verify(dealService).getRevenueTimeseries(null, "UTC", allTeam);
         verify(dealService).getStageDistribution(null, allTeam);
     }
 
@@ -611,12 +616,14 @@ class RecordListControllerTest {
         when(dealService.getDealAging(null, allTeam)).thenReturn(aging);
         when(dealService.getTopDeals(null, allTeam)).thenReturn(top);
 
-        assertSame(kpis, controller.getDealKpis("JPY", "30d", null, null));
-        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m", null, null));
+        assertSame(kpis, controller.getDealKpis(
+            "JPY", "30d", null, null, null, null, null, null, null));
+        assertSame(pipelineValues, controller.getDealPipelineValue(
+            "JPY", "12m", null, null, null, null, null, null));
         assertSame(aging, controller.getDealAging("  ", null, null));
         assertSame(top, controller.getTopDeals("", null, null));
 
-        controller.getDealKpis(" ", null, null, null);
+        controller.getDealKpis(" ", null, null, null, null, null, "month", "Mars/Olympus", "+09:00");
 
         verify(dealService).getDealKpis("JPY", 30, allTeam);
         verify(dealService).getDealPipelineValue("JPY", 365, allTeam);
@@ -631,11 +638,130 @@ class RecordListControllerTest {
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
 
-        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d", null, null));
-        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "7d", null, null, null, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
+            null, "all", null, null, null, null, null, null));
 
         verify(dealService, never()).getDealKpis(any(), anyInt(), any());
         verify(dealService, never()).getDealPipelineValue(any(), anyInt(), any());
+    }
+
+    @Test
+    void legacyAnalyticsEndpointsPreserveEverySupportedRange() {
+        DealController dealController = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        ActivityController activityController = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        List<String> ranges = List.of("30d", "90d", "12m");
+        List<Integer> days = List.of(30, 90, 365);
+
+        for (String range : ranges) {
+            dealController.getDealKpis(
+                null, range, null, null, null, null, null, null, null);
+            dealController.getDealPipelineValue(
+                null, range, null, null, null, null, null, null);
+            activityController.getActivityVolume(
+                range, null, null, null, null, null, null, null);
+            activityController.getTeamLeaderboard(
+                range, null, null, null, null);
+        }
+
+        for (int dayCount : days) {
+            verify(dealService).getDealKpis(null, dayCount, allTeam);
+            verify(dealService).getDealPipelineValue(null, dayCount, allTeam);
+            verify(activityService).getActivityVolume(dayCount, allTeam);
+            verify(activityService).getTeamLeaderboard(dayCount);
+        }
+    }
+
+    @Test
+    void windowedAnalyticsEndpointsDispatchWithValidatedUtcWindows() {
+        DealController dealController = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        ActivityController activityController = new ActivityController(
+            activityService, workspaceService, memberScopeResolver);
+        MemberScope allTeam = MemberScope.allTeam();
+        DealKpisDto kpis = new DealKpisDto(
+            0.0, null, 0.0, null, 0, 0, 0.0, 0.0, null, null, 0.0, null,
+            List.of(), List.of(), List.of(), List.of());
+        DealRevenuePeriodSeriesDto revenue = new DealRevenuePeriodSeriesDto(List.of(), List.of());
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
+        when(dealService.getDealKpis(any(), any(Window.class), anyList(), eq(allTeam))).thenReturn(kpis);
+        when(dealService.getRevenueSeries(any(), any(Window.class), anyList(), eq(allTeam))).thenReturn(revenue);
+        when(activityService.getActivityVolume(any(Window.class), anyList(), eq(allTeam))).thenReturn(List.of());
+        when(activityService.getTeamLeaderboard(any(Window.class))).thenReturn(List.of());
+
+        assertSame(kpis, dealController.getDealKpis(
+            "JPY", "invalid-ignored", null, null,
+            "2026-03-08", "2026-03-09", "day", "America/New_York", null));
+        dealController.getDealPipelineValue(
+            "JPY", "invalid-ignored", null, null,
+            "2026-03-08", "2026-03-09", null, "+09:00");
+        assertSame(revenue, dealController.getRevenueSeries(
+            "2026-03-08", "2026-03-09", "day", "JPY",
+            null, null, null, null));
+        assertTrue(activityController.getActivityVolume(
+            "invalid-ignored", null, null,
+            "2026-03-08", "2026-03-09", "day", null, null).isEmpty());
+        assertTrue(activityController.getTeamLeaderboard(
+            "invalid-ignored", "2026-03-08", "2026-03-09", null, null).isEmpty());
+
+        verify(dealService).getDealKpis(
+            eq("JPY"),
+            argThat(window -> "America/New_York".equals(window.timezone().getId())),
+            anyList(),
+            eq(allTeam));
+        verify(dealService).getDealPipelineValue(
+            eq("JPY"),
+            argThat(window -> "+09:00".equals(window.timezone().getId())),
+            eq(allTeam));
+        verify(dealService).getRevenueSeries(
+            eq("JPY"),
+            argThat(window -> "UTC".equals(window.timezone().getId())),
+            anyList(),
+            eq(allTeam));
+    }
+
+    @Test
+    void windowValidationRejectsInvalidCommonParameters() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService, memberScopeResolver);
+
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "90d", null, null,
+            "2026-01-01", null, "day", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "90d", null, null,
+            "2026-02-01", "2026-01-01", "day", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "90d", null, null,
+            "2026-01-01", "2026-01-31", null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "90d", null, null,
+            "2026-01-01", "2026-01-31", "quarter", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            null, "90d", null, null,
+            "2026-01-01", "2026-05-01", "day", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
+            null, "90d", null, null,
+            "2026-01-01", "2028-01-02", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
+            null, "90d", null, null,
+            "bad-date", "2026-01-01", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
+            null, "90d", null, null,
+            "2026-01-01", "2026-01-02", "Mars/Olympus", null));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
+            null, "90d", null, null,
+            "2026-01-01", "2026-01-02", "UTC", "+09:00"));
     }
 
     @Test
@@ -786,11 +912,15 @@ class RecordListControllerTest {
         when(activityService.getTeamLeaderboard(365)).thenReturn(List.of());
         when(activityService.getUpcomingCount(7)).thenReturn(new CountDto(2));
 
-        assertTrue(controller.getActivityVolume("30d", null, null).isEmpty());
-        assertTrue(controller.getTeamLeaderboard("12m").isEmpty());
+        assertTrue(controller.getActivityVolume(
+            "30d", null, null, null, null, null, null, null).isEmpty());
+        assertTrue(controller.getTeamLeaderboard(
+            "12m", null, null, null, null).isEmpty());
         assertEquals(2, controller.getUpcomingCount(7).count());
-        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d", null, null));
-        assertThrows(BadRequestException.class, () -> controller.getTeamLeaderboard("all"));
+        assertThrows(BadRequestException.class, () -> controller.getActivityVolume(
+            "7d", null, null, null, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getTeamLeaderboard(
+            "all", null, null, null, null));
         assertThrows(BadRequestException.class, () -> controller.getUpcomingCount(0));
 
         verify(activityService).getActivityVolume(30, allTeam);

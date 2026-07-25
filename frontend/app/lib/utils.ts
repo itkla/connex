@@ -529,7 +529,8 @@ export function riskTextClass(severity: DealRiskSeverity): string {
 
 export type CalendarYearMonth = { year: number; month: number };
 
-function fixedOffsetSeconds(timezone: string): number | null {
+/** Parses a legacy fixed-offset timezone ({@code UTC+9}, {@code +09:00}, …) into seconds, or null for IANA names. */
+export function fixedOffsetSeconds(timezone: string): number | null {
     if (/^(?:Z|UTC|GMT|UT)$/i.test(timezone)) return 0;
     const match = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/i.exec(timezone);
     if (!match) return null;

@@ -18,6 +18,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -90,7 +92,7 @@ public class ActivityService {
         double spanDays = days / (double) bucketCount;
         List<ActivityVolumeBucketDto> volume = new ArrayList<>(bucketCount);
         for (int bucketIndex = 0; bucketIndex < bucketCount; bucketIndex++) {
-            volume.add(new ActivityVolumeBucketDto(bucketIndex, 0, 0, 0, 0, 0));
+            volume.add(new ActivityVolumeBucketDto(bucketIndex, 0, 0, 0, 0, 0, null));
         }
         for (ActivityVolumeBucketDto bucket :
                 activityMapper.activityVolume(workspaceId, days, bucketCount, spanDays, memberScope)) {
@@ -99,8 +101,28 @@ public class ActivityService {
         return volume;
     }
 
+    public List<ActivityVolumeBucketDto> getActivityVolume(
+            Window window, List<AnalyticsPeriod> periods, MemberScope memberScope) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<ActivityVolumeBucketDto> volume = new ArrayList<>(periods.size());
+        for (AnalyticsPeriod period : periods) {
+            volume.add(new ActivityVolumeBucketDto(
+                period.index(), 0, 0, 0, 0, 0, period.startDate().toString()));
+        }
+        for (ActivityVolumeBucketDto bucket : activityMapper.activityVolumeByBoundaries(
+                workspaceId, window.startUtc(), window.endUtc(), periods, memberScope)) {
+            volume.set(bucket.bucketIndex(), bucket);
+        }
+        return volume;
+    }
+
     public List<TeamLeaderboardEntryDto> getTeamLeaderboard(int days) {
         return activityMapper.teamLeaderboard(workspaceService.getCurrentWorkspaceId(), days);
+    }
+
+    public List<TeamLeaderboardEntryDto> getTeamLeaderboard(Window window) {
+        return activityMapper.teamLeaderboardWindow(
+            workspaceService.getCurrentWorkspaceId(), window.startUtc(), window.endUtc());
     }
 
     public CountDto getUpcomingCount(int days) {

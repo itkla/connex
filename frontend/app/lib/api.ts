@@ -2130,28 +2130,57 @@ export function getDealRevenueTimeseries(
         `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
 }
 
+/**
+ * Server-computed calendar-bucketed revenue series (realized won revenue vs projected value by
+ * expected close) over an explicit window at day/week/month granularity, zero-filled per bucket.
+ */
+export function getDealRevenueSeries(
+    window: Types.AnalyticsWindowParams,
+    currency?: string,
+    scope: Types.MemberScopeParams = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.DealRevenuePeriodSeries>(
+        `/api/deals/revenue-series${buildQuery({ currency, ...scope, ...window })}`, init);
+}
+
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
 
 /**
- * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
- * Replaces the client-side KPI/win-rate math over a bounded page slice.
+ * Server-computed deal KPIs over ALL deals, optionally scoped to a currency. Windowed calls pass
+ * {@code window} (calendar-aligned from/to + granularity, superseding {@code range}); legacy calls
+ * pass {@code range} (30d/90d/12m). Replaces the client-side KPI/win-rate math over a bounded page slice.
  */
 export function getDealKpis(
-    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    currency?: string,
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
 ) {
-    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range, ...scope })}`, init);
+    return getJson<Types.DealKpis>(
+        `/api/deals/kpis${buildQuery({ currency, range: window ? undefined : range, ...scope, ...window })}`,
+        init,
+    );
 }
 
 export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
     return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, withCookie(cookie));
 }
 
-/** Server-computed per-pipeline won-in-range + open rollup. */
+/** Server-computed per-pipeline won-in-range + open rollup; {@code window} bounds the won window. */
 export function getDealPipelineValue(
-    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    currency?: string,
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
 ) {
+    const windowParams = window
+        ? { from: window.from, to: window.to, timezone: window.timezone }
+        : { range };
     return getJson<Types.DealPipelineValue[]>(
-        `/api/deals/pipeline-value${buildQuery({ currency, range, ...scope })}`, init);
+        `/api/deals/pipeline-value${buildQuery({ currency, ...scope, ...windowParams })}`, init);
 }
 
 export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -2189,18 +2218,41 @@ export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, li
     return getJson<Types.Deal[]>(`/api/deals/closing-soon${buildQuery({ days, limit })}`, withCookie(cookie));
 }
 
-/** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
-export function getActivityVolume(range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
-    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range, ...scope })}`, init);
+/**
+ * Server-computed activity counts by type per time bucket, either over a calendar-aligned
+ * {@code window} (day/week/month buckets carrying {@code periodStart}) or the legacy
+ * {@code range} (30d/90d/12m).
+ */
+export function getActivityVolume(
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ActivityVolumeBucket[]>(
+        `/api/activities/volume${buildQuery({ range: window ? undefined : range, ...scope, ...window })}`,
+        init,
+    );
 }
 
 export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
     return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, withCookie(cookie));
 }
 
-/** Server-computed per-user touch counts (activities + completed tasks + notes) over {@code range}. */
-export function getTeamLeaderboard(range?: string, init: RequestInit = {}) {
-    return getJson<Types.TeamLeaderboardEntry[]>(`/api/activities/leaderboard${buildQuery({ range })}`, init);
+/**
+ * Server-computed per-user touch counts (activities + completed tasks + notes), over a
+ * calendar-aligned {@code window} or the legacy {@code range}.
+ */
+export function getTeamLeaderboard(
+    range?: string,
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
+) {
+    const windowParams = window
+        ? { from: window.from, to: window.to, timezone: window.timezone }
+        : { range };
+    return getJson<Types.TeamLeaderboardEntry[]>(
+        `/api/activities/leaderboard${buildQuery(windowParams)}`, init);
 }
 
 export function getTeamLeaderboardFromCookie(cookie: string | null, range?: string) {

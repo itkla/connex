@@ -5,15 +5,26 @@ import { Area, AreaChart, CartesianGrid, Line, ReferenceLine, XAxis, YAxis, Tool
 import { useLocale, useTranslations } from 'next-intl';
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart';
-import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
+import {
+    type DealMonthTotal,
+    type DealRevenuePeriodSeries,
+    type DealRevenueSeries,
+} from '@/app/lib/types';
 import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
-import { type RangeKey } from '@/app/components/overview/analytics/metrics';
+import {
+    formatPeriodTick,
+    formatPeriodTooltipDate,
+    localIsoDate,
+    periodStartOf,
+    type Granularity,
+    type RollingRangeKey,
+} from '@/app/components/overview/analytics/metrics';
 
 const MIN_MONTHS_FORWARD = 3;
 const MAX_MONTHS_FORWARD = 12;
-const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
+const MONTHS_BACK: Record<RollingRangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 
-type Bucket = { key: string; label: string; won: number; projected: number };
+type Bucket = { key: string; label: string; tooltipLabel: string; won: number; projected: number };
 
 function forwardHorizon(series: DealRevenueSeries, base: number): number {
     let furthest = MIN_MONTHS_FORWARD;
@@ -24,7 +35,48 @@ function forwardHorizon(series: DealRevenueSeries, base: number): number {
     return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
 }
 
-function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey, timezone: string) {
+function buildPeriodBuckets(
+    series: DealRevenuePeriodSeries,
+    granularity: Granularity,
+    now: number,
+    locale: string,
+    timezone: string,
+    weekOf: (date: string) => string,
+): { data: Bucket[]; todayKey: string | null } {
+    const keys = Array.from(
+        new Set([...series.realized, ...series.projected].map((point) => point.periodStart)),
+    ).sort();
+    const byKey = new Map<string, Bucket>();
+    const data: Bucket[] = keys.map((key, index) => {
+        const date = formatPeriodTooltipDate(key, granularity, locale);
+        const bucket: Bucket = {
+            key,
+            label: formatPeriodTick(
+                key,
+                granularity,
+                locale,
+                granularity === 'month' && (index === 0 || key.slice(5, 7) === '01'),
+            ),
+            tooltipLabel: granularity === 'week' ? weekOf(date) : date,
+            won: 0,
+            projected: 0,
+        };
+        byKey.set(key, bucket);
+        return bucket;
+    });
+    for (const point of series.realized) {
+        const bucket = byKey.get(point.periodStart);
+        if (bucket) bucket.won += point.total;
+    }
+    for (const point of series.projected) {
+        const bucket = byKey.get(point.periodStart);
+        if (bucket) bucket.projected += point.total;
+    }
+    const todayKey = periodStartOf(localIsoDate(now, timezone), granularity);
+    return { data, todayKey: byKey.has(todayKey) ? todayKey : null };
+}
+
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RollingRangeKey, timezone: string) {
     const current = yearMonthInTimezone(now, timezone);
     const currentIndex = current.year * 12 + current.month - 1;
     const startIndex = currentIndex - (MONTHS_BACK[range] - 1);
@@ -43,7 +95,7 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
         const key = `${year}-${month}`;
         keyToIndex.set(key, buckets.length);
         const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
-        buckets.push({ key, label, won: 0, projected: 0 });
+        buckets.push({ key, label, tooltipLabel: label, won: 0, projected: 0 });
     }
 
     const todayKey = `${current.year}-${current.month - 1}`;
@@ -62,27 +114,43 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
 }
 
 /**
- * Monthly revenue trend — realized (won-by-close-month) vs projected (by expected-close-month) —
- * from the server-computed {@link DealRevenueSeries}. {@code range} only sizes the historical
- * window shown; the series itself is aggregated server-side over all deals.
+ * Revenue trend — realized (won revenue) vs projected (by expected close) — from a
+ * server-computed series. With {@code periods} it renders calendar-aligned day/week/month
+ * buckets straight from the windowed {@link DealRevenuePeriodSeries}; otherwise it falls
+ * back to the legacy all-history monthly {@link DealRevenueSeries}, where {@code range}
+ * only sizes the historical window shown.
  */
+const EMPTY_MONTHLY_SERIES: DealRevenueSeries = { closed: [], projected: [] };
+
 export default function RevenueTrend({
-    series,
+    series = EMPTY_MONTHLY_SERIES,
     currency,
     range,
     timezone,
+    periods,
 }: {
-    series: DealRevenueSeries;
+    series?: DealRevenueSeries;
     currency: string;
-    range: RangeKey;
+    range?: RollingRangeKey;
     timezone: string;
+    periods?: { series: DealRevenuePeriodSeries; granularity: Granularity };
 }) {
     const t = useTranslations('AnalyticsRevenue');
+    const tPage = useTranslations('AnalyticsPage');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
     const { data, todayKey } = useMemo(
-        () => buildBuckets(series, now, locale, range, timezone),
-        [series, now, locale, range, timezone],
+        () => (periods
+            ? buildPeriodBuckets(
+                periods.series,
+                periods.granularity,
+                now,
+                locale,
+                timezone,
+                (date) => tPage('weekOf', { date }),
+            )
+            : buildBuckets(series, now, locale, range ?? '90d', timezone)),
+        [series, periods, now, locale, range, timezone, tPage],
     );
 
     const labelByKey = useMemo(() => {
@@ -120,6 +188,8 @@ export default function RevenueTrend({
                     tickLine={false}
                     axisLine={false}
                     tickMargin={10}
+                    minTickGap={16}
+                    interval="preserveStartEnd"
                     tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
                 <YAxis
@@ -191,7 +261,7 @@ function RevenueTooltip({
     const d = payload[0].payload;
     return (
         <div className="rounded-md bg-popover p-2 text-xs text-popover-foreground border border-border shadow-md">
-            <div className="mb-1.5 font-medium text-foreground">{d.label}</div>
+            <div className="mb-1.5 font-medium text-foreground">{d.tooltipLabel}</div>
             <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />

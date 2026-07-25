@@ -9,5 +9,6 @@ public record ActivityVolumeBucketDto(
     long email,
     long meeting,
     long note,
-    long other
+    long other,
+    String periodStart
 ) {}

@@ -6,7 +6,9 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -36,9 +38,21 @@ public interface ActivityMapper {
         @Param("spanDays") double spanDays,
         @Param("memberScope") MemberScope memberScope
     );
+    List<ActivityVolumeBucketDto> activityVolumeByBoundaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("periods") List<AnalyticsPeriod> periods,
+        @Param("memberScope") MemberScope memberScope
+    );
     List<TeamLeaderboardEntryDto> teamLeaderboard(
         @Param("workspaceId") int workspaceId,
         @Param("days") int days
+    );
+    List<TeamLeaderboardEntryDto> teamLeaderboardWindow(
+        @Param("workspaceId") int workspaceId,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc
     );
     long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);

@@ -19,7 +19,7 @@ import {
     type DealKpis,
     type DealMetrics,
     type DealPipelineValue,
-    type DealRevenueSeries,
+    type DealRevenuePeriodSeries,
     type DealRiskAnalytics,
     type DealStageDistribution,
     type DealTop,
@@ -41,7 +41,7 @@ import {
     getDealAging,
     getDealKpis,
     getDealPipelineValue,
-    getDealRevenueTimeseries,
+    getDealRevenueSeries,
     getDealRiskAnalytics,
     getDealStageDistribution,
     getDealTop,
@@ -73,7 +73,17 @@ import TaskStatusDonut from '@/app/components/overview/analytics/TaskStatusDonut
 import IntroActivity from '@/app/components/overview/analytics/IntroActivity';
 import RecentMovesList from '@/app/components/overview/analytics/RecentMovesList';
 import FirstRun from '@/app/components/overview/analytics/FirstRun';
-import { type RangeKey } from '@/app/components/overview/analytics/metrics';
+import {
+    clampGranularity,
+    DEFAULT_GRANULARITY,
+    isGranularity,
+    isRangeKey,
+    projectionWindow,
+    RANGE_GRANULARITIES,
+    resolveAnalyticsWindow,
+    type Granularity,
+    type RangeKey,
+} from '@/app/components/overview/analytics/metrics';
 
 const EMPTY_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -95,7 +105,7 @@ const EMPTY_KPIS: DealKpis = {
 };
 
 const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
-const EMPTY_REVENUE: DealRevenueSeries = { closed: [], projected: [] };
+const EMPTY_REVENUE: DealRevenuePeriodSeries = { realized: [], projected: [] };
 const EMPTY_PIPELINE_VALUES: DealPipelineValue[] = [];
 const EMPTY_AGING: DealAging[] = [];
 const EMPTY_STAGE_DISTRIBUTION: DealStageDistribution[] = [];
@@ -172,8 +182,19 @@ export default function AnalyticsBoard({
     const searchParams = useSearchParams();
     const [range, setRange] = useState<RangeKey>(() => {
         const initial = searchParams.get('range');
-        return initial === '30d' || initial === '12m' ? initial : '90d';
+        return isRangeKey(initial) ? initial : '90d';
     });
+    const [granularityChoice, setGranularityChoice] = useState<Granularity | null>(() => {
+        const initial = searchParams.get('granularity');
+        return isGranularity(initial) ? initial : null;
+    });
+    const granularity = clampGranularity(range, granularityChoice);
+    const [now] = useState(() => Date.now());
+    const analyticsWindow = useMemo(() => resolveAnalyticsWindow(range, now, timezone), [range, now, timezone]);
+    const revenueWindow = useMemo(
+        () => projectionWindow(analyticsWindow, range, granularity),
+        [analyticsWindow, range, granularity],
+    );
     const [ownerValues, setOwnerValues] = useState<string[]>(() => {
         const initial = searchParams.get('owner');
         return initial ? initial.split(',').filter(Boolean) : [];
@@ -224,14 +245,17 @@ export default function AnalyticsBoard({
 
     useUrlSync({
         range: range === '90d' ? undefined : range,
+        granularity: granularity === DEFAULT_GRANULARITY[range] ? undefined : granularity,
         currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,
         owner: effectiveOwnerValues.length ? effectiveOwnerValues.join(',') : undefined,
     });
 
-    const dealRangeScope = `${currency}:${range}:${memberKey}`;
-    const revenueScope = `${currency}:${timezone}:${memberKey}`;
+    const windowKey = `${analyticsWindow.from}:${analyticsWindow.to}`;
+    const kpiScope = `${currency}:${windowKey}:${granularity}:${memberKey}`;
+    const pipelineScope = `${currency}:${windowKey}:${memberKey}`;
+    const revenueScope = `${currency}:${revenueWindow.from}:${revenueWindow.to}:${granularity}:${memberKey}`;
     const currencyScope = `${currency}:${memberKey}`;
-    const rangeMemberScope = `${range}:${memberKey}`;
+    const volumeScope = `${windowKey}:${granularity}:${memberKey}`;
     const [kpisResult, setKpisResult] = useState<ScopedData<DealKpis>>({ scope: '', data: EMPTY_KPIS });
     const [pipelineResult, setPipelineResult] = useState<ScopedData<DealPipelineValue[]>>({
         scope: '',
@@ -239,7 +263,7 @@ export default function AnalyticsBoard({
     });
     const [agingResult, setAgingResult] = useState<ScopedData<DealAging[]>>({ scope: '', data: EMPTY_AGING });
     const [topDealsResult, setTopDealsResult] = useState<ScopedData<DealTop>>({ scope: '', data: EMPTY_TOP });
-    const [revenueResult, setRevenueResult] = useState<ScopedData<DealRevenueSeries>>({
+    const [revenueResult, setRevenueResult] = useState<ScopedData<DealRevenuePeriodSeries>>({
         scope: '',
         data: EMPTY_REVENUE,
     });
@@ -256,33 +280,43 @@ export default function AnalyticsBoard({
         data: EMPTY_LEADERBOARD,
     });
 
-    const kpis = dataForScope(kpisResult, dealRangeScope, EMPTY_KPIS);
-    const pipelineValues = dataForScope(pipelineResult, dealRangeScope, EMPTY_PIPELINE_VALUES);
+    const kpis = dataForScope(kpisResult, kpiScope, EMPTY_KPIS);
+    const pipelineValues = dataForScope(pipelineResult, pipelineScope, EMPTY_PIPELINE_VALUES);
     const aging = dataForScope(agingResult, currencyScope, EMPTY_AGING);
     const topDeals = dataForScope(topDealsResult, currencyScope, EMPTY_TOP);
     const revenueSeries = dataForScope(revenueResult, revenueScope, EMPTY_REVENUE);
     const stageDistribution = dataForScope(stageResult, currencyScope, EMPTY_STAGE_DISTRIBUTION);
-    const activityBuckets = dataForScope(activityResult, rangeMemberScope, EMPTY_ACTIVITY_BUCKETS);
-    const leaderboard = dataForScope(leaderboardResult, range, EMPTY_LEADERBOARD);
+    const activityBuckets = dataForScope(activityResult, volumeScope, EMPTY_ACTIVITY_BUCKETS);
+    const leaderboard = dataForScope(leaderboardResult, windowKey, EMPTY_LEADERBOARD);
 
     useEffect(() => {
         let cancelled = false;
-        getDealKpis(currency, range, scopeParams)
-            .then((data) => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data }); })
-            .catch(() => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data: EMPTY_KPIS }); });
-        getDealPipelineValue(currency, range, scopeParams)
-            .then((data) => { if (!cancelled) setPipelineResult({ scope: dealRangeScope, data }); })
+        getDealKpis(currency, undefined, scopeParams, { ...analyticsWindow, granularity, timezone })
+            .then((data) => { if (!cancelled) setKpisResult({ scope: kpiScope, data }); })
+            .catch(() => { if (!cancelled) setKpisResult({ scope: kpiScope, data: EMPTY_KPIS }); });
+        return () => { cancelled = true; };
+    }, [currency, kpiScope, analyticsWindow, granularity, timezone, scopeParams]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getDealPipelineValue(currency, undefined, scopeParams, { ...analyticsWindow, timezone })
+            .then((data) => { if (!cancelled) setPipelineResult({ scope: pipelineScope, data }); })
             .catch(() => {
-                if (!cancelled) setPipelineResult({ scope: dealRangeScope, data: EMPTY_PIPELINE_VALUES });
+                if (!cancelled) setPipelineResult({ scope: pipelineScope, data: EMPTY_PIPELINE_VALUES });
             });
         return () => { cancelled = true; };
-    }, [currency, dealRangeScope, range, scopeParams]);
+    }, [currency, pipelineScope, analyticsWindow, timezone, scopeParams]);
 
     useEffect(() => {
         let cancelled = false;
-        getDealRevenueTimeseries(currency, timezone, scopeParams)
+        getDealRevenueSeries({ ...revenueWindow, granularity, timezone }, currency, scopeParams)
             .then((data) => { if (!cancelled) setRevenueResult({ scope: revenueScope, data }); })
             .catch(() => { if (!cancelled) setRevenueResult({ scope: revenueScope, data: EMPTY_REVENUE }); });
+        return () => { cancelled = true; };
+    }, [currency, revenueScope, revenueWindow, granularity, timezone, scopeParams]);
+
+    useEffect(() => {
+        let cancelled = false;
         getDealStageDistribution(currency, scopeParams)
             .then((data) => { if (!cancelled) setStageResult({ scope: currencyScope, data }); })
             .catch(() => {
@@ -295,18 +329,23 @@ export default function AnalyticsBoard({
             .then((data) => { if (!cancelled) setTopDealsResult({ scope: currencyScope, data }); })
             .catch(() => { if (!cancelled) setTopDealsResult({ scope: currencyScope, data: EMPTY_TOP }); });
         return () => { cancelled = true; };
-    }, [currency, revenueScope, currencyScope, timezone, scopeParams]);
+    }, [currency, currencyScope, scopeParams]);
 
     useEffect(() => {
         let cancelled = false;
-        getActivityVolume(range, scopeParams)
-            .then((data) => { if (!cancelled) setActivityResult({ scope: rangeMemberScope, data }); })
-            .catch(() => { if (!cancelled) setActivityResult({ scope: rangeMemberScope, data: EMPTY_ACTIVITY_BUCKETS }); });
-        getTeamLeaderboard(range)
-            .then((data) => { if (!cancelled) setLeaderboardResult({ scope: range, data }); })
-            .catch(() => { if (!cancelled) setLeaderboardResult({ scope: range, data: EMPTY_LEADERBOARD }); });
+        getActivityVolume(undefined, scopeParams, { ...analyticsWindow, granularity, timezone })
+            .then((data) => { if (!cancelled) setActivityResult({ scope: volumeScope, data }); })
+            .catch(() => { if (!cancelled) setActivityResult({ scope: volumeScope, data: EMPTY_ACTIVITY_BUCKETS }); });
         return () => { cancelled = true; };
-    }, [range, rangeMemberScope, scopeParams]);
+    }, [volumeScope, analyticsWindow, granularity, timezone, scopeParams]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getTeamLeaderboard(undefined, { ...analyticsWindow, timezone })
+            .then((data) => { if (!cancelled) setLeaderboardResult({ scope: windowKey, data }); })
+            .catch(() => { if (!cancelled) setLeaderboardResult({ scope: windowKey, data: EMPTY_LEADERBOARD }); });
+        return () => { cancelled = true; };
+    }, [windowKey, analyticsWindow, timezone]);
 
     const [riskResult, setRiskResult] = useState<ScopedData<DealRiskAnalytics>>({ scope: ALL_TEAM_KEY, data: dealRiskAnalytics });
     const [taskResult, setTaskResult] = useState<ScopedData<TaskSummary>>({ scope: ALL_TEAM_KEY, data: taskSummary });
@@ -323,6 +362,11 @@ export default function AnalyticsBoard({
     }, [memberKey, ownerScope.mode, scopeParams]);
     const riskAnalytics = ownerScope.mode === 'all' ? dealRiskAnalytics : dataForScope(riskResult, memberKey, EMPTY_RISK);
     const tasks = ownerScope.mode === 'all' ? taskSummary : dataForScope(taskResult, memberKey, EMPTY_TASKS);
+
+    const revenuePeriods = useMemo(
+        () => ({ series: revenueSeries, granularity }),
+        [revenueSeries, granularity],
+    );
 
     const openPipeline = useMemo(
         () => dealMetrics.byCurrency.find((c) => c.currency === currency)?.openValue ?? 0,
@@ -381,6 +425,21 @@ export default function AnalyticsBoard({
         { key: '90d', label: t('range90d') },
         { key: '12m', label: t('range12m') },
     ];
+    const rangePresets: { key: RangeKey; label: string }[] = [
+        { key: 'this-week', label: t('rangeThisWeek') },
+        { key: 'this-month', label: t('rangeThisMonth') },
+        { key: 'last-month', label: t('rangeLastMonth') },
+        { key: 'this-quarter', label: t('rangeThisQuarter') },
+    ];
+    const granularityLabels: Record<Granularity, string> = {
+        day: t('granularityDay'),
+        week: t('granularityWeek'),
+        month: t('granularityMonth'),
+    };
+    const granularityOptions = RANGE_GRANULARITIES[range].map((key) => ({
+        key,
+        label: granularityLabels[key],
+    }));
 
     return (
         <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
@@ -424,7 +483,21 @@ export default function AnalyticsBoard({
                             {currency}
                         </span>
                     ) : null}
-                    <RangeControl value={range} onChange={setRange} options={rangeOptions} label={t('rangeLabel')} />
+                    <RangeControl
+                        value={range}
+                        onChange={setRange}
+                        options={rangeOptions}
+                        presets={rangePresets}
+                        presetsLabel={t('rangePresets')}
+                        label={t('rangeLabel')}
+                    />
+                    <RangeControl
+                        value={granularity}
+                        onChange={setGranularityChoice}
+                        options={granularityOptions}
+                        label={t('granularityLabel')}
+                        layoutId="analytics-granularity-thumb"
+                    />
                     </div>
                 )}
             </header>
@@ -456,7 +529,7 @@ export default function AnalyticsBoard({
                         </div>
                     }
                 >
-                    <RevenueTrend series={revenueSeries} currency={currency} range={range} timezone={timezone} />
+                    <RevenueTrend periods={revenuePeriods} currency={currency} timezone={timezone} />
                 </Panel>
             </Reveal>
 
@@ -502,7 +575,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <ActivityVolume buckets={activityBuckets} range={range} />
+                    <ActivityVolume buckets={activityBuckets} granularity={granularity} />
                 </Panel>
                 <Panel
                     title={t('teamTitle')}
@@ -612,7 +685,8 @@ export default function AnalyticsBoard({
                             <IntroActivity
                                 suggestions={introSuggestions}
                                 lineage={introLineage}
-                                range={range}
+                                analyticsWindow={analyticsWindow}
+                                granularity={granularity}
                             />
                         </Panel>
                         <Panel
