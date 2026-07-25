@@ -6,3 +6,16 @@ allowBuilds:
 overrides:
   sharp: ^0.35.0
   fast-uri: ^3.1.4
+  js-yaml: '>=4.3.0'
+  postcss: '>=8.5.18'
+  'brace-expansion@1': '>=1.1.16'
+  'brace-expansion@>=3': '>=5.0.8'
+
+# GHSA-mh99-v99m-4gvg (brace-expansion DoS) marks every version <=5.0.7 vulnerable but only
+# the 5.x line has a patched release (5.0.8, forced above). The remaining flagged paths are
+# 1.x pulled in by the dev-only eslint/minimatch toolchain, where no patched 1.x exists yet
+# (1.1.16 is the newest). Not shipped to production; drop this ignore once a patched 1.x
+# lands and the override above can cover it.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-mh99-v99m-4gvg
