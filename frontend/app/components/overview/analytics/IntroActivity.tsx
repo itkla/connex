@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
 
@@ -12,23 +12,28 @@ import {
 } from '@/components/ui/chart';
 import { type IntroSuggestion, type IntroductionRecord } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
-import { buildTimeBuckets, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import {
+    buildCalendarBuckets,
+    type AnalyticsWindow,
+    type Granularity,
+} from '@/app/components/overview/analytics/metrics';
 
 export default function IntroActivity({
     suggestions,
     lineage,
-    range,
+    window,
+    granularity,
 }: {
     suggestions: IntroSuggestion[];
     lineage: IntroductionRecord[];
-    range: RangeKey;
+    window: AnalyticsWindow;
+    granularity: Granularity;
 }) {
     const t = useTranslations('AnalyticsIntros');
     const locale = useLocale();
-    const [now] = useState(() => Date.now());
 
     const { data, made } = useMemo(() => {
-        const buckets = buildTimeBuckets(range, now, locale);
+        const buckets = buildCalendarBuckets(window, granularity, locale);
         const rows = buckets.map((bucket) => ({ label: bucket.label, made: 0 }));
         let total = 0;
         for (const record of lineage) {
@@ -40,7 +45,7 @@ export default function IntroActivity({
             total += 1;
         }
         return { data: rows, made: total };
-    }, [lineage, range, now, locale]);
+    }, [lineage, window, granularity, locale]);
 
     const chartConfig = useMemo<ChartConfig>(
         () => ({ made: { label: t('made'), color: 'var(--color-brand)' } }),

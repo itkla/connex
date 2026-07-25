@@ -91,7 +91,7 @@ import PipelineValue from '@/app/components/overview/analytics/PipelineValue';
 import StageFunnel from '@/app/components/overview/analytics/StageFunnel';
 import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
-import type { RangeKey } from '@/app/components/overview/analytics/metrics';
+import type { RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 
 const EMPTY_DEAL_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -144,7 +144,7 @@ const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
     dealRisksTruncated: false,
 };
 
-const DASHBOARD_RANGE: RangeKey = '90d';
+const DASHBOARD_RANGE: RollingRangeKey = '90d';
 
 /**
  * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
