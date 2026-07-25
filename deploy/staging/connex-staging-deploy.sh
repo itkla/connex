@@ -137,7 +137,7 @@ wait_for_frontend() {
     local deadline
     deadline=$(( $(date +%s) + FRONTEND_HEALTH_TIMEOUT ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        if curl -fsS --max-time 5 -o /dev/null "$FRONTEND_URL/"; then
+        if curl -fsS --max-time 5 -o /dev/null "$FRONTEND_URL/" 2>/dev/null; then
             return 0
         fi
         sleep "$POLL_INTERVAL"
