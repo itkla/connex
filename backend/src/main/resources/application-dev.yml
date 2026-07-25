@@ -24,6 +24,10 @@ connex:
         allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
     workspace-cookie:
         secure: false
+    workspaces:
+        # Local dev keeps self-service workspace creation on; the base default is
+        # invite-only (guided pilot GTM).
+        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}

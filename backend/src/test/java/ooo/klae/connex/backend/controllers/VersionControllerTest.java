@@ -41,12 +41,14 @@ class VersionControllerTest {
         Properties properties = new Properties();
         properties.setProperty("version", "1.2.3");
         properties.setProperty("time", "2026-07-12T18:30:00Z");
+        properties.setProperty("gitSha", "0123456789abcdef0123456789abcdef01234567");
         beanFactory.registerSingleton("buildProperties", new BuildProperties(properties));
 
         mockMvc.perform(get("/api/version"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value("1.2.3"))
-                .andExpect(jsonPath("$.buildTime").value("2026-07-12T18:30:00Z"));
+                .andExpect(jsonPath("$.buildTime").value("2026-07-12T18:30:00Z"))
+                .andExpect(jsonPath("$.gitSha").value("0123456789abcdef0123456789abcdef01234567"));
     }
 
     @Test
@@ -54,6 +56,7 @@ class VersionControllerTest {
         mockMvc.perform(get("/api/version"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value("dev"))
-                .andExpect(jsonPath("$.buildTime").value(nullValue()));
+                .andExpect(jsonPath("$.buildTime").value(nullValue()))
+                .andExpect(jsonPath("$.gitSha").value(nullValue()));
     }
 }

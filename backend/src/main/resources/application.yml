@@ -64,8 +64,9 @@ connex:
         max-sessions-per-user: ${CONNEX_WS_MAX_SESSIONS_PER_USER:10}
     workspaces:
         # When false, new registrations and the create endpoint cannot make workspaces
-        # (invite-only mode); users onboard by accepting an invite instead.
-        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
+        # (invite-only mode); users onboard by accepting an invite instead. Defaults to
+        # invite-only for the guided-pilot GTM; the dev profile re-enables self-service.
+        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:false}
     bootstrap:
         # Provisions the first owner account + workspace on startup when the instance has zero
         # login-capable users (fresh self-host/on-prem deploy). Set enabled=true with username,
