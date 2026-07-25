@@ -1,0 +1,10 @@
+{
+  "ErrorState": {
+    "title": "Something went wrong",
+    "body": "We couldn't load this page. The issue is usually temporary.",
+    "retry": "Try again",
+    "retrying": "Retrying",
+    "back": "Go back",
+    "reference": "Reference: {digest}"
+  }
+}

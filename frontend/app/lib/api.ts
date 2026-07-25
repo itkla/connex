@@ -897,6 +897,15 @@ export function me(init: RequestInit = {}) {
     return getJson<Types.User>("/api/auth/me", init);
 }
 
+/**
+ * Resolves the authenticated user from a forwarded cookie header during SSR.
+ * Returns null when the session is absent or the backend rejects it, so pages
+ * can redirect to login; rethrows network-level failures (the backend being
+ * unreachable) so they surface in the segment error boundary instead of
+ * masquerading as a logged-out session.
+ * @param cookie the incoming request's cookie header, or null
+ * @returns the authenticated user, or null when unauthenticated
+ */
 export async function getCurrentUserFromCookie(cookie: string | null) {
     if (!cookie) {
         return null;
@@ -907,7 +916,10 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
             headers: { cookie },
             cache: "no-store",
         });
-    } catch {
+    } catch (error) {
+        if (error instanceof TypeError) {
+            throw error;
+        }
         return null;
     }
 }

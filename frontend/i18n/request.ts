@@ -7,6 +7,7 @@ export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "@/i18n/confi
 
 const namespaces = [
     "common",
+    "errors",
     "actions",
     "auth",
     "workspace",
