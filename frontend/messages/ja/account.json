@@ -80,7 +80,7 @@
   },
   "AccountConnections": {
     "title": "連携アカウント",
-    "subtitle": "普段使っているメールとカレンダーを連携すると、Connex が顧客とのやり取りを取り込めるようになります。連携はあなた自身のものです。このページを通じてチームメンバーにアカウントや内容が見えることはありません。",
+    "subtitle": "普段使っているメールとカレンダーを連携できます。やり取りの同期は今後のリリースで提供予定です。連携はあなた自身のものです。このページを通じてチームメンバーにアカウントや内容が見えることはありません。",
     "provider_google": "Google",
     "provider_microsoft": "Microsoft",
     "status_connected": "連携中",
@@ -97,7 +97,7 @@
     "connectedNoEmail": "連携中",
     "notConnected": "未連携",
     "lastSync": "{time}に同期",
-    "neverSynced": "未同期",
+    "neverSynced": "同期は今後提供予定",
     "connectedToast": "{provider} アカウントを連携しました",
     "pausedToast": "連携を一時停止しました",
     "resumedToast": "連携を再開しました",

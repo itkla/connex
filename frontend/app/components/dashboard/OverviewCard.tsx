@@ -10,7 +10,6 @@ export default function OverviewCard({
     href,
     index = 0,
     className,
-    description,
 }: {
     label: string;
     value: number;
@@ -18,7 +17,6 @@ export default function OverviewCard({
     href?: string;
     index?: number;
     className?: string;
-    description?: string;
 }) {
     return (
         <MotionCard
@@ -41,9 +39,6 @@ export default function OverviewCard({
                 {label}
             </span>
             <CountUp value={value} className="mt-1 text-4xl leading-none text-foreground tabular-nums" />
-            {description ? (
-                <span className="mt-1 pt-2 text-xs text-muted-foreground">{description}</span>
-            ) : null}
         </MotionCard>
     );
 }

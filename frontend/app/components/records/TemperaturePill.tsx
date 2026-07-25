@@ -10,7 +10,9 @@ import type { RelationshipTemperature } from '@/app/lib/types';
 /**
  * Compact warmth indicator: a band-coloured dot and label on a tinted surface, with a tooltip
  * giving the numeric score and time since the last interaction. Renders an em dash when the
- * temperature has not loaded yet. Shared by the records tables and the dashboard cooling feed.
+ * temperature has not loaded yet, and a neutral "no history" chip when the relationship has no
+ * recorded interactions — a score without evidence would be a fabricated judgement. Shared by the
+ * records tables and the dashboard cooling feed.
  */
 export default function TemperaturePill({ temp }: { temp?: RelationshipTemperature | null }) {
     const t = useTranslations('Temperature');
@@ -18,7 +20,21 @@ export default function TemperaturePill({ temp }: { temp?: RelationshipTemperatu
 
     if (!temp) return <span className="text-sm text-muted-foreground">—</span>;
 
-    const lastTouch = temp.lastTouchAt ? formatRelativeTime(temp.lastTouchAt, locale) : t('never');
+    if (!temp.lastTouchAt) {
+        return (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-border ring-inset select-none">
+                        <span className="size-2 shrink-0 rounded-full bg-muted-foreground/40" />
+                        {t('noHistory')}
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent>{t('noHistoryTooltip')}</TooltipContent>
+            </Tooltip>
+        );
+    }
+
+    const lastTouch = formatRelativeTime(temp.lastTouchAt, locale);
 
     return (
         <Tooltip>
