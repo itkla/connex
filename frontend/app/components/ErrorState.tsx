@@ -44,6 +44,14 @@ export default function ErrorState({
         console.error(error);
     }, [error]);
 
+    const goBack = () => {
+        if (window.history.length > 1) {
+            router.back();
+        } else {
+            router.push('/dashboard');
+        }
+    };
+
     return (
         <div className="flex min-h-[60vh] items-center justify-center px-6 py-16">
             <Rise className="flex w-full max-w-md flex-col items-center text-center">
@@ -61,7 +69,7 @@ export default function ErrorState({
                         {isRetrying ? t('retrying') : t('retry')}
                     </Button>
                     {showBack ? (
-                        <Button variant="ghost" onClick={() => router.back()}>
+                        <Button variant="ghost" onClick={goBack}>
                             {t('back')}
                         </Button>
                     ) : null}
