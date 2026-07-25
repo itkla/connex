@@ -21,19 +21,19 @@ import {
 export default function IntroActivity({
     suggestions,
     lineage,
-    window,
+    analyticsWindow,
     granularity,
 }: {
     suggestions: IntroSuggestion[];
     lineage: IntroductionRecord[];
-    window: AnalyticsWindow;
+    analyticsWindow: AnalyticsWindow;
     granularity: Granularity;
 }) {
     const t = useTranslations('AnalyticsIntros');
     const locale = useLocale();
 
     const { data, made } = useMemo(() => {
-        const buckets = buildCalendarBuckets(window, granularity, locale);
+        const buckets = buildCalendarBuckets(analyticsWindow, granularity, locale);
         const rows = buckets.map((bucket) => ({ label: bucket.label, made: 0 }));
         let total = 0;
         for (const record of lineage) {
@@ -45,7 +45,7 @@ export default function IntroActivity({
             total += 1;
         }
         return { data: rows, made: total };
-    }, [lineage, window, granularity, locale]);
+    }, [lineage, analyticsWindow, granularity, locale]);
 
     const chartConfig = useMemo<ChartConfig>(
         () => ({ made: { label: t('made'), color: 'var(--color-brand)' } }),

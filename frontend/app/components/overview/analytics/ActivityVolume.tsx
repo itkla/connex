@@ -47,7 +47,7 @@ export default function ActivityVolume({
     const locale = useLocale();
     const [now] = useState(() => Date.now());
 
-    const { data, activeTypes } = useMemo(() => {
+    const { data, activeTypes, tooltipLabels } = useMemo(() => {
         let rows: Row[];
         if (granularity) {
             rows = [...buckets]
@@ -86,6 +86,7 @@ export default function ActivityVolume({
             activeTypes: ACTIVITY_TYPES.filter(
                 (type) => rows.reduce((sum, row) => sum + row[type], 0) > 0,
             ),
+            tooltipLabels: new Map(rows.map((row) => [row.label, row.tooltipLabel])),
         };
     }, [buckets, granularity, range, now, locale, tPage]);
 
@@ -124,10 +125,7 @@ export default function ActivityVolume({
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
                     content={
                         <ChartTooltipContent
-                            labelFormatter={(_, payload) => {
-                                const row = payload?.[0]?.payload as Row | undefined;
-                                return row?.tooltipLabel ?? '';
-                            }}
+                            labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
                         />
                     }
                 />

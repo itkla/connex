@@ -190,10 +190,10 @@ export default function AnalyticsBoard({
     });
     const granularity = clampGranularity(range, granularityChoice);
     const [now] = useState(() => Date.now());
-    const window = useMemo(() => resolveAnalyticsWindow(range, now, timezone), [range, now, timezone]);
+    const analyticsWindow = useMemo(() => resolveAnalyticsWindow(range, now, timezone), [range, now, timezone]);
     const revenueWindow = useMemo(
-        () => projectionWindow(window, range, granularity),
-        [window, range, granularity],
+        () => projectionWindow(analyticsWindow, range, granularity),
+        [analyticsWindow, range, granularity],
     );
     const [ownerValues, setOwnerValues] = useState<string[]>(() => {
         const initial = searchParams.get('owner');
@@ -250,7 +250,7 @@ export default function AnalyticsBoard({
         owner: effectiveOwnerValues.length ? effectiveOwnerValues.join(',') : undefined,
     });
 
-    const windowKey = `${window.from}:${window.to}`;
+    const windowKey = `${analyticsWindow.from}:${analyticsWindow.to}`;
     const kpiScope = `${currency}:${windowKey}:${granularity}:${memberKey}`;
     const pipelineScope = `${currency}:${windowKey}:${memberKey}`;
     const revenueScope = `${currency}:${revenueWindow.from}:${revenueWindow.to}:${granularity}:${memberKey}`;
@@ -291,21 +291,21 @@ export default function AnalyticsBoard({
 
     useEffect(() => {
         let cancelled = false;
-        getDealKpis(currency, undefined, scopeParams, { ...window, granularity, timezone })
+        getDealKpis(currency, undefined, scopeParams, { ...analyticsWindow, granularity, timezone })
             .then((data) => { if (!cancelled) setKpisResult({ scope: kpiScope, data }); })
             .catch(() => { if (!cancelled) setKpisResult({ scope: kpiScope, data: EMPTY_KPIS }); });
         return () => { cancelled = true; };
-    }, [currency, kpiScope, window, granularity, timezone, scopeParams]);
+    }, [currency, kpiScope, analyticsWindow, granularity, timezone, scopeParams]);
 
     useEffect(() => {
         let cancelled = false;
-        getDealPipelineValue(currency, undefined, scopeParams, { ...window, timezone })
+        getDealPipelineValue(currency, undefined, scopeParams, { ...analyticsWindow, timezone })
             .then((data) => { if (!cancelled) setPipelineResult({ scope: pipelineScope, data }); })
             .catch(() => {
                 if (!cancelled) setPipelineResult({ scope: pipelineScope, data: EMPTY_PIPELINE_VALUES });
             });
         return () => { cancelled = true; };
-    }, [currency, pipelineScope, window, timezone, scopeParams]);
+    }, [currency, pipelineScope, analyticsWindow, timezone, scopeParams]);
 
     useEffect(() => {
         let cancelled = false;
@@ -333,19 +333,19 @@ export default function AnalyticsBoard({
 
     useEffect(() => {
         let cancelled = false;
-        getActivityVolume(undefined, scopeParams, { ...window, granularity, timezone })
+        getActivityVolume(undefined, scopeParams, { ...analyticsWindow, granularity, timezone })
             .then((data) => { if (!cancelled) setActivityResult({ scope: volumeScope, data }); })
             .catch(() => { if (!cancelled) setActivityResult({ scope: volumeScope, data: EMPTY_ACTIVITY_BUCKETS }); });
         return () => { cancelled = true; };
-    }, [volumeScope, window, granularity, timezone, scopeParams]);
+    }, [volumeScope, analyticsWindow, granularity, timezone, scopeParams]);
 
     useEffect(() => {
         let cancelled = false;
-        getTeamLeaderboard(undefined, { ...window, timezone })
+        getTeamLeaderboard(undefined, { ...analyticsWindow, timezone })
             .then((data) => { if (!cancelled) setLeaderboardResult({ scope: windowKey, data }); })
             .catch(() => { if (!cancelled) setLeaderboardResult({ scope: windowKey, data: EMPTY_LEADERBOARD }); });
         return () => { cancelled = true; };
-    }, [windowKey, window, timezone]);
+    }, [windowKey, analyticsWindow, timezone]);
 
     const [riskResult, setRiskResult] = useState<ScopedData<DealRiskAnalytics>>({ scope: ALL_TEAM_KEY, data: dealRiskAnalytics });
     const [taskResult, setTaskResult] = useState<ScopedData<TaskSummary>>({ scope: ALL_TEAM_KEY, data: taskSummary });
@@ -685,7 +685,7 @@ export default function AnalyticsBoard({
                             <IntroActivity
                                 suggestions={introSuggestions}
                                 lineage={introLineage}
-                                window={window}
+                                analyticsWindow={analyticsWindow}
                                 granularity={granularity}
                             />
                         </Panel>
