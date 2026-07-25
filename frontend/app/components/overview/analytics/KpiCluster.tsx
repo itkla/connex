@@ -129,7 +129,7 @@ function DeltaChip({ kpi }: { kpi: Kpi }) {
 
 /**
  * Renders the analytics/dashboard KPI cluster from the server-computed {@link DealKpis} DTO:
- * won revenue, new pipeline, win rate, and average cycle, each with a 12-point sparkline and a
+ * won revenue, new pipeline, win rate, and average cycle, each with a per-bucket sparkline and a
  * previous-period delta chip. All aggregation happens server-side; this component only presents it.
  */
 export default function KpiCluster({ kpis, currency }: { kpis: DealKpis; currency: string }) {

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.mappers;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -17,6 +18,7 @@ import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
+import ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
@@ -25,6 +27,7 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 
 /**
  * mapper interface for {@code Deal} persistence.
@@ -189,10 +192,64 @@ public interface DealMapper {
         @Param("span") double span,
         @Param("memberScope") MemberScope memberScope
     );
+    DealKpiPeriodDto dealKpiWindow(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealKpiClosedBucketDto> dealKpiClosedSeriesByBoundaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("periods") List<AnalyticsPeriod> periods,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealBucketValueDto> dealKpiNewPipelineSeriesByBoundaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("periods") List<AnalyticsPeriod> periods,
+        @Param("memberScope") MemberScope memberScope
+    );
     List<DealPipelineValueDto> dealPipelineValue(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
         @Param("days") int days,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealPipelineValueDto> dealPipelineValueWindow(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealPeriodDecimalTotalDto> revenueClosedByPeriods(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("periods") List<AnalyticsPeriod> periods,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealPeriodDecimalTotalDto> revenueScheduledClosedByPeriods(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("periods") List<AnalyticsPeriod> periods,
+        @Param("memberScope") MemberScope memberScope
+    );
+    List<DealPeriodDecimalTotalDto> revenueProjectedByPeriods(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("periods") List<AnalyticsPeriod> periods,
         @Param("memberScope") MemberScope memberScope
     );
     List<DealAgingDto> dealAging(

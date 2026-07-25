@@ -21,9 +21,13 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.AnalyticsPeriods;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import jakarta.validation.Valid;
@@ -102,8 +106,19 @@ public class ActivityController {
     public List<ActivityVolumeBucketDto> getActivityVolume(
         @RequestParam(defaultValue = "90d") String range,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) String from,
+        @RequestParam(required = false) String to,
+        @RequestParam(required = false) String granularity,
+        @RequestParam(required = false) String timezone,
+        @RequestParam(required = false) String tzOffset
     ) {
+        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        if (window.isPresent()) {
+            List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window.get(), granularity);
+            return activityService.getActivityVolume(
+                window.get(), periods, analyticsMemberScope(scope, memberIds));
+        }
         return activityService.getActivityVolume(
             analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
@@ -130,8 +145,16 @@ public class ActivityController {
      */
     @GetMapping("/leaderboard")
     public List<TeamLeaderboardEntryDto> getTeamLeaderboard(
-        @RequestParam(defaultValue = "90d") String range
+        @RequestParam(defaultValue = "90d") String range,
+        @RequestParam(required = false) String from,
+        @RequestParam(required = false) String to,
+        @RequestParam(required = false) String timezone,
+        @RequestParam(required = false) String tzOffset
     ) {
+        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        if (window.isPresent()) {
+            return activityService.getTeamLeaderboard(window.get());
+        }
         return activityService.getTeamLeaderboard(analyticsRangeDays(range));
     }
 

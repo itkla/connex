@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.UUID;
@@ -81,6 +82,57 @@ class DealAnalyticsIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(0));
 
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("range", "invalid-ignored")
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.wonSeries.length()").value(6))
+            .andExpect(jsonPath("$.newPipelineSeries.length()").value(6));
+
+        mockMvc.perform(get("/api/deals/pipeline-value")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("range", "invalid-ignored")
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
+
+        mockMvc.perform(get("/api/deals/revenue-series")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.realized.length()").value(6))
+            .andExpect(jsonPath("$.realized[0].periodStart").value("2026-03-05"))
+            .andExpect(jsonPath("$.realized[0].total").value(0.0))
+            .andExpect(jsonPath("$.projected.length()").value(6));
+
+        mockMvc.perform(get("/api/activities/volume")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .param("granularity", "week")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(2))
+            .andExpect(jsonPath("$[0].periodStart").value("2026-03-02"))
+            .andExpect(jsonPath("$[1].periodStart").value("2026-03-09"));
+
+        mockMvc.perform(get("/api/activities/leaderboard")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
+
         mockMvc.perform(get("/api/deals/aging")
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
@@ -114,8 +166,117 @@ class DealAnalyticsIntegrationTest {
                 .session(session))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get("/api/deals/kpis"))
-            .andExpect(status().is4xxClientError());
+        mockMvc.perform(get("/api/deals/revenue-series")
+                .param("from", "2026-03-05")
+                .param("to", "2026-03-10")
+                .param("granularity", "day"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void windowValidationReturnsPlainTextBadRequests() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User user = newMember(workspace);
+        MockHttpSession session = login(user.getUsername());
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("from and to must be provided together"));
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "invalid")
+                .param("to", "2026-01-01")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("from must be an ISO date in yyyy-MM-dd format"));
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "invalid")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("to must be an ISO date in yyyy-MM-dd format"));
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-02-01")
+                .param("to", "2026-01-01")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("from must be on or before to"));
+
+        mockMvc.perform(get("/api/deals/pipeline-value")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2024-01-01")
+                .param("to", "2026-01-01")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("from and to must span 731 days or fewer"));
+
+        mockMvc.perform(get("/api/activities/volume")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-05-01")
+                .param("granularity", "day")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("granularity produces more than 120 calendar buckets"));
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("granularity is required"));
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("granularity", "quarter")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("granularity must be one of: day, week, month"));
+
+        mockMvc.perform(get("/api/activities/leaderboard")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("timezone", "Mars/Olympus")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Invalid timezone: Mars/Olympus"));
+
+        mockMvc.perform(get("/api/activities/leaderboard")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("timezone", "UTC")
+                .param("tzOffset", "+09:00")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Specify either timezone or tzOffset, not both"));
+
+        mockMvc.perform(get("/api/activities/leaderboard")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("tzOffset", "25:00")
+                .session(session))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string(
+                "tzOffset must be a UTC offset like +09:00 or -05:00"));
     }
 
     @Test
@@ -139,7 +300,8 @@ class DealAnalyticsIntegrationTest {
                 .param("scope", "me")
                 .session(session))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.length()").value(6));
+            .andExpect(jsonPath("$.length()").value(6))
+            .andExpect(jsonPath("$[0].periodStart").doesNotExist());
 
         mockMvc.perform(get("/api/tasks/summary")
                 .header("X-Workspace-Id", workspace.getId())
@@ -162,6 +324,23 @@ class DealAnalyticsIntegrationTest {
     }
 
     @Test
+    void memberCannotUseNarrowedWindowedAnalyticsScope() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User user = newMember(workspace);
+        MockHttpSession session = login(user.getUsername());
+
+        mockMvc.perform(get("/api/deals/revenue-series")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("granularity", "month")
+                .param("scope", "me")
+                .session(session))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
     void nonMemberWorkspaceIsRejected() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace memberWorkspace = newWorkspace();
@@ -171,6 +350,14 @@ class DealAnalyticsIntegrationTest {
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", foreignWorkspace.getId())
+                .session(session))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/deals/revenue-series")
+                .header("X-Workspace-Id", foreignWorkspace.getId())
+                .param("from", "2026-01-01")
+                .param("to", "2026-01-31")
+                .param("granularity", "month")
                 .session(session))
             .andExpect(status().isForbidden());
     }

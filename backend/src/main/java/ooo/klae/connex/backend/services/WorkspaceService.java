@@ -96,7 +96,7 @@ public class WorkspaceService {
         return permissions;
     }
 
-    @Value("${connex.workspaces.allow-self-service-creation:true}")
+    @Value("${connex.workspaces.allow-self-service-creation:false}")
     private boolean selfServiceCreationAllowed;
 
     /** Workspace roles in ascending privilege order. */

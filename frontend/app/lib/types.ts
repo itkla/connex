@@ -2380,6 +2380,30 @@ export type DealRevenueSeries = {
     projected: DealMonthTotal[];
 };
 
+/**
+ * Calendar-aligned window params for the analytics series endpoints: inclusive local ISO
+ * dates in {@code timezone} (IANA), with a bucketing {@code granularity} where the endpoint
+ * returns a series.
+ */
+export type AnalyticsWindowParams = {
+    from: string;
+    to: string;
+    granularity?: 'day' | 'week' | 'month';
+    timezone?: string;
+};
+
+/** One calendar bucket's total; {@code periodStart} is the bucket's local start date ({@code yyyy-MM-dd}). */
+export type DealPeriodTotal = {
+    periodStart: string;
+    total: number;
+};
+
+/** Server-computed calendar-bucketed revenue series (realized vs projected), zero-filled per bucket. */
+export type DealRevenuePeriodSeries = {
+    realized: DealPeriodTotal[];
+    projected: DealPeriodTotal[];
+};
+
 /** Per-stage open/closed rollup for the deals page stage-distribution chart. */
 export type DealStageDistribution = {
     stageId: number | null;
@@ -2393,7 +2417,8 @@ export type DealStageDistribution = {
 /**
  * Server-computed deal KPIs for the analytics/dashboard clusters over ALL deals in a range.
  * Scalars are current-period; {@code *Prev} are the previous window (null = no baseline).
- * The four series are 12 buckets, oldest→newest, over the current period.
+ * The four series are per-bucket, oldest→newest, over the current period (12 fixed buckets on
+ * the legacy range path, one per calendar bucket on the windowed path).
  */
 export type DealKpis = {
     wonRevenue: number;
@@ -2438,7 +2463,11 @@ export type DealTop = {
     topWon: DealSummary[];
 };
 
-/** One time bucket of the activity-volume chart: counts per activity type. */
+/**
+ * One time bucket of the activity-volume chart: counts per activity type.
+ * {@code periodStart} is the bucket's local start date ({@code yyyy-MM-dd}) on the
+ * calendar-aligned windowed path; absent on the legacy rolling-range path.
+ */
 export type ActivityVolumeBucket = {
     bucketIndex: number;
     call: number;
@@ -2446,6 +2475,7 @@ export type ActivityVolumeBucket = {
     meeting: number;
     note: number;
     other: number;
+    periodStart?: string | null;
 };
 
 /** One user's touch count (activities + completed tasks + notes) for the team leaderboard. */

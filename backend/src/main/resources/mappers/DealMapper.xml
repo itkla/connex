@@ -127,6 +127,16 @@
     </choose>
   </sql>
 
+  <sql id="analyticsPeriods">
+    <foreach collection="periods" item="period" separator=" UNION ALL ">
+      SELECT #{period.index} AS bucket_index,
+             #{period.startDate} AS start_date,
+             #{period.endDate} AS end_date,
+             #{period.startUtc} AS start_utc,
+             #{period.endUtc} AS end_utc
+    </foreach>
+  </sql>
+
   <sql id="dealListFilterWhere">
     <where>
       AND d.workspace_id = #{workspaceId}
@@ -566,6 +576,36 @@
     </if>
   </select>
 
+  <select id="dealKpiWindow" resultType="ooo.klae.connex.backend.dto.DealKpiPeriodDto">
+    SELECT COALESCE(SUM(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc} THEN d.actual_value END), 0) AS won_revenue,
+           COALESCE(SUM(CASE WHEN d.created_at &gt;= #{startUtc}
+               AND d.created_at &lt; #{endUtc} THEN d.value END), 0) AS new_pipeline,
+           COUNT(CASE WHEN d.created_at &gt;= #{startUtc}
+               AND d.created_at &lt; #{endUtc} THEN 1 END) AS new_pipeline_count,
+           COUNT(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc} THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc} THEN 1 END) AS lost_count,
+           COALESCE(SUM(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc} THEN d.value END), 0) AS lost_value,
+           COALESCE(AVG(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc}
+               AND d.closed_at &gt;= d.created_at
+               THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+  </select>
+
   <select id="dealKpiClosedSeries" resultType="ooo.klae.connex.backend.dto.DealKpiClosedBucketDto">
     SELECT 11 - LEAST(11, GREATEST(0,
                FLOOR(DATEDIFF(NOW(), d.closed_at) / #{span}))) AS bucket_index,
@@ -603,6 +643,51 @@
     ORDER BY bucket_index
   </select>
 
+  <select id="dealKpiClosedSeriesByBoundaries"
+          resultType="ooo.klae.connex.backend.dto.DealKpiClosedBucketDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value END), 0) AS won_value,
+           COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count,
+           COALESCE(AVG(CASE WHEN d.won = TRUE AND d.closed_at &gt;= d.created_at
+               THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN deal d FORCE INDEX FOR JOIN (idx_deal_workspace_closed_at)
+      ON d.workspace_id = #{workspaceId}
+      AND d.closed_at &gt;= boundary.start_utc
+      AND d.closed_at &lt; boundary.end_utc
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.won IS NOT NULL
+      AND d.closed_at &gt;= #{startUtc}
+      AND d.closed_at &lt; #{endUtc}
+    GROUP BY boundary.bucket_index
+    ORDER BY boundary.bucket_index
+  </select>
+
+  <select id="dealKpiNewPipelineSeriesByBoundaries"
+          resultType="ooo.klae.connex.backend.dto.DealBucketValueDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(d.value), 0) AS value
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN deal d
+      ON d.workspace_id = #{workspaceId}
+      AND d.created_at &gt;= boundary.start_utc
+      AND d.created_at &lt; boundary.end_utc
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.created_at &gt;= #{startUtc}
+      AND d.created_at &lt; #{endUtc}
+    GROUP BY boundary.bucket_index
+    ORDER BY boundary.bucket_index
+  </select>
+
   <select id="dealPipelineValue" resultType="ooo.klae.connex.backend.dto.DealPipelineValueDto">
     SELECT d.pipeline_id AS pipeline_id,
            COALESCE(SUM(CASE WHEN d.won = TRUE
@@ -618,6 +703,87 @@
     </if>
     GROUP BY d.pipeline_id
     ORDER BY d.pipeline_id
+  </select>
+
+  <select id="dealPipelineValueWindow" resultType="ooo.klae.connex.backend.dto.DealPipelineValueDto">
+    SELECT d.pipeline_id AS pipeline_id,
+           COALESCE(SUM(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= #{startUtc}
+               AND d.closed_at &lt; #{endUtc} THEN d.actual_value END), 0) AS won_value,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+           COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+    GROUP BY d.pipeline_id
+    ORDER BY d.pipeline_id
+  </select>
+
+  <select id="revenueClosedByPeriods"
+          resultType="ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(d.actual_value), 0) AS total
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN deal d FORCE INDEX FOR JOIN (idx_deal_workspace_closed_at)
+      ON d.workspace_id = #{workspaceId}
+      AND d.closed_at &gt;= boundary.start_utc
+      AND d.closed_at &lt; boundary.end_utc
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.closed_at &gt;= #{startUtc}
+      AND d.closed_at &lt; #{endUtc}
+      AND (d.won = FALSE OR d.expected_close_date IS NULL)
+      AND d.actual_value != 0
+    GROUP BY boundary.bucket_index
+    ORDER BY boundary.bucket_index
+  </select>
+
+  <select id="revenueScheduledClosedByPeriods"
+          resultType="ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(d.actual_value), 0) AS total
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN deal d
+      ON d.workspace_id = #{workspaceId}
+      AND d.expected_close_date &gt;= boundary.start_date
+      AND d.expected_close_date &lt; boundary.end_date
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.closed_at IS NOT NULL
+      AND d.won = TRUE
+      AND d.expected_close_date &gt;= #{startDate}
+      AND d.expected_close_date &lt; #{endDate}
+    GROUP BY boundary.bucket_index
+    ORDER BY boundary.bucket_index
+  </select>
+
+  <select id="revenueProjectedByPeriods"
+          resultType="ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(d.value), 0) AS total
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN deal d
+      ON d.workspace_id = #{workspaceId}
+      AND d.expected_close_date &gt;= boundary.start_date
+      AND d.expected_close_date &lt; boundary.end_date
+    WHERE d.workspace_id = #{workspaceId}
+    <include refid="memberScopePredicate"/>
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.expected_close_date &gt;= #{startDate}
+      AND d.expected_close_date &lt; #{endDate}
+    GROUP BY boundary.bucket_index
+    ORDER BY boundary.bucket_index
   </select>
 
   <select id="dealAging" resultType="ooo.klae.connex.backend.dto.DealAgingDto">

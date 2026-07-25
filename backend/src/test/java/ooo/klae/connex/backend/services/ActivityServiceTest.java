@@ -19,6 +19,8 @@ import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.util.AnalyticsPeriods;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 class ActivityServiceTest extends AbstractServiceTest {
 
@@ -137,6 +139,32 @@ class ActivityServiceTest extends AbstractServiceTest {
             bucket.call() + bucket.email() + bucket.meeting() + bucket.note() + bucket.other()).sum());
         assertEquals(List.of(new TeamLeaderboardEntryDto(currentUser.getId(), 1)), leaderboard);
         assertEquals(1, activityService.getUpcomingCount(7).count());
+    }
+
+    @Test
+    void windowedActivityVolumeClipsPartialWeeksAndZeroFillsPeriodStarts() {
+        useIsolatedWorkspace();
+        Activity included = activityService.create(draft("included", null, "2026-03-05 12:00:00"));
+        included.setType("Call");
+        activityMapper.update(included);
+        Activity beforeWindow = activityService.create(draft("before", null, "2026-03-02 12:00:00"));
+        beforeWindow.setType("Email");
+        activityMapper.update(beforeWindow);
+        Activity atExclusiveEnd = activityService.create(draft("end", null, "2026-03-11 00:00:00"));
+        atExclusiveEnd.setType("Meeting");
+        activityMapper.update(atExclusiveEnd);
+        Window window = AnalyticsPeriods.requiredWindow(
+            "2026-03-04", "2026-03-10", "UTC", null);
+
+        List<ActivityVolumeBucketDto> volume = activityService.getActivityVolume(
+            window, AnalyticsPeriods.periods(window, "week"), MemberScope.allTeam());
+
+        assertEquals(2, volume.size());
+        assertEquals("2026-03-02", volume.get(0).periodStart());
+        assertEquals(1, volume.get(0).call());
+        assertEquals(0, volume.get(0).email());
+        assertEquals("2026-03-09", volume.get(1).periodStart());
+        assertEquals(0, volume.get(1).meeting());
     }
 
     private Activity draftForPerson(String subject, Person person, String timestamp) {
