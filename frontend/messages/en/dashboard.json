@@ -57,7 +57,7 @@
     "scheduleFailed": "Couldn't schedule the follow-up."
   },
   "RecentMoves": {
-    "empty": "No recent job changes in your network.",
+    "empty": "No recent job changes among workspace contacts.",
     "unknown": "Unknown"
   },
   "DashboardGreeting": {
@@ -67,7 +67,7 @@
     "goodEvening": "Good evening,",
     "nothingUrgent": "Nothing urgent today. Smooth sailing.",
     "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
-    "upcomingTitle": "On your radar this week",
+    "upcomingTitle": "This week across the workspace",
     "tasksDue": "{count, plural, one {# task due} other {# tasks due}}",
     "dealsClosing": "{count, plural, one {# deadline} other {# deadlines}}",
     "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",

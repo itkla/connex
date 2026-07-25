@@ -57,7 +57,7 @@
     "scheduleFailed": "フォローアップを予約できませんでした。"
   },
   "RecentMoves": {
-    "empty": "ネットワーク内で最近の転職はありません。",
+    "empty": "ワークスペースのコンタクトに最近の転職はありません。",
     "unknown": "不明"
   },
   "DashboardGreeting": {
@@ -67,7 +67,7 @@
     "goodEvening": "こんばんは、",
     "nothingUrgent": "本日緊急の用件はありません。順調です。",
     "tasksOverdue": "{count, plural, one {# 件の期限切れタスク} other {# 件の期限切れタスク}}",
-    "upcomingTitle": "今週の予定",
+    "upcomingTitle": "今週のワークスペース全体の予定",
     "tasksDue": "{count, plural, one {タスク # 件} other {タスク # 件}}",
     "dealsClosing": "{count, plural, one {締切 # 件} other {締切 # 件}}",
     "activitiesUpcoming": "{count, plural, one {予定 # 件} other {予定 # 件}}",
