@@ -33,7 +33,7 @@
     "teamLeaderboard": "チームランキング"
   },
   "CompanyWarmth": {
-    "empty": "すべての取引先との関係が良好です。"
+    "empty": "現在、冷え込みつつある会社はありません。"
   },
   "WarmthDistribution": {
     "empty": "温度データがまだありません"
@@ -47,7 +47,7 @@
     "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の商談が残っています。"
   },
   "CoolingRelationships": {
-    "empty": "すべての関係が良好です。冷め込みはありません。",
+    "empty": "現在、冷え込みつつある関係はありません。",
     "quiet": "{days}日間接触なし",
     "goesColdIn": "あと{days}日で冷め込み",
     "noCompany": "会社なし",

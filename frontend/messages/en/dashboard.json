@@ -33,7 +33,7 @@
     "teamLeaderboard": "Team leaderboard"
   },
   "CompanyWarmth": {
-    "empty": "Every company relationship is warm."
+    "empty": "No cooling companies right now."
   },
   "WarmthDistribution": {
     "empty": "No warmth data yet"
@@ -47,7 +47,7 @@
     "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
   },
   "CoolingRelationships": {
-    "empty": "Every relationship is warm — nothing cooling off.",
+    "empty": "No cooling relationships right now.",
     "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
     "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
     "noCompany": "No company",
