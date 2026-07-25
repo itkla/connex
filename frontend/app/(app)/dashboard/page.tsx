@@ -269,9 +269,9 @@ export default async function Dashboard() {
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" description={t('companiesDescription')} />
+                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" />
                 <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" />
-                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" description={t('dealsDescription')} />
+                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" />
                 <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" />
             </div>
         ),
