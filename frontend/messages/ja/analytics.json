@@ -73,7 +73,7 @@
     "avgCycleTooltip": "今期間に受注した商談の、作成からクローズまでの平均日数。"
   },
   "AnalyticsRevenue": {
-    "subtitle": "受注と予想（月別）",
+    "subtitle": "実績と予想の推移",
     "openPipeline": "進行中のパイプライン",
     "actual": "受注",
     "projected": "予想",

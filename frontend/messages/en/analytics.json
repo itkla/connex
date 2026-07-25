@@ -73,7 +73,7 @@
     "avgCycleTooltip": "Average days from creation to close, for deals won this period."
   },
   "AnalyticsRevenue": {
-    "subtitle": "Won vs projected, by month",
+    "subtitle": "Won vs projected over time",
     "openPipeline": "Open pipeline",
     "actual": "Won",
     "projected": "Projected",
