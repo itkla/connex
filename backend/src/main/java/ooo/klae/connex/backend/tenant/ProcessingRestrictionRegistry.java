@@ -96,6 +96,8 @@ public final class ProcessingRestrictionRegistry {
             "Tag lookup is auxiliary to an already restriction-assessed person result.");
         entries.put(MAPPERS + "TaskMapper",
             "Retained task associations remain reachable for compliance and erasure operations.");
+        entries.put(MAPPERS + "TenantLifecycleMapper",
+            "Offboarding export and teardown deliberately reach restricted people and their managed images.");
         return Map.copyOf(entries);
     }
 

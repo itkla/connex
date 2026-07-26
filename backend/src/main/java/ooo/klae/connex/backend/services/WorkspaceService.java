@@ -205,6 +205,9 @@ public class WorkspaceService {
             throw new ResourceNotFoundException("User not found: " + ownerUserId);
         }
         int orgId = orgIdForOwner(ownerUserId, name);
+        if (organizationMapper.lockActiveByIdForShare(orgId) == null) {
+            throw new ForbiddenException("Organization teardown is in progress");
+        }
         Workspace workspace = new Workspace();
         workspace.setOrgId(orgId);
         workspace.setName(name.trim());

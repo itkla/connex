@@ -62,6 +62,7 @@ public final class TablePlaneRegistry {
         "sso_domain",
         "sso_domain_mutation_lock",
         "sso_link_challenge",
+        "tenant_operation_lease",
         "user_object_deletion_queue",
         "webauthn_credential",
         "webauthn_user_entity",

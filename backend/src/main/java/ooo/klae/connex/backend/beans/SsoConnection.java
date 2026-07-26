@@ -17,7 +17,7 @@ public class SsoConnection {
     private String protocol;
     private boolean enabled;
     private boolean enforceSso;
-    private int jitWorkspaceId;
+    private Integer jitWorkspaceId;
     private String defaultRole;
     private String oidcIssuer;
     private String oidcClientId;
