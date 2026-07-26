@@ -14,6 +14,8 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
+    Integer findWorkspaceOrgIdForLifecycle(@Param("workspaceId") int workspaceId);
+
     WorkspaceLifecycleRef lockActiveWorkspaceForExport(
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);

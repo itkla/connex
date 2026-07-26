@@ -58,6 +58,12 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     void orgEventsChainByOrganizationScope() {
         int orgId = workspaceMapper.getOrgId(workspace.getId());
         String summary = "org-" + unique();
+        String expectedPreviousHash = jdbcTemplate.query(
+            "SELECT row_hash FROM audit_log"
+                + " WHERE chain_scope_type = 'organization' AND chain_scope_id = ?"
+                + " ORDER BY chain_index DESC LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString("row_hash"),
+            orgId).stream().findFirst().orElse(HASH_GENESIS);
 
         auditService.record("test.org_integrity", "organization", orgId, "Org", summary, null);
 
@@ -65,7 +71,7 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
 
         assertEquals("organization", entry.getChainScopeType());
         assertEquals(orgId, entry.getChainScopeId());
-        assertEquals(HASH_GENESIS, entry.getPrevHash());
+        assertEquals(expectedPreviousHash, entry.getPrevHash());
         assertNotNull(entry.getRowHash());
         assertEquals(64, entry.getRowHash().length());
     }

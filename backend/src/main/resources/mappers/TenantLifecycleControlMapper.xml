@@ -22,6 +22,13 @@
     WHERE w.org_id = #{orgId} AND w.id = #{workspaceId}
   </select>
 
+  <select id="findWorkspaceOrgIdForLifecycle" resultType="int">
+    SELECT w.org_id
+    FROM workspace w
+    JOIN organization o ON o.id = w.org_id
+    WHERE w.id = #{workspaceId}
+  </select>
+
   <select id="lockActiveWorkspaceForExport"
           resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
     SELECT <include refid="workspaceLifecycleColumns"/>

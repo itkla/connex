@@ -127,7 +127,7 @@ public class ObjectDeletionRetryQueue {
     public void enqueueRollbackTombstoneTenant(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
-            tenantWorkScope.inWorkspace(workspaceId, () -> {
+            tenantWorkScope.inLifecycleWorkspace(workspaceId, () -> {
                 try {
                     transactionExecutor.enqueueTenant(
                         workspaceId, validKey, 2, ambiguousWriteCleanupAt());
@@ -161,7 +161,7 @@ public class ObjectDeletionRetryQueue {
     public void processTenant(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
-            tenantWorkScope.inWorkspace(workspaceId,
+            tenantWorkScope.inLifecycleWorkspace(workspaceId,
                 () -> {
                     LocalDateTime current = now();
                     transactionExecutor.processTenant(

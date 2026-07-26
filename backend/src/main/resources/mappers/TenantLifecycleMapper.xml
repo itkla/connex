@@ -35,7 +35,7 @@
            candidates.kind,
            candidates.owner_id AS ownerId,
            candidates.persisted_url AS persistedUrl,
-           usage.size_bytes AS usageSizeBytes
+           u.size_bytes AS usageSizeBytes
     FROM (
       SELECT CONCAT('workspaces/', #{workspaceId}, '/attachments/',
                     SUBSTRING_INDEX(a.url, '/', -1)) AS object_key,
@@ -64,9 +64,9 @@
       WHERE c.workspace_id = #{workspaceId}
         AND c.logo_url LIKE CONCAT('/api/companies/', c.id, '/logo/%')
     ) candidates
-    LEFT JOIN managed_object_usage usage
-      ON usage.workspace_id = #{workspaceId}
-     AND usage.object_key = candidates.object_key
+    LEFT JOIN managed_object_usage u
+      ON u.workspace_id = #{workspaceId}
+     AND u.object_key = candidates.object_key
     WHERE candidates.object_key &gt; #{afterKey}
     ORDER BY candidates.object_key
     LIMIT #{limit}
@@ -75,9 +75,9 @@
   <select id="findLifecycleObjectKeysAfter" resultType="string">
     SELECT object_key
     FROM (
-      SELECT usage.object_key
-      FROM managed_object_usage usage
-      WHERE usage.workspace_id = #{workspaceId}
+      SELECT u.object_key
+      FROM managed_object_usage u
+      WHERE u.workspace_id = #{workspaceId}
       UNION DISTINCT
       SELECT queue.object_key
       FROM object_deletion_queue queue
