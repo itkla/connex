@@ -12,10 +12,11 @@ Update the Status column in place as items move; the wave issues reference this 
 | 4 | Microsoft publisher verification | Wave 3 production enablement (MS provider) | Not started |
 | 5 | Penetration-test procurement | Wave 5 execution | Not started |
 | 6 | Staging root actions | Wave 0 close-out (mitigated) | Pending |
-| 7 | Backup-retention decision | Wave 1 (design input) | Undecided |
+| 7 | Backup-retention decision | Wave 1 (design input) | **Decided: 30-day rolling + PITR (2026-07-25)** |
 | 8 | Staging `connex_pub` cutover decision | Wave 5 execution | Undecided |
 | 9 | Error-monitoring vendor (APPI) | Wave 1 observability floor | Undecided |
 | 10 | Native-JP reviewer | Wave 5 EN/JA quality gate | Unassigned |
+| 11 | v0.9.0 release rehearsal prerequisites | Wave 1 exit criterion; hard gate before Wave 5 | Deferred — owner |
 
 ## 1. Legal counsel engagement (APPI)
 
@@ -72,13 +73,25 @@ sudo install -m 0755 /opt/connex-staging/deploy/staging/connex-staging-deploy-wr
 
 Optional: staging is now invite-only workspace creation; if QA needs self-service registration there, root must add `CONNEX_WORKSPACES_ALLOW_CREATION=true` to the root-600 `backend.env`. See [STAGING_DEPLOY.md](STAGING_DEPLOY.md).
 
+**Backup timers (added 2026-07-25, Wave 1 backup workstream):** the 30-day backup/PITR tooling ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) is merged but cannot be installed on staging as `dev` — systemd unit installation, `/etc/connex-backup`, and the Docker socket are all root-only there (`dev` is not in the `docker` group and MySQL runs in Docker with no host client tools). Root actions:
+
+```bash
+sudo /opt/connex-staging/deploy/backup/install.sh
+sudoedit /etc/connex-backup/backup.env   # set CONNEX_BACKUP_DB_CONTAINER to the staging db container
+sudo sh -c 'umask 077; printf "[client]\npassword=%s\n" "<CONNEX_DB_ROOT_PASSWORD from /opt/connex-staging/backend/.env>" > /etc/connex-backup/source.cnf'
+sudo docker pull percona/percona-server:8.4   # PITR replay client tools (mysqlbinlog); dumps/archiving need nothing extra
+sudo /opt/connex-staging/deploy/backup/install.sh   # rerun to render drop-ins from the edited env
+```
+
+*Mitigated meanwhile:* a manual staging backup was taken via SSH tunnel with the shipped tooling on 2026-07-26 and restore-verified locally (see #853); until root installs the timers, staging has no scheduled backups.
+
 *Mitigated meanwhile:* sha-stamped builds force a fresh JAR per commit; staleness is detectable via `GET /api/version`.
 
 ## 7. Backup-retention decision
 
 **Why it blocks:** retention length is a **design input** to Wave 1's backup automation, and the DPA's 30-day deletion clause (item 1) constrains it — decide retention first, then build, or the automation is built twice.
 
-**Action:** choose the retention window (and thus RPO/RTO targets) reconcilable with the DPA deletion commitment. Record on [#853](https://github.com/itkla/connex/issues/853).
+**Decided (2026-07-25):** **30-day rolling retention + point-in-time recovery** — daily full logical dumps plus MySQL binlog archiving, 30-day retention with automated pruning; nothing (dumps, archived binlogs, or server-side binlogs) is retained beyond 30 days, deliberately reconcilable with the DPA's 30-day post-termination deletion clause. Implemented in `deploy/backup/`; policy, published RPO/RTO, and restore runbooks live in [BACKUP_RESTORE.md](BACKUP_RESTORE.md). Recorded on [#853](https://github.com/itkla/connex/issues/853).
 
 ## 8. Staging `connex_pub` cutover decision
 
@@ -97,3 +110,13 @@ Optional: staging is now invite-only workspace creation; if QA needs self-servic
 **Why it blocks:** message-key parity is CI-enforceable, but business-register Japanese quality is not. Every new 1.0 surface ships EN/JA, and Wave 5's quality gate needs a named native reviewer.
 
 **Action:** name the person (or engage one) for the Wave 5 review of the highest-traffic namespaces.
+
+## 11. v0.9.0 release rehearsal prerequisites
+
+**Why it blocks:** the first-ever execution of `release.yml` (a Wave 1 exit criterion, and a hard gate before Wave 5 — the first run must not be the v1.0.0 tag) is preflighted and parked on three owner actions; the pipeline's first job fails within ~1 minute without the first two. See the preflight comment on [#853](https://github.com/itkla/connex/issues/853) for the full walkthrough of what the pipeline does.
+
+**Actions:**
+
+1. Create a fine-grained PAT for `itkla/connex` with **Administration: read** and set it as the `CONNEX_RELEASE_ADMIN_TOKEN` Actions secret (`gh secret set CONNEX_RELEASE_ADMIN_TOKEN --repo itkla/connex`).
+2. Enable **immutable releases** on the repository. Note: once enabled, any published version number is burned forever — a failed rehearsal retry becomes `v0.9.1`.
+3. Accept the pipeline's inherent side effects — image pushes to GHCR and permanent public Sigstore/Rekor signing entries.

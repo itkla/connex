@@ -540,7 +540,7 @@ jobs:
             --format=tar \
             --prefix="connex-${VERSION}/" \
             "$GITHUB_SHA" \
-            deploy docs/DEPLOYMENT.md docs/UPGRADING.md docs/RELEASE.md \
+            deploy docs/BACKUP_RESTORE.md docs/DEPLOYMENT.md docs/UPGRADING.md docs/RELEASE.md \
             > "$DEPLOY_BUNDLE"
           REPORT_FILE=business-card-benchmark.json
           FIXTURES_FILE=business-card-benchmark-fixtures.tar
