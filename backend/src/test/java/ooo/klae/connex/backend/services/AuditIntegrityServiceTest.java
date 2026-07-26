@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -101,6 +102,44 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
         assertFalse(projected.getChanges().contains("Private"));
         assertEquals(stored.getRowHash(), projected.getRowHash());
         assertTrue(projected.isContentRedacted());
+    }
+
+    @Test
+    void databaseSnapshotsIntegrityReferencesForRollingDeploymentWriters() {
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+        AuditLog entry = new AuditLog();
+        entry.setWorkspaceId(workspace.getId());
+        entry.setOrgId(orgId);
+        entry.setActorId(currentUser.getId());
+        entry.setAction("test.rolling_writer");
+        entry.setEntityType("workspace");
+        entry.setEntityId(workspace.getId());
+        entry.setOutcome("success");
+        entry.setChainScopeType("workspace");
+        entry.setChainScopeId(workspace.getId());
+        entry.setChainIndex(Math.max(10_000_000L, System.nanoTime()));
+        entry.setPrevHash("d".repeat(64));
+        entry.setRowHash("c".repeat(64));
+
+        auditLogMapper.insert(entry);
+
+        Map<String, Object> references = jdbcTemplate.queryForMap(
+            "SELECT integrity_workspace_id, integrity_org_id, integrity_actor_id,"
+                + " integrity_reference_state FROM audit_log WHERE id = ?",
+            entry.getId());
+        assertEquals(workspace.getId(), references.get("integrity_workspace_id"));
+        assertEquals(orgId, references.get("integrity_org_id"));
+        assertEquals(currentUser.getId(), references.get("integrity_actor_id"));
+        assertEquals("captured", references.get("integrity_reference_state"));
+    }
+
+    @Test
+    void legacyUnknownReferencesAreNotReportedAsVerifiable() {
+        AuditLog entry = new AuditLog();
+        entry.setIntegrityReferenceState("legacy_unknown");
+        entry.setRowHash("c".repeat(64));
+
+        assertFalse(auditIntegrityService.hasValidIntegrity(entry));
     }
 
     private int checkpointCount(int auditLogId) {

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +22,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 
+@SpringBootTest(properties = "connex.tenant-lifecycle.teardown-settle-delay=0s")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
@@ -126,6 +129,71 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
                 ownerOrganization.getId(),
                 currentUser.getId(),
                 "wrong"));
+    }
+
+    @Test
+    void lifecycleOwnerCanResumeAfterOrdinaryOrganizationAccessIsFenced() {
+        Organization organization = createOrganization(currentUser);
+        Workspace workspace = createWorkspace(organization, currentUser);
+        jdbcTemplate.update(
+            "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            organization.getId());
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> orgMemberService.requireOrgOwner(
+                organization.getId(),
+                currentUser.getId()));
+
+        teardownService.teardownOrganization(
+            organization.getId(),
+            currentUser.getId(),
+            organization.getSlug());
+
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace WHERE id = ?",
+                Integer.class,
+                workspace.getId()));
+    }
+
+    @Test
+    void cleanupTombstoneRoutesRetryAfterWorkspaceRootIsGone() {
+        Organization organization = createOrganization(currentUser);
+        Workspace workspace = createWorkspace(organization, currentUser);
+        jdbcTemplate.update(
+            "INSERT INTO tenant_cleanup_tombstone"
+                + " (workspace_id, org_id, workspace_name, workspace_slug)"
+                + " VALUES (?, ?, ?, ?)",
+            workspace.getId(),
+            organization.getId(),
+            workspace.getName(),
+            workspace.getSlug());
+        jdbcTemplate.update(
+            "DELETE FROM workspace WHERE id = ?",
+            workspace.getId());
+        jdbcTemplate.update(
+            "INSERT INTO ai_output_cache"
+                + " (workspace_id, feature, subject_a_id, content_hash, payload, generated_at)"
+                + " VALUES (?, 'lifecycle_retry', 1, ?, JSON_OBJECT(), '2026-07-25T00:00:00Z')",
+            workspace.getId(),
+            "b".repeat(64));
+
+        teardownService.teardownWorkspace(
+            organization.getId(),
+            workspace.getId(),
+            currentUser.getId(),
+            workspace.getSlug());
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM ai_output_cache WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM tenant_cleanup_tombstone WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
     }
 
     private Organization createOrganization(User owner) {

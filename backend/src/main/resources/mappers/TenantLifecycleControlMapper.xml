@@ -22,11 +22,50 @@
     WHERE w.org_id = #{orgId} AND w.id = #{workspaceId}
   </select>
 
+  <select id="findWorkspaceOrCleanupInOrg"
+          resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
+    SELECT id, orgId, name, slug, lifecycleState
+    FROM (
+      SELECT w.id,
+             w.org_id AS orgId,
+             w.name,
+             w.slug,
+             CASE
+               WHEN w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
+               THEN 'active'
+               ELSE 'tearing_down'
+             END AS lifecycleState,
+             0 AS targetOrder
+      FROM workspace w
+      JOIN organization o ON o.id = w.org_id
+      WHERE w.org_id = #{orgId} AND w.id = #{workspaceId}
+      UNION ALL
+      SELECT t.workspace_id AS id,
+             t.org_id AS orgId,
+             t.workspace_name AS name,
+             t.workspace_slug AS slug,
+             'tearing_down' AS lifecycleState,
+             1 AS targetOrder
+      FROM tenant_cleanup_tombstone t
+      WHERE t.org_id = #{orgId} AND t.workspace_id = #{workspaceId}
+    ) lifecycle_target
+    ORDER BY targetOrder
+    LIMIT 1
+  </select>
+
   <select id="findWorkspaceOrgIdForLifecycle" resultType="int">
-    SELECT w.org_id
-    FROM workspace w
-    JOIN organization o ON o.id = w.org_id
-    WHERE w.id = #{workspaceId}
+    SELECT org_id
+    FROM (
+      SELECT w.org_id, 0 AS targetOrder
+      FROM workspace w
+      WHERE w.id = #{workspaceId}
+      UNION ALL
+      SELECT t.org_id, 1 AS targetOrder
+      FROM tenant_cleanup_tombstone t
+      WHERE t.workspace_id = #{workspaceId}
+    ) lifecycle_route
+    ORDER BY targetOrder
+    LIMIT 1
   </select>
 
   <select id="lockActiveWorkspaceForExport"
@@ -50,6 +89,18 @@
     FOR UPDATE
   </select>
 
+  <select id="lockCleanupTombstoneInOrg"
+          resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
+    SELECT workspace_id AS id,
+           org_id AS orgId,
+           workspace_name AS name,
+           workspace_slug AS slug,
+           'tearing_down' AS lifecycleState
+    FROM tenant_cleanup_tombstone
+    WHERE org_id = #{orgId} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
   <select id="findOrganization"
           resultType="ooo.klae.connex.backend.dto.OrganizationLifecycleRef">
     SELECT id, name, slug, lifecycle_state AS lifecycleState
@@ -67,11 +118,30 @@
 
   <select id="findWorkspacesInOrgAfter"
           resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
-    SELECT <include refid="workspaceLifecycleColumns"/>
-    FROM workspace w
-    JOIN organization o ON o.id = w.org_id
-    WHERE w.org_id = #{orgId} AND w.id &gt; #{afterWorkspaceId}
-    ORDER BY w.id
+    SELECT id, orgId, name, slug, lifecycleState
+    FROM (
+      SELECT w.id,
+             w.org_id AS orgId,
+             w.name,
+             w.slug,
+             CASE
+               WHEN w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
+               THEN 'active'
+               ELSE 'tearing_down'
+             END AS lifecycleState
+      FROM workspace w
+      JOIN organization o ON o.id = w.org_id
+      WHERE w.org_id = #{orgId} AND w.id &gt; #{afterWorkspaceId}
+      UNION ALL
+      SELECT t.workspace_id AS id,
+             t.org_id AS orgId,
+             t.workspace_name AS name,
+             t.workspace_slug AS slug,
+             'tearing_down' AS lifecycleState
+      FROM tenant_cleanup_tombstone t
+      WHERE t.org_id = #{orgId} AND t.workspace_id &gt; #{afterWorkspaceId}
+    ) lifecycle_workspaces
+    ORDER BY id
     LIMIT #{limit}
   </select>
 
@@ -80,6 +150,18 @@
       SELECT 1
       FROM org_member
       WHERE org_id = #{orgId} AND user_id = #{userId} AND org_role = 'owner'
+      FOR SHARE
+    )
+  </select>
+
+  <select id="isOrgAdminForLifecycle" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM org_member
+      WHERE org_id = #{orgId}
+        AND user_id = #{userId}
+        AND org_role IN ('admin', 'owner')
+      FOR SHARE
     )
   </select>
 
@@ -96,6 +178,17 @@
       AND lease_kind = #{leaseKind}
       AND lease_token = #{leaseToken}
   </delete>
+
+  <select id="ownsOperationLease" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM tenant_operation_lease
+      WHERE workspace_id = #{workspaceId}
+        AND lease_kind = #{leaseKind}
+        AND lease_token = #{leaseToken}
+      FOR SHARE
+    )
+  </select>
 
   <select id="countOperationLeases" resultType="int">
     SELECT COUNT(*)
@@ -121,6 +214,18 @@
     WHERE org_id = #{orgId} AND jit_workspace_id = #{workspaceId}
   </update>
 
+  <insert id="insertCleanupTombstone">
+    INSERT INTO tenant_cleanup_tombstone
+      (workspace_id, org_id, workspace_name, workspace_slug)
+    VALUES
+      (#{workspaceId}, #{orgId}, #{workspaceName}, #{workspaceSlug})
+  </insert>
+
+  <delete id="deleteCleanupTombstone">
+    DELETE FROM tenant_cleanup_tombstone
+    WHERE org_id = #{orgId} AND workspace_id = #{workspaceId}
+  </delete>
+
   <delete id="deleteFederatedIdentityBatch">
     DELETE FROM federated_identity
     WHERE org_id = #{orgId}
@@ -141,6 +246,12 @@
   <select id="countWorkspaces" resultType="int">
     SELECT COUNT(*)
     FROM workspace
+    WHERE org_id = #{orgId}
+  </select>
+
+  <select id="countCleanupTombstones" resultType="int">
+    SELECT COUNT(*)
+    FROM tenant_cleanup_tombstone
     WHERE org_id = #{orgId}
   </select>
 </mapper>

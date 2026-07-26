@@ -95,11 +95,19 @@ class TenantTeardownArchTest {
     void preparationsAreLiveNullableColumnsAndRestrictiveDeleteOrderIsCovered() throws Exception {
         List<String> violations = new ArrayList<>();
         Map<String, Integer> deleteOrder = new HashMap<>();
+        Map<Integer, String> deleteOrderOwner = new HashMap<>();
         try (Connection connection = dataSource.getConnection()) {
             for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
                 if (declaration.direct()) {
                     if (deleteOrder.put(declaration.table(), declaration.deleteOrder()) != null) {
                         violations.add("duplicate delete order table " + declaration.table());
+                    }
+                    String existing = deleteOrderOwner.put(
+                        declaration.deleteOrder(),
+                        declaration.table());
+                    if (existing != null) {
+                        violations.add("delete order " + declaration.deleteOrder()
+                            + " is shared by " + existing + " and " + declaration.table());
                     }
                 }
                 for (var preparation : declaration.preparations()) {

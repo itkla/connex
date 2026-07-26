@@ -215,8 +215,12 @@
     SELECT COUNT(*)
     FROM workspace_member wm
     JOIN workspace w ON w.id = wm.workspace_id
+    JOIN organization o ON o.id = w.org_id
     JOIN sso_connection s ON s.org_id = w.org_id AND s.enabled = 1 AND s.enforce_sso = 1
-    WHERE wm.user_id = #{userId} AND wm.status = 'active'
+    WHERE wm.user_id = #{userId}
+      AND wm.status = 'active'
+      AND w.lifecycle_state = 'active'
+      AND o.lifecycle_state = 'active'
   </select>
 
   <insert id="addMember">

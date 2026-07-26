@@ -25,7 +25,10 @@ public class TenantLifecycleControlOperations {
 
     /** Atomically validates an active workspace and acquires an export lease. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public AcquiredWorkspace acquireExport(int orgId, int workspaceId) {
+    public AcquiredWorkspace acquireExport(
+            int orgId,
+            int workspaceId,
+            int actorId) {
         WorkspaceLifecycleRef workspace = mapper.lockActiveWorkspaceForExport(orgId, workspaceId);
         if (workspace == null) {
             WorkspaceLifecycleRef existing = mapper.findWorkspaceInOrg(orgId, workspaceId);
@@ -34,8 +37,17 @@ public class TenantLifecycleControlOperations {
             }
             throw new ConflictException("Workspace teardown is in progress");
         }
+        if (!mapper.isOrgAdminForLifecycle(orgId, actorId)) {
+            throw new ForbiddenException("Organization administrator access required");
+        }
         OperationLease lease = insertLease(orgId, workspaceId, EXPORT);
         return new AcquiredWorkspace(workspace, lease);
+    }
+
+    /** Requires a lifecycle owner even after ordinary organization access is fenced. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public void requireLifecycleOwner(int orgId, int actorId) {
+        requireOwner(orgId, actorId);
     }
 
     /** Releases exactly the export or teardown lease owned by its token. */
@@ -69,13 +81,19 @@ public class TenantLifecycleControlOperations {
             int workspaceId,
             int actorId) {
         WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(orgId, workspaceId);
+        boolean rootExists = workspace != null;
+        if (workspace == null) {
+            workspace = mapper.lockCleanupTombstoneInOrg(orgId, workspaceId);
+        }
         if (workspace == null) {
             throw new ResourceNotFoundException("Workspace not found");
         }
         requireOwner(orgId, actorId);
         OperationLease lease = insertLease(orgId, workspaceId, TEARDOWN);
-        mapper.markWorkspaceTearingDown(orgId, workspaceId);
-        mapper.clearSsoJitWorkspace(orgId, workspaceId);
+        if (rootExists) {
+            mapper.markWorkspaceTearingDown(orgId, workspaceId);
+            mapper.clearSsoJitWorkspace(orgId, workspaceId);
+        }
         return new AcquiredWorkspace(workspace, lease);
     }
 
@@ -105,19 +123,58 @@ public class TenantLifecycleControlOperations {
             int workspaceId,
             int actorId,
             OperationLease teardownLease) {
-        if (mapper.lockWorkspaceInOrg(orgId, workspaceId) == null) {
+        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(orgId, workspaceId);
+        WorkspaceLifecycleRef tombstone = workspace == null
+            ? mapper.lockCleanupTombstoneInOrg(orgId, workspaceId)
+            : null;
+        if (workspace == null && tombstone == null) {
             throw new ResourceNotFoundException("Workspace not found");
         }
         requireOwner(orgId, actorId);
-        mapper.clearSsoJitWorkspace(orgId, workspaceId);
+        if (!mapper.ownsOperationLease(
+                workspaceId,
+                TEARDOWN,
+                teardownLease.token())) {
+            throw new IllegalStateException("Workspace teardown lease was not owned at terminal deletion");
+        }
+        if (workspace != null) {
+            mapper.clearSsoJitWorkspace(orgId, workspaceId);
+            mapper.insertCleanupTombstone(
+                workspace.id(),
+                workspace.orgId(),
+                workspace.name(),
+                workspace.slug());
+            if (mapper.deleteWorkspace(orgId, workspaceId) != 1) {
+                throw new IllegalStateException("Workspace lifecycle root was not deleted");
+            }
+        }
+    }
+
+    /** Removes the durable cleanup route and its exact lease after a clean post-root scan. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void completeWorkspaceCleanup(
+            int orgId,
+            int workspaceId,
+            int actorId,
+            OperationLease teardownLease) {
+        if (mapper.lockCleanupTombstoneInOrg(orgId, workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace cleanup marker not found");
+        }
+        requireOwner(orgId, actorId);
+        if (!mapper.ownsOperationLease(
+                workspaceId,
+                TEARDOWN,
+                teardownLease.token())) {
+            throw new IllegalStateException("Workspace teardown lease was not owned at cleanup completion");
+        }
+        if (mapper.deleteCleanupTombstone(orgId, workspaceId) != 1) {
+            throw new IllegalStateException("Workspace cleanup marker was not deleted");
+        }
         if (mapper.deleteOperationLease(
                 workspaceId,
                 TEARDOWN,
                 teardownLease.token()) != 1) {
-            throw new IllegalStateException("Workspace teardown lease was not owned at terminal deletion");
-        }
-        if (mapper.deleteWorkspace(orgId, workspaceId) != 1) {
-            throw new IllegalStateException("Workspace lifecycle root was not deleted");
+            throw new IllegalStateException("Workspace teardown lease was not deleted");
         }
     }
 
@@ -134,7 +191,8 @@ public class TenantLifecycleControlOperations {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
-        if (mapper.countWorkspaces(orgId) != 0) {
+        if (mapper.countWorkspaces(orgId) != 0
+                || mapper.countCleanupTombstones(orgId) != 0) {
             throw new IllegalStateException("Organization still has workspace roots");
         }
         if (mapper.deleteOrganization(orgId) != 1) {

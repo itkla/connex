@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
@@ -29,6 +30,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.CustomFieldValue;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldValueMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -73,6 +76,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Autowired private CustomFieldValueMapper customFieldValueMapper;
     @Autowired private AiOutputCacheMapper aiOutputCacheMapper;
+    @Autowired private AuditLogMapper auditLogMapper;
+    @Autowired private AuditIntegrityService auditIntegrityService;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -148,6 +153,16 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(manifest.contains("\"schemaVersion\":1"));
         assertTrue(manifest.contains("\"objectCount\":1"));
         assertTrue(Files.exists(fixture.objectPath()));
+        AuditLog retained = new AuditLog();
+        retained.setWorkspaceId(drillWorkspace.getId());
+        retained.setOrgId(drillOrganization.getId());
+        retained.setAction("test.lifecycle.retained");
+        retained.setEntityType("workspace");
+        retained.setEntityId(drillWorkspace.getId());
+        retained.setTargetLabel(drillWorkspace.getSlug());
+        retained.setOutcome("success");
+        retained.setSummary("Workspace audit integrity survives teardown");
+        auditIntegrityService.appendIndependent(retained);
 
         teardownService.teardownWorkspace(
             drillOrganization.getId(),
@@ -174,6 +189,54 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 + " AND workspace_id IS NULL AND org_id = ?",
             Integer.class,
             drillOrganization.getId()) > 0);
+        Map<String, Object> retainedReferences = jdbcTemplate.queryForMap(
+            "SELECT workspace_id, org_id, integrity_workspace_id, integrity_org_id"
+                + " FROM audit_log WHERE id = ?",
+            retained.getId());
+        assertNull(retainedReferences.get("workspace_id"));
+        assertEquals(drillOrganization.getId(), retainedReferences.get("org_id"));
+        assertEquals(
+            drillWorkspace.getId(),
+            retainedReferences.get("integrity_workspace_id"));
+        assertEquals(
+            drillOrganization.getId(),
+            retainedReferences.get("integrity_org_id"));
+        retained.setWorkspaceId(null);
+        assertTrue(auditIntegrityService.hasValidIntegrity(retained));
+        assertTrue(auditLogMapper.findOrgExport(
+            drillOrganization.getId(),
+            500,
+            0).stream().noneMatch(
+                entry -> "test.lifecycle.retained".equals(entry.getAction())));
+    }
+
+    @Test
+    void tearsDownOrganizationAndAllWorkspaceRoots() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+
+        teardownService.teardownOrganization(
+            orgId,
+            currentUser.getId(),
+            drillOrganization.getSlug());
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workspace WHERE id = ?",
+            Integer.class,
+            workspaceId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM organization WHERE id = ?",
+            Integer.class,
+            orgId));
+        assertTrue(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log"
+                + " WHERE action = 'tenant.organization.teardown'"
+                + " AND org_id IS NULL"
+                + " AND chain_scope_type = 'organization'"
+                + " AND chain_scope_id = ?",
+            Integer.class,
+            orgId) > 0);
     }
 
     private void createDedicatedDrillRoots() {

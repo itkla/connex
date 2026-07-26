@@ -4,15 +4,33 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.OrgMemberMapper">
 
   <select id="getRole" resultType="string">
-    SELECT org_role FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId}
+    SELECT om.org_role
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id
+    WHERE om.org_id = #{orgId}
+      AND om.user_id = #{userId}
+      AND o.lifecycle_state = 'active'
   </select>
 
   <select id="getRoleForUpdate" resultType="string">
-    SELECT org_role FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId} FOR UPDATE
+    SELECT om.org_role
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id
+    WHERE om.org_id = #{orgId}
+      AND om.user_id = #{userId}
+      AND o.lifecycle_state = 'active'
+    FOR UPDATE
   </select>
 
   <select id="isMember" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId})
+    SELECT EXISTS(
+      SELECT 1
+      FROM org_member om
+      JOIN organization o ON o.id = om.org_id
+      WHERE om.org_id = #{orgId}
+        AND om.user_id = #{userId}
+        AND o.lifecycle_state = 'active'
+    )
   </select>
 
   <insert id="addMember">

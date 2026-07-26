@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.DeleteStage;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Resumable tenant teardown with durable lifecycle fences and bounded
@@ -43,14 +44,18 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
  * and bounded deletes while the control root survives. Export and teardown
  * leases have no automatic expiry, so a process crash can leave a stale lease
  * that fails closed pending privileged operator clearance outside this wave.
+ * Before deleting a workspace root, teardown persists a root-independent
+ * cleanup tombstone. The tombstone retains its organization placement route
+ * until the post-root scan is clean, makes handled failures HTTP-resumable, and
+ * prevents organization finalization while cleanup remains.
  * Physical object bytes with no database metadata or quota ledger cannot be
  * enumerated and remain an acknowledged orphan-byte limitation.
  *
  * <p>Control-plane {@code audit_log} and its HMAC chain/checkpoint records are
  * retained. Existing foreign keys null the deleted workspace and organization
- * references while immutable chain-scope identifiers preserve the
- * accountability record. The audit trail is outside tenant data return under
- * the DPA.
+ * references while immutable integrity reference snapshots and chain-scope
+ * identifiers preserve the verifiable accountability record. The audit trail
+ * is outside tenant data return under the DPA.
  */
 @Service
 @RequiredArgsConstructor
@@ -59,8 +64,8 @@ public class TenantTeardownService {
     private static final String ORGANIZATION_ACTION = "tenant.organization.teardown";
     private static final long WAIT_CHUNK_NANOS = Duration.ofMillis(100).toNanos();
 
-    private final OrgMemberService orgMemberService;
     private final SessionSecurityService sessionSecurityService;
+    private final TenantWorkScope tenantWorkScope;
     private final TenantLifecycleControlMapper controlMapper;
     private final TenantLifecycleControlOperations controlOperations;
     private final TenantLifecycleAccess lifecycleAccess;
@@ -77,9 +82,22 @@ public class TenantTeardownService {
             int workspaceId,
             int actorId,
             String confirmation) {
-        orgMemberService.requireOrgOwner(orgId, actorId);
+        tenantWorkScope.unrouted(() -> {
+            teardownWorkspaceUnrouted(orgId, workspaceId, actorId, confirmation);
+            return null;
+        });
+    }
+
+    private void teardownWorkspaceUnrouted(
+            int orgId,
+            int workspaceId,
+            int actorId,
+            String confirmation) {
+        controlOperations.requireLifecycleOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        WorkspaceLifecycleRef target = controlMapper.findWorkspaceInOrg(orgId, workspaceId);
+        WorkspaceLifecycleRef target = controlMapper.findWorkspaceOrCleanupInOrg(
+            orgId,
+            workspaceId);
         if (target == null) {
             throw new ResourceNotFoundException("Workspace not found");
         }
@@ -106,7 +124,17 @@ public class TenantTeardownService {
             int orgId,
             int actorId,
             String confirmation) {
-        orgMemberService.requireOrgOwner(orgId, actorId);
+        tenantWorkScope.unrouted(() -> {
+            teardownOrganizationUnrouted(orgId, actorId, confirmation);
+            return null;
+        });
+    }
+
+    private void teardownOrganizationUnrouted(
+            int orgId,
+            int actorId,
+            String confirmation) {
+        controlOperations.requireLifecycleOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrganizationLifecycleRef organization = controlMapper.findOrganization(orgId);
         if (organization == null) {
@@ -187,6 +215,7 @@ public class TenantTeardownService {
         OperationLease lease = acquired.lease();
         Route route = lifecycleAccess.capture(workspace, workspace.orgId());
         boolean rootDeleted = false;
+        boolean completed = false;
         try {
             waitForExportDrain(workspace.id());
             waitFor(properties.getTeardownSettleDelay());
@@ -209,14 +238,39 @@ public class TenantTeardownService {
                 route,
                 actorId,
                 () -> residualReport(workspace.id()));
-            requireClean(afterRoot, workspace, "after control-root deletion");
+            if (!afterRoot.clean()) {
+                TenantResidualReport cleanup = lifecycleAccess.withRoute(
+                    route,
+                    actorId,
+                    () -> {
+                        sweepTenant(workspace.id());
+                        return residualReport(workspace.id());
+                    });
+                if (cleanup.clean()) {
+                    controlOperations.completeWorkspaceCleanup(
+                        workspace.orgId(),
+                        workspace.id(),
+                        actorId,
+                        lease);
+                    completed = true;
+                }
+                throw new IllegalStateException(
+                    "Tenant residual invariant failed after control-root deletion for workspace "
+                        + workspace.id() + "; trusted cleanup clean=" + cleanup.clean());
+            }
+            controlOperations.completeWorkspaceCleanup(
+                workspace.orgId(),
+                workspace.id(),
+                actorId,
+                lease);
+            completed = true;
         } catch (RuntimeException exception) {
             if (auditFailure || rootDeleted) {
                 recordFailure(workspace, exception);
             }
             throw exception;
         } finally {
-            if (!rootDeleted) {
+            if (!completed) {
                 controlOperations.releaseIfPresent(lease);
             }
         }
@@ -283,7 +337,9 @@ public class TenantTeardownService {
     }
 
     private void deleteStage(int workspaceId, DeleteStage stage) {
-        for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
+        for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values().stream()
+                .sorted(java.util.Comparator.comparingInt(TableLifecycle::deleteOrder))
+                .toList()) {
             if (!declaration.direct() || declaration.deleteStage() != stage) {
                 continue;
             }

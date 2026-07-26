@@ -14,6 +14,10 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
+    WorkspaceLifecycleRef findWorkspaceOrCleanupInOrg(
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId);
+
     Integer findWorkspaceOrgIdForLifecycle(@Param("workspaceId") int workspaceId);
 
     WorkspaceLifecycleRef lockActiveWorkspaceForExport(
@@ -21,6 +25,10 @@ public interface TenantLifecycleControlMapper {
         @Param("workspaceId") int workspaceId);
 
     WorkspaceLifecycleRef lockWorkspaceInOrg(
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId);
+
+    WorkspaceLifecycleRef lockCleanupTombstoneInOrg(
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
@@ -37,6 +45,10 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("userId") int userId);
 
+    boolean isOrgAdminForLifecycle(
+        @Param("orgId") int orgId,
+        @Param("userId") int userId);
+
     int insertOperationLease(
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId,
@@ -44,6 +56,11 @@ public interface TenantLifecycleControlMapper {
         @Param("leaseToken") String leaseToken);
 
     int deleteOperationLease(
+        @Param("workspaceId") int workspaceId,
+        @Param("leaseKind") String leaseKind,
+        @Param("leaseToken") String leaseToken);
+
+    boolean ownsOperationLease(
         @Param("workspaceId") int workspaceId,
         @Param("leaseKind") String leaseKind,
         @Param("leaseToken") String leaseToken);
@@ -62,6 +79,16 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
+    int insertCleanupTombstone(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgId") int orgId,
+        @Param("workspaceName") String workspaceName,
+        @Param("workspaceSlug") String workspaceSlug);
+
+    int deleteCleanupTombstone(
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId);
+
     int deleteFederatedIdentityBatch(
         @Param("orgId") int orgId,
         @Param("limit") int limit);
@@ -73,4 +100,6 @@ public interface TenantLifecycleControlMapper {
     int deleteOrganization(@Param("orgId") int orgId);
 
     int countWorkspaces(@Param("orgId") int orgId);
+
+    int countCleanupTombstones(@Param("orgId") int orgId);
 }

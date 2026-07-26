@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedTenantObject;
 import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -48,6 +49,7 @@ public class TenantExportService {
 
     private final OrgMemberService orgMemberService;
     private final SessionSecurityService sessionSecurityService;
+    private final TenantWorkScope tenantWorkScope;
     private final TenantLifecycleControlOperations controlOperations;
     private final TenantLifecycleAccess lifecycleAccess;
     private final TenantExportTableReadTransaction readTransaction;
@@ -63,9 +65,20 @@ public class TenantExportService {
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public TenantExportDownload prepare(int orgId, int workspaceId, int actorId) {
+        return tenantWorkScope.unrouted(
+            () -> prepareUnrouted(orgId, workspaceId, actorId));
+    }
+
+    private TenantExportDownload prepareUnrouted(
+            int orgId,
+            int workspaceId,
+            int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        AcquiredWorkspace acquired = controlOperations.acquireExport(orgId, workspaceId);
+        AcquiredWorkspace acquired = controlOperations.acquireExport(
+            orgId,
+            workspaceId,
+            actorId);
         boolean transferred = false;
         try {
             Route route = lifecycleAccess.capture(acquired.workspace(), orgId);
