@@ -172,6 +172,17 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
+    /**
+     * Processes one tenant deletion using the lifecycle caller's already
+     * validated catalog route and propagates failures for terminal verification.
+     */
+    public void processTenantInLifecycleRoute(int workspaceId, String key) {
+        transactionExecutor.processTenant(
+            workspaceId,
+            ObjectStorageKey.requireValid(key),
+            now());
+    }
+
     public void processUser(String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
