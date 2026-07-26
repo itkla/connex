@@ -90,6 +90,7 @@ restore_run() {
     fi
     RESTORE_SOURCE_SCHEMA="$(backup_select_source_schema "$RESTORE_RUN_DIR/manifest" "$RESTORE_SOURCE_SCHEMA")" || return $?
     BACKUP_PHASE=restoring
+    backup_configure_sidecar_binlog "$RESTORE_SOURCE_SCHEMA" "$RESTORE_TARGET_SCHEMA"
     backup_log info restore_started run_id "$(basename "$RESTORE_RUN_DIR")" source_schema "$RESTORE_SOURCE_SCHEMA" target_schema "$RESTORE_TARGET_SCHEMA" force_overwrite "$RESTORE_FORCE"
     backup_restore_artifact "$RESTORE_RUN_DIR" "$RESTORE_SOURCE_SCHEMA" "$RESTORE_TARGET_SCHEMA" "$RESTORE_FORCE" restore || return $?
     BACKUP_PHASE=row_summary

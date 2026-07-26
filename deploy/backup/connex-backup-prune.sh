@@ -17,6 +17,8 @@ PRUNE_FULL_DELETED=0
 PRUNE_FAILED_DELETED=0
 PRUNE_BINLOG_DELETED=0
 PRUNE_BYTES_DELETED=0
+PRUNE_SKIPPED=0
+PRUNE_LOCK_WAIT_SECONDS=900
 
 prune_remove_run() {
     local run_dir="$1"
@@ -36,53 +38,70 @@ prune_remove_run() {
     backup_log info full_run_pruned run_id "$(basename "$run_dir")" classification "$classification" bytes "$bytes"
 }
 
+prune_skip() {
+    backup_log warn prune_skipped "$@"
+    PRUNE_SKIPPED=$((PRUNE_SKIPPED + 1))
+}
+
+prune_newest_complete_run() {
+    local run_dir
+    while IFS= read -r run_dir; do
+        if backup_validate_run "$run_dir" >/dev/null 2>&1; then
+            printf '%s\n' "$run_dir"
+            return 0
+        fi
+    done < <(find "$CONNEX_BACKUP_ROOT/full" -mindepth 1 -maxdepth 1 -type d -name '*Z' -exec test -f '{}/COMPLETE' ';' -print | sort -r)
+    return 0
+}
+
 prune_full_runs() {
-    local now legal_age grace_age run_dir run_id run_epoch age marker_count classification
+    local now legal_age grace_age run_dir run_id run_epoch age classification newest_complete
     now="$(date +%s)"
     legal_age=$(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 ))
     grace_age=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
+    newest_complete="$(prune_newest_complete_run)"
     while IFS= read -r run_dir; do
         run_id="$(basename "$run_dir")"
         if ! run_epoch="$(backup_run_id_to_epoch "$run_id")"; then
-            backup_log error prune_failed reason unclassifiable_full_run path "$run_dir"
-            return "$EXIT_PRUNE"
+            prune_skip reason unclassifiable_full_run path "$run_dir"
+            continue
         fi
         age=$((now - run_epoch))
         if [ "$age" -lt 0 ]; then
-            backup_log error prune_failed reason future_full_run run_id "$run_id"
-            return "$EXIT_PRUNE"
+            prune_skip reason future_full_run run_id "$run_id"
+            continue
         fi
-        marker_count=0
+        if [ -f "$run_dir/COMPLETE" ] && [ -f "$run_dir/IN_PROGRESS" ]; then
+            rm -f "$run_dir/IN_PROGRESS"
+            backup_log warn prune_normalized reason stale_in_progress_marker run_id "$run_id"
+        fi
+        if [ -f "$run_dir/COMPLETE" ] && [ -f "$run_dir/FAILED" ]; then
+            prune_skip reason conflicting_terminal_markers run_id "$run_id"
+            continue
+        fi
         classification=incomplete
         if [ -f "$run_dir/COMPLETE" ]; then
-            marker_count=$((marker_count + 1))
             classification=complete
-        fi
-        if [ -f "$run_dir/FAILED" ]; then
-            marker_count=$((marker_count + 1))
+        elif [ -f "$run_dir/FAILED" ]; then
             classification=failed
-        fi
-        if [ -f "$run_dir/IN_PROGRESS" ]; then
-            marker_count=$((marker_count + 1))
+        elif [ -f "$run_dir/IN_PROGRESS" ]; then
             classification=orphaned
         fi
-        if [ "$marker_count" -gt 1 ]; then
-            backup_log error prune_failed reason conflicting_markers run_id "$run_id"
-            return "$EXIT_PRUNE"
-        fi
         if [ "$classification" = complete ]; then
+            if [ "$run_dir" = "$newest_complete" ]; then
+                continue
+            fi
             if [ "$age" -ge "$legal_age" ]; then
-                prune_remove_run "$run_dir" complete || return "$EXIT_PRUNE"
+                prune_remove_run "$run_dir" complete || prune_skip reason remove_failed run_id "$run_id"
             fi
             continue
         fi
         if [ "$age" -ge "$grace_age" ] || [ "$age" -ge "$legal_age" ]; then
-            prune_remove_run "$run_dir" "$classification" || return "$EXIT_PRUNE"
+            prune_remove_run "$run_dir" "$classification" || prune_skip reason remove_failed run_id "$run_id"
         fi
     done < <(find "$CONNEX_BACKUP_ROOT/full" -mindepth 1 -maxdepth 1 -type d -print | sort)
     if find "$CONNEX_BACKUP_ROOT/full" -mindepth 1 -maxdepth 1 ! -type d -print -quit | grep -q .; then
-        backup_log error prune_failed reason unexpected_full_root_entry
-        return "$EXIT_PRUNE"
+        prune_skip reason unexpected_full_root_entry
     fi
 }
 
@@ -103,24 +122,24 @@ prune_binlogs() {
     while IFS= read -r meta; do
         raw="${meta%.meta}"
         if ! backup_validate_binlog_triplet "$raw"; then
-            backup_log error prune_failed reason invalid_binlog_triplet file "$(basename "$raw")"
-            return "$EXIT_PRUNE"
+            prune_skip reason invalid_binlog_triplet file "$(basename "$raw")"
+            continue
         fi
-        created_epoch="$(backup_meta_value "$meta" file_created_epoch)" || {
-            backup_log error prune_failed reason missing_binlog_timestamp file "$(basename "$raw")"
-            return "$EXIT_PRUNE"
-        }
+        if ! created_epoch="$(backup_meta_value "$meta" file_created_epoch)"; then
+            prune_skip reason missing_binlog_timestamp file "$(basename "$raw")"
+            continue
+        fi
         if [[ ! "$created_epoch" =~ ^[0-9]+$ ]]; then
-            backup_log error prune_failed reason invalid_binlog_timestamp file "$(basename "$raw")" value "$created_epoch"
-            return "$EXIT_PRUNE"
+            prune_skip reason invalid_binlog_timestamp file "$(basename "$raw")" value "$created_epoch"
+            continue
         fi
         age=$((now - created_epoch))
         if [ "$age" -lt 0 ]; then
-            backup_log error prune_failed reason future_binlog_timestamp file "$(basename "$raw")"
-            return "$EXIT_PRUNE"
+            prune_skip reason future_binlog_timestamp file "$(basename "$raw")"
+            continue
         fi
         if [ "$age" -ge "$legal_age" ]; then
-            prune_binlog_triplet "$raw" || return "$EXIT_PRUNE"
+            prune_binlog_triplet "$raw" || prune_skip reason binlog_remove_failed file "$(basename "$raw")"
         fi
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f -name '*.meta' ! -name '*.pending' -print | sort)
     while IFS= read -r entry; do
@@ -132,8 +151,7 @@ prune_binlogs() {
                 if [ -f "$entry.meta" ] && [ -f "$entry.sha256" ]; then
                     continue
                 fi
-                backup_log error prune_failed reason unclassifiable_binlog_entry file "$name"
-                return "$EXIT_PRUNE"
+                prune_skip reason unclassifiable_binlog_entry file "$name"
                 ;;
         esac
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f ! -name '*.pending' -print | sort)
@@ -143,15 +161,12 @@ prune_staging() {
     local entry
     while IFS= read -r entry; do
         if [[ "$entry" != "$CONNEX_BACKUP_ROOT/binlog/.fetch."* ]]; then
-            return "$EXIT_PRUNE"
+            prune_skip reason unexpected_binlog_directory path "$entry"
+            continue
         fi
-        rm -rf -- "$entry" || return "$EXIT_PRUNE"
+        rm -rf -- "$entry" || { prune_skip reason staging_remove_failed path "$entry"; continue; }
         backup_log warn abandoned_binlog_staging_pruned path "$entry"
-    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type d -name '.fetch.*' -print)
-    if find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type d ! -name '.fetch.*' -print -quit | grep -q .; then
-        backup_log error prune_failed reason unexpected_binlog_directory
-        return "$EXIT_PRUNE"
-    fi
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type d -print)
     if find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f \( -name '*.pending' -o -name '.pitr-query.*' \) -delete -print | grep -q .; then
         backup_log warn abandoned_binlog_pending_pruned
     fi
@@ -183,13 +198,14 @@ prune_run() {
     backup_load_environment || return $?
     backup_validate_common || return $?
     backup_prepare_directories || return "$EXIT_CONFIG"
-    backup_acquire_lock exclusive lifecycle || return $?
-    backup_acquire_lock exclusive prune || return $?
+    backup_acquire_lock exclusive lifecycle "$PRUNE_LOCK_WAIT_SECONDS" || return $?
+    backup_acquire_lock exclusive prune "$PRUNE_LOCK_WAIT_SECONDS" || return $?
+    BACKUP_PHASE=pruning_staging
+    prune_staging
     BACKUP_PHASE=pruning_full
-    prune_full_runs || return "$EXIT_PRUNE"
+    prune_full_runs
     BACKUP_PHASE=pruning_binlog
-    prune_binlogs || return "$EXIT_PRUNE"
-    prune_staging || return "$EXIT_PRUNE"
+    prune_binlogs
     BACKUP_PHASE=freshness_check
     prune_freshness_check || return $?
 }
@@ -197,7 +213,7 @@ prune_run() {
 main() {
     local exit_code=0
     prune_run "$@" || exit_code=$?
-    backup_finish "$exit_code" prune_summary full_deleted "$PRUNE_FULL_DELETED" failed_deleted "$PRUNE_FAILED_DELETED" binlog_deleted "$PRUNE_BINLOG_DELETED" bytes_deleted "$PRUNE_BYTES_DELETED"
+    backup_finish "$exit_code" prune_summary full_deleted "$PRUNE_FULL_DELETED" failed_deleted "$PRUNE_FAILED_DELETED" binlog_deleted "$PRUNE_BINLOG_DELETED" bytes_deleted "$PRUNE_BYTES_DELETED" skipped "$PRUNE_SKIPPED"
     return "$exit_code"
 }
 

@@ -49,7 +49,8 @@ Everything lives in `deploy/backup/` inside the release deploy bundle:
 All scripts log single-line structured events (`ts=… level=… event=…`) to stdout — journald
 captures them under the unit name — and exit nonzero with a documented per-class exit code on any
 failure, so a `systemctl --failed` or an `OnFailure=` hook surfaces broken backups. **A backup
-run that did not end with `event=summary status=ok` and exit 0 is not a backup.**
+run that did not end with a `*_summary` event carrying `status=success exit_code=0` is not a
+backup** (the full run logs `event=backup_summary status=success`).
 
 ## Install (operator, once)
 
@@ -83,7 +84,7 @@ run that did not end with `event=summary status=ok` and exit 0 is not a backup.*
    journalctl -u connex-backup.service -n 20
    ```
 
-   Confirm `event=summary status=ok`, then confirm the timers are active:
+   Confirm `event=backup_summary status=success`, then confirm the timers are active:
    `systemctl list-timers 'connex-*'`.
 
 The backup root holds plaintext logical dumps of your database. Keep it on an encrypted volume,
@@ -153,9 +154,49 @@ The vendor-side reference drill that produced the published RTO above is recorde
 - **Partial dumps cannot masquerade as backups.** A run directory only counts (for restore and
   for the stale-backup alarm) once every schema dumped, compressed, and checksum-verified; failed
   runs are marked `FAILED` and pruned after a grace period.
-- **No binlog, no PITR.** The archive script fails closed if `log_bin` is off or the server's own
-  binlog expiry exceeds the 30-day cap. The shipped Compose deployment has binlogs enabled by
-  default.
+- **No binlog, no PITR.** The archive script fails closed if `log_bin` is off, `binlog_format` is
+  not `ROW`, auto-purge is disabled, or the server's own `binlog_expire_logs_seconds` exceeds
+  retention minus one day (29 days at the 30-day cap) — so server-side binlogs can never outlive
+  the legal ceiling either. Set the `db` service's `binlog_expire_logs_seconds` to `2505600`
+  (29 days) or less. The shipped Compose deployment has binlogs enabled by default. Configuration
+  is not evidence, so each archive run also *observes* the oldest binlog the server still holds
+  (`event=binlog_server_retention`), warns when it crosses the 29-day prune threshold, and fails
+  the run if it ever reaches 30 days — purge it with `PURGE BINARY LOGS BEFORE …` and fix the
+  server setting.
+- **Backups self-verify by default.** `CONNEX_BACKUP_RESTORE_VERIFY=true` restores each fresh dump
+  into a throwaway scratch schema and compares base-table counts before the run is marked
+  `COMPLETE`, so a gzip-valid but semantically incomplete dump cannot pass as good. Point the
+  verify profile at a non-production host if the extra load matters, but do not disable it lightly.
+- **PITR refuses to leak onto other schemas.** Before any replay, the restore decodes the binlog
+  window and refuses (fail-closed) if it references any schema other than `--source-schema` — an
+  allowlist, so an unknown schema name is a refusal, not a pass — or contains account/global/
+  database-level statements (`GRANT`, `CREATE USER`, `SET GLOBAL`, `CREATE DATABASE`, …) that a
+  schema rewrite cannot contain, or a qualified reference split across lines that the rewriter
+  cannot safely retarget. `--force-overwrite` downgrades this refusal to a logged warning for the
+  rare case where you have vetted the window yourself. The default configuration replays into the
+  **same server** the backup came from; the run logs `event=pitr_replay_target_shared` to say so.
+  Point `CONNEX_BACKUP_RESTORE_DB_*` at a separate host when you can — a restore server that is
+  not production is the only guard that cannot be defeated by a parser gap.
+- **A silent empty replay is a failure, not a success.** The replay counts the row events the
+  archived window holds for the source schema and the row events actually applied to the target.
+  If the window provably contains events and none were applied, PITR fails
+  (`reason=zero_events_applied`) instead of reporting a dump-time restore as a point-in-time one.
+  Both counts appear on `event=pitr_completed` / `event=pitr_summary`.
+- **Scratch and sidecar restores do not enter the binary log.** Restore-verify schemas, and any
+  restore/PITR into a schema other than the source, run with `SET SESSION sql_log_bin = 0`, so a
+  daily self-verify does not write a second full copy of your database into the binlogs (and into
+  every later PITR window). This needs `BINLOG_ADMIN` (or `SUPER`) on the verify/restore account:
+  the backup fails closed if the verify account lacks it, while a restore falls back to logged
+  mode with a warning rather than blocking a recovery.
+- **Pruning is resilient.** A single corrupt or half-written artifact is skipped and logged
+  (`event=prune_skipped`), never aborting the whole prune — one bad file can't silently freeze
+  retention. The prune timer runs twice daily and a failed run retries every 15 minutes, so a
+  transient failure still clears well inside the one-day margin under the legal ceiling.
+- **The newest complete dump is never pruned.** Retention deletes by age, but the single newest
+  complete run is exempt: a deployment whose backups have been failing for a month keeps its last
+  good dump rather than ending up with nothing. If your data-protection commitments require the
+  30-day ceiling to win even over that, delete the backup root by hand when you decommission the
+  deployment — the tooling will not leave you with zero recoverable backups on its own.
 - **Disk-space guard.** The full-dump script refuses to start below a configurable free-space
   floor rather than producing a truncated dump.
 - **Retention versus PITR depth.** Pruning at 29 days means the oldest reachable PITR moment

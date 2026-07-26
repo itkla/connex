@@ -37,6 +37,7 @@ declare -a MYSQLBINLOG_COMMAND=()
 declare -a BINLOG_STREAM_COMMAND=()
 declare -a BINLOG_STAT_COMMAND=()
 declare -a BACKUP_LOCK_FDS=()
+BACKUP_SUPPRESS_RESTORE_BINLOG=false
 
 backup_exit_code_catalog() {
     printf '%s\n' \
@@ -167,7 +168,7 @@ backup_set_defaults() {
     : "${CONNEX_BACKUP_DB_PORT:=3306}"
     : "${CONNEX_BACKUP_DB_USER:=root}"
     : "${CONNEX_BACKUP_SOURCE_DEFAULTS_FILE:=/etc/connex-backup/source.cnf}"
-    : "${CONNEX_BACKUP_RESTORE_VERIFY:=false}"
+    : "${CONNEX_BACKUP_RESTORE_VERIFY:=true}"
     : "${CONNEX_BACKUP_VERIFY_DB_HOST:=$CONNEX_BACKUP_DB_HOST}"
     : "${CONNEX_BACKUP_VERIFY_DB_PORT:=$CONNEX_BACKUP_DB_PORT}"
     : "${CONNEX_BACKUP_VERIFY_DB_USER:=$CONNEX_BACKUP_DB_USER}"
@@ -177,7 +178,7 @@ backup_set_defaults() {
     : "${CONNEX_BACKUP_RESTORE_DB_USER:=$CONNEX_BACKUP_DB_USER}"
     : "${CONNEX_BACKUP_RESTORE_DEFAULTS_FILE:=$CONNEX_BACKUP_SOURCE_DEFAULTS_FILE}"
     : "${CONNEX_BACKUP_PROTECTED_SCHEMAS:=connex_pub}"
-    : "${CONNEX_BACKUP_PROTECTED_SCHEMA_PATTERN:=(^connex(db)?$|prod)}"
+    : "${CONNEX_BACKUP_PROTECTED_SCHEMA_PATTERN:=^connexdb$|^connex_pub$|prod}"
     : "${CONNEX_BACKUP_BINLOG_FETCH_MODE:=stream}"
     : "${CONNEX_BACKUP_BINLOG_FLUSH:=true}"
     : "${CONNEX_BACKUP_BINLOG_NO_FLUSH_ACK:=false}"
@@ -196,7 +197,7 @@ backup_set_defaults() {
     : "${CONNEX_BACKUP_DEFAULTS_DIR:=/etc/connex-backup}"
     : "${CONNEX_BACKUP_FULL_CALENDAR:=*-*-* 03:30:00 Asia/Tokyo}"
     : "${CONNEX_BACKUP_BINLOG_CALENDAR:=*:0/15}"
-    : "${CONNEX_BACKUP_PRUNE_CALENDAR:=*-*-* 04:30:00 Asia/Tokyo}"
+    : "${CONNEX_BACKUP_PRUNE_CALENDAR:=*-*-* 04,16:30:00 Asia/Tokyo}"
     : "${MYSQL:=$BACKUP_LIB_DIR/shims/mysql}"
     : "${MYSQLDUMP:=$BACKUP_LIB_DIR/shims/mysqldump}"
     : "${MYSQLBINLOG:=$BACKUP_LIB_DIR/shims/mysqlbinlog}"
@@ -395,10 +396,43 @@ backup_mysql() {
     "${MYSQL_COMMAND[@]}" "--defaults-extra-file=$defaults_file" --protocol=TCP --host="$host" --port="$port" --user="$user" "$@"
 }
 
+backup_profile_suppresses_binlog() {
+    local profile="$1"
+    case "$profile" in
+        verify)
+            return 0
+            ;;
+        restore)
+            [ "$BACKUP_SUPPRESS_RESTORE_BINLOG" = true ]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+backup_session_preamble() {
+    local profile="$1"
+    if backup_profile_suppresses_binlog "$profile"; then
+        printf 'SET SESSION sql_log_bin = 0;\n'
+    fi
+}
+
+backup_probe_binlog_suppression() {
+    local profile="$1"
+    if ! backup_profile_suppresses_binlog "$profile"; then
+        return 0
+    fi
+    if backup_mysql_query "$profile" "SELECT 1;" >/dev/null 2>&1; then
+        return 0
+    fi
+    return "$EXIT_DB_PREFLIGHT"
+}
+
 backup_mysql_query() {
     local profile="$1"
     local query="$2"
-    backup_mysql "$profile" --batch --skip-column-names --raw --execute="$query"
+    backup_mysql "$profile" --batch --skip-column-names --raw --execute="$(backup_session_preamble "$profile" | tr '\n' ' ')$query"
 }
 
 backup_mysqldump() {
@@ -437,18 +471,22 @@ backup_prepare_directories() {
 backup_acquire_lock() {
     local mode="$1"
     local name="$2"
-    local fd
+    local wait_seconds="${3:-0}"
+    local fd flag
     exec {fd}>"$CONNEX_BACKUP_LOCK_DIR/$name.lock"
     if [ "$mode" = shared ]; then
-        if ! flock -n -s "$fd"; then
-            backup_log error lock_held lock "$name" mode "$mode"
-            return "$EXIT_LOCK_HELD"
-        fi
+        flag=-s
     else
-        if ! flock -n -x "$fd"; then
-            backup_log error lock_held lock "$name" mode "$mode"
+        flag=-x
+    fi
+    if [ "$wait_seconds" -gt 0 ]; then
+        if ! flock -w "$wait_seconds" "$flag" "$fd"; then
+            backup_log error lock_held lock "$name" mode "$mode" waited_seconds "$wait_seconds"
             return "$EXIT_LOCK_HELD"
         fi
+    elif ! flock -n "$flag" "$fd"; then
+        backup_log error lock_held lock "$name" mode "$mode"
+        return "$EXIT_LOCK_HELD"
     fi
     BACKUP_LOCK_FDS+=("$fd")
 }
@@ -675,10 +713,17 @@ backup_schema_row_summary() {
 
 backup_schema_is_protected() {
     local schema="$1"
-    if backup_schema_in_list "$schema" "$CONNEX_BACKUP_PROTECTED_SCHEMAS"; then
+    local lower_schema="${schema,,}"
+    if backup_schema_in_list "$lower_schema" "${CONNEX_BACKUP_PROTECTED_SCHEMAS,,}"; then
         return 0
     fi
-    [[ "$schema" =~ $CONNEX_BACKUP_PROTECTED_SCHEMA_PATTERN ]]
+    shopt -s nocasematch
+    local matched=1
+    if [[ "$lower_schema" =~ $CONNEX_BACKUP_PROTECTED_SCHEMA_PATTERN ]]; then
+        matched=0
+    fi
+    shopt -u nocasematch
+    return "$matched"
 }
 
 backup_schema_collides() {
@@ -755,6 +800,22 @@ backup_filter_dump_global_state() {
     '
 }
 
+backup_configure_sidecar_binlog() {
+    local source_schema="$1"
+    local target_schema="$2"
+    if [ "$source_schema" = "$target_schema" ]; then
+        backup_log info restore_binlog_mode mode logged reason in_place_recovery target_schema "$target_schema"
+        return 0
+    fi
+    BACKUP_SUPPRESS_RESTORE_BINLOG=true
+    if backup_probe_binlog_suppression restore; then
+        backup_log info restore_binlog_mode mode suppressed reason sidecar_restore target_schema "$target_schema"
+        return 0
+    fi
+    BACKUP_SUPPRESS_RESTORE_BINLOG=false
+    backup_log warn restore_binlog_mode mode logged reason session_binlog_disable_denied required_privilege BINLOG_ADMIN target_schema "$target_schema"
+}
+
 backup_restore_artifact() {
     local run_dir="$1"
     local source_schema="$2"
@@ -765,7 +826,7 @@ backup_restore_artifact() {
     manifest="$run_dir/manifest"
     artifact="$(backup_manifest_schema_field "$manifest" "$source_schema" artifact)" || return "$EXIT_INTEGRITY"
     backup_prepare_restore_target "$manifest" "$source_schema" "$target_schema" "$force" "$profile" || return $?
-    if ! gzip -dc "$run_dir/$artifact" | backup_filter_dump_global_state | backup_mysql "$profile" --binary-mode "$target_schema"; then
+    if ! { backup_session_preamble "$profile"; gzip -dc "$run_dir/$artifact"; } | backup_filter_dump_global_state | backup_mysql "$profile" --binary-mode "$target_schema"; then
         backup_log error restore_import_failed source_schema "$source_schema" target_schema "$target_schema"
         return "$EXIT_RESTORE"
     fi

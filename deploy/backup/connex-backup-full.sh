@@ -110,7 +110,16 @@ full_dump_schema() {
     BACKUP_PHASE=dumping
     backup_log info dump_started run_id "$FULL_RUN_ID" schema "$schema"
     base_table_count="$(backup_mysql_query source "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$schema' AND table_type = 'BASE TABLE';")" || return "$EXIT_DB_PREFLIGHT"
-    IFS=$'\t' read -r charset collation < <(backup_mysql_query source "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = '$schema';")
+    local charset_row
+    charset_row="$(backup_mysql_query source "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = '$schema';")" || {
+        backup_log error dump_charset_failed run_id "$FULL_RUN_ID" schema "$schema"
+        return "$EXIT_DB_PREFLIGHT"
+    }
+    IFS=$'\t' read -r charset collation <<< "$charset_row"
+    if [[ ! "$charset" =~ ^[A-Za-z0-9_]+$ || ! "$collation" =~ ^[A-Za-z0-9_]+$ ]]; then
+        backup_log error dump_charset_invalid run_id "$FULL_RUN_ID" schema "$schema" charset "$charset" collation "$collation"
+        return "$EXIT_INTEGRITY"
+    fi
     if ! backup_mysqldump source \
         --single-transaction \
         --quick \
@@ -203,6 +212,10 @@ full_restore_verify() {
         return 0
     fi
     BACKUP_PHASE=restore_verify
+    if ! backup_probe_binlog_suppression verify; then
+        backup_log error restore_verify_failed reason session_binlog_disable_denied required_privilege BINLOG_ADMIN profile verify
+        return "$EXIT_RESTORE_VERIFY"
+    fi
     for schema in "${FULL_SCHEMAS[@]}"; do
         index=$((index + 1))
         full_verify_schema "$schema" "$index" || return "$EXIT_RESTORE_VERIFY"

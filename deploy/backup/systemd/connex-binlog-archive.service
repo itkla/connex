@@ -19,4 +19,4 @@ PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/var/backups/connex /run/connex-backup /var/run/docker.sock
 ReadOnlyPaths=/etc/connex-backup
-TimeoutStartSec=infinity
+TimeoutStartSec=1800

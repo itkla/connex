@@ -23,7 +23,22 @@ PITR_RUN_DIR=
 PITR_BINLOG_POSITION=
 PITR_TABLE_COUNT=0
 PITR_ROW_COUNT=0
+PITR_SCRATCH_FILE=
+PITR_COUNT_FILE=
+PITR_EXPECTED_EVENTS=0
+PITR_APPLIED_EVENTS=0
 declare -a PITR_BINLOG_FILES=()
+
+pitr_cleanup() {
+    if [ -n "$PITR_SCRATCH_FILE" ]; then
+        rm -f "$PITR_SCRATCH_FILE"
+    fi
+    if [ -n "$PITR_COUNT_FILE" ]; then
+        rm -f "$PITR_COUNT_FILE"
+    fi
+}
+
+trap pitr_cleanup EXIT
 
 pitr_usage() {
     printf 'Usage: %s --target-time <UTC timestamp> --target-schema <name> [--source-schema <name>] [--force-overwrite]\n' "$(basename "$0")" >&2
@@ -191,43 +206,188 @@ pitr_extract_query_statements() {
     '
 }
 
+pitr_scan_unsafe_statements() {
+    awk -v source_schema="$1" '
+        function following_dot(text, position, length_value,    scan, crossed) {
+            crossed = 0
+            scan = position
+            while (scan <= length_value && substr(text, scan, 1) ~ /[[:space:]]/) {
+                if (substr(text, scan, 1) == "\n") {
+                    crossed = 1
+                }
+                scan++
+            }
+            if (substr(text, scan, 1) != ".") {
+                return -1
+            }
+            return crossed
+        }
+        function emit(token, crossed) {
+            if (toupper(token) == "NEW" || toupper(token) == "OLD") {
+                return
+            }
+            if (token == source_schema) {
+                if (crossed == 1) {
+                    print "split_schema\t" token
+                }
+                return
+            }
+            if (token ~ /^connex_verify_/) {
+                return
+            }
+            print "schema\t" token
+        }
+        function shift_keyword(upper) {
+            previous2 = previous
+            previous = upper
+        }
+        function classify(token,    upper) {
+            upper = toupper(token)
+            if (upper == "GRANT" || upper == "REVOKE" || upper == "SHUTDOWN") {
+                print "statement\t" upper
+            } else if ((previous == "CREATE" || previous == "DROP" || previous == "ALTER" || previous == "RENAME") && (upper == "USER" || upper == "ROLE" || upper == "DATABASE" || upper == "SCHEMA" || upper == "TABLESPACE" || upper == "LOGFILE" || upper == "SERVER")) {
+                print "statement\t" previous "_" upper
+            } else if (previous == "SET" && (upper == "GLOBAL" || upper == "PERSIST" || upper == "PERSIST_ONLY")) {
+                print "statement\tSET_" upper
+            } else if (previous2 == "SET" && previous == "DEFAULT" && upper == "ROLE") {
+                print "statement\tSET_DEFAULT_ROLE"
+            } else if ((previous == "INSTALL" || previous == "UNINSTALL") && (upper == "PLUGIN" || upper == "COMPONENT")) {
+                print "statement\t" previous "_" upper
+            } else if (previous == "RESET" && (upper == "MASTER" || upper == "REPLICA" || upper == "SLAVE" || upper == "BINARY")) {
+                print "statement\tRESET_" upper
+            } else if (previous == "PURGE" && (upper == "BINARY" || upper == "MASTER")) {
+                print "statement\tPURGE_" upper
+            } else if (previous == "CHANGE" && (upper == "MASTER" || upper == "REPLICATION")) {
+                print "statement\tCHANGE_" upper
+            }
+            shift_keyword(upper)
+        }
+        { buffer = buffer $0 "\n" }
+        END {
+            text = buffer
+            length_value = length(text)
+            index_value = 1
+            exec_comment = 0
+            while (index_value <= length_value) {
+                character = substr(text, index_value, 1)
+                next_character = substr(text, index_value + 1, 1)
+                if (character == "#") {
+                    while (index_value <= length_value && substr(text, index_value, 1) != "\n") { index_value++ }
+                } else if (character == "-" && next_character == "-" && substr(text, index_value + 2, 1) ~ /[[:space:]]/) {
+                    while (index_value <= length_value && substr(text, index_value, 1) != "\n") { index_value++ }
+                } else if (character == "/" && next_character == "*") {
+                    if (substr(text, index_value + 2, 1) == "!") {
+                        index_value += 3
+                        while (index_value <= length_value && substr(text, index_value, 1) ~ /[0-9]/) { index_value++ }
+                        exec_comment = 1
+                    } else {
+                        index_value += 2
+                        while (index_value <= length_value && !(substr(text, index_value, 1) == "*" && substr(text, index_value + 1, 1) == "/")) { index_value++ }
+                        index_value += 2
+                    }
+                } else if (exec_comment && character == "*" && next_character == "/") {
+                    index_value += 2
+                    exec_comment = 0
+                } else if (character == "\x27") {
+                    index_value++
+                    while (index_value <= length_value) {
+                        inner = substr(text, index_value, 1)
+                        if (inner == "\\") { index_value += 2; continue }
+                        if (inner == "\x27" && substr(text, index_value + 1, 1) == "\x27") { index_value += 2; continue }
+                        if (inner == "\x27") { index_value++; break }
+                        index_value++
+                    }
+                    shift_keyword("")
+                } else if (character == "\"") {
+                    token = ""
+                    index_value++
+                    while (index_value <= length_value) {
+                        inner = substr(text, index_value, 1)
+                        if (inner == "\"" && substr(text, index_value + 1, 1) == "\"") { token = token "\""; index_value += 2; continue }
+                        if (inner == "\"") { index_value++; break }
+                        token = token inner
+                        index_value++
+                    }
+                    dot_state = following_dot(text, index_value, length_value)
+                    if (dot_state >= 0) { emit(token, dot_state) }
+                    shift_keyword("")
+                } else if (character == "`") {
+                    token = ""
+                    index_value++
+                    while (index_value <= length_value) {
+                        inner = substr(text, index_value, 1)
+                        if (inner == "`" && substr(text, index_value + 1, 1) == "`") { token = token "`"; index_value += 2; continue }
+                        if (inner == "`") { index_value++; break }
+                        token = token inner
+                        index_value++
+                    }
+                    dot_state = following_dot(text, index_value, length_value)
+                    if (dot_state >= 0) { emit(token, dot_state) }
+                    shift_keyword("")
+                } else if (character == "@") {
+                    token = "@"
+                    index_value++
+                    while (index_value <= length_value && substr(text, index_value, 1) ~ /[@A-Za-z0-9_$.]/) {
+                        token = token substr(text, index_value, 1)
+                        index_value++
+                    }
+                    if (tolower(token) ~ /^@@(global|persist)/) { print "statement\tSET_GLOBAL_VARIABLE" }
+                    shift_keyword("")
+                } else if (character ~ /[A-Za-z_$]/) {
+                    token_end = index_value
+                    while (token_end <= length_value && substr(text, token_end, 1) ~ /[A-Za-z0-9_$-]/) { token_end++ }
+                    token = substr(text, index_value, token_end - index_value)
+                    dot_state = following_dot(text, token_end, length_value)
+                    if (dot_state >= 0) { emit(token, dot_state) }
+                    classify(token)
+                    index_value = token_end
+                } else {
+                    index_value++
+                }
+            }
+        }
+    '
+}
+
 pitr_query_preflight() {
-    local decoded="$CONNEX_BACKUP_ROOT/binlog/.pitr-query.$$.txt"
-    local schema pattern unsafe=false
-    local -a other_schemas=()
-    while IFS= read -r schema; do
-        if [ "$schema" != "$PITR_SOURCE_SCHEMA" ]; then
-            other_schemas+=("$schema")
-        fi
-    done < <(backup_manifest_schema_names "$PITR_RUN_DIR/manifest")
+    local kind detail unsafe=false
+    PITR_SCRATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-query.XXXXXX")" || return "$EXIT_PITR"
     if ! backup_mysqlbinlog_local \
         --verify-binlog-checksum \
         --start-position="$PITR_BINLOG_POSITION" \
         --stop-datetime="$PITR_TARGET_TIME" \
-        "${PITR_BINLOG_FILES[@]}" | pitr_extract_query_statements > "$decoded"; then
-        rm -f "$decoded"
+        "${PITR_BINLOG_FILES[@]}" | pitr_extract_query_statements > "$PITR_SCRATCH_FILE"; then
         backup_log error pitr_preflight_failed reason decode
         return "$EXIT_PITR"
     fi
-    for schema in "${other_schemas[@]}"; do
-        pattern="(\`${schema}\`[[:space:]]*[.]|(^|[^A-Za-z0-9_\$-])${schema}[[:space:]]*[.])"
-        if grep -Eiq "$pattern" "$decoded"; then
-            backup_log error pitr_preflight_failed reason unsafe_cross_schema_statement schema "$schema"
-            unsafe=true
-        fi
-    done
-    if grep -Eiq "(\`(information_schema|performance_schema|mysql|sys)\`[[:space:]]*[.]|(^|[^A-Za-z0-9_\$-])(information_schema|performance_schema|mysql|sys)[[:space:]]*[.])" "$decoded"; then
-        backup_log error pitr_preflight_failed reason unsafe_system_schema_statement
+    while IFS=$'\t' read -r kind detail; do
+        case "$kind" in
+            schema)
+                backup_log error pitr_preflight_failed reason foreign_schema_reference schema "$detail"
+                ;;
+            split_schema)
+                backup_log error pitr_preflight_failed reason unrewritable_split_schema_reference schema "$detail"
+                ;;
+            statement)
+                backup_log error pitr_preflight_failed reason global_or_schema_level_statement statement "$detail"
+                ;;
+            *)
+                continue
+                ;;
+        esac
         unsafe=true
-    fi
-    rm -f "$decoded"
+    done < <(pitr_scan_unsafe_statements "$PITR_SOURCE_SCHEMA" < "$PITR_SCRATCH_FILE" | sort -u)
     if [ "$unsafe" = true ]; then
+        if [ "$PITR_FORCE" = true ]; then
+            backup_log warn pitr_preflight_overridden override "--force-overwrite" source_schema "$PITR_SOURCE_SCHEMA" target_schema "$PITR_TARGET_SCHEMA"
+            return 0
+        fi
         return "$EXIT_PITR"
     fi
 }
 
 pitr_rewrite_qualified_schema() {
-    awk -v source_schema="$PITR_SOURCE_SCHEMA" -v target_schema="$PITR_TARGET_SCHEMA" '
+    awk -v source_schema="$PITR_SOURCE_SCHEMA" -v target_schema="$PITR_TARGET_SCHEMA" -v count_file="$1" '
         function identifier_character(character) {
             return character ~ /[A-Za-z0-9_$-]/
         }
@@ -239,6 +399,9 @@ pitr_rewrite_qualified_schema() {
             return substr(text, scan, 1) == "."
         }
         {
+            if ($0 ~ /^BINLOG [\x27]/) {
+                applied_events++
+            }
             text = $0
             length_value = length(text)
             output = ""
@@ -287,22 +450,60 @@ pitr_rewrite_qualified_schema() {
                     } else {
                         index_value++
                     }
+                } else if (exec_comment && character == "*" && next_character == "/") {
+                    output = output "*/"
+                    index_value += 2
+                    exec_comment = 0
                 } else if (character == "#") {
                     line_comment = 1
                 } else if (character == "-" && next_character == "-" && substr(text, index_value + 2, 1) ~ /[[:space:]]/) {
                     line_comment = 1
                 } else if (character == "/" && next_character == "*") {
-                    output = output character next_character
-                    index_value += 2
-                    block_comment = 1
+                    if (substr(text, index_value + 2, 1) == "!") {
+                        output = output "/*!"
+                        index_value += 3
+                        while (index_value <= length_value && substr(text, index_value, 1) ~ /[0-9]/) {
+                            output = output substr(text, index_value, 1)
+                            index_value++
+                        }
+                        exec_comment = 1
+                    } else {
+                        output = output character next_character
+                        index_value += 2
+                        block_comment = 1
+                    }
                 } else if (character == "'"'"'") {
                     output = output character
                     index_value++
                     single_quote = 1
                 } else if (character == "\"") {
-                    output = output character
-                    index_value++
-                    double_quote = 1
+                    close_index = index_value + 1
+                    quoted_token = ""
+                    found_close = 0
+                    while (close_index <= length_value) {
+                        quoted_character = substr(text, close_index, 1)
+                        if (quoted_character == "\"" && substr(text, close_index + 1, 1) == "\"") {
+                            quoted_token = quoted_token "\""
+                            close_index += 2
+                        } else if (quoted_character == "\"") {
+                            found_close = 1
+                            break
+                        } else {
+                            quoted_token = quoted_token quoted_character
+                            close_index++
+                        }
+                    }
+                    if (found_close && quoted_token == source_schema && following_dot(text, close_index + 1, length_value)) {
+                        output = output "\"" target_schema "\""
+                        index_value = close_index + 1
+                    } else if (found_close) {
+                        output = output substr(text, index_value, close_index - index_value + 1)
+                        index_value = close_index + 1
+                    } else {
+                        output = output character
+                        index_value++
+                        double_quote = 1
+                    }
                 } else if (character == "`") {
                     token = ""
                     token_end = index_value + 1
@@ -343,10 +544,35 @@ pitr_rewrite_qualified_schema() {
             }
             print output
         }
+        END {
+            printf "%s\n", applied_events + 0 > count_file
+        }
     '
 }
 
+pitr_count_source_events() {
+    backup_mysqlbinlog_local \
+        --verify-binlog-checksum \
+        --start-position="$PITR_BINLOG_POSITION" \
+        --stop-datetime="$PITR_TARGET_TIME" \
+        "--database=$PITR_SOURCE_SCHEMA" \
+        "${PITR_BINLOG_FILES[@]}" |
+        awk '/^BINLOG [\x27]/ { count++ } END { printf "%s\n", count + 0 }'
+}
+
+pitr_replay_target_notice() {
+    if [ "$CONNEX_BACKUP_DOCKER_CLIENT_MODE" = exec ] ||
+        { [ "$CONNEX_BACKUP_RESTORE_DB_HOST" = "$CONNEX_BACKUP_DB_HOST" ] && [ "$CONNEX_BACKUP_RESTORE_DB_PORT" = "$CONNEX_BACKUP_DB_PORT" ]; }; then
+        backup_log warn pitr_replay_target_shared reason same_server_as_source restore_host "$CONNEX_BACKUP_RESTORE_DB_HOST" restore_port "$CONNEX_BACKUP_RESTORE_DB_PORT" client_mode "$CONNEX_BACKUP_DOCKER_CLIENT_MODE"
+    fi
+}
+
 pitr_replay() {
+    if ! PITR_EXPECTED_EVENTS="$(pitr_count_source_events)"; then
+        backup_log error pitr_replay_failed reason source_event_count source_schema "$PITR_SOURCE_SCHEMA"
+        return "$EXIT_PITR"
+    fi
+    PITR_COUNT_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-applied.XXXXXX")" || return "$EXIT_PITR"
     if ! TZ=UTC "${MYSQLBINLOG_COMMAND[@]}" \
         --verify-binlog-checksum \
         --require-row-format \
@@ -355,11 +581,25 @@ pitr_replay() {
         "--rewrite-db=$PITR_SOURCE_SCHEMA->$PITR_TARGET_SCHEMA" \
         "--database=$PITR_TARGET_SCHEMA" \
         "${PITR_BINLOG_FILES[@]}" |
-        pitr_rewrite_qualified_schema |
+        pitr_rewrite_qualified_schema "$PITR_COUNT_FILE" |
+        { backup_session_preamble restore; cat; } |
         backup_mysql restore --binary-mode "$PITR_TARGET_SCHEMA"; then
         backup_log error pitr_replay_failed source_schema "$PITR_SOURCE_SCHEMA" target_schema "$PITR_TARGET_SCHEMA" target_time "$PITR_TARGET_TIME"
         return "$EXIT_PITR"
     fi
+    PITR_APPLIED_EVENTS="$(cat "$PITR_COUNT_FILE")"
+    if [[ ! "$PITR_APPLIED_EVENTS" =~ ^[0-9]+$ ]]; then
+        backup_log error pitr_replay_failed reason applied_event_count_unreadable
+        return "$EXIT_PITR"
+    fi
+    if [ "$PITR_EXPECTED_EVENTS" -gt 0 ] && [ "$PITR_APPLIED_EVENTS" -eq 0 ]; then
+        backup_log error pitr_replay_failed reason zero_events_applied expected_row_events "$PITR_EXPECTED_EVENTS" applied_row_events "$PITR_APPLIED_EVENTS" source_schema "$PITR_SOURCE_SCHEMA" target_schema "$PITR_TARGET_SCHEMA"
+        return "$EXIT_PITR"
+    fi
+    if [ "$PITR_APPLIED_EVENTS" -ne "$PITR_EXPECTED_EVENTS" ]; then
+        backup_log warn pitr_replay_event_count_differs expected_row_events "$PITR_EXPECTED_EVENTS" applied_row_events "$PITR_APPLIED_EVENTS"
+    fi
+    backup_log info pitr_replay_completed expected_row_events "$PITR_EXPECTED_EVENTS" applied_row_events "$PITR_APPLIED_EVENTS"
 }
 
 pitr_run() {
@@ -381,6 +621,8 @@ pitr_run() {
     pitr_validate_sequence "$start_file" || return $?
     pitr_query_preflight || return $?
     BACKUP_PHASE=restoring_full
+    pitr_replay_target_notice
+    backup_configure_sidecar_binlog "$PITR_SOURCE_SCHEMA" "$PITR_TARGET_SCHEMA"
     backup_log info pitr_started run_id "$(basename "$PITR_RUN_DIR")" source_schema "$PITR_SOURCE_SCHEMA" target_schema "$PITR_TARGET_SCHEMA" target_time "$PITR_TARGET_TIME" binlog_count "${#PITR_BINLOG_FILES[@]}" force_overwrite "$PITR_FORCE"
     backup_restore_artifact "$PITR_RUN_DIR" "$PITR_SOURCE_SCHEMA" "$PITR_TARGET_SCHEMA" "$PITR_FORCE" restore || return $?
     BACKUP_PHASE=replaying_binlogs
@@ -388,13 +630,13 @@ pitr_run() {
     BACKUP_PHASE=row_summary
     summary="$(backup_schema_row_summary restore "$PITR_TARGET_SCHEMA")" || return "$EXIT_RESTORE"
     IFS=$'\t' read -r PITR_TABLE_COUNT PITR_ROW_COUNT <<< "$summary"
-    backup_log info pitr_completed run_id "$(basename "$PITR_RUN_DIR")" binlog_count "${#PITR_BINLOG_FILES[@]}" stop_time "$PITR_TARGET_TIME" table_count "$PITR_TABLE_COUNT" row_count "$PITR_ROW_COUNT"
+    backup_log info pitr_completed run_id "$(basename "$PITR_RUN_DIR")" binlog_count "${#PITR_BINLOG_FILES[@]}" stop_time "$PITR_TARGET_TIME" table_count "$PITR_TABLE_COUNT" row_count "$PITR_ROW_COUNT" applied_row_events "$PITR_APPLIED_EVENTS"
 }
 
 main() {
     local exit_code=0
     pitr_run "$@" || exit_code=$?
-    backup_finish "$exit_code" pitr_summary run_id "$(basename "${PITR_RUN_DIR:-none}")" source_schema "${PITR_SOURCE_SCHEMA:-unknown}" target_schema "${PITR_TARGET_SCHEMA:-unknown}" binlogs_replayed "${#PITR_BINLOG_FILES[@]}" stop_time "${PITR_TARGET_TIME:-unknown}" table_count "$PITR_TABLE_COUNT" row_count "$PITR_ROW_COUNT"
+    backup_finish "$exit_code" pitr_summary run_id "$(basename "${PITR_RUN_DIR:-none}")" source_schema "${PITR_SOURCE_SCHEMA:-unknown}" target_schema "${PITR_TARGET_SCHEMA:-unknown}" binlogs_replayed "${#PITR_BINLOG_FILES[@]}" stop_time "${PITR_TARGET_TIME:-unknown}" table_count "$PITR_TABLE_COUNT" row_count "$PITR_ROW_COUNT" expected_row_events "$PITR_EXPECTED_EVENTS" applied_row_events "$PITR_APPLIED_EVENTS"
     return "$exit_code"
 }
 

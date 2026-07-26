@@ -54,8 +54,8 @@ archive_preflight() {
         backup_log error binlog_preflight reason binlog_format_not_row format "$format"
         return "$EXIT_DB_PREFLIGHT"
     fi
-    if [[ ! "$expiry" =~ ^[0-9]+$ ]] || [ "$expiry" -le 0 ] || [ "$expiry" -gt $((CONNEX_BACKUP_RETENTION_DAYS * 86400)) ]; then
-        backup_log error binlog_preflight reason server_expiry_outside_cap expiry_seconds "$expiry" cap_seconds "$((CONNEX_BACKUP_RETENTION_DAYS * 86400))"
+    if [[ ! "$expiry" =~ ^[0-9]+$ ]] || [ "$expiry" -le 0 ] || [ "$expiry" -gt $(((CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400)) ]; then
+        backup_log error binlog_preflight reason server_expiry_outside_cap expiry_seconds "$expiry" cap_seconds "$(((CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400))"
         return "$EXIT_DB_PREFLIGHT"
     fi
     if [ "$auto_purge" != 1 ]; then
@@ -85,6 +85,32 @@ archive_rotate_and_list() {
         return "$EXIT_BINLOG_ARCHIVE"
     fi
     IFS=$'\t' read -r ARCHIVE_ACTIVE_FILE _ _ <<< "${ARCHIVE_SERVER_LOGS[-1]}"
+}
+
+archive_verify_server_retention() {
+    local oldest_file range created_epoch age legal_age ceiling_age
+    IFS=$'\t' read -r oldest_file _ _ <<< "${ARCHIVE_SERVER_LOGS[0]}"
+    if [[ ! "$oldest_file" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        backup_log error binlog_list reason invalid_server_entry file "$oldest_file"
+        return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    if ! range="$(archive_source_time_range "$oldest_file" 2>/dev/null)"; then
+        backup_log warn binlog_server_retention reason oldest_file_unreadable file "$oldest_file"
+        return 0
+    fi
+    IFS=$'\t' read -r created_epoch _ <<< "$range"
+    age=$(( $(date +%s) - created_epoch ))
+    legal_age=$(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 ))
+    ceiling_age=$(( CONNEX_BACKUP_RETENTION_DAYS * 86400 ))
+    if [ "$age" -ge "$ceiling_age" ]; then
+        backup_log error binlog_server_retention reason server_binlog_past_legal_ceiling file "$oldest_file" age_seconds "$age" ceiling_seconds "$ceiling_age" remedy "PURGE BINARY LOGS BEFORE"
+        return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    if [ "$age" -ge "$legal_age" ]; then
+        backup_log warn binlog_server_retention reason server_purge_lagging file "$oldest_file" age_seconds "$age" prune_threshold_seconds "$legal_age"
+        return 0
+    fi
+    backup_log info binlog_server_retention file "$oldest_file" age_seconds "$age" prune_threshold_seconds "$legal_age"
 }
 
 archive_state_value() {
@@ -279,9 +305,9 @@ archive_publish_file() {
         printf 'archived_at_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'fetch_mode\t%s\n' "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
     } > "$destination.meta.pending"
+    mv "$temporary_file" "$destination"
     mv "$destination.sha256.pending" "$destination.sha256"
     mv "$destination.meta.pending" "$destination.meta"
-    mv "$temporary_file" "$destination"
     ARCHIVE_FETCHED=$((ARCHIVE_FETCHED + 1))
     ARCHIVE_BYTES=$((ARCHIVE_BYTES + local_size))
     backup_log info binlog_fetch_completed file "$file" server_size "$server_size" local_size "$local_size" sha256 "$hash" file_created_utc "$created_utc" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
@@ -387,6 +413,7 @@ archive_run() {
     archive_validate_state || return $?
     BACKUP_PHASE=binlog_rotation
     archive_rotate_and_list || return $?
+    archive_verify_server_retention || return $?
     BACKUP_PHASE=binlog_fetch
     archive_process_logs || return $?
     BACKUP_PHASE=binlog_publish
