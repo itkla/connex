@@ -15,8 +15,10 @@
 #   - Builds both artifacts before restarting anything; the frontend builds into
 #     .next-new (NEXT_DIST_DIR) and is swapped into .next only after the backend
 #     passes its health gate, so the live frontend keeps a consistent build dir.
-#   - Restarts the backend, then polls unit + HTTP health with a bounded timeout and
-#     verifies the served gitSha equals the target commit; rechecks the same PID after
+#   - Restarts the backend, then polls unit + HTTP health with a bounded timeout,
+#     verifies the served gitSha equals the target commit, and requires
+#     GET /api/health/ready to answer 200 (DB reachable, migrations applied; falls
+#     back to /api/version for pre-readiness JARs); rechecks the same PID after
 #     a stability interval. Only then swaps and restarts the frontend.
 #   - On backend health failure: restores the previous JAR, restarts, and exits
 #     nonzero without touching the frontend or the marker.
@@ -68,8 +70,18 @@ served_git_sha() {
         | sed -n 's/.*"gitSha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p'
 }
 
+# Readiness-gated health: /api/health/ready must answer 200 (DB reachable, migrations
+# applied). A 404/405 means the running JAR predates the endpoint (e.g. a rollback
+# artifact), so fall back to the old /api/version liveness probe; any other status
+# (notably 503 = not ready) fails the check.
 backend_http_healthy() {
-    curl -fsS --max-time 5 -o /dev/null "$BACKEND_URL/api/version" 2>/dev/null
+    local code
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$BACKEND_URL/api/health/ready" 2>/dev/null)" || return 1
+    case "$code" in
+        200) return 0 ;;
+        404|405) curl -fsS --max-time 5 -o /dev/null "$BACKEND_URL/api/version" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
 }
 
 wait_for_backend_sha() {
@@ -77,10 +89,12 @@ wait_for_backend_sha() {
     deadline=$(( $(date +%s) + BACKEND_HEALTH_TIMEOUT ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
         sha="$(served_git_sha || true)"
-        if [ "$sha" = "$target" ]; then
+        if [ "$sha" = "$target" ] && backend_http_healthy; then
             return 0
         fi
-        if [ -n "$sha" ]; then
+        if [ "$sha" = "$target" ]; then
+            log "Backend serving sha ${target:0:8} but /api/health/ready not green yet; waiting..."
+        elif [ -n "$sha" ]; then
             log "Backend answering but serving sha ${sha:0:8}, want ${target:0:8}; waiting..."
         fi
         sleep "$POLL_INTERVAL"
@@ -110,7 +124,8 @@ verify_backend_stability() {
         log "Backend stability check FAILED: PID changed ($pid_before -> $pid_after) within ${STABILITY_INTERVAL}s of passing health"
         return 1
     fi
-    if ! systemctl is-active --quiet connex-staging-backend || [ "$(served_git_sha || true)" != "$target" ]; then
+    if ! systemctl is-active --quiet connex-staging-backend || [ "$(served_git_sha || true)" != "$target" ] \
+        || ! backend_http_healthy; then
         log "Backend stability check FAILED: unhealthy on recheck (unit state: $(backend_unit_state))"
         return 1
     fi
