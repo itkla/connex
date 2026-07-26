@@ -335,13 +335,16 @@ class EncryptionGuardrailArchTest {
 
     private static final Set<String> CORE_CRM_TABLES = Set.of(
         "person",
+        "person_identity",
         "person_share",
         "person_tag",
         "person_employment",
         "person_edge",
         "company",
+        "company_identity",
         "company_share",
         "company_tag",
+        "identity_collision",
         "deal",
         "deal_person",
         "deal_collaborator",
