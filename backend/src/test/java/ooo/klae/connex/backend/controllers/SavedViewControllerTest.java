@@ -32,20 +32,23 @@ import ooo.klae.connex.backend.dto.SavedViewUpdateRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SavedViewService;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class SavedViewControllerTest {
 
     @Mock private SavedViewService service;
+    @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(new SavedViewController(service))
-            .setControllerAdvice(new GlobalExceptionHandler())
+            .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
     }
 

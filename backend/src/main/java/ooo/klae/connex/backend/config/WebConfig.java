@@ -37,6 +37,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addInterceptor(tenantResolutionInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
-                        "/api/auth/**", "/api/mail/managed", "/api/version", "/api/capabilities");
+                        "/api/auth/**", "/api/mail/managed", "/api/health", "/api/health/ready",
+                        "/api/metrics", "/api/version", "/api/capabilities");
     }
 }

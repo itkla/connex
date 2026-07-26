@@ -21,10 +21,24 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.observability.ReportedError;
+import ooo.klae.connex.backend.observability.ReportedError.Source;
+import ooo.klae.connex.backend.tenant.TenantContext;
+
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final int MAX_STACK_DETAIL_LENGTH = 8_000;
+    private static final int MAX_STACK_FRAMES = 32;
+
+    private final ErrorReporter errorReporter;
+    private final TenantContext tenantContext;
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<String> notFound(ResourceNotFoundException ex) {
@@ -90,7 +104,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> validation(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new LinkedHashMap<>(); // using LinkedHashMap to preserve order of errors
+        Map<String, String> errors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(err ->
             errors.put(err.getField(), err.getDefaultMessage())
         );
@@ -178,9 +192,24 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> internalError(Exception ex) {
-        log.error("Unhandled exception", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred");
+    public ResponseEntity<Map<String, String>> internalError(Exception ex, HttpServletRequest request) {
+        String correlationId = CorrelationIds.current();
+        try {
+            errorReporter.report(new ReportedError(
+                    Source.SERVER,
+                    correlationId,
+                    tenantContext.getWorkspaceId(),
+                    tenantContext.getUserId(),
+                    ex.getClass().getName(),
+                    stackDetail(ex),
+                    request.getRequestURI()));
+        } catch (Throwable reportingFailure) {
+            log.error("Application error reporter failed");
+        }
+        Map<String, String> response = new LinkedHashMap<>();
+        response.put("message", "An unexpected error occurred");
+        response.put("correlationId", correlationId);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -197,5 +226,29 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return false;
+    }
+
+    private static String stackDetail(Throwable throwable) {
+        StringBuilder detail = new StringBuilder();
+        StackTraceElement[] frames = throwable.getStackTrace();
+        int count = Math.min(frames.length, MAX_STACK_FRAMES);
+        for (int index = 0; index < count; index++) {
+            String frame = frames[index].toString();
+            int separatorLength = detail.isEmpty() ? 0 : 1;
+            int remaining = MAX_STACK_DETAIL_LENGTH - detail.length() - separatorLength;
+            if (remaining <= 0) {
+                break;
+            }
+            if (separatorLength != 0) {
+                detail.append('\n');
+            }
+            if (frame.length() <= remaining) {
+                detail.append(frame);
+            } else {
+                detail.append(frame, 0, remaining);
+                break;
+            }
+        }
+        return detail.toString();
     }
 }

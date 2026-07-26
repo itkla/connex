@@ -37,6 +37,7 @@ import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.session.FindByIndexNameSessionRepository;
@@ -51,6 +52,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.businesscard.BusinessCardImportAdmissionFilter;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.observability.CorrelationIdFilter;
+import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -152,6 +155,7 @@ public class SecurityConfig {
             WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
+            @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
@@ -162,6 +166,7 @@ public class SecurityConfig {
                 workspaceRequestResolver,
                 workspaceService),
             CsrfFilter.class);
+        http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
@@ -187,7 +192,10 @@ public class SecurityConfig {
         }
         http
             .authorizeHttpRequests(auth -> {
-                auth.requestMatchers(HttpMethod.GET, "/api/version").permitAll()
+                auth.requestMatchers(HttpMethod.GET, "/api/health/ready").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/version").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/metrics").authenticated()
                     .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
                     .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
@@ -253,6 +261,14 @@ public class SecurityConfig {
             );
         }
         return http.build();
+    }
+
+    @Bean
+    FilterRegistrationBean<CorrelationIdFilter> correlationIdFilterRegistration() {
+        FilterRegistrationBean<CorrelationIdFilter> registration =
+            new FilterRegistrationBean<>(new CorrelationIdFilter());
+        registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 2);
+        return registration;
     }
 
     @Bean

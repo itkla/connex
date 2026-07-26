@@ -51,6 +51,7 @@ ext['jackson-2-bom.version'] = '2.21.5'
 ext['logback.version'] = '1.5.35'
 
 dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
@@ -71,8 +72,10 @@ dependencies {
 	implementation 'org.springframework.security:spring-security-messaging'
 	implementation platform('software.amazon.awssdk:bom:2.46.8')
 	implementation 'software.amazon.awssdk:s3'
+	compileOnly 'io.micrometer:micrometer-registry-prometheus'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	annotationProcessor 'org.projectlombok:lombok'
 	providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat-runtime'
