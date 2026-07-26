@@ -1,0 +1,13 @@
+# Connex on-prem daily backup-prune schedule.
+# install.sh renders OnCalendar from CONNEX_BACKUP_PRUNE_CALENDAR.
+
+[Unit]
+Description=Schedule Connex database backup pruning
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Tokyo
+Persistent=true
+Unit=connex-backup-prune.service
+
+[Install]
+WantedBy=timers.target
