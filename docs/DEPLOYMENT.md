@@ -426,6 +426,30 @@ algorithm, so these variables cannot substitute a tag or alternate repository. R
 verifying a new manifest, replacing the complete three-digest set, and re-running `pull` plus
 `up -d`.
 
+## Monitoring & support (operator-facing)
+
+Connex deployments are frequently operated by the customer (silo / on-prem), so the observability
+surface is designed for **your** monitoring stack — Connex has no remote access and nothing phones
+home. The default error sink is local (structured `ERROR` log lines); no error data leaves the
+deployment unless the operator explicitly configures a vendor integration.
+
+- `GET /api/health` — liveness. Anonymous, returns `200 {"status":"UP"}` while the process serves
+  traffic. Safe for load-balancer checks; carries no version or build information.
+- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable and all
+  Flyway migrations are applied, otherwise `503`. Status words only — the body never carries
+  exception details. Gate restarts/upgrades on this endpoint.
+- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. **Never anonymous**:
+  authenticate with a logged-in session or configure a static scrape token and send it as
+  `Authorization: Bearer <token>`. Unset token = endpoint unavailable to scrapers.
+
+**Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
+unexpected `500` responses include the same id in the JSON body; the frontend error screen shows a
+`Reference:` digest for rendering failures. Production logs are structured JSON (ECS) and include
+the `correlationId` field, so when a user quotes the reference from the error screen or response,
+the operator can find the exact server-side stack trace with e.g.
+`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket —
+that pairing is the support path for deployments Connex cannot access.
+
 ## Local evaluation (not for production)
 
 For a zero-config local trial against the bundled MySQL, build from source and use the eval env,
