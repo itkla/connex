@@ -4046,3 +4046,13 @@ export function createSuppression(payload: Types.SuppressionEntryPayload) {
 export function deleteSuppression(id: number) {
     return deleteJson<void>(`/api/suppressions/${id}`);
 }
+
+/**
+ * Reports a client-side error boundary hit to the backend error sink. Authenticated,
+ * workspace-scoped, and rate-limited server-side; callers must treat delivery as
+ * best-effort (see `reportBoundaryError` for the guarded entry point).
+ * @param payload the size-capped error report
+ */
+export function reportClientError(payload: Types.ClientErrorReportPayload) {
+    return postJson<void>(`/api/client-errors`, payload);
+}
