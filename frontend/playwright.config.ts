@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 export const E2E_BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 /** Directory for per-run bootstrap artifacts (storage state + seeded-record fixture). Never committed. */
-export const E2E_ARTIFACT_DIR = path.resolve(import.meta.dirname, "test/e2e/.artifacts");
+export const E2E_ARTIFACT_DIR = path.resolve(__dirname, "test/e2e/.artifacts");
 
 export const STORAGE_STATE_PATH = path.join(E2E_ARTIFACT_DIR, "storage-state.json");
 export const RUN_FIXTURE_PATH = path.join(E2E_ARTIFACT_DIR, "run.json");

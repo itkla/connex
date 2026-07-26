@@ -15,7 +15,7 @@ test.describe("notifications", () => {
     test("the bell opens the notification popover with a link to the inbox", async ({ page }) => {
         await page.goto("/dashboard");
         await page.getByRole("button", { name: /Open notifications/ }).click();
-        await page.getByRole("link", { name: "View all notifications" }).click();
+        await page.getByRole("menuitem", { name: "View all notifications" }).click();
         await expect(page).toHaveURL(/\/notifications/);
         await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
     });

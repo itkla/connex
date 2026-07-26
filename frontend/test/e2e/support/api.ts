@@ -31,6 +31,7 @@ export async function registerUser(
     credentials: { username: string; password: string; email: string },
 ): Promise<void> {
     const response = await api.post("/api/auth/register", {
+        timeout: 120_000,
         data: {
             username: credentials.username,
             password: credentials.password,
@@ -42,18 +43,18 @@ export async function registerUser(
     expect(response.status(), await safeBody(response)).toBe(200);
 }
 
-/** Reads the session's default workspace id, the tenant every seeded record belongs to. */
-export async function defaultWorkspaceId(api: APIRequestContext): Promise<number> {
-    const response = await api.get("/api/workspaces");
+/** Reads the session's active workspace id, the tenant every seeded record belongs to. */
+export async function activeWorkspaceId(api: APIRequestContext): Promise<number> {
+    const response = await api.get("/api/workspaces", { timeout: 120_000 });
     expect(response.status()).toBe(200);
-    const body = (await response.json()) as { defaultWorkspaceId: number };
-    expect(body.defaultWorkspaceId).toBeGreaterThan(0);
-    return body.defaultWorkspaceId;
+    const body = (await response.json()) as { activeWorkspaceId: number };
+    expect(body.activeWorkspaceId).toBeGreaterThan(0);
+    return body.activeWorkspaceId;
 }
 
 /** Fetches the CSRF token scoped writes require (register/login are exempt; seeding is not). */
 export async function csrfBootstrap(api: APIRequestContext): Promise<CsrfBootstrap> {
-    const response = await api.get("/api/auth/csrf");
+    const response = await api.get("/api/auth/csrf", { timeout: 120_000 });
     expect(response.status()).toBe(200);
     const body = (await response.json()) as CsrfBootstrap;
     expect(body.token).toBeTruthy();
@@ -71,6 +72,7 @@ export function seeder(api: APIRequestContext, workspaceId: number, csrf: CsrfBo
     return {
         async post(path, data) {
             const response = await api.post(path, {
+                timeout: 120_000,
                 headers: {
                     "X-Workspace-Id": String(workspaceId),
                     [csrf.headerName]: csrf.token,

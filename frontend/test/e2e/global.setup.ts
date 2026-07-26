@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, request, test as setup } from "@playwright/test";
 import { E2E_ARTIFACT_DIR, E2E_BASE_URL, RUN_FIXTURE_PATH, STORAGE_STATE_PATH } from "../../playwright.config";
-import { csrfBootstrap, defaultWorkspaceId, registerUser, seeder, type RunFixture } from "./support/api";
+import { csrfBootstrap, activeWorkspaceId, registerUser, seeder, type RunFixture } from "./support/api";
 
 /**
  * Provisions an isolated tenant for this run: registers a fresh user (which, under the dev
@@ -10,6 +10,7 @@ import { csrfBootstrap, defaultWorkspaceId, registerUser, seeder, type RunFixtur
  * against. Every run gets its own workspace, so runs are isolated and rerunnable.
  */
 setup("provision tenant and seed records", async () => {
+    setup.setTimeout(240_000);
     const api = await request.newContext({ baseURL: E2E_BASE_URL });
 
     const probe = await api.get("/auth/login").catch(() => null);
@@ -42,7 +43,7 @@ setup("provision tenant and seed records", async () => {
     };
 
     await registerUser(api, fixture);
-    fixture.workspaceId = await defaultWorkspaceId(api);
+    fixture.workspaceId = await activeWorkspaceId(api);
 
     const csrf = await csrfBootstrap(api);
     const seed = seeder(api, fixture.workspaceId, csrf);

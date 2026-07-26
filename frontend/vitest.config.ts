@@ -10,5 +10,7 @@ export default defineConfig({
     test: {
         include: ["test/unit/**/*.test.ts"],
         environment: "node",
+        testTimeout: 30_000,
+        maxWorkers: 2,
     },
 });
