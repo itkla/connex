@@ -140,11 +140,8 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
             newPerson(workspace, company, "Case@Example.com", "090-1111-1111");
 
         runPersonPages(10);
-        jdbcTemplate.update(
-            "UPDATE person SET email = ? WHERE workspace_id = ? AND id = ?",
-            "case@example.com",
-            workspace.getId(),
-            person.getId());
+        person.setEmail("case@example.com");
+        personMapper.update(person);
         BackfillTotals formattingReplay = runPersonPages(10);
 
         assertEquals(0, formattingReplay.identitiesCreated);
@@ -160,11 +157,8 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
                 workspace.getId(),
                 person.getId()));
 
-        jdbcTemplate.update(
-            "UPDATE person SET email = ? WHERE workspace_id = ? AND id = ?",
-            "new@example.com",
-            workspace.getId(),
-            person.getId());
+        person.setEmail("new@example.com");
+        personMapper.update(person);
         BackfillTotals changedReplay = runPersonPages(10);
 
         assertEquals(1, changedReplay.identitiesCreated);
