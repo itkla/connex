@@ -10,6 +10,15 @@ export const E2E_ARTIFACT_DIR = path.resolve(__dirname, "test/e2e/.artifacts");
 export const STORAGE_STATE_PATH = path.join(E2E_ARTIFACT_DIR, "storage-state.json");
 export const RUN_FIXTURE_PATH = path.join(E2E_ARTIFACT_DIR, "run.json");
 
+/** Gradle console log of the deterministic volume-seeder run that populated the stack under test. */
+export const SEED_LOG_PATH = process.env.E2E_SEED_LOG ?? path.join(E2E_ARTIFACT_DIR, "seeder.log");
+
+/** Tests whose title carries this tag also run in the phone-viewport project. */
+export const MOBILE_TAG = /@mobile/;
+
+/** Tests whose title carries this tag run *only* in the phone-viewport project. */
+export const MOBILE_ONLY_TAG = /@mobile-only/;
+
 export default defineConfig({
     testDir: "./test/e2e",
     fullyParallel: true,
@@ -38,6 +47,16 @@ export default defineConfig({
                 ...devices["Desktop Chrome"],
                 storageState: STORAGE_STATE_PATH,
             },
+            grepInvert: MOBILE_ONLY_TAG,
+            dependencies: ["setup"],
+        },
+        {
+            name: "mobile-chromium",
+            use: {
+                ...devices["Pixel 7"],
+                storageState: STORAGE_STATE_PATH,
+            },
+            grep: MOBILE_TAG,
             dependencies: ["setup"],
         },
     ],
