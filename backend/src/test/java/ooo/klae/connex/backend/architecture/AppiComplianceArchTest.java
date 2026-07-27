@@ -85,8 +85,9 @@ class AppiComplianceArchTest {
                 violations.add("blank allowlist rationale " + exception.getKey());
             }
         }
-        assertEquals(11, enrollments.size(),
-            "The historical APPI restriction sweep must retain all 11 reviewed namespaces.");
+        assertEquals(13, enrollments.size(),
+            "The APPI restriction sweep must retain every reviewed namespace: the historical 11 "
+                + "plus IdentityMapper and IdentityCollisionMapper.");
         assertTrue(violations.isEmpty(),
             "Person-reading mappers must be either strategy-enrolled or explicitly allowlisted "
                 + "with one-line justification: " + violations);

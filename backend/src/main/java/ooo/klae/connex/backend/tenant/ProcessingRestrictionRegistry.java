@@ -73,6 +73,10 @@ public final class ProcessingRestrictionRegistry {
             "Campaign validation deliberately detects both restriction states before excluding audience members.");
         enroll(entries, "PersonEdgeMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Relationship graph reads exclude suspended endpoints.");
+        enroll(entries, "IdentityMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
+            "Backfill candidate reads and identity writes exclude both suspended and provision-ceased people.");
+        enroll(entries, "IdentityCollisionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
+            "Collision group reads exclude both suspended and provision-ceased people at read time.");
         enroll(entries, "NotificationMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Notification person projections exclude suspended people.");
         enroll(entries, "IntroductionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,

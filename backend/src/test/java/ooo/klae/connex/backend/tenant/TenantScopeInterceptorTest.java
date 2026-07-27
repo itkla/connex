@@ -46,6 +46,10 @@ class TenantScopeInterceptorTest {
     @Test
     void scopedStatementsRequireResolvedContext() {
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.getAllCompanies"));
+        assertTrue(interceptor.requiresResolvedContext(
+            NS + "IdentityMapper.findPersonBackfillCandidates"));
+        assertTrue(interceptor.requiresResolvedContext(
+            NS + "IdentityCollisionMapper.findVisibleGroups"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DealMapper.search"));
         assertTrue(interceptor.requiresResolvedContext(NS + "ReportMapper.getDefinitions"));
         assertTrue(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.getPin"));

@@ -271,6 +271,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("introduction", 370));
         raw.add(direct("warm_path_dismissal", 380));
         raw.add(direct("suppression_entry", 390));
+        raw.add(direct("identity_collision", 395));
         raw.add(direct("activity", 400));
         raw.add(direct("note", 410));
         raw.add(direct("task", 420));
@@ -304,6 +305,12 @@ public final class TenantLifecycleRegistry {
             "fk_deal_tag_deal", link("deal_id", "id")));
         raw.add(cascade("person_tag", "person",
             "fk_person_tag_person", link("person_id", "id")));
+        raw.add(cascade("person_identity", "person",
+            "fk_person_identity_person",
+            link("workspace_id", "workspace_id"), link("person_id", "id")));
+        raw.add(cascade("company_identity", "company",
+            "fk_company_identity_company",
+            link("workspace_id", "workspace_id"), link("company_id", "id")));
 
         Map<String, TableLifecycle> byTable = new LinkedHashMap<>();
         for (TableLifecycle declaration : raw) {
