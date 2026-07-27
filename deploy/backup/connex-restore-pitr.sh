@@ -24,6 +24,7 @@ PITR_BINLOG_POSITION=
 PITR_TABLE_COUNT=0
 PITR_ROW_COUNT=0
 PITR_SCRATCH_FILE=
+PITR_FILTERED_SCRATCH_FILE=
 PITR_COUNT_FILE=
 PITR_EXPECTED_EVENTS=0
 PITR_APPLIED_EVENTS=0
@@ -32,6 +33,9 @@ declare -a PITR_BINLOG_FILES=()
 pitr_cleanup() {
     if [ -n "$PITR_SCRATCH_FILE" ]; then
         rm -f "$PITR_SCRATCH_FILE"
+    fi
+    if [ -n "$PITR_FILTERED_SCRATCH_FILE" ]; then
+        rm -f "$PITR_FILTERED_SCRATCH_FILE"
     fi
     if [ -n "$PITR_COUNT_FILE" ]; then
         rm -f "$PITR_COUNT_FILE"
@@ -232,9 +236,6 @@ pitr_scan_unsafe_statements() {
                 }
                 return
             }
-            if (token ~ /^connex_verify_/) {
-                return
-            }
             print "schema\t" token
         }
         function shift_keyword(upper) {
@@ -249,6 +250,8 @@ pitr_scan_unsafe_statements() {
                 print "statement\t" previous "_" upper
             } else if (previous == "SET" && (upper == "GLOBAL" || upper == "PERSIST" || upper == "PERSIST_ONLY")) {
                 print "statement\tSET_" upper
+            } else if (previous == "SET" && upper == "PASSWORD") {
+                print "statement\tSET_PASSWORD"
             } else if (previous2 == "SET" && previous == "DEFAULT" && upper == "ROLE") {
                 print "statement\tSET_DEFAULT_ROLE"
             } else if ((previous == "INSTALL" || previous == "UNINSTALL") && (upper == "PLUGIN" || upper == "COMPONENT")) {
@@ -349,6 +352,33 @@ pitr_scan_unsafe_statements() {
     '
 }
 
+# mysqlbinlog --database filters Query events by the event's *default* database,
+# not by qualified names inside the statement text. A statement such as
+# "ALTER TABLE src.foo ..." issued without selecting src therefore passes this
+# preflight but is silently dropped from the replay, so PITR can report success
+# with a schema that never received the change. Decode the window a second time
+# with the filter the replay uses and refuse on anything it removes.
+pitr_verify_no_statement_is_filtered_away() {
+    local dropped
+    PITR_FILTERED_SCRATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-filtered.XXXXXX")" || return 1
+    if ! backup_mysqlbinlog_local \
+        --verify-binlog-checksum \
+        --start-position="$PITR_BINLOG_POSITION" \
+        --stop-datetime="$PITR_TARGET_TIME" \
+        "--database=$PITR_SOURCE_SCHEMA" \
+        "${PITR_BINLOG_FILES[@]}" | pitr_extract_query_statements > "$PITR_FILTERED_SCRATCH_FILE"; then
+        backup_log error pitr_preflight_failed reason filtered_decode
+        return 1
+    fi
+    dropped="$(comm -23 <(sort -u "$PITR_SCRATCH_FILE") <(sort -u "$PITR_FILTERED_SCRATCH_FILE") | head -1)"
+    if [ -n "$dropped" ]; then
+        backup_log error pitr_preflight_failed reason qualified_statement_without_matching_default_database \
+            source_schema "$PITR_SOURCE_SCHEMA"
+        return 1
+    fi
+    return 0
+}
+
 pitr_query_preflight() {
     local kind detail unsafe=false
     PITR_SCRATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-query.XXXXXX")" || return "$EXIT_PITR"
@@ -377,6 +407,7 @@ pitr_query_preflight() {
         esac
         unsafe=true
     done < <(pitr_scan_unsafe_statements "$PITR_SOURCE_SCHEMA" < "$PITR_SCRATCH_FILE" | sort -u)
+    pitr_verify_no_statement_is_filtered_away || unsafe=true
     if [ "$unsafe" = true ]; then
         if [ "$PITR_FORCE" = true ]; then
             backup_log warn pitr_preflight_overridden override "--force-overwrite" source_schema "$PITR_SOURCE_SCHEMA" target_schema "$PITR_TARGET_SCHEMA"
@@ -610,7 +641,7 @@ pitr_run() {
     backup_initialize_mysqlbinlog || return "$EXIT_CONFIG"
     backup_validate_restore_profile || return "$EXIT_CONFIG"
     backup_prepare_directories || return "$EXIT_CONFIG"
-    backup_acquire_lock shared lifecycle || return $?
+    backup_acquire_lock exclusive lifecycle || return $?
     backup_acquire_lock exclusive restore || return $?
     backup_acquire_lock shared binlog || return $?
     BACKUP_PHASE=selecting_dump

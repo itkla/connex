@@ -77,7 +77,7 @@ restore_run() {
     backup_validate_common || return $?
     backup_validate_restore_profile || return "$EXIT_CONFIG"
     backup_prepare_directories || return "$EXIT_CONFIG"
-    backup_acquire_lock shared lifecycle || return $?
+    backup_acquire_lock exclusive lifecycle || return $?
     backup_acquire_lock exclusive restore || return $?
     BACKUP_PHASE=integrity
     RESTORE_RUN_DIR="$(backup_resolve_run "$RESTORE_RUN_REQUEST")" || {

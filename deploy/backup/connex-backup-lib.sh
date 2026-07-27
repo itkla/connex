@@ -510,6 +510,12 @@ backup_schema_in_list() {
 
 backup_schema_selected() {
     local schema="$1"
+    # A restore-verify scratch schema abandoned by an interrupted run holds a
+    # copy of source data; it must never be discovered and backed up as if it
+    # were customer data of its own.
+    if [[ "$schema" == connex_verify_* ]]; then
+        return 1
+    fi
     if [ -n "$CONNEX_BACKUP_SCHEMA_INCLUDE" ] && ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
         return 1
     fi

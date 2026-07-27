@@ -115,6 +115,32 @@ prune_binlog_triplet() {
     backup_log info binlog_pruned file "$(basename "$raw")" bytes "$bytes"
 }
 
+# A binlog whose sidecars are missing or unreadable can never be classified, so
+# an unconditional skip would retain customer data past the hard retention
+# ceiling. Fall back to the file's own mtime and quarantine-delete it once it is
+# older than the legal age.
+prune_quarantine_expired_binlog() {
+    local raw="$1"
+    local reason="$2"
+    local now="$3"
+    local legal_age="$4"
+    local mtime age
+    if ! mtime="$(stat -c %Y "$raw" 2>/dev/null)"; then
+        prune_skip reason "$reason" file "$(basename "$raw")"
+        return 0
+    fi
+    age=$((now - mtime))
+    if [ "$age" -ge "$legal_age" ]; then
+        if prune_binlog_triplet "$raw"; then
+            backup_log warn binlog_quarantine_pruned reason "$reason" file "$(basename "$raw")" age_seconds "$age"
+        else
+            prune_skip reason binlog_remove_failed file "$(basename "$raw")"
+        fi
+        return 0
+    fi
+    prune_skip reason "$reason" file "$(basename "$raw")" age_seconds "$age"
+}
+
 prune_binlogs() {
     local now legal_age meta raw created_epoch age entry name
     now="$(date +%s)"
@@ -122,15 +148,15 @@ prune_binlogs() {
     while IFS= read -r meta; do
         raw="${meta%.meta}"
         if ! backup_validate_binlog_triplet "$raw"; then
-            prune_skip reason invalid_binlog_triplet file "$(basename "$raw")"
+            prune_quarantine_expired_binlog "$raw" invalid_binlog_triplet "$now" "$legal_age"
             continue
         fi
         if ! created_epoch="$(backup_meta_value "$meta" file_created_epoch)"; then
-            prune_skip reason missing_binlog_timestamp file "$(basename "$raw")"
+            prune_quarantine_expired_binlog "$raw" missing_binlog_timestamp "$now" "$legal_age"
             continue
         fi
         if [[ ! "$created_epoch" =~ ^[0-9]+$ ]]; then
-            prune_skip reason invalid_binlog_timestamp file "$(basename "$raw")" value "$created_epoch"
+            prune_quarantine_expired_binlog "$raw" invalid_binlog_timestamp "$now" "$legal_age"
             continue
         fi
         age=$((now - created_epoch))
