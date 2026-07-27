@@ -74,7 +74,7 @@ public final class ProcessingRestrictionRegistry {
         enroll(entries, "PersonEdgeMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Relationship graph reads exclude suspended endpoints.");
         enroll(entries, "IdentityMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
-            "Backfill candidate reads and identity writes exclude both suspended and provision-ceased people.");
+            "Person identity backfill, intake, and duplicate-preflight paths exclude both restriction states.");
         enroll(entries, "IdentityCollisionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Collision group reads exclude both suspended and provision-ceased people at read time.");
         enroll(entries, "NotificationMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,

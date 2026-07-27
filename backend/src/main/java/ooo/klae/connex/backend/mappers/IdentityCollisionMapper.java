@@ -9,7 +9,7 @@ import ooo.klae.connex.backend.dto.IdentityCollisionGroupRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberRow;
 
 /**
- * Workspace-scoped persistence and reads for the canonical identity collision report.
+ * Workspace-scoped persistence and live reads for the canonical identity collision report.
  */
 public interface IdentityCollisionMapper {
 

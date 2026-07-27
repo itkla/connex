@@ -9,7 +9,7 @@ import java.util.List;
  * @param kind canonical identity kind
  * @param normalizedValue canonical colliding value
  * @param collisionSize number of currently visible members
- * @param rebuiltAt collision artifact rebuild timestamp
+ * @param rebuiltAt timestamp at which the live collision membership was evaluated
  * @param members visible records participating in the collision
  */
 public record IdentityCollisionDto(

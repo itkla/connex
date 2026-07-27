@@ -22,7 +22,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
- * Permissioned workspace report over visible canonical identity collisions.
+ * Permissioned live workspace report over visible canonical identity collisions.
  */
 @Service
 @RequiredArgsConstructor

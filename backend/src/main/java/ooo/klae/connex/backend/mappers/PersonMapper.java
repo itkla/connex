@@ -75,6 +75,13 @@ public interface PersonMapper {
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);
     int update(Person person);
+    /**
+     * Updates CSV-supplied scalar fields while touching the company foreign key only after the
+     * import coordinator has locked that dependency.
+     */
+    int updateFromImport(
+        @Param("person") Person person,
+        @Param("updateCompany") boolean updateCompany);
     int updateOwner(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,

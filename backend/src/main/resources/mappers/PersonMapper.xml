@@ -423,6 +423,24 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateFromImport">
+    UPDATE person
+    <set>
+      <if test="person.name != null">name = #{person.name},</if>
+      <if test="person.email != null">email = #{person.email},</if>
+      <if test="person.phone != null">phone = #{person.phone},</if>
+      <if test="person.title != null">title = #{person.title},</if>
+      <if test="updateCompany">
+        company_id =
+        <choose>
+          <when test="person.company != null">#{person.company.id}</when>
+          <otherwise>NULL</otherwise>
+        </choose>,
+      </if>
+    </set>
+    WHERE workspace_id = #{person.workspaceId} AND id = #{person.id}
+  </update>
+
   <update id="updateOwner">
     UPDATE person
     SET owner_id = #{ownerId,jdbcType=INTEGER}

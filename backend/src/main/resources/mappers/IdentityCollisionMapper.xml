@@ -9,16 +9,13 @@
            pi.normalized_value,
            pi.person_id AS record_id,
            p.name AS record_name,
-           ic.rebuilt_at
-    FROM identity_collision ic
-    JOIN person_identity pi
-      ON pi.workspace_id = ic.workspace_id
-      AND pi.id = ic.person_identity_id
+           CURRENT_TIMESTAMP AS rebuilt_at
+    FROM person_identity pi
     JOIN person p
       ON p.workspace_id = pi.workspace_id
       AND p.id = pi.person_id
-    WHERE ic.workspace_id = #{workspaceId}
-      AND ic.person_identity_id IS NOT NULL
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.superseded_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
     UNION ALL
@@ -27,16 +24,13 @@
            ci.normalized_value,
            ci.company_id AS record_id,
            c.name AS record_name,
-           ic.rebuilt_at
-    FROM identity_collision ic
-    JOIN company_identity ci
-      ON ci.workspace_id = ic.workspace_id
-      AND ci.id = ic.company_identity_id
+           CURRENT_TIMESTAMP AS rebuilt_at
+    FROM company_identity ci
     JOIN company c
       ON c.workspace_id = ci.workspace_id
       AND c.id = ci.company_id
-    WHERE ic.workspace_id = #{workspaceId}
-      AND ic.company_identity_id IS NOT NULL
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.superseded_at IS NULL
   </sql>
 
   <delete id="deleteForWorkspace">
@@ -58,6 +52,7 @@
         ON p.workspace_id = pi.workspace_id
         AND p.id = pi.person_id
       WHERE pi.workspace_id = #{workspaceId}
+        AND pi.superseded_at IS NULL
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
     ) collision
@@ -78,6 +73,7 @@
         ON c.workspace_id = ci.workspace_id
         AND c.id = ci.company_id
       WHERE ci.workspace_id = #{workspaceId}
+        AND ci.superseded_at IS NULL
     ) collision
     WHERE collision.collision_size &gt;= 2
   </insert>
