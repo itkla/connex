@@ -138,6 +138,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
 
     const {
         displayMode,
+        effectiveDisplayMode,
+        isMobile,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -813,7 +815,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         [columns, customColumns],
     );
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('company', companies, displayMode === 'table');
+    const peek = useRecordPeekController('company', companies, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (company: Company): ActiveRecordRef => ({ type: 'company', id: company.id, label: company.name }),
@@ -879,7 +881,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                         onChange={setDefinition}
                                     />
                                 )}
-                                {displayMode === 'grid' && (
+                                {effectiveDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -887,17 +889,19 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
-                                    ariaLabel={t('displayModeAriaLabel')}
-                                    value={displayMode}
-                                    onChange={setDisplayMode}
-                                    options={[
-                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
-                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
-                                    ]}
-                                />
-                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {displayMode === 'table' && (
+                                {!isMobile && (
+                                    <SegmentedToggle
+                                        ariaLabel={t('displayModeAriaLabel')}
+                                        value={displayMode}
+                                        onChange={setDisplayMode}
+                                        options={[
+                                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
+                                        ]}
+                                    />
+                                )}
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -988,7 +992,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
-                        displayMode={displayMode}
+                        displayMode={effectiveDisplayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}

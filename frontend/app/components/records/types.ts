@@ -10,7 +10,14 @@ export type SelectionId = string | number;
  * icon are chosen from this rather than always saying delete.
  */
 export type RecordRemoveIntent = 'delete' | 'archive' | 'restore';
-export type DisplayMode = 'grid' | 'table' | 'kanban';
+/** A display mode the user can pick and that is safe to persist or share in the `view` query param. */
+export type SelectableDisplayMode = 'grid' | 'table' | 'kanban';
+
+/**
+ * Every mode {@link RecordsRenderView} can render, including `list` — the row layout forced below the
+ * `md` breakpoint so phones get a task-adaptive list instead of a horizontally scrolling desktop table.
+ */
+export type DisplayMode = SelectableDisplayMode | 'list';
 export type SortValue = string | number | null;
 
 export type FilterFacetValue = string | number;
@@ -151,6 +158,13 @@ export interface CardCallbacks<T> {
     onDelete?: (item: T) => void;
 }
 
-export function isDisplayMode(value: unknown): value is DisplayMode {
+/**
+ * Narrows a persisted or URL-supplied value to a mode the user may actually choose.
+ *
+ * `list` is deliberately excluded: it is forced by viewport below the `md` breakpoint rather than
+ * picked, so accepting it here would let a phone-shaped session overwrite the desktop preference
+ * stored in `localStorage` or shared through the `view` query param.
+ */
+export function isSelectableDisplayMode(value: unknown): value is SelectableDisplayMode {
     return value === 'grid' || value === 'table' || value === 'kanban';
 }

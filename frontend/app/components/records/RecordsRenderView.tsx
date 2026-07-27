@@ -73,6 +73,13 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
     columns: ColumnDef<T>[];
     renderCard: (item: T, callbacks: CardCallbacks<T>) => ReactNode;
+    /**
+     * Row body for the viewport-forced `list` mode. Receives only the record because a list row is a
+     * summary that opens the record rather than an editing surface. When omitted the row falls back to
+     * the record name plus the first two non-identity columns, so every browser gets a usable mobile
+     * list before it supplies a bespoke adapter.
+     */
+    renderListRow?: (item: T) => ReactNode;
     renderAvatar?: (item: T) => ReactNode;
     detailPath?: (item: T) => string;
     onRowClick?: (item: T) => void;
@@ -110,6 +117,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     data,
     columns,
     renderCard,
+    renderListRow,
     renderAvatar,
     detailPath,
     onRowClick,
@@ -337,8 +345,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const gridSortOptions =
         sortOptions ?? columns.flatMap((column) => isSortableColumn(column) ? [{ key: column.key, label: column.label }] : []);
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
-    const gridSortBar =
-        !controlled && displayMode === 'grid' && gridSortOptions.length > 0 ? (
+    const sortBar =
+        !controlled && (displayMode === 'grid' || displayMode === 'list') && gridSortOptions.length > 0 ? (
             <div className="mb-3 flex justify-end">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -514,10 +522,107 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         );
     }
 
+    if (displayMode === 'list') {
+        return (
+            <>
+                {sortBar}
+                <ul
+                    className={cn(
+                        'overflow-hidden rounded-2xl border border-border bg-card',
+                        loading && 'opacity-60 transition-opacity',
+                    )}
+                    aria-busy={loading}
+                >
+                    {pagedData.map((item) => {
+                        const menuModel = buildRecordMenu(item);
+                        const isSelected = selectedIds.has(item.id);
+                        const open = () => {
+                            if (onRowClick) onRowClick(item);
+                            else if (detailPath) router.push(detailPath(item));
+                        };
+                        const row = (
+                            <li
+                                key={item.id}
+                                data-state={isSelected ? 'selected' : undefined}
+                                className={cn(
+                                    'flex items-center gap-3 border-b border-border px-3 transition-colors last:border-b-0',
+                                    isSelected ? 'bg-brand-light/40' : 'hover:bg-muted',
+                                    item.id === activeId && 'ring-2 ring-inset ring-brand',
+                                )}
+                            >
+                                <Checkbox
+                                    checked={isSelected}
+                                    onClick={(event) => {
+                                        rangeShiftRef.current = event.shiftKey;
+                                    }}
+                                    onCheckedChange={(checked) => applyToggle(item.id, checked === true)}
+                                    aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
+                                    className={CHECKBOX_CLASS}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={open}
+                                    disabled={!onRowClick && !detailPath}
+                                    className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2 text-left outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand disabled:cursor-default"
+                                >
+                                    {renderAvatar?.(item)}
+                                    <span className="min-w-0 flex-1">
+                                        {renderListRow ? (
+                                            renderListRow(item)
+                                        ) : (
+                                            <>
+                                                <span className="block truncate text-sm font-medium text-foreground">
+                                                    {item.name ?? entityLabel}
+                                                </span>
+                                                {columns.slice(1, 3).some((col) => col.render) && (
+                                                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                                                        {columns.slice(1, 3).map((col) => (
+                                                            <span key={col.key} className="truncate">
+                                                                {col.render
+                                                                    ? col.render(item)
+                                                                    : (item as unknown as Record<string, ReactNode>)[col.key]}
+                                                            </span>
+                                                        ))}
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
+                                    </span>
+                                </button>
+                                {hasRowActions &&
+                                    (menuModel ? (
+                                        <RecordActionMenuTrigger model={menuModel} />
+                                    ) : (
+                                        <RowActions
+                                            name={item.name ?? entityLabel}
+                                            onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                            onDelete={onDelete ? () => onDelete(item) : undefined}
+                                            actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
+                                            quickEditLabel={t('quickEdit')}
+                                            deleteLabel={t('delete')}
+                                        />
+                                    ))}
+                            </li>
+                        );
+                        return menuModel ? (
+                            <RecordContextMenu key={item.id} model={menuModel}>
+                                {row}
+                            </RecordContextMenu>
+                        ) : (
+                            row
+                        );
+                    })}
+                </ul>
+                {pager}
+                {selectionBar}
+            </>
+        );
+    }
+
     if (displayMode === 'grid') {
         return (
             <>
-                {gridSortBar}
+                {sortBar}
                 <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
                         {pagedData.map((item) => {

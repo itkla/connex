@@ -89,6 +89,8 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
 
     const {
         displayMode,
+        effectiveDisplayMode,
+        isMobile,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -678,7 +680,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('person', contacts, displayMode === 'table');
+    const peek = useRecordPeekController('person', contacts, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (contact: Contact): ActiveRecordRef => ({ type: 'person', id: contact.id, label: contact.name }),
@@ -735,7 +737,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                {displayMode === 'grid' && (
+                                {effectiveDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -743,17 +745,19 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
-                                    ariaLabel={t('displayModeAria')}
-                                    value={displayMode}
-                                    onChange={setDisplayMode}
-                                    options={[
-                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
-                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
-                                    ]}
-                                />
-                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {displayMode === 'table' && (
+                                {!isMobile && (
+                                    <SegmentedToggle
+                                        ariaLabel={t('displayModeAria')}
+                                        value={displayMode}
+                                        onChange={setDisplayMode}
+                                        options={[
+                                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                                        ]}
+                                    />
+                                )}
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -846,7 +850,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                         onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
-                        displayMode={displayMode}
+                        displayMode={effectiveDisplayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}

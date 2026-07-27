@@ -26,6 +26,7 @@ import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
@@ -446,6 +447,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const {
         displayMode,
+        effectiveDisplayMode,
+        isMobile,
         setDisplayMode,
         query,
         setQuery,
@@ -1062,7 +1065,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const visibleDeals = deals;
 
     const { density, setDensity } = useRecordDensity();
-    const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
+    const peek = useRecordPeekController('deal', visibleDeals, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (deal: Deal): ActiveRecordRef => ({ type: 'deal', id: deal.id, label: deal.name }),
@@ -1375,6 +1378,15 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 allowGroups
                                 onChange={changeDefinition}
                             />
+                            {effectiveDisplayMode !== 'table' && (
+                                <RecordsSortMenu
+                                    columns={columns}
+                                    sortKey={sortKey}
+                                    sortDirection={sortDir}
+                                    onSortChange={handleSortChange}
+                                />
+                            )}
+                            {!isMobile && (
                             <div
                                 role="group"
                                 aria-label={t('displayMode')}
@@ -1408,8 +1420,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     <ViewColumnsIcon className="size-4" />
                                 </button>
                             </div>
-                            {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                            {displayMode === 'table' && (
+                            )}
+                            {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                            {effectiveDisplayMode === 'table' && (
                                 <ColumnVisibilityMenu
                                     toggles={toggles}
                                     onColumnVisibleChange={setColumnVisible}
@@ -1480,7 +1493,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 )}
 
                 <Rise delay={0.3}>
-                    {displayMode === 'kanban' ? (
+                    {effectiveDisplayMode === 'kanban' ? (
                         <DealsKanban
                             deals={visibleDeals}
                             pipelines={pipelines}
@@ -1536,7 +1549,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
                             recordRef={recordRef}
-                            displayMode={displayMode}
+                            displayMode={effectiveDisplayMode}
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}
