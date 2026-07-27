@@ -83,6 +83,7 @@ public class CompanyService {
     private final ReferenceService referenceService;
     private final Clock clock;
     private final ManagedObjectService managedObjectService;
+    private final IdentityIntakeService identityIntakeService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -340,6 +341,7 @@ public class CompanyService {
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
@@ -348,6 +350,10 @@ public class CompanyService {
         company.setCreatedAt(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
+        identityIntakeService.recordCompany(
+            company.getWorkspaceId(), company.getId(), company.getName(),
+            company.getWebsite(), company.getPhone(),
+            IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
             auditService.diff(null, company, AUDIT_FIELDS));
@@ -396,6 +402,9 @@ public class CompanyService {
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
         Company after = requireOwnedCompany(workspaceId, id);
+        identityIntakeService.recordCompany(
+            workspaceId, id, after.getName(), after.getWebsite(), after.getPhone(),
+            IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
         auditService.record("company.update", "company", id, after.getName(),
             "Updated company " + after.getName(),
             auditService.diff(before, after, AUDIT_FIELDS));

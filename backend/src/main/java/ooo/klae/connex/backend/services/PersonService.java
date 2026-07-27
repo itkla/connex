@@ -67,6 +67,7 @@ public class PersonService {
     private final ReferenceService referenceService;
     private final RuleTriggerPublisher ruleTriggers;
     private final ManagedObjectService managedObjectService;
+    private final IdentityIntakeService identityIntakeService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -184,6 +185,28 @@ public class PersonService {
     @Transactional
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
+        return createWithSource(
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
+    }
+
+    /**
+     * Creates a reviewed business-card contact with its durable request provenance.
+     *
+     * @param person reviewed contact
+     * @param sourceRowRef durable business-card request reference
+     * @return created contact
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_CREATE)
+    public Person createFromBusinessCard(Person person, String sourceRowRef) {
+        return createWithSource(
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef);
+    }
+
+    private Person createWithSource(
+            Person person,
+            IdentityAcquisitionSource source,
+            String sourceRowRef) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
@@ -191,6 +214,9 @@ public class PersonService {
         person.setImageUrl(null);
         person.setCreatedAt(null);
         personMapper.insert(person);
+        identityIntakeService.recordPerson(
+            workspaceId, person.getId(), person.getName(), person.getEmail(), person.getPhone(),
+            source, sourceRowRef);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
         auditService.record("person.create", "person", person.getId(), person.getName(),
             "Created person " + person.getName(),
@@ -219,6 +245,9 @@ public class PersonService {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
         Person after = requireOwnedPerson(workspaceId, id);
+        identityIntakeService.recordPerson(
+            workspaceId, id, after.getName(), after.getEmail(), after.getPhone(),
+            IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
         auditService.record("person.update", "person", id, after.getName(),
             "Updated person " + after.getName(),
             auditService.diff(before, after, AUDIT_FIELDS));
@@ -314,6 +343,11 @@ public class PersonService {
             ? aiOutputCacheMapper.deleteForPerson(workspaceId, id)
             : 0;
         Person after = requireOwnedPerson(workspaceId, id);
+        if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
+            identityIntakeService.recordPerson(
+                workspaceId, id, after.getName(), after.getEmail(), after.getPhone(),
+                IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
+        }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {
             Map<String, Object> changes = new LinkedHashMap<>();
