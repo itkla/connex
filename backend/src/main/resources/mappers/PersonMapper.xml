@@ -388,7 +388,7 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url, created_at)
     VALUES (
       #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{email}, #{phone},
       <choose>
@@ -396,7 +396,8 @@
         <otherwise>NULL</otherwise>
       </choose>,
       #{title},
-      #{imageUrl}
+      #{imageUrl},
+      COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
   </insert>
 

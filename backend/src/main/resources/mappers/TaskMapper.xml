@@ -165,7 +165,8 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO task (
-      workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id
+      workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
+      created_at
     )
     VALUES (
       #{workspaceId}, #{description}, #{completed}, #{status}, #{position}, #{dueDate}, #{assignedTo.id},
@@ -176,7 +177,8 @@
       <choose>
         <when test="deal != null">#{deal.id}</when>
         <otherwise>NULL</otherwise>
-      </choose>
+      </choose>,
+      COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
   </insert>
 

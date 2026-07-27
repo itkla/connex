@@ -31,6 +31,59 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
     }
 
     @Test
+    void allowsExactNonWebSeederProfileWithLoopbackPlaintextMysqlUrl() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://localhost:3313/connex_seeder?sslMode=DISABLED"
+            );
+
+        assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void refusesSeederPlaintextUrlWithoutCompleteIsolationProperties() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("connex.maintenance.mode", "seeder")
+            .withProperty("spring.main.web-application-type", "none");
+        environment.setActiveProfiles("seeder");
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> postProcessor.postProcessEnvironment(environment, null)
+        );
+    }
+
+    @Test
+    void refusesRemoteSeederPlaintextUrlEvenWithSeederRemoteGuardOverride() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://db.example.com:3306/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("connex.seeder.allow-remote-host", "true");
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> postProcessor.postProcessEnvironment(environment, null)
+        );
+    }
+
+    @Test
     void allowsLocalSystemdStagingLoopbackPlaintextMysqlUrl() {
         MockEnvironment environment = localSystemdStagingEnvironment()
             .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED")
@@ -465,5 +518,14 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
         return productionEnvironment()
             .withProperty("user.dir", "/opt/connex-staging/backend")
             .withProperty("INVOCATION_ID", "4df8e80cad3c4b36a3e3a11f47c7f4f5");
+    }
+
+    private static MockEnvironment seederEnvironment() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.seeder.enabled", "true")
+            .withProperty("connex.maintenance.mode", "seeder")
+            .withProperty("spring.main.web-application-type", "none");
+        environment.setActiveProfiles("seeder");
+        return environment;
     }
 }

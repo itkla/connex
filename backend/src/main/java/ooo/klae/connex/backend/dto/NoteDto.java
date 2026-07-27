@@ -47,6 +47,7 @@ public class NoteDto {
 
     private Integer deal;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
 

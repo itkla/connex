@@ -55,6 +55,7 @@ public class CompanyDto {
     private int[] dealIds;
     private int[] tagIds;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
 

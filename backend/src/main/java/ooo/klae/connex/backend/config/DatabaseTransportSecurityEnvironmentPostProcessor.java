@@ -108,7 +108,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         requiredProperty(environment, "spring.datasource.username", "CONNEX_DB_USERNAME");
         requiredProperty(environment, "spring.datasource.password", "CONNEX_DB_PASSWORD");
 
-        if (!allowsLocalSystemdStagingPlaintextMysqlUrl(environment, url)) {
+        if (!allowsLocalPlaintextMysqlUrl(environment, url)) {
             validateVerifiedMysqlUrl(url, "CONNEX_DB_URL");
         }
         validateOverridingDatasourceConfiguration(environment);
@@ -222,7 +222,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
             throw new IllegalStateException(propertyName + " must not be blank outside dev/test");
         }
         String strippedUrl = url.strip();
-        if (!allowsLocalSystemdStagingPlaintextMysqlUrl(environment, strippedUrl)) {
+        if (!allowsLocalPlaintextMysqlUrl(environment, strippedUrl)) {
             validateVerifiedMysqlUrl(strippedUrl, propertyName);
         }
     }
@@ -244,6 +244,20 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
 
     private static boolean allowsLocalSystemdStagingPlaintextMysqlUrl(ConfigurableEnvironment environment, String url) {
         return isLocalSystemdStaging(environment)
+            && hasLoopbackMysqlHost(url)
+            && hasAllowedSslMode(url, LOCAL_PLAINTEXT_SSL_MODES);
+    }
+
+    private static boolean allowsLocalPlaintextMysqlUrl(ConfigurableEnvironment environment, String url) {
+        return allowsLocalSystemdStagingPlaintextMysqlUrl(environment, url)
+            || allowsSeederPlaintextMysqlUrl(environment, url);
+    }
+
+    private static boolean allowsSeederPlaintextMysqlUrl(ConfigurableEnvironment environment, String url) {
+        return environment.acceptsProfiles(Profiles.of("seeder"))
+            && Boolean.TRUE.equals(environment.getProperty("connex.seeder.enabled", Boolean.class))
+            && "seeder".equals(environment.getProperty("connex.maintenance.mode"))
+            && "none".equals(normalized(environment.getProperty("spring.main.web-application-type")))
             && hasLoopbackMysqlHost(url)
             && hasAllowedSslMode(url, LOCAL_PLAINTEXT_SSL_MODES);
     }
@@ -394,6 +408,10 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
 
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8).strip();
+    }
+
+    private static String normalized(String value) {
+        return value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
     }
 
     private static boolean isHikariTlsModeProperty(String canonicalName) {
