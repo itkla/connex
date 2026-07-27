@@ -31,10 +31,12 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.TenantExportService;
 import ooo.klae.connex.backend.services.TenantExportService.TenantExportDownload;
 import ooo.klae.connex.backend.services.TenantTeardownService;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +46,7 @@ class TenantLifecycleControllerTest {
     @Mock private AuthService authService;
     @Mock private TenantExportDownload download;
     @Mock private AsyncWebRequest asyncWebRequest;
+    @Mock private ErrorReporter errorReporter;
 
     private TenantLifecycleProperties properties;
     private TenantLifecycleController exportController;
@@ -62,7 +65,7 @@ class TenantLifecycleControllerTest {
             tenantTeardownService,
             authService);
         mockMvc = MockMvcBuilders.standaloneSetup(exportController, teardownController)
-            .setControllerAdvice(new GlobalExceptionHandler())
+            .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
         User user = new User();
         user.setId(7);
