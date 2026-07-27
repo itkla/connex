@@ -10,6 +10,7 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -30,6 +31,7 @@ public class HealthService {
 
     private volatile Snapshot snapshot;
 
+    @Autowired
     public HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope) {
         this(dataSource, flyway, tenantWorkScope, CACHE_NANOS);
     }
