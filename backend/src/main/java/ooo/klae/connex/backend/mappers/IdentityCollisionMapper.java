@@ -23,6 +23,8 @@ public interface IdentityCollisionMapper {
         @Param("workspaceId") int workspaceId,
         @Param("rebuiltAt") LocalDateTime rebuiltAt);
 
+    long countForWorkspace(@Param("workspaceId") int workspaceId);
+
     List<IdentityCollisionGroupRow> findVisibleGroups(
         @Param("workspaceId") int workspaceId,
         @Param("recordType") String recordType,
@@ -37,5 +39,6 @@ public interface IdentityCollisionMapper {
 
     List<IdentityCollisionMemberRow> findVisibleMembers(
         @Param("workspaceId") int workspaceId,
-        @Param("groups") List<IdentityCollisionGroupRow> groups);
+        @Param("groups") List<IdentityCollisionGroupRow> groups,
+        @Param("memberLimit") int memberLimit);
 }

@@ -28,11 +28,15 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class IdentityCollisionService {
 
+    private static final int MAX_MEMBERS_PER_GROUP = 20;
+
     private final IdentityCollisionMapper identityCollisionMapper;
     private final WorkspaceService workspaceService;
 
     /**
-     * Returns one group-level page of visible identity collisions.
+     * Returns one group-level page of visible identity collisions. Each group carries at most
+     * a bounded sample of its members, so a single page can never materialize a
+     * workspace-sized member list.
      * @param query validated collision filters and pagination
      * @return grouped collision page
      */
@@ -57,7 +61,7 @@ public class IdentityCollisionService {
             return new PageResponse<>(List.of(), total);
         }
         List<IdentityCollisionMemberRow> memberRows =
-            identityCollisionMapper.findVisibleMembers(workspaceId, groups);
+            identityCollisionMapper.findVisibleMembers(workspaceId, groups, MAX_MEMBERS_PER_GROUP);
         Map<CollisionKey, List<IdentityCollisionMemberDto>> members = new LinkedHashMap<>();
         for (IdentityCollisionMemberRow row : memberRows) {
             IdentityCollisionMemberRow required = Objects.requireNonNull(row, "collision member");
@@ -86,7 +90,8 @@ public class IdentityCollisionService {
             Objects.requireNonNull(required.getNormalizedValue(), "collision value"));
         List<IdentityCollisionMemberDto> groupMembers =
             List.copyOf(members.getOrDefault(key, List.of()));
-        if (groupMembers.size() != required.getCollisionSize()) {
+        int expectedMembers = Math.min(required.getCollisionSize(), MAX_MEMBERS_PER_GROUP);
+        if (groupMembers.size() != expectedMembers) {
             throw new IllegalStateException("Identity collision group changed during its read transaction");
         }
         return new IdentityCollisionDto(

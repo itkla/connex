@@ -200,7 +200,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         List<IdentityCollisionGroupRow> page =
             collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 1, 1);
         List<IdentityCollisionMemberRow> members =
-            collisionMapper.findVisibleMembers(workspace.getId(), page);
+            collisionMapper.findVisibleMembers(workspace.getId(), page, 10);
 
         assertEquals(3L, collisionMapper.countVisibleGroups(
             workspace.getId(), "company", "domain"));
@@ -214,6 +214,61 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         assertEquals(
             members.stream().map(member -> member.getRecordId()).sorted().toList(),
             members.stream().map(member -> member.getRecordId()).toList());
+    }
+
+    @Test
+    void memberReadsAreBoundedPerGroupWithoutLosingTheGroupSize() {
+        createCompanyDomainGroup("bounded.example", 5);
+        assertEquals(5, rebuild(workspace.getId()));
+
+        List<IdentityCollisionGroupRow> page =
+            collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 10, 0);
+        List<IdentityCollisionMemberRow> members =
+            collisionMapper.findVisibleMembers(workspace.getId(), page, 2);
+
+        assertEquals(5, page.getFirst().getCollisionSize());
+        assertEquals(
+            jdbcTemplate.queryForList(
+                """
+                SELECT company_id
+                FROM company_identity
+                WHERE workspace_id = ? AND kind = 'domain' AND normalized_value = ?
+                ORDER BY company_id
+                LIMIT 2
+                """,
+                Integer.class,
+                workspace.getId(),
+                "bounded.example"),
+            members.stream().map(member -> member.getRecordId()).toList());
+    }
+
+    @Test
+    void repeatedMembershipInsertsConvergeInsteadOfFailingOnDuplicateKeys() {
+        Company company = newCompany();
+        Person first = newPerson(workspace, company, "converge@example.com", "090-1111-1111");
+        Person second = newPerson(workspace, company, "converge@example.com", "090-2222-2222");
+        insertPersonIdentity(first, "email", "converge@example.com");
+        insertPersonIdentity(second, "email", "converge@example.com");
+        createCompanyDomainGroup("converge.example", 2);
+        assertEquals(2, collisionMapper.insertPersonCollisionMembers(workspace.getId(), REBUILT_AT));
+        assertEquals(2, collisionMapper.insertCompanyCollisionMembers(workspace.getId(), REBUILT_AT));
+
+        LocalDateTime replayedAt = REBUILT_AT.plusHours(1);
+        collisionMapper.insertPersonCollisionMembers(workspace.getId(), replayedAt);
+        collisionMapper.insertCompanyCollisionMembers(workspace.getId(), replayedAt);
+
+        assertEquals(4L, collisionMapper.countForWorkspace(workspace.getId()));
+        assertEquals(
+            4,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM identity_collision
+                WHERE workspace_id = ? AND rebuilt_at = ?
+                """,
+                Integer.class,
+                workspace.getId(),
+                replayedAt));
     }
 
     @Test
