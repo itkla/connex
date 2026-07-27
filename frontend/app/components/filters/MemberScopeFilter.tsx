@@ -47,6 +47,26 @@ export function interpretMemberScope(values: string[] | undefined): {
     return memberIds.length > 0 ? { mode: "members", memberIds } : { mode: "all", memberIds: [] };
 }
 
+/**
+ * Applies one of the exclusive sentinels to a member-scope selection: picking it replaces whatever
+ * was selected, picking it again falls back to the default "all team" scope.
+ */
+export function toggleMemberScopeSentinel(values: string[] | undefined, sentinel: string): string[] {
+    return values?.includes(sentinel) ? [] : [sentinel];
+}
+
+/**
+ * Adds or removes a single workspace member from a member-scope selection. Sentinels are exclusive,
+ * so toggling a member while one is active starts a fresh member list instead of mixing the two.
+ */
+export function toggleMemberScopeMember(values: string[] | undefined, memberId: number): string[] {
+    const { mode, memberIds } = interpretMemberScope(values);
+    const next = new Set(mode === "members" ? memberIds : []);
+    if (next.has(memberId)) next.delete(memberId);
+    else next.add(memberId);
+    return Array.from(next, String);
+}
+
 function MemberRow({ member }: { member: WorkspaceMember }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
@@ -95,13 +115,10 @@ export default function MemberScopeFilter({
     })();
 
     const toggleSentinel = (sentinel: string) => {
-        onChange(values?.includes(sentinel) ? [] : [sentinel]);
+        onChange(toggleMemberScopeSentinel(values, sentinel));
     };
     const toggleMember = (id: number) => {
-        const next = new Set(mode === "members" ? memberIds : []);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        onChange(Array.from(next, String));
+        onChange(toggleMemberScopeMember(values, id));
     };
 
     return (

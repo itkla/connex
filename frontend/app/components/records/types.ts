@@ -57,6 +57,25 @@ export interface ColumnDef<T> {
 
 export type FilterState = Record<string, string[]>;
 
+/** One choice offered by a sort control: the column to order by and its user-facing label. */
+export interface SortOption {
+    key: string;
+    label: string;
+}
+
+/** Whether a column can be ordered by — it must opt in and know how to produce a sort value. */
+export function isSortableColumn<T>(column: ColumnDef<T>): boolean {
+    return column.sortable !== false && !!column.getSortValue;
+}
+
+/**
+ * Derives the options a sort control should offer from a column set, so the table headers, the
+ * desktop sort menu and the mobile filter sheet always agree on which columns are sortable.
+ */
+export function sortOptionsFromColumns<T>(columns: ColumnDef<T>[]): SortOption[] {
+    return columns.flatMap((column) => (isSortableColumn(column) ? [{ key: column.key, label: column.label }] : []));
+}
+
 export interface FilterOption {
     key: string;
     label: string;

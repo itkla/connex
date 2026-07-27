@@ -45,7 +45,15 @@ import {
     type RecordMenuModel,
 } from './RecordActionMenu';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import { type ColumnDef, type CardCallbacks, type DisplayMode, type RecordRemoveIntent, type SelectionId } from './types';
+import {
+    isSortableColumn,
+    sortOptionsFromColumns,
+    type ColumnDef,
+    type CardCallbacks,
+    type DisplayMode,
+    type RecordRemoveIntent,
+    type SelectionId,
+} from './types';
 import EditableCell from './EditableCell';
 
 type SortDirection = 'asc' | 'desc';
@@ -64,10 +72,6 @@ function pageList(current: number, total: number): (number | 'gap')[] {
     return out;
 }
 const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-brand-foreground';
-
-function isSortableColumn<T>(column: ColumnDef<T>): boolean {
-    return column.sortable !== false && !!column.getSortValue;
-}
 
 interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
@@ -342,8 +346,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     );
     const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
 
-    const gridSortOptions =
-        sortOptions ?? columns.flatMap((column) => isSortableColumn(column) ? [{ key: column.key, label: column.label }] : []);
+    const gridSortOptions = sortOptions ?? sortOptionsFromColumns(columns);
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
     const sortBar =
         !controlled && (displayMode === 'grid' || displayMode === 'list') && gridSortOptions.length > 0 ? (

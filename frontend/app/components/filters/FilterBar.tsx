@@ -31,10 +31,21 @@ export function FilterChip({ label, reduce, onRemove }: { label: string; reduce:
     );
 }
 
+/**
+ * The toolbar above a record list: facet controls, a clear-all shortcut, view/sort controls and the
+ * search field, with the applied-filter chips beneath.
+ *
+ * Passing `collapsed` opts the bar into its phone layout: below the `md` breakpoint the facet
+ * controls, the clear-all shortcut and `trailing` are hidden and `collapsed` takes their place — a
+ * single trigger that opens them in a sheet, so the toolbar stays one row instead of wrapping into
+ * several. The chips row is never collapsed: an applied filter must stay visible and removable on
+ * every viewport.
+ */
 export default function FilterBar({
     search,
     children,
     trailing,
+    collapsed,
     chips,
     hasActiveFilters,
     onClearAll,
@@ -45,6 +56,7 @@ export default function FilterBar({
     search?: React.ReactNode;
     children?: React.ReactNode;
     trailing?: React.ReactNode;
+    collapsed?: React.ReactNode;
     chips: FilterChipData[];
     hasActiveFilters: boolean;
     onClearAll: () => void;
@@ -52,23 +64,41 @@ export default function FilterBar({
     reduce: boolean;
     className?: string;
 }) {
+    const collapsible = collapsed != null;
     return (
         <div className={cn("rounded-2xl py-2.5", className)}>
             <div className="flex flex-wrap items-center gap-2">
-                {children && <div className="flex flex-wrap items-center gap-1.5">{children}</div>}
+                {children && (
+                    <div className={cn("flex flex-wrap items-center gap-1.5", collapsible && "hidden md:flex")}>
+                        {children}
+                    </div>
+                )}
                 {hasActiveFilters && (
                     <button
                         type="button"
                         onClick={onClearAll}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                        className={cn(
+                            "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40",
+                            collapsible && "hidden md:inline-flex",
+                        )}
                     >
                         <XMarkIcon className="size-3.5" />
                         {clearAllLabel}
                     </button>
                 )}
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                    {trailing}
+                <div
+                    className={cn(
+                        "ml-auto flex flex-wrap items-center gap-2",
+                        collapsible && "min-w-0 flex-1 flex-nowrap md:flex-initial md:flex-wrap",
+                    )}
+                >
+                    {collapsible ? (
+                        trailing && <div className="hidden items-center gap-2 md:flex">{trailing}</div>
+                    ) : (
+                        trailing
+                    )}
                     {search}
+                    {collapsed}
                 </div>
             </div>
 
