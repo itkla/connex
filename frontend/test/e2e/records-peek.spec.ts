@@ -23,6 +23,10 @@ test.describe("records browse and peek", () => {
         await page.goBack();
         const qPattern = encodeURIComponent(contact.name).replace(/%20/g, "(?:%20|\\+)");
         await expect(page).toHaveURL(new RegExp(`q=${qPattern}`));
+        await expect(peek).toBeVisible();
+
+        await page.keyboard.press("Escape");
+        await expect(peek).toBeHidden();
         await expect(page.getByRole("row").filter({ hasText: contact.name })).toBeVisible();
     });
 });

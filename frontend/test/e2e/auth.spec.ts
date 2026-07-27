@@ -36,6 +36,6 @@ test.describe("auth", () => {
         await page.getByLabel("Username or email").fill(fixture.username);
         await page.getByLabel("Password", { exact: true }).fill("Wrong!Password1");
         await page.getByRole("button", { name: "Sign in", exact: true }).click();
-        await expect(page.getByRole("alert")).toContainText("Invalid username or password");
+        await expect(page.locator("form").getByRole("alert")).toContainText("Invalid username or password");
     });
 });
