@@ -60,11 +60,11 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(1, personTotals.invalidEmails);
         assertEquals(1, personTotals.invalidPhones);
         assertEquals(3, companyTotals.recordsScanned);
-        assertEquals(2, companyTotals.identitiesCreated);
+        assertEquals(5, companyTotals.identitiesCreated);
         assertEquals(1, companyTotals.invalidDomains);
-        assertEquals(4, collisionMemberships);
+        assertEquals(7, collisionMemberships);
         assertEquals(
-            2L,
+            3L,
             collisionMapper.countVisibleGroups(workspace.getId(), null, null));
         assertEquals(
             0,
@@ -172,6 +172,18 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
                 ORDER BY normalized_value
                 """,
                 String.class,
+                workspace.getId(),
+                person.getId()));
+        assertEquals(
+            List.of(1, 0),
+            jdbcTemplate.queryForList(
+                """
+                SELECT superseded_at IS NOT NULL
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ? AND kind = 'email'
+                ORDER BY normalized_value
+                """,
+                Integer.class,
                 workspace.getId(),
                 person.getId()));
     }

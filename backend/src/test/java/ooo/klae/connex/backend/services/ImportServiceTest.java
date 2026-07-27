@@ -10,9 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -33,12 +36,16 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ColumnMapping;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
+import ooo.klae.connex.backend.dto.DuplicateMatchKind;
+import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
 import ooo.klae.connex.backend.dto.ImportRequest;
 import ooo.klae.connex.backend.dto.ImportResult;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class ImportServiceTest extends AbstractServiceTest {
@@ -53,8 +60,12 @@ class ImportServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired PersonService personService;
+    @Autowired CompanyService companyService;
     @MockitoSpyBean PersonMapper personMapperSpy;
     @MockitoSpyBean CompanyMapper companyMapperSpy;
+    @MockitoSpyBean DealMapper dealMapperSpy;
+    @MockitoSpyBean PipelineMapper pipelineMapperSpy;
 
     private static ColumnMapping map(String column, String field) {
         return new ColumnMapping(column, field, null, null, null);
@@ -91,6 +102,99 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getCreated());
         assertEquals(0, result.getUpdated());
         assertEquals(2, result.getFailed().size());
+    }
+
+    @Test
+    void recordImportsWriteTraceableIdentityProvenanceForCreatesAndUpdates() {
+        ImportRequest personCreate = req(
+            List.of(map("Name", "name"), map("Email", "email"), map("Phone", "phone")),
+            List.of(Map.of(
+                "Name", "Identity import",
+                "Email", "identity-import@example.com",
+                "Phone", "090-1234-5678")),
+            "fill_empty");
+        ImportRequest companyCreate = req(
+            List.of(map("Name", "name"), map("Website", "website"), map("Phone", "phone")),
+            List.of(Map.of(
+                "Name", "Identity import company",
+                "Website", "https://identity-import.example.org",
+                "Phone", "090-2345-6789")),
+            "fill_empty");
+
+        importService.commitPersons(personCreate);
+        importService.commitCompanies(companyCreate);
+
+        Person imported = personMapper.findByEmails(
+            workspace.getId(), List.of("identity-import@example.com")).getFirst();
+        Company importedCompany = companyMapper.getAllCompanies(workspace.getId()).stream()
+            .filter(candidate -> "Identity import company".equals(candidate.getName()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(
+            2,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND source_system = 'csv_import'
+                  AND source_row_ref = 'csv-row:1'
+                  AND acquired_at IS NOT NULL
+                  AND purpose_of_use_code IS NULL
+                """,
+                workspace.getId(),
+                imported.getId()));
+        assertEquals(
+            2,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                  AND source_system = 'csv_import'
+                  AND source_row_ref = 'csv-row:1'
+                  AND acquired_at IS NOT NULL
+                  AND purpose_of_use_code IS NULL
+                """,
+                workspace.getId(),
+                importedCompany.getId()));
+
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email"), map("Phone", "phone")),
+            List.of(
+                Map.of(
+                    "Name", "Other identity import",
+                    "Email", unique() + "@example.com",
+                    "Phone", "090-3456-7890"),
+                Map.of(
+                    "Name", "Identity import",
+                    "Email", "identity-import@example.com",
+                    "Phone", "090-4567-8901")),
+            "overwrite"));
+
+        assertEquals(
+            "csv-row:2",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT source_row_ref
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND kind = 'phone' AND superseded_at IS NULL
+                """,
+                String.class,
+                workspace.getId(),
+                imported.getId()));
+        assertEquals(
+            1,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND kind = 'phone' AND superseded_at IS NOT NULL
+                """,
+                workspace.getId(),
+                imported.getId()));
     }
 
     @Test
@@ -164,6 +268,118 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, preview.getToSkip());
+    }
+
+    @Test
+    void personImportPreviewReturnsSharedStrongCandidatesWithoutAutoUpdatingThem() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        Person shared = personInWorkspace(ownerWorkspace, ownerCompany);
+        String email = "shared-preflight-" + unique() + "@example.com";
+        jdbcTemplate.update(
+            """
+            UPDATE person
+            SET email = ?
+            WHERE workspace_id = ? AND id = ?
+            """,
+            email,
+            ownerWorkspace.getId(),
+            shared.getId());
+        jdbcTemplate.update(
+            """
+            INSERT INTO person_identity (
+              workspace_id, person_id, kind, `value`, normalized_value,
+              source_system, source_channel, acquired_at
+            )
+            VALUES (?, ?, 'email', ?, ?, 'test', 'person.email', CURRENT_TIMESTAMP)
+            """,
+            ownerWorkspace.getId(),
+            shared.getId(),
+            email,
+            email);
+        assertEquals(1, shareMapper.sharePerson(
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+
+        ImportPreviewResult preview = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Shared candidate", "Email", email)),
+            "fill_empty"));
+
+        assertEquals(1, preview.getToCreate());
+        assertEquals(0, preview.getToUpdate());
+        assertEquals(1, preview.getRows().getFirst().getCandidates().size());
+        assertFalse(preview.getRows().getFirst().getCandidates().getFirst()
+            .ownedByActiveWorkspace());
+        assertEquals(
+            DuplicateMatchStrength.STRONG,
+            preview.getRows().getFirst().getCandidates().getFirst().strength());
+        assertEquals(
+            DuplicateMatchKind.EMAIL,
+            preview.getRows().getFirst().getCandidates().getFirst().matches().getFirst().kind());
+    }
+
+    @Test
+    void personImportPreviewRejectsAmbiguousOwnedStrongMatches() {
+        String email = "ambiguous-" + unique() + "@example.com";
+        Person first = new Person();
+        first.setName("Ambiguous first");
+        first.setEmail(email);
+        Person second = new Person();
+        second.setName("Ambiguous second");
+        second.setEmail(email);
+        personService.create(first);
+        personService.create(second);
+
+        ImportPreviewResult preview = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Ambiguous import", "Email", email)),
+            "fill_empty"));
+
+        assertEquals(1, preview.getInvalid());
+        assertEquals(2, preview.getRows().getFirst().getCandidates().size());
+        assertTrue(preview.getRows().getFirst().getErrors().getFirst()
+            .contains("Multiple visible contact records"));
+    }
+
+    @Test
+    void companyImportPreviewKeepsExactNameOnlyMatchesAsWeakSuggestions() {
+        Company existing = new Company();
+        existing.setWorkspaceId(workspace.getId());
+        existing.setName("Weak Name Candidate " + unique());
+        companyMapper.insert(existing);
+
+        ImportPreviewResult preview = importService.previewCompanies(req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", existing.getName().toUpperCase())),
+            "fill_empty"));
+
+        assertEquals(1, preview.getToCreate());
+        assertEquals(0, preview.getToUpdate());
+        assertEquals(
+            DuplicateMatchStrength.WEAK,
+            preview.getRows().getFirst().getCandidates().getFirst().strength());
+        assertEquals(
+            DuplicateMatchKind.NAME,
+            preview.getRows().getFirst().getCandidates().getFirst().matches().getFirst().kind());
+    }
+
+    @Test
+    void companyImportPreviewAutoMatchesAnExactCanonicalDomain() {
+        Company draft = new Company();
+        draft.setName("Canonical Domain " + unique());
+        draft.setWebsite("https://www.canonical-" + unique() + ".co.jp/about");
+        Company existing = companyService.createCompany(draft);
+
+        ImportPreviewResult preview = importService.previewCompanies(req(
+            List.of(map("Name", "name"), map("Website", "website")),
+            List.of(Map.of(
+                "Name", "Canonical domain import",
+                "Website", existing.getWebsite().replace("https://www.", "http://"))),
+            "fill_empty"));
+
+        assertEquals(0, preview.getToCreate());
+        assertEquals(1, preview.getToUpdate());
+        assertEquals(existing.getId(), preview.getRows().getFirst().getMatchedId());
     }
 
     @Test
@@ -354,20 +570,21 @@ class ImportServiceTest extends AbstractServiceTest {
     void recordImports_failVanishedMatchesBeforeTargetSideEffects() {
         Person person = newPerson(newCompany());
         Company company = newCompany();
-        Company replacementCompany = newCompany();
-        Tag tag = newTag();
-        CustomFieldDefinition personCustom = customDefinition("person");
-        CustomFieldDefinition companyCustom = customDefinition("company");
+        String replacementCompanyName = "Orphan company " + unique();
+        String personTagName = "orphan_person_tag_" + unique();
+        String companyTagName = "orphan_company_tag_" + unique();
+        String personCustomKey = "orphan_person_" + unique();
+        String companyCustomKey = "orphan_company_" + unique();
         ImportRequest personRequest = req(
             List.of(
                 map("Name", "name"),
                 map("Company", "company"),
                 map("Tags", "tags"),
-                map("Custom", "custom:" + personCustom.getId())),
+                new ColumnMapping("Custom", null, true, "text", personCustomKey)),
             List.of(Map.of(
                 "Name", "Vanished person update",
-                "Company", replacementCompany.getName(),
-                "Tags", tag.getName(),
+                "Company", replacementCompanyName,
+                "Tags", personTagName,
                 "Custom", "vanished value")),
             "overwrite",
             Map.of(0, person.getId()));
@@ -375,10 +592,10 @@ class ImportServiceTest extends AbstractServiceTest {
             List.of(
                 map("Name", "name"),
                 map("Tags", "tags"),
-                map("Custom", "custom:" + companyCustom.getId())),
+                new ColumnMapping("Custom", null, true, "text", companyCustomKey)),
             List.of(Map.of(
                 "Name", "Vanished company update",
-                "Tags", tag.getName(),
+                "Tags", companyTagName,
                 "Custom", "vanished value")),
             "overwrite",
             Map.of(0, company.getId()));
@@ -394,6 +611,9 @@ class ImportServiceTest extends AbstractServiceTest {
         int companyCustomCount = rowCount(
             "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
             company.getId());
+        int auditCount = rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action LIKE 'import.%'",
+            workspace.getId());
         doReturn(null).when(personMapperSpy).getOwnedPersonByIdForUpdate(workspace.getId(), person.getId());
         doReturn(null).when(companyMapperSpy).getOwnedCompanyByIdForUpdate(workspace.getId(), company.getId());
 
@@ -418,6 +638,150 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(companyCustomCount, rowCount(
             "SELECT COUNT(*) FROM custom_field_value WHERE entity_type = 'company' AND entity_id = ?",
             company.getId()));
+        assertFalse(companyMapper.getCompaniesForDedup(workspace.getId()).stream()
+            .anyMatch(candidate -> replacementCompanyName.equals(candidate.getName())));
+        assertNull(tagMapper.getTagByName(workspace.getId(), personTagName));
+        assertNull(tagMapper.getTagByName(workspace.getId(), companyTagName));
+        assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", personCustomKey));
+        assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "company", companyCustomKey));
+        assertEquals(auditCount, rowCount(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action LIKE 'import.%'",
+            workspace.getId()));
+    }
+
+    @Test
+    void matchedImportLocksUseAscendingTargetIds() {
+        Person firstPerson = newPerson(newCompany());
+        Person secondPerson = newPerson(newCompany());
+        Company firstCompany = newCompany();
+        Company secondCompany = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal firstDeal = newDeal(pipeline, stage, firstCompany);
+        Deal secondDeal = newDeal(pipeline, stage, secondCompany);
+
+        ImportResult personResult = importService.commitPersons(req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Second person"), Map.of("Name", "First person")),
+            "overwrite",
+            Map.of(0, secondPerson.getId(), 1, firstPerson.getId())));
+        ImportResult companyResult = importService.commitCompanies(req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Second company"), Map.of("Name", "First company")),
+            "overwrite",
+            Map.of(0, secondCompany.getId(), 1, firstCompany.getId())));
+        ImportResult dealResult = importService.commitDeals(req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Second deal"), Map.of("Name", "First deal")),
+            "overwrite",
+            Map.of(0, secondDeal.getId(), 1, firstDeal.getId())));
+
+        assertEquals(2, personResult.getUpdated());
+        assertEquals(2, companyResult.getUpdated());
+        assertEquals(2, dealResult.getUpdated());
+        InOrder personLocks = inOrder(personMapperSpy);
+        personLocks.verify(personMapperSpy).getOwnedPersonByIdForUpdate(workspace.getId(), firstPerson.getId());
+        personLocks.verify(personMapperSpy).getOwnedPersonByIdForUpdate(workspace.getId(), secondPerson.getId());
+        InOrder companyLocks = inOrder(companyMapperSpy);
+        companyLocks.verify(companyMapperSpy).getOwnedCompanyByIdForUpdate(workspace.getId(), firstCompany.getId());
+        companyLocks.verify(companyMapperSpy).getOwnedCompanyByIdForUpdate(workspace.getId(), secondCompany.getId());
+        InOrder dealLocks = inOrder(dealMapperSpy);
+        dealLocks.verify(dealMapperSpy).getDealByIdForUpdate(workspace.getId(), firstDeal.getId());
+        dealLocks.verify(dealMapperSpy).getDealByIdForUpdate(workspace.getId(), secondDeal.getId());
+    }
+
+    @Test
+    void dependencyLocksPrecedeMatchedTargetsInDeterministicOrder() {
+        Company firstCompany = newCompany();
+        Company secondCompany = newCompany();
+        Person firstPerson = newPerson(firstCompany);
+        Person secondPerson = newPerson(secondCompany);
+
+        ImportResult personResult = importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Company", "company")),
+            List.of(
+                Map.of("Name", "Second dependency", "Company", secondCompany.getName()),
+                Map.of("Name", "First dependency", "Company", firstCompany.getName())),
+            "overwrite",
+            Map.of(0, secondPerson.getId(), 1, firstPerson.getId())));
+
+        assertEquals(2, personResult.getUpdated());
+        InOrder personOrder = inOrder(companyMapperSpy, personMapperSpy);
+        personOrder.verify(companyMapperSpy).lockById(
+            workspace.getId(), Math.min(firstCompany.getId(), secondCompany.getId()));
+        personOrder.verify(companyMapperSpy).lockById(
+            workspace.getId(), Math.max(firstCompany.getId(), secondCompany.getId()));
+        personOrder.verify(personMapperSpy).getOwnedPersonByIdForUpdate(
+            workspace.getId(), Math.min(firstPerson.getId(), secondPerson.getId()));
+        personOrder.verify(personMapperSpy).getOwnedPersonByIdForUpdate(
+            workspace.getId(), Math.max(firstPerson.getId(), secondPerson.getId()));
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, firstCompany);
+        clearInvocations(companyMapperSpy, pipelineMapperSpy, dealMapperSpy);
+        ImportResult dealResult = importService.commitDeals(req(
+            List.of(
+                map("Name", "name"),
+                map("Company", "company"),
+                map("Pipeline", "pipeline"),
+                map("Stage", "stage")),
+            List.of(Map.of(
+                "Name", "Ordered deal",
+                "Company", firstCompany.getName(),
+                "Pipeline", pipeline.getName(),
+                "Stage", stage.getName())),
+            "overwrite",
+            Map.of(0, deal.getId())));
+
+        assertEquals(1, dealResult.getUpdated());
+        InOrder dealOrder = inOrder(companyMapperSpy, pipelineMapperSpy, dealMapperSpy);
+        dealOrder.verify(companyMapperSpy).lockById(workspace.getId(), firstCompany.getId());
+        dealOrder.verify(pipelineMapperSpy).lockVisiblePipelineById(
+            workspace.getId(), pipeline.getId());
+        dealOrder.verify(pipelineMapperSpy).lockVisibleStageById(
+            workspace.getId(), stage.getId());
+        dealOrder.verify(dealMapperSpy).getDealByIdForUpdate(
+            workspace.getId(), deal.getId());
+    }
+
+    @Test
+    void dealImportFailsWhenMatchedTargetVanishes() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        doReturn(null).when(dealMapperSpy).getDealByIdForUpdate(workspace.getId(), deal.getId());
+
+        ImportResult result = importService.commitDeals(req(
+            List.of(map("Name", "name")),
+            List.of(Map.of("Name", "Vanished deal update")),
+            "overwrite",
+            Map.of(0, deal.getId())));
+
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+    }
+
+    @Test
+    void vanishedMatchedRowsDoNotInvalidateValidRows() {
+        Person vanished = newPerson(newCompany());
+        String validEmail = unique() + "@x.test";
+        doReturn(null).when(personMapperSpy)
+            .getOwnedPersonByIdForUpdate(workspace.getId(), vanished.getId());
+
+        ImportResult result = importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(
+                Map.of("Name", "Vanished update", "Email", vanished.getEmail()),
+                Map.of("Name", "Valid create", "Email", validEmail)),
+            "overwrite",
+            Map.of(0, vanished.getId())));
+
+        assertEquals(1, result.getCreated());
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+        assertEquals(1, personMapper.findByEmails(workspace.getId(), List.of(validEmail)).size());
     }
 
     @Test
@@ -608,7 +972,10 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void companyAndDealPreviews_requireUpdatePermissionForMatchedRows() {
-        Company company = newCompany();
+        Company companyDraft = new Company();
+        companyDraft.setName("Permission company " + unique());
+        companyDraft.setWebsite("https://permission-" + unique() + ".co.jp");
+        Company company = companyService.createCompany(companyDraft);
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);

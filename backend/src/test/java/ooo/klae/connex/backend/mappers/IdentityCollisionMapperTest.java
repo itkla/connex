@@ -77,6 +77,33 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void liveReadsIncludeNewCollisionWithoutARebuild() {
+        Company company = newCompany();
+        Person first = newPerson(workspace, company, "live@example.com", "090-1111-1111");
+        Person second = newPerson(workspace, company, "live@example.com", "090-2222-2222");
+        insertPersonIdentity(first, "email", "live@example.com");
+        insertPersonIdentity(second, "email", "live@example.com");
+
+        assertEquals(
+            1L,
+            collisionMapper.countVisibleGroups(
+                workspace.getId(), "person", "email"));
+        assertEquals(
+            List.of("live@example.com"),
+            collisionMapper.findVisibleGroups(
+                    workspace.getId(), "person", "email", 100, 0)
+                .stream()
+                .map(IdentityCollisionGroupRow::getNormalizedValue)
+                .toList());
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+    }
+
+    @Test
     void kindAndRecordTypePartitionsRemainIndependent() {
         Company company = newCompany();
         Person first = newPerson(workspace, company, "first@example.com", "090-1111-1111");

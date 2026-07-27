@@ -304,7 +304,7 @@ class BusinessCardServiceTest {
                 "  Ada   Lovelace  ", "ADA@EXAMPLE.TEST", "+1 202 555 0199", "Engineer", 17);
         when(imageValidator.validate(image)).thenReturn(validated);
         when(companyService.getCompanyById(17)).thenReturn(company);
-        when(personService.create(any())).thenAnswer(invocation -> {
+        when(personService.createFromBusinessCard(any(), anyString())).thenAnswer(invocation -> {
             Person person = invocation.getArgument(0);
             person.setId(31);
             return person;
@@ -327,7 +327,8 @@ class BusinessCardServiceTest {
 
         assertTrue(service.isImportAvailable());
         ArgumentCaptor<Person> personCaptor = ArgumentCaptor.forClass(Person.class);
-        verify(personService).create(personCaptor.capture());
+        verify(personService).createFromBusinessCard(
+            personCaptor.capture(), eq("business-card:" + IDEMPOTENCY_KEY));
         assertEquals("Ada Lovelace", personCaptor.getValue().getName());
         assertEquals("ADA@EXAMPLE.TEST", personCaptor.getValue().getEmail());
         assertEquals(company, personCaptor.getValue().getCompany());
@@ -345,7 +346,8 @@ class BusinessCardServiceTest {
         persistenceOrder.verify(binaryStore).store(
             5, "business-card.jpg", "image/jpeg", validated.content());
         persistenceOrder.verify(companyService).getCompanyById(17);
-        persistenceOrder.verify(personService).create(any());
+        persistenceOrder.verify(personService)
+            .createFromBusinessCard(any(), eq("business-card:" + IDEMPOTENCY_KEY));
         persistenceOrder.verify(attachmentService).createManaged(any());
         verify(importRequestMapper).complete(5, IDEMPOTENCY_KEY, 31, 41, 17);
         verify(rateLimiter).requireImportAllowed();
@@ -402,7 +404,7 @@ class BusinessCardServiceTest {
                 any(),
                 any(),
                 eq(LocalDateTime.parse("2026-07-15T00:00:00")));
-        verify(personService, never()).create(any());
+        verify(personService, never()).createFromBusinessCard(any(), anyString());
     }
 
     @Test
@@ -584,7 +586,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.Existing(18), IDEMPOTENCY_KEY));
 
         verify(companyService, never()).getCompanyById(18);
-        verify(personService, never()).create(any());
+        verify(personService, never()).createFromBusinessCard(any(), anyString());
         verify(binaryStore, never()).store(anyInt(), any(), any(), any());
     }
 
@@ -598,7 +600,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.Create("　"), IDEMPOTENCY_KEY));
 
         verify(companyService, never()).createCompany(any());
-        verify(personService, never()).create(any());
+        verify(personService, never()).createFromBusinessCard(any(), anyString());
     }
 
     @Test
@@ -606,7 +608,7 @@ class BusinessCardServiceTest {
         BusinessCardContactRequest contact = new BusinessCardContactRequest(
                 "Ada Lovelace", null, null, null, null);
         when(imageValidator.validate(image)).thenReturn(validated);
-        when(personService.create(any())).thenAnswer(invocation -> {
+        when(personService.createFromBusinessCard(any(), anyString())).thenAnswer(invocation -> {
             Person person = invocation.getArgument(0);
             person.setId(31);
             return person;
@@ -688,7 +690,7 @@ class BusinessCardServiceTest {
         person.setName("Ada Lovelace");
         Attachment attachment = new Attachment();
         attachment.setId(41);
-        when(personService.create(any())).thenReturn(person);
+        when(personService.createFromBusinessCard(any(), anyString())).thenReturn(person);
         when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card-31.jpg", validated.content().length));
@@ -709,7 +711,8 @@ class BusinessCardServiceTest {
         assertNull(response.company());
         assertEquals(31, normalizedResponse.contact().getId());
         verify(rateLimiter, times(2)).requireImportAllowed();
-        verify(personService).create(any());
+        verify(personService).createFromBusinessCard(
+            any(), eq("business-card:" + IDEMPOTENCY_KEY));
         verify(binaryStore).store(5, "business-card.jpg", "image/jpeg", validated.content());
     }
 
@@ -728,7 +731,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(personService, never()).getPersonById(anyInt());
-        verify(personService, never()).create(any());
+        verify(personService, never()).createFromBusinessCard(any(), anyString());
         verify(binaryStore, never()).store(anyInt(), any(), any(), any());
     }
 

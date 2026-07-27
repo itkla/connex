@@ -55,6 +55,91 @@ class CompanyServiceTest extends AbstractServiceTest {
     @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
+    void createAndUpdateReconcileCurrentIdentityHistory() {
+        Company draft = new Company();
+        draft.setName("Identity company");
+        draft.setWebsite("https://www.identity-source.example.com/about");
+        draft.setPhone("090-1234-5678");
+
+        Company created = companyService.createCompany(draft);
+
+        assertEquals(
+            List.of("domain", "phone"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT kind
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                ORDER BY kind
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                  AND source_system = 'interactive_create'
+                  AND purpose_of_use_code IS NULL
+                  AND superseded_at IS NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+
+        Company update = new Company();
+        update.setName(created.getName());
+        update.setWebsite("https://new-identity.example.org");
+        update.setPhone("invalid phone");
+        companyService.updateCompany(created.getId(), update);
+        companyService.updateCompany(created.getId(), update);
+
+        assertEquals(
+            3,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM company_identity WHERE workspace_id = ? AND company_id = ?",
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            List.of("example.org"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT normalized_value
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND superseded_at IS NULL
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND superseded_at IS NOT NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            "interactive_update",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT source_system
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND normalized_value = 'example.org'
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+    }
+
+    @Test
     void createRejectsClientSuppliedLogoUrl() {
         Company company = new Company();
         company.setName("No remote logo");
@@ -289,7 +374,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), mock(ReferenceService.class),
             Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -328,7 +414,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), referenceService, Clock.systemUTC(),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -359,7 +446,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(SegmentService.class),
             mock(ReferenceService.class),
             Clock.systemUTC(),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class)
         );
     }
 

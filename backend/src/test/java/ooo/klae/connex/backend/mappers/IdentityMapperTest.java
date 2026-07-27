@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -157,20 +158,24 @@ class IdentityMapperTest extends AbstractMapperTest {
 
         assertEquals(
             0,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), active.getId(), "case@example.com", "case@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), active.getId(), "case@example.com", "case@example.com",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
         assertEquals(
             0,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), suspended.getId(), suspended.getEmail(), "blocked@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), suspended.getId(), suspended.getEmail(), "blocked@example.com",
+                "backfill", "person:" + suspended.getId(), createdAt(suspended.getId())));
         assertEquals(
             1,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), active.getId(), active.getEmail(), "case@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), active.getId(), active.getEmail(), "case@example.com",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
         assertEquals(
             1,
-            identityMapper.insertBackfilledPersonPhoneIfAbsent(
-                workspace.getId(), active.getId(), active.getPhone(), "+819012345678"));
+            identityMapper.upsertPersonPhoneIdentity(
+                workspace.getId(), active.getId(), active.getPhone(), "+819012345678",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
 
         assertEquals(
             2,
@@ -256,11 +261,14 @@ class IdentityMapperTest extends AbstractMapperTest {
             "manual@example.com",
             "manual");
 
-        identityMapper.insertBackfilledPersonEmailIfAbsent(
+        identityMapper.upsertPersonEmailIdentity(
             workspace.getId(),
             person.getId(),
             person.getEmail(),
-            "manual@example.com");
+            "manual@example.com",
+            "backfill",
+            "person:" + person.getId(),
+            createdAt(person.getId()));
 
         assertEquals(
             "manual",
@@ -452,6 +460,14 @@ class IdentityMapperTest extends AbstractMapperTest {
             value,
             normalizedValue,
             sourceSystem);
+    }
+
+    private LocalDateTime createdAt(int personId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT created_at FROM person WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.class,
+            workspace.getId(),
+            personId);
     }
 
     private int count(String table, String column, String value) {
