@@ -145,8 +145,7 @@ jobs:
         run: bash frontend/ci/smoke_image.sh connex-frontend-ci
 
   frontend-tests:
-    # Non-required while the suite proves itself stable (see #853); do not add to
-    # branch protection until it has run green for a week.
+    # Required check on main (see #853). Keep this job green: a failure here blocks merges.
     name: Frontend — unit & e2e
     runs-on: ubuntu-latest
     timeout-minutes: 60
