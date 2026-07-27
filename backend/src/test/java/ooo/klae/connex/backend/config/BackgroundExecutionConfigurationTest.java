@@ -34,13 +34,15 @@ class BackgroundExecutionConfigurationTest {
 
     @Test
     void maintenanceModeDisablesScheduledAndAsyncProcessing() {
-        contextRunner.withPropertyValues("connex.maintenance.mode=legacy-upload-migration")
-            .run(context -> {
-                assertFalse(context.containsBean(
-                    TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME));
-                assertFalse(context.containsBean(
-                    TaskManagementConfigUtils.ASYNC_ANNOTATION_PROCESSOR_BEAN_NAME));
-            });
+        for (String mode : List.of("legacy-upload-migration", "seeder")) {
+            contextRunner.withPropertyValues("connex.maintenance.mode=" + mode)
+                .run(context -> {
+                    assertFalse(context.containsBean(
+                        TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME));
+                    assertFalse(context.containsBean(
+                        TaskManagementConfigUtils.ASYNC_ANNOTATION_PROCESSOR_BEAN_NAME));
+                });
+        }
     }
 
     @Test
