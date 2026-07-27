@@ -12,10 +12,10 @@
     "contact": "連絡先",
     "deal": "取引",
     "company": "会社",
-    "filterSort": "絞り込みと並べ替え",
-    "filterSortAria": "レコードを絞り込んで並べ替える",
+    "filterSort": "絞り込みと並び替え",
+    "filterSortAria": "レコードを絞り込んで並び替える",
     "filterSortDescription": "一覧の並び順と、表示するレコードを選びます。",
-    "sortBy": "並べ替え",
+    "sortBy": "並び替え",
     "sortAscending": "昇順",
     "sortDescending": "降順",
     "done": "完了"
