@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +20,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
+
+import ooo.klae.connex.backend.services.IdentityKind;
+import ooo.klae.connex.backend.services.MatchingService;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -33,6 +37,9 @@ class SeederDeterminismTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MatchingService matchingService;
 
     @Test
     void sameSeedAndAnchorProduceIdenticalIdIndependentContentWithoutNotifications() {
@@ -268,6 +275,25 @@ class SeederDeterminismTest {
             "SELECT COUNT(*) FROM person WHERE workspace_id = ? "
                 + "AND name IN ('山田 太郎', 'ヤマダ タロウ', 'やまだ たろう')",
             workspaceId));
+        assertSeededPhonesAreMatchable(workspaceId);
+    }
+
+    private void assertSeededPhonesAreMatchable(int workspaceId) {
+        List<String> phones = new ArrayList<>();
+        phones.addAll(jdbcTemplate.queryForList(
+            "SELECT phone FROM person WHERE workspace_id = ? AND phone IS NOT NULL AND phone <> ''",
+            String.class,
+            workspaceId));
+        phones.addAll(jdbcTemplate.queryForList(
+            "SELECT phone FROM company WHERE workspace_id = ? AND phone IS NOT NULL AND phone <> ''",
+            String.class,
+            workspaceId));
+        assertTrue(phones.size() > 0, "the fixture must seed some phone numbers");
+        List<String> unmatchable = phones.stream()
+            .filter(phone -> matchingService.normalizeIdentifier(IdentityKind.PHONE, phone).isEmpty())
+            .toList();
+        assertEquals(List.of(), unmatchable,
+            "every seeded phone must normalize to E.164 or the identity backfill silently drops it");
     }
 
     private static MessageDigest sha256() {
