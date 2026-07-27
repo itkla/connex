@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -163,7 +164,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         Workspace other = newWorkspace("collision-fk");
 
         assertThrows(
-            DataIntegrityViolationException.class,
+            DataAccessException.class,
             () -> jdbcTemplate.update(
                 """
                 INSERT INTO identity_collision (

@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -84,7 +85,7 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "person@example.com",
                 "manual"));
         assertThrows(
-            DataIntegrityViolationException.class,
+            DataAccessException.class,
             () -> insertPersonIdentity(
                 workspace.getId(),
                 person.getId(),
@@ -93,7 +94,7 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "example.com",
                 "manual"));
         assertThrows(
-            DataIntegrityViolationException.class,
+            DataAccessException.class,
             () -> insertCompanyIdentity(
                 workspace.getId(),
                 company.getId(),

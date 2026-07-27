@@ -76,7 +76,7 @@
           AND existing.kind = 'email'
           AND existing.normalized_value = #{normalizedValue}
       )
-    ON DUPLICATE KEY UPDATE id = id
+    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
   </insert>
 
   <insert id="insertBackfilledPersonPhoneIfAbsent">
@@ -102,7 +102,7 @@
           AND existing.kind = 'phone'
           AND existing.normalized_value = #{normalizedValue}
       )
-    ON DUPLICATE KEY UPDATE id = id
+    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
   </insert>
 
   <insert id="insertBackfilledCompanyDomainIfAbsent">
@@ -126,7 +126,7 @@
           AND existing.kind = 'domain'
           AND existing.normalized_value = #{normalizedValue}
       )
-    ON DUPLICATE KEY UPDATE id = id
+    ON DUPLICATE KEY UPDATE company_identity.id = company_identity.id
   </insert>
 
   <delete id="deletePersonIdentitiesForWorkspace">
