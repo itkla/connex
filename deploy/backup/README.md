@@ -68,6 +68,14 @@ Native hosts may select `CONNEX_BACKUP_BINLOG_FETCH_MODE=mysqlbinlog` to use `my
 
 GTID-disabled servers are the normal Connex configuration. GTID-enabled sources can be dumped with `--set-gtid-purged=AUTO`, but optional scratch restore verification may require additional `SET_ANY_DEFINER` or related privileges. Restores are schema-level: `SET @@GLOBAL.GTID_PURGED` and `SET @@SESSION.SQL_LOG_BIN` statements embedded in a dump are stripped during import so restoring one schema never mutates global state on the target server.
 
+## Tests
+
+```bash
+deploy/backup/tests/run-tests.sh
+```
+
+Offline regression tests for schema selection, the PITR preflight refusals, binlog coverage-gap handling, and retention pruning. They source the real scripts with stubbed server calls against a sandbox backup root, so they need no database, Docker, or root. The sandbox parent defaults to `/var/tmp/connex-backup-tests` and can be moved with `CONNEX_BACKUP_TEST_ROOT` — it cannot live under `/tmp`, which the path validator rejects.
+
 ## Exit codes
 
 | Code | Failure class |
