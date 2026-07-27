@@ -184,11 +184,11 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
             dataSubjectDisclosureMapper.findProvisions(
                 ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream()
                 .map(row -> row.getTargetWorkspaceId()).sorted().toList());
-        assertEquals(List.of("person.legacy-unscoped", "person.organization", "person.subject"),
+        assertEquals(List.of("person.organization", "person.subject"),
             dataSubjectRequestMapper.findDisclosureAudit(
             org.getId(), subject.getId(), orgWorkspaceIds, 1_000).stream()
             .map(row -> row.getAction()).toList());
-        assertEquals(3, dataSubjectRequestMapper.countDisclosureAudit(
+        assertEquals(2, dataSubjectRequestMapper.countDisclosureAudit(
             org.getId(), subject.getId(), orgWorkspaceIds));
     }
 

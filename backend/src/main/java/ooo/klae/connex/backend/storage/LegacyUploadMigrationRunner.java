@@ -98,7 +98,7 @@ public class LegacyUploadMigrationRunner implements ApplicationRunner {
                         "Legacy upload workspace enumeration did not advance");
                 }
                 afterId = workspaceId;
-                int references = tenantWorkScope.inWorkspace(
+                int references = tenantWorkScope.inLifecycleWorkspace(
                     workspaceId, () -> tenantMapper.countReferences(workspaceId));
                 remaining = Math.addExact(remaining, references);
             }

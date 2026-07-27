@@ -78,6 +78,12 @@ class LegacyUploadMigrationRunnerTest {
             Supplier<Integer> work = invocation.getArgument(1);
             return work.get();
         });
+        lenient().when(tenantWorkScope.inLifecycleWorkspace(
+            anyInt(), org.mockito.ArgumentMatchers.<Supplier<Integer>>any()
+        )).thenAnswer(invocation -> {
+            Supplier<Integer> work = invocation.getArgument(1);
+            return work.get();
+        });
         lenient().doAnswer(invocation -> {
             Runnable work = invocation.getArgument(1);
             work.run();
@@ -127,7 +133,9 @@ class LegacyUploadMigrationRunnerTest {
         when(controlMapper.findWorkspaceIds(0, 100)).thenReturn(List.of(3));
         doThrow(new IllegalStateException("route unavailable"))
             .when(tenantWorkScope)
-            .inWorkspace(eq(3), org.mockito.ArgumentMatchers.<Supplier<Integer>>any());
+            .inLifecycleWorkspace(
+                eq(3),
+                org.mockito.ArgumentMatchers.<Supplier<Integer>>any());
 
         assertThrows(IllegalStateException.class, () -> runner.run(arguments));
 

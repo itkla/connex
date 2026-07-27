@@ -103,7 +103,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiOutputCacheMapper",
         MAPPERS + "ReportMapper",
         MAPPERS + "GoalMapper",
-        MAPPERS + "ScheduleMapper"
+        MAPPERS + "ScheduleMapper",
+        MAPPERS + "TenantLifecycleMapper"
     );
 
     /**
@@ -147,7 +148,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "UserObjectDeletionQueueMapper",
         MAPPERS + "WebauthnCredentialMapper",
         MAPPERS + "WebauthnUserEntityMapper",
-        MAPPERS + "WorkspaceMapper"
+        MAPPERS + "WorkspaceMapper",
+        MAPPERS + "TenantLifecycleControlMapper"
     );
 
     /**

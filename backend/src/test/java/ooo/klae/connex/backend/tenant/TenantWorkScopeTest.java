@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,13 +26,18 @@ class TenantWorkScopeTest {
 
     @Mock private TenantCatalogResolver tenantCatalogResolver;
     @Mock private WorkspaceMapper workspaceMapper;
+    @Mock private TenantLifecycleControlMapper tenantLifecycleControlMapper;
 
     private final TenantContext tenantContext = new TenantContext();
     private TenantWorkScope workScope;
 
     @BeforeEach
     void setUp() {
-        workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
+        workScope = new TenantWorkScope(
+            tenantContext,
+            tenantCatalogResolver,
+            workspaceMapper,
+            tenantLifecycleControlMapper);
     }
 
     @AfterEach
@@ -172,6 +178,32 @@ class TenantWorkScopeTest {
     void missingWorkspaceIsRefused() {
         when(workspaceMapper.getOrgId(7)).thenReturn(null);
         assertThrows(IllegalStateException.class, () -> workScope.inWorkspace(7, () -> null));
+    }
+
+    @Test
+    void lifecycleRoutingUsesTheTrustedUnfilteredWorkspaceLookup() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7))
+            .thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+
+        assertEquals(
+            "cnx_cleanup",
+            workScope.inLifecycleWorkspace(7, () -> tenantContext.getCatalog()));
+        verifyNoInteractions(workspaceMapper);
+    }
+
+    @Test
+    void ordinaryWorkNestedInALifecycleScopeIsStillFenced() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7))
+            .thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+        when(workspaceMapper.getOrgId(7)).thenReturn(null);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> workScope.inLifecycleWorkspace(
+                7,
+                () -> workScope.inWorkspace(7, () -> null)));
     }
 
 }

@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,6 +30,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
@@ -317,6 +319,55 @@ public class ManagedObjectService implements ApplicationRunner {
         String token = requireRequestedToken(persistedUrl, userImageUrl(userId, requestedToken), requestedToken);
         StoredObject object = getForResponse(userImageKey(userId, token));
         return new ManagedContent(object, imageContentType(token), "profile-picture." + extension(token));
+    }
+
+    /**
+     * Opens one registry-enumerated active tenant object for an already
+     * authorized export actor. The database reference, canonical object key,
+     * owning workspace, and quota ledger length must all agree before storage
+     * access.
+     */
+    public ManagedTenantObject openTenantExportObject(
+            int workspaceId,
+            int actorId,
+            ActiveObjectReference reference,
+            Duration timeout) {
+        Objects.requireNonNull(reference, "reference");
+        if (!reference.usagePresent() || reference.usageSizeBytes() < 0) {
+            throw new IllegalStateException("Active managed object is missing its usage ledger");
+        }
+        String expectedKey = switch (reference.kind()) {
+            case "attachment" -> managedAttachmentKey(workspaceId, reference.persistedUrl())
+                .orElseThrow(() -> new IllegalStateException("Attachment object reference is invalid"));
+            case "person_image" -> managedPersonImageKey(
+                    workspaceId,
+                    positive(reference.ownerId()),
+                    reference.persistedUrl())
+                .orElseThrow(() -> new IllegalStateException("Person image object reference is invalid"));
+            case "company_image" -> managedCompanyImageKey(
+                    workspaceId,
+                    positive(reference.ownerId()),
+                    reference.persistedUrl())
+                .orElseThrow(() -> new IllegalStateException("Company image object reference is invalid"));
+            default -> throw new IllegalStateException("Active managed object category is invalid");
+        };
+        if (!expectedKey.equals(reference.objectKey())) {
+            throw new IllegalStateException("Active managed object key does not match its metadata");
+        }
+        StoredObject object = readAdmissionService.admit(
+            actorId,
+            timeout,
+            () -> get(expectedKey));
+        if (object.contentLength() != reference.usageSizeBytes()) {
+            try {
+                object.close();
+            } catch (IOException exception) {
+                throw new ServiceUnavailableException(
+                    "Managed export object could not be closed", exception);
+            }
+            throw new IllegalStateException("Active managed object length does not match its usage ledger");
+        }
+        return new ManagedTenantObject(expectedKey, object, reference.usageSizeBytes());
     }
 
     void verifyAttachment(int workspaceId, String url, byte[] expectedContent) {
@@ -772,6 +823,33 @@ public class ManagedObjectService implements ApplicationRunner {
 
         public long contentLength() {
             return object.contentLength();
+        }
+
+        @Override
+        public void close() throws IOException {
+            object.close();
+        }
+    }
+
+    /**
+     * Validated tenant export object with its canonical ZIP-relative key and
+     * expected streamed length.
+     */
+    public record ManagedTenantObject(
+            String objectKey,
+            StoredObject object,
+            long expectedLength) implements AutoCloseable {
+
+        public ManagedTenantObject {
+            Objects.requireNonNull(objectKey, "objectKey");
+            Objects.requireNonNull(object, "object");
+            if (expectedLength < 0) {
+                throw new IllegalArgumentException("Managed object length is invalid");
+            }
+        }
+
+        public InputStream inputStream() {
+            return object.inputStream();
         }
 
         @Override
