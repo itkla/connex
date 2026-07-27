@@ -208,7 +208,7 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO note (workspace_id, content, title, visibility, author_id, person_id, deal_id)
+    INSERT INTO note (workspace_id, content, title, visibility, author_id, person_id, deal_id, created_at)
     VALUES (
       #{workspaceId}, #{content}, #{title},
       <choose>
@@ -223,7 +223,8 @@
       <choose>
         <when test="deal != null">#{deal.id}</when>
         <otherwise>NULL</otherwise>
-      </choose>
+      </choose>,
+      COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
   </insert>
 

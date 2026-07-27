@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.config;
 import java.util.Locale;
 
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
@@ -13,6 +14,7 @@ import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMo
 public class MaintenanceModeStartupValidator {
     private static final String OFF = "off";
     private static final String LEGACY_UPLOAD_MIGRATION = "legacy-upload-migration";
+    private static final String SEEDER = "seeder";
 
     public MaintenanceModeStartupValidator(
             Environment environment,
@@ -30,6 +32,10 @@ public class MaintenanceModeStartupValidator {
             }
             return;
         }
+        if (SEEDER.equals(maintenanceMode)) {
+            validateSeeder(environment, migrationMode);
+            return;
+        }
         if (!LEGACY_UPLOAD_MIGRATION.equals(maintenanceMode)) {
             throw new IllegalStateException("Unknown maintenance mode: " + maintenanceMode);
         }
@@ -42,6 +48,21 @@ public class MaintenanceModeStartupValidator {
         if (!"none".equals(webApplicationType)) {
             throw new IllegalStateException(
                     "Legacy upload maintenance mode requires spring.main.web-application-type=none");
+        }
+    }
+
+    private static void validateSeeder(Environment environment, LegacyMigrationMode migrationMode) {
+        if (migrationMode != LegacyMigrationMode.OFF) {
+            throw new IllegalStateException("Seeder maintenance mode requires legacy upload migration mode OFF");
+        }
+        if (!environment.acceptsProfiles(Profiles.of(SEEDER))) {
+            throw new IllegalStateException("Seeder maintenance mode requires the seeder Spring profile");
+        }
+        if (!Boolean.TRUE.equals(environment.getProperty("connex.seeder.enabled", Boolean.class))) {
+            throw new IllegalStateException("Seeder maintenance mode requires connex.seeder.enabled=true");
+        }
+        if (!"none".equals(normalized(environment.getProperty("spring.main.web-application-type", "")))) {
+            throw new IllegalStateException("Seeder maintenance mode requires spring.main.web-application-type=none");
         }
     }
 

@@ -104,6 +104,8 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             routeLimit = properties.getImportMaxBodyBytes();
         } else if (path.equals("/api/business-cards") || path.startsWith("/api/business-cards/")) {
             routeLimit = properties.getBusinessCardMaxBodyBytes();
+        } else if (path.equals("/api/client-errors")) {
+            routeLimit = properties.getClientErrorsMaxBodyBytes();
         } else if (isUploadPath(path)) {
             routeLimit = properties.getUploadMaxBodyBytes();
         } else if (path.equals("/api/auth/webauthn") || path.startsWith("/api/auth/webauthn/")) {

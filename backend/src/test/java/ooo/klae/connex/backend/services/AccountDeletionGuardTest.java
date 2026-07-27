@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
@@ -41,12 +42,14 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
 
     @Test
     void deletingSoleWorkspaceOwner_isRefused() {
+        newSoleOwnedWorkspace();
         assertThrows(BadRequestException.class, () -> userService.delete(currentUser.getId()),
             "the sole owner of a workspace must transfer ownership before deleting their account");
     }
 
     @Test
     void workspaceGuard_firesOnlyForTheSoleOwner() {
+        newSoleOwnedWorkspace();
         assertThrows(BadRequestException.class,
             () -> workspaceService.assertNotSoleOwnerOfAnyWorkspace(currentUser.getId()));
         User plainMember = newUser();
@@ -88,5 +91,14 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
         assertTrue(auditLogMapper.findRecent(workspace.getId(), 50, 0).stream()
             .anyMatch(entry -> "user.delete".equals(entry.getAction())),
             "account erasure must be audited; recording after the row delete was silently swallowed");
+    }
+
+    private void newSoleOwnedWorkspace() {
+        Workspace soleOwned = new Workspace();
+        soleOwned.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        soleOwned.setName("Sole owner " + unique());
+        soleOwned.setSlug("sole-owner-" + unique());
+        workspaceMapper.insert(soleOwned);
+        workspaceMapper.addMember(soleOwned.getId(), currentUser.getId(), "owner");
     }
 }

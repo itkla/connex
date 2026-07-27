@@ -88,12 +88,11 @@
     SELECT action, actor_label, outcome, summary, created_at
     FROM audit_log
     WHERE entity_type = 'person' AND entity_id = #{personId}
-      AND ((workspace_id IS NOT NULL AND workspace_id IN
+      AND ((integrity_workspace_id IS NOT NULL AND integrity_workspace_id IN
         <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
           #{candidateWorkspaceId}
         </foreach>)
-        OR (workspace_id IS NULL AND org_id = #{orgId})
-        OR (workspace_id IS NULL AND org_id IS NULL))
+        OR (integrity_workspace_id IS NULL AND integrity_org_id = #{orgId}))
     ORDER BY created_at DESC, id DESC
     LIMIT #{limit}
   </select>
@@ -102,12 +101,11 @@
     SELECT COUNT(*)
     FROM audit_log
     WHERE entity_type = 'person' AND entity_id = #{personId}
-      AND ((workspace_id IS NOT NULL AND workspace_id IN
+      AND ((integrity_workspace_id IS NOT NULL AND integrity_workspace_id IN
         <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
           #{candidateWorkspaceId}
         </foreach>)
-        OR (workspace_id IS NULL AND org_id = #{orgId})
-        OR (workspace_id IS NULL AND org_id IS NULL))
+        OR (integrity_workspace_id IS NULL AND integrity_org_id = #{orgId}))
   </select>
 
 </mapper>

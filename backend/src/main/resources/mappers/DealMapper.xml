@@ -1034,12 +1034,12 @@
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
       workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
-      expected_close_date, closed_at, closed_reason, won
+      expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES (
       #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value}, #{actualValue}, #{currency},
       #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
-      #{closedReason}, #{won}
+      #{closedReason}, #{won}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
   </insert>
 

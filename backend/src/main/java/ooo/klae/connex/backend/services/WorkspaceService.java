@@ -205,6 +205,9 @@ public class WorkspaceService {
             throw new ResourceNotFoundException("User not found: " + ownerUserId);
         }
         int orgId = orgIdForOwner(ownerUserId, name);
+        if (organizationMapper.lockActiveByIdForShare(orgId) == null) {
+            throw new ForbiddenException("Organization teardown is in progress");
+        }
         Workspace workspace = new Workspace();
         workspace.setOrgId(orgId);
         workspace.setName(name.trim());
@@ -764,13 +767,13 @@ public class WorkspaceService {
      */
     @Transactional
     public void ensureActiveMember(int workspaceId, int userId, String role) {
+        int orgId = getOrgId(workspaceId);
         if (isMember(workspaceId, userId)) {
             return;
         }
         userOffboardingService.prepareFreshMembership(workspaceId, userId);
         workspaceMapper.addMember(workspaceId, userId, role);
         notificationStateVersionService.markChanged(userId);
-        int orgId = workspaceMapper.getOrgId(workspaceId);
         auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,
                 "Provisioned an SSO member into a workspace",
                 Map.of("workspaceId", workspaceId, "userId", userId, "role", role));

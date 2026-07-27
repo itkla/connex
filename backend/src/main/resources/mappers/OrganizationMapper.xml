@@ -18,4 +18,11 @@
   <select id="lockByIdForShare" resultType="java.lang.Integer">
     SELECT id FROM organization WHERE id = #{id} FOR SHARE
   </select>
+
+  <select id="lockActiveByIdForShare" resultType="java.lang.Integer">
+    SELECT id
+    FROM organization
+    WHERE id = #{id} AND lifecycle_state = 'active'
+    FOR SHARE
+  </select>
 </mapper>

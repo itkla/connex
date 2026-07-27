@@ -11,6 +11,10 @@
     <result property="entityType" column="entity_type"/>
     <result property="entityId" column="entity_id"/>
     <result property="actorId" column="actor_id"/>
+    <result property="integrityWorkspaceId" column="integrity_workspace_id"/>
+    <result property="integrityOrgId" column="integrity_org_id"/>
+    <result property="integrityActorId" column="integrity_actor_id"/>
+    <result property="integrityReferenceState" column="integrity_reference_state"/>
     <result property="actorLabel" column="actor_label"/>
     <result property="targetLabel" column="target_label"/>
     <result property="outcome" column="outcome"/>
@@ -31,7 +35,9 @@
   </resultMap>
 
   <sql id="auditColumns">
-    al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id, al.actor_id, al.actor_label,
+    al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id, al.actor_id,
+    al.integrity_workspace_id, al.integrity_org_id, al.integrity_actor_id,
+    al.integrity_reference_state, al.actor_label,
     al.target_label, al.outcome, al.summary, al.changes, al.context, al.ip_address,
     al.user_agent, al.session_id, al.request_id, al.chain_scope_type, al.chain_scope_id,
     al.chain_index, al.prev_hash, al.row_hash, al.created_at,
@@ -40,11 +46,15 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO audit_log
-      (workspace_id, org_id, action, entity_type, entity_id, actor_id, actor_label, target_label,
+      (workspace_id, org_id, action, entity_type, entity_id, actor_id,
+       integrity_workspace_id, integrity_org_id, integrity_actor_id, actor_label, target_label,
+       integrity_reference_state,
        outcome, summary, changes, context, ip_address, user_agent, session_id, request_id,
        chain_scope_type, chain_scope_id, chain_index, prev_hash, row_hash, created_at)
     VALUES
-      (#{workspaceId}, #{orgId}, #{action}, #{entityType}, #{entityId}, #{actorId}, #{actorLabel}, #{targetLabel},
+      (#{workspaceId}, #{orgId}, #{action}, #{entityType}, #{entityId}, #{actorId},
+       #{integrityWorkspaceId}, #{integrityOrgId}, #{integrityActorId}, #{actorLabel}, #{targetLabel},
+       #{integrityReferenceState},
        #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId},
        #{chainScopeType}, #{chainScopeId}, #{chainIndex}, #{prevHash}, #{rowHash}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
@@ -80,7 +90,12 @@
     SELECT <include refid="auditColumns"/>
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
-    WHERE al.org_id = #{orgId} AND al.workspace_id IS NULL
+    WHERE al.org_id = #{orgId}
+      AND al.workspace_id IS NULL
+      AND (
+        (al.chain_scope_type = 'organization' AND al.chain_scope_id = #{orgId})
+        OR (al.chain_scope_type IS NULL AND al.integrity_workspace_id IS NULL)
+      )
     ORDER BY al.chain_index IS NULL, al.chain_index ASC, al.created_at ASC, al.id ASC
     LIMIT #{limit} OFFSET #{offset}
   </select>
@@ -95,7 +110,12 @@
     SELECT <include refid="auditColumns"/>
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
-    WHERE al.org_id = #{orgId} AND al.workspace_id IS NULL
+    WHERE al.org_id = #{orgId}
+      AND al.workspace_id IS NULL
+      AND (
+        (al.chain_scope_type = 'organization' AND al.chain_scope_id = #{orgId})
+        OR (al.chain_scope_type IS NULL AND al.integrity_workspace_id IS NULL)
+      )
     ORDER BY al.created_at DESC, al.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>

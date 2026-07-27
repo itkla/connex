@@ -13,6 +13,7 @@ public class RequestBodySizeProperties {
     private long importMaxBodyBytes = 64L * 1024L * 1024L;
     private long uploadMaxBodyBytes = 27L * 1024L * 1024L;
     private long businessCardMaxBodyBytes = 12L * 1024L * 1024L;
+    private long clientErrorsMaxBodyBytes = 16L * 1024L;
     private long webauthnMaxBodyBytes = 64L * 1024L;
     private long workflowMaxBodyBytes = 96L * 1024L;
     private long formMaxBodyBytes = 1L * 1024L * 1024L;
@@ -39,6 +40,14 @@ public class RequestBodySizeProperties {
 
     public void setBusinessCardMaxBodyBytes(long businessCardMaxBodyBytes) {
         this.businessCardMaxBodyBytes = businessCardMaxBodyBytes;
+    }
+
+    public long getClientErrorsMaxBodyBytes() {
+        return clientErrorsMaxBodyBytes;
+    }
+
+    public void setClientErrorsMaxBodyBytes(long clientErrorsMaxBodyBytes) {
+        this.clientErrorsMaxBodyBytes = clientErrorsMaxBodyBytes;
     }
 
     public long getWebauthnMaxBodyBytes() {

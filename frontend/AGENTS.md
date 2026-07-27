@@ -86,9 +86,10 @@ Any subagent dispatched to implement frontend work must first return a short pla
 ## Definition of Done (frontend)
 
 1. `pnpm lint` and `pnpm exec tsc --noEmit` clean.
-2. **Verify in a real browser — this is the frontend test gate.** Run `pnpm dev`, then use the **Playwright MCP** to open the implemented page and confirm it renders and the flow completes with no console errors. There is no unit-test runner, so exercising the real UI is mandatory, not optional. (Requires the Playwright MCP server connected — if absent, say so, don't skip.)
+2. **Run the test harness.** `pnpm test` (vitest, pure logic under `test/unit/`) must pass, and if your change touches one of the covered flows, `pnpm e2e` (Playwright, `test/e2e/`) against a running stack must too — see [`docs/FRONTEND_TESTING.md`](../docs/FRONTEND_TESTING.md). Add or update unit tests when you change pure logic that already has coverage.
+3. **Verify in a real browser — this is the frontend test gate.** Run `pnpm dev`, then use the **Playwright MCP** to open the implemented page and confirm it renders and the flow completes with no console errors. Interactive browser verification is mandatory, not optional — the e2e suite covers only eight core flows. (Requires the Playwright MCP server connected — if absent, say so, don't skip.)
    - **Run the Playwright MCP in `--isolated` mode.** Several agents share this one clone, and Chrome lets only one process hold a profile at a time — the default shared profile serializes browsing to a single agent and fails the rest with `Browser is already in use for …/mcp-chrome-… use --isolated`. With `--isolated`, each agent gets its own fresh browser profile/context, so concurrent verification doesn't collide. Configure it where the server is registered, e.g. `npx @playwright/mcp@latest --isolated` (add `--headless` for CI/headless runs). Trade-off: an isolated profile starts logged-out, so make session login part of the verification flow (hit `/auth/login`, authenticate, then drive the page) rather than relying on a persisted session.
-3. `/code-review` **and** adversarial multi-agent review; address findings. Auth, invite, sharing, or permissions UI changes also get `/security-review`.
+4. `/code-review` **and** adversarial multi-agent review; address findings. Auth, invite, sharing, or permissions UI changes also get `/security-review`.
 
 ## Commands
 
@@ -100,5 +101,7 @@ This repo uses **pnpm** — don't run `npm install` or reintroduce `package-lock
 - Build: `pnpm build`
 - Lint: `pnpm lint`
 - Typecheck: `pnpm exec tsc --noEmit`
+- Unit tests: `pnpm test` (vitest; `pnpm test:watch` for watch mode)
+- E2E tests: `pnpm e2e` (Playwright; needs the full stack running — see [`docs/FRONTEND_TESTING.md`](../docs/FRONTEND_TESTING.md))
 
-No test runner is configured — the browser verification in the Definition of Done is the test gate.
+Unit tests cover pure logic only; the browser verification in the Definition of Done remains the gate for everything the harness doesn't cover.

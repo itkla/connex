@@ -40,7 +40,10 @@ migration-discipline part of #87 §9 / #102).
   - **Drop** the old column/table **several releases later**, once no supported version still uses it.
   - Renames follow the same shape: add-new → backfill → drop-old-later, never an in-place rename.
 - Migrations are **non-destructive and defensive** wherever possible, and are tested against
-  realistic data volumes before release, not just empty schemas.
+  realistic data volumes before release, not just empty schemas. The
+  [deterministic volume seeder](VOLUME_SEEDER.md#migration-timing-evidence) logs fresh-schema
+  per-migration and total Flyway timing, then establishes the populated fixture used for separate
+  upgrade-drill measurements.
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
 

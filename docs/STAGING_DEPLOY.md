@@ -38,8 +38,11 @@ reviewed, in-repo script
    not rebuilt or restarted.
 4. **Health-gates the backend restart.** After `systemctl restart connex-staging-backend` it
    polls unit state + `http://127.0.0.1:8081/api/version` (bounded, 300s) until the served
-   `gitSha` equals the target commit, then rechecks the same MainPID, unit health, and HTTP
-   response after a 15s stability interval.
+   `gitSha` equals the target commit **and** `GET /api/health/ready` answers 200 (DB
+   reachable, Flyway migrations applied, no failed migrations), then rechecks the same
+   MainPID, unit health, and readiness after a 15s stability interval. A JAR that predates
+   the readiness endpoint (404/405 — e.g. a rollback artifact) falls back to the plain
+   `/api/version` probe; a 503 (not ready) fails the gate.
 5. **Rolls back on failure.** If the gate fails, the previous JAR is restored and restarted,
    the frontend is left untouched, the marker is not advanced, and the run exits nonzero
    (visible in `journalctl -u connex-staging-deploy`).
@@ -60,6 +63,7 @@ The in-repo script needs no installation — every deploy cycle runs the version
 ```bash
 ssh -i ~/.ssh/connex_target dev@192.168.0.141
 curl -s http://127.0.0.1:8081/api/version        # gitSha must equal origin/main HEAD
+curl -s http://127.0.0.1:8081/api/health/ready   # 200 {"status":"UP",...} when serving traffic
 cat /opt/connex-staging/.staging/deployed-sha
 journalctl -u connex-staging-deploy -n 50 --no-pager
 ```

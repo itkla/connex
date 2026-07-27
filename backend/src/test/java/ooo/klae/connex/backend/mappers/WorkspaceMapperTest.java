@@ -71,7 +71,8 @@ class WorkspaceMapperTest extends AbstractMapperTest {
 
         List<Integer> workspaceIds = workspaceMapper.findWorkspaceIds();
         List<Integer> expectedWorkspaceIds = jdbcTemplate.queryForList(
-            "SELECT id FROM workspace ORDER BY id", Integer.class);
+            "SELECT id FROM workspace WHERE lifecycle_state = 'active' ORDER BY id",
+            Integer.class);
 
         assertTrue(workspaceIds.contains(first.getId()));
         assertTrue(workspaceIds.contains(second.getId()));

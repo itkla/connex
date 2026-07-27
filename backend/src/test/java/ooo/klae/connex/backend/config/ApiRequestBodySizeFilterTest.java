@@ -31,6 +31,7 @@ class ApiRequestBodySizeFilterTest {
         properties.setWebauthnMaxBodyBytes(4);
         properties.setWorkflowMaxBodyBytes(6);
         properties.setBusinessCardMaxBodyBytes(20);
+        properties.setClientErrorsMaxBodyBytes(10);
         filter = new ApiRequestBodySizeFilter(properties);
     }
 
@@ -176,6 +177,39 @@ class ApiRequestBodySizeFilterTest {
 
         assertEquals(413, response.getStatus());
         assertNull(chain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedClientErrorLimitToKnownLengthBody() throws Exception {
+        MockHttpServletRequest allowed = jsonRequest("POST", "/api/client-errors", "1234567890");
+        MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+        MockFilterChain allowedChain = new MockFilterChain();
+
+        filter.doFilter(allowed, allowedResponse, allowedChain);
+
+        assertEquals(200, allowedResponse.getStatus());
+        assertNotNull(allowedChain.getRequest());
+
+        MockHttpServletRequest rejected = jsonRequest("POST", "/api/client-errors", "12345678901");
+        MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+        MockFilterChain rejectedChain = new MockFilterChain();
+
+        filter.doFilter(rejected, rejectedResponse, rejectedChain);
+
+        assertEquals(413, rejectedResponse.getStatus());
+        assertNull(rejectedChain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedClientErrorLimitToUnknownLengthBody() throws Exception {
+        MockHttpServletRequest request =
+                unknownLengthJsonRequest("POST", "/api/client-errors", "12345678901");
+        request.addHeader("Transfer-Encoding", "chunked");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, drainingInputStreamChain());
+
+        assertEquals(413, response.getStatus());
     }
 
     @Test

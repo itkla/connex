@@ -147,6 +147,7 @@ public class NoteService {
         note.setVisibility(normalizeVisibility(note.getVisibility(),
             note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
         requireLinkedRecordsVisible(workspaceId, note);
+        note.setCreatedAt(null);
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), auditLabel(note),
             "Created note",

@@ -21,10 +21,25 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.observability.ReportedError;
+import ooo.klae.connex.backend.observability.ReportedError.Source;
+import ooo.klae.connex.backend.tenant.TenantContext;
+
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final int MAX_STACK_DETAIL_LENGTH = 8_000;
+    private static final int MAX_STACK_FRAMES = 32;
+    private static final int MAX_CAUSE_DEPTH = 5;
+
+    private final ErrorReporter errorReporter;
+    private final TenantContext tenantContext;
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<String> notFound(ResourceNotFoundException ex) {
@@ -90,7 +105,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> validation(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new LinkedHashMap<>(); // using LinkedHashMap to preserve order of errors
+        Map<String, String> errors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(err ->
             errors.put(err.getField(), err.getDefaultMessage())
         );
@@ -178,9 +193,25 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> internalError(Exception ex) {
-        log.error("Unhandled exception", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred");
+    public ResponseEntity<Map<String, String>> internalError(Exception ex, HttpServletRequest request) {
+        String correlationId = CorrelationIds.current();
+        try {
+            errorReporter.report(new ReportedError(
+                    Source.SERVER,
+                    correlationId,
+                    tenantContext.getWorkspaceId(),
+                    tenantContext.getUserId(),
+                    ex.getClass().getName(),
+                    stackDetail(ex),
+                    request.getRequestURI()));
+        } catch (Throwable reportingFailure) {
+            log.error("Application error reporter failed", reportingFailure);
+            log.error("Unhandled exception", ex);
+        }
+        Map<String, String> response = new LinkedHashMap<>();
+        response.put("message", "An unexpected error occurred");
+        response.put("correlationId", correlationId);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -197,5 +228,36 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return false;
+    }
+
+    private static String stackDetail(Throwable throwable) {
+        StringBuilder detail = new StringBuilder();
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth < MAX_CAUSE_DEPTH && detail.length() < MAX_STACK_DETAIL_LENGTH) {
+            if (depth > 0) {
+                appendLine(detail, "Caused by: " + current.getClass().getName());
+            }
+            StackTraceElement[] frames = current.getStackTrace();
+            int count = Math.min(frames.length, MAX_STACK_FRAMES);
+            for (int index = 0; index < count && detail.length() < MAX_STACK_DETAIL_LENGTH; index++) {
+                appendLine(detail, frames[index].toString());
+            }
+            current = current.getCause() == current ? null : current.getCause();
+            depth++;
+        }
+        return detail.toString();
+    }
+
+    private static void appendLine(StringBuilder detail, String line) {
+        int separatorLength = detail.isEmpty() ? 0 : 1;
+        int remaining = MAX_STACK_DETAIL_LENGTH - detail.length() - separatorLength;
+        if (remaining <= 0) {
+            return;
+        }
+        if (separatorLength != 0) {
+            detail.append('\n');
+        }
+        detail.append(line, 0, Math.min(line.length(), remaining));
     }
 }
