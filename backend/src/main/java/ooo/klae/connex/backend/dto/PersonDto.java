@@ -59,6 +59,7 @@ public class PersonDto {
     private int[] activityIds;
     private int[] noteIds;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
 

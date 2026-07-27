@@ -948,6 +948,7 @@ public class DealService {
         if (deal.getStageId() != null) {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
         }
+        deal.setCreatedAt(null);
         dealMapper.insert(deal);
         if (deal.getStageId() != null) {
             dealStageHistoryService.recordInitial(

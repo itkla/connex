@@ -1,0 +1,33 @@
+spring:
+    main:
+        web-application-type: none
+
+connex:
+    maintenance:
+        mode: seeder
+    bootstrap:
+        enabled: false
+    notifications:
+        scheduling-enabled: false
+    rules:
+        scheduling-enabled: false
+    reports:
+        scheduling-enabled: false
+    mail:
+        enabled: false
+    password-reset:
+        email-enabled: false
+        scheduling-enabled: false
+    email-change:
+        email-enabled: false
+        scheduling-enabled: false
+    registration-verification:
+        enabled: false
+        email-enabled: false
+        scheduling-enabled: false
+    secret-store:
+        master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+        batch-rewrap-on-startup: false
+    audit:
+        integrity:
+            hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:seeder-audit-integrity-hmac-secret}

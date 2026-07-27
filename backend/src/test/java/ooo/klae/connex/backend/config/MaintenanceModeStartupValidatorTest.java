@@ -61,6 +61,45 @@ class MaintenanceModeStartupValidatorTest {
     }
 
     @Test
+    void acceptsExactSeederMaintenanceInvocation() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        MockEnvironment environment = seederEnvironment();
+
+        assertDoesNotThrow(() -> MaintenanceModeStartupValidator.validate(environment, properties));
+    }
+
+    @Test
+    void rejectsIncompleteOrWebSeederMaintenanceInvocation() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        MockEnvironment missingProfile = new MockEnvironment()
+                .withProperty("connex.maintenance.mode", "seeder")
+                .withProperty("connex.seeder.enabled", "true")
+                .withProperty("spring.main.web-application-type", "none");
+        MockEnvironment missingEnabled = new MockEnvironment()
+                .withProperty("connex.maintenance.mode", "seeder")
+                .withProperty("spring.main.web-application-type", "none");
+        missingEnabled.setActiveProfiles("seeder");
+        MockEnvironment web = seederEnvironment()
+                .withProperty("spring.main.web-application-type", "servlet");
+
+        assertThrows(IllegalStateException.class,
+                () -> MaintenanceModeStartupValidator.validate(missingProfile, properties));
+        assertThrows(IllegalStateException.class,
+                () -> MaintenanceModeStartupValidator.validate(missingEnabled, properties));
+        assertThrows(IllegalStateException.class,
+                () -> MaintenanceModeStartupValidator.validate(web, properties));
+    }
+
+    @Test
+    void rejectsSeederMaintenanceWithLegacyUploadMigrationEnabled() {
+        ObjectStorageProperties properties = new ObjectStorageProperties();
+        properties.getLegacyMigration().setMode(LegacyMigrationMode.DRY_RUN);
+
+        assertThrows(IllegalStateException.class,
+                () -> MaintenanceModeStartupValidator.validate(seederEnvironment(), properties));
+    }
+
+    @Test
     void rejectsMaintenanceModeWhitespaceAndCaseVariants() {
         ObjectStorageProperties properties = new ObjectStorageProperties();
 
@@ -70,5 +109,14 @@ class MaintenanceModeStartupValidatorTest {
             assertThrows(IllegalStateException.class,
                     () -> MaintenanceModeStartupValidator.validate(environment, properties));
         }
+    }
+
+    private static MockEnvironment seederEnvironment() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("connex.maintenance.mode", "seeder")
+                .withProperty("connex.seeder.enabled", "true")
+                .withProperty("spring.main.web-application-type", "none");
+        environment.setActiveProfiles("seeder");
+        return environment;
     }
 }

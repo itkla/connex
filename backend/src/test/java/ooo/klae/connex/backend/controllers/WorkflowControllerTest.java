@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -98,6 +99,7 @@ class WorkflowControllerTest {
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;
+    @MockitoBean private ErrorReporter errorReporter;
     @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
 
     @Test

@@ -5,6 +5,7 @@ import { ArrowPathIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outl
 
 import { Button } from '@/components/ui/button';
 import type { SegmentErrorProps } from '@/app/components/ErrorState';
+import { reportBoundaryError } from '@/app/lib/clientErrorReporter';
 import './globals.css';
 
 /**
@@ -17,6 +18,7 @@ export default function GlobalError({ error, reset, unstable_retry }: SegmentErr
 
     useEffect(() => {
         console.error(error);
+        reportBoundaryError(error);
     }, [error]);
 
     return (
