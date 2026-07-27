@@ -29,6 +29,7 @@ import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
@@ -39,6 +40,7 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
+import ContactListRow from '@/app/components/records/contacts/ContactListRow';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
@@ -733,6 +735,26 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Contact>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                                facets={facets}
+                                filterState={filterState}
+                                onFilterStateChange={setFilterState}
+                                ownerScope={{
+                                    values: filterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
@@ -844,6 +866,9 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 readOnly={showArchived}
                                 removeIntent={showArchived ? 'restore' : 'archive'}
                             />
+                        )}
+                        renderListRow={(item) => (
+                            <ContactListRow contact={item} temperature={tempByContactId.get(item.id)} />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}

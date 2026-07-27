@@ -33,12 +33,14 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
+import CompanyListRow from '@/app/components/records/companies/CompanyListRow';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
@@ -868,6 +870,26 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Company>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                                facets={facets}
+                                filterState={filterState}
+                                onFilterStateChange={setFilterState}
+                                ownerScope={{
+                                    values: filterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
@@ -986,6 +1008,9 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 readOnly={showArchived}
                                 removeIntent={showArchived ? 'restore' : 'archive'}
                             />
+                        )}
+                        renderListRow={(item) => (
+                            <CompanyListRow company={item} temperature={tempByCompanyId.get(item.id)} />
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}

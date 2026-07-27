@@ -37,6 +37,7 @@ import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/c
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
@@ -45,6 +46,7 @@ import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import DealListRow from '@/app/components/records/deals/DealListRow';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
@@ -1366,6 +1368,26 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Deal>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDir}
+                                onSortChange={handleSortChange}
+                                facets={facets}
+                                filterState={activeFilterState}
+                                onFilterStateChange={changeFilters}
+                                ownerScope={{
+                                    values: activeFilterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
@@ -1534,14 +1556,23 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     onDelete={onDelete ? () => onDelete(item) : undefined}
                                 />
                             )}
+                            renderListRow={(item) => (
+                                <DealListRow
+                                    deal={item}
+                                    company={item.company != null ? companyById.get(item.company) : undefined}
+                                    stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                                    risk={riskByDealId.get(item.id)}
+                                />
+                            )}
                             renderAvatar={(item) => {
+                                const avatarSize = effectiveDisplayMode === 'list' ? 'small' : 'large';
                                 const company = item.company != null ? companyById.get(item.company) : undefined;
-                                if (company) return <CompanyAvatar company={company} type="large" />;
+                                if (company) return <CompanyAvatar company={company} type={avatarSize} />;
                                 const contact = contactByDealId.get(item.id);
                                 return (
                                     <ContactAvatar
                                         contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
-                                        type="large"
+                                        type={avatarSize}
                                     />
                                 );
                             }}
