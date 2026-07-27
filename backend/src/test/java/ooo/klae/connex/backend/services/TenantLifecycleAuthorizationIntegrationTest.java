@@ -13,12 +13,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpSession;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 
@@ -194,6 +198,61 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM tenant_cleanup_tombstone WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
+    }
+
+    @Test
+    void exportAndTeardownRejectAnOwnerWithoutRecentStepUp() {
+        Organization organization = createOrganization(currentUser);
+        Workspace workspace = createWorkspace(organization, currentUser);
+        expireStepUp();
+
+        assertThrows(
+            RecentAuthenticationRequiredException.class,
+            () -> exportService.prepare(
+                organization.getId(),
+                workspace.getId(),
+                currentUser.getId()));
+        assertThrows(
+            RecentAuthenticationRequiredException.class,
+            () -> teardownService.teardownWorkspace(
+                organization.getId(),
+                workspace.getId(),
+                currentUser.getId(),
+                workspace.getSlug()));
+        assertThrows(
+            RecentAuthenticationRequiredException.class,
+            () -> teardownService.teardownOrganization(
+                organization.getId(),
+                currentUser.getId(),
+                organization.getSlug()));
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace WHERE id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        restoreStepUp();
+        exportService.prepare(
+            organization.getId(),
+            workspace.getId(),
+            currentUser.getId()).closeIfNotStarted();
+    }
+
+    private void expireStepUp() {
+        currentSession().removeAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR);
+    }
+
+    private void restoreStepUp() {
+        currentSession().setAttribute(
+            SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
+            System.currentTimeMillis());
+    }
+
+    private HttpSession currentSession() {
+        ServletRequestAttributes attributes =
+            (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+        return attributes.getRequest().getSession(true);
     }
 
     private Organization createOrganization(User owner) {

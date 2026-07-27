@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -58,12 +60,12 @@ class TenantResolutionInterceptorTest {
 
     @Test
     void otherOrganizationRequestsStillUseOrdinaryResolution() {
-        when(requestResolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(7)))
+        when(requestResolver.resolve(any(), eq(7)))
             .thenReturn(null);
 
         assertTrue(preHandle("GET", "/api/orgs/3"));
 
-        verify(requestResolver).resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(7));
+        verify(requestResolver).resolve(any(), eq(7));
     }
 
     private boolean preHandle(String method, String path) {

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -338,7 +339,7 @@ public class TenantTeardownService {
 
     private void deleteStage(int workspaceId, DeleteStage stage) {
         for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values().stream()
-                .sorted(java.util.Comparator.comparingInt(TableLifecycle::deleteOrder))
+                .sorted(Comparator.comparingInt(TableLifecycle::deleteOrder))
                 .toList()) {
             if (!declaration.direct() || declaration.deleteStage() != stage) {
                 continue;

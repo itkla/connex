@@ -192,4 +192,18 @@ class TenantWorkScopeTest {
         verifyNoInteractions(workspaceMapper);
     }
 
+    @Test
+    void ordinaryWorkNestedInALifecycleScopeIsStillFenced() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7))
+            .thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+        when(workspaceMapper.getOrgId(7)).thenReturn(null);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> workScope.inLifecycleWorkspace(
+                7,
+                () -> workScope.inWorkspace(7, () -> null)));
+    }
+
 }

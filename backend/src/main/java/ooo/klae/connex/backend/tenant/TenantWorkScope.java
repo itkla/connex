@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.tenant;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -35,6 +37,7 @@ public class TenantWorkScope {
 
     private static final class WorkspaceRoutes {
         private final Map<Integer, WorkspaceRoute> routes = new HashMap<>();
+        private final Set<Integer> lifecycleResolved = new HashSet<>();
         private int depth;
     }
 
@@ -201,13 +204,19 @@ public class TenantWorkScope {
             int workspaceId,
             boolean lifecycle) {
         WorkspaceRoute existing = routes.routes.get(workspaceId);
-        if (existing != null) {
+        if (existing != null
+                && (lifecycle || !routes.lifecycleResolved.contains(workspaceId))) {
             return existing;
         }
         WorkspaceRoute resolved = lifecycle
             ? resolveLifecycleRouteForWorkspace(workspaceId)
             : resolveRouteForWorkspace(workspaceId);
         routes.routes.put(workspaceId, resolved);
+        if (lifecycle) {
+            routes.lifecycleResolved.add(workspaceId);
+        } else {
+            routes.lifecycleResolved.remove(workspaceId);
+        }
         return resolved;
     }
 
