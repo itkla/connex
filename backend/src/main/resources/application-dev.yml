@@ -15,6 +15,11 @@ spring:
         username: ${CONNEX_DB_USERNAME}
         password: ${CONNEX_DB_PASSWORD}
 
+logging:
+    structured:
+        format:
+            console: ""
+
 connex:
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}

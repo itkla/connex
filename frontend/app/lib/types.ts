@@ -2970,3 +2970,10 @@ export type AiProviderConfigRequest = {
     apiKey?: string | null;
     serviceAccountJson?: string | null;
 };
+
+export type ClientErrorReportPayload = {
+    digest?: string | null;
+    message: string;
+    stack?: string | null;
+    path?: string | null;
+};

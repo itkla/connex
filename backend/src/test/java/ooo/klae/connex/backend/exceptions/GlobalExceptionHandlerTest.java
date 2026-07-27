@@ -4,20 +4,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.observability.ReportedError;
+import ooo.klae.connex.backend.observability.ReportedError.Source;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
  * The data-integrity handler must not echo which unique column collided (#81): a duplicate email or
@@ -27,7 +42,22 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
  */
 class GlobalExceptionHandlerTest {
 
-    private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+    private ErrorReporter errorReporter;
+    private TenantContext tenantContext;
+    private GlobalExceptionHandler handler;
+
+    @BeforeEach
+    void setUp() {
+        errorReporter = mock(ErrorReporter.class);
+        tenantContext = new TenantContext();
+        handler = new GlobalExceptionHandler(errorReporter, tenantContext);
+    }
+
+    @AfterEach
+    void tearDown() {
+        tenantContext.clear();
+        MDC.clear();
+    }
 
     @Test
     void missingParameter_mapsTo400WithParameterName() {
@@ -176,5 +206,75 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("Malformed request body", response.getBody());
+    }
+
+    @Test
+    void internalErrorReturnsCorrelationIdAndReportsSanitizedServerMetadata() {
+        MDC.put(CorrelationIds.MDC_KEY, "request_id_123");
+        tenantContext.set(7, 8, 9, "member", null);
+        IllegalArgumentException exception = new IllegalArgumentException("jdbc:mysql://secret");
+        exception.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Controller", "handle", "Controller.java", 42)
+        });
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fail");
+        request.setQueryString("token=secret");
+
+        ResponseEntity<Map<String, String>> response = handler.internalError(exception, request);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(Map.of(
+                "message", "An unexpected error occurred",
+                "correlationId", "request_id_123"), response.getBody());
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        assertEquals(new ReportedError(
+                Source.SERVER,
+                "request_id_123",
+                7,
+                9,
+                IllegalArgumentException.class.getName(),
+                "example.Controller.handle(Controller.java:42)",
+                "/api/fail"), captor.getValue());
+        assertFalse(captor.getValue().detail().contains("secret"));
+        assertFalse(captor.getValue().path().contains("token"));
+    }
+
+    @Test
+    void internalErrorReportsCauseChainClassesAndFramesWithoutMessages() {
+        IllegalStateException root = new IllegalStateException("password=secret");
+        root.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Repository", "query", "Repository.java", 7)
+        });
+        RuntimeException wrapper = new RuntimeException("outer secret", root);
+        wrapper.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Service", "run", "Service.java", 3)
+        });
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fail");
+
+        handler.internalError(wrapper, request);
+
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        String detail = captor.getValue().detail();
+        assertEquals(String.join("\n",
+                "example.Service.run(Service.java:3)",
+                "Caused by: " + IllegalStateException.class.getName(),
+                "example.Repository.query(Repository.java:7)"), detail);
+        assertFalse(detail.contains("secret"));
+    }
+
+    @Test
+    void reporterFailureCannotAlterStableInternalErrorResponse() {
+        doThrow(new IllegalStateException("vendor secret")).when(errorReporter).report(
+                org.mockito.ArgumentMatchers.any());
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fail");
+
+        ResponseEntity<Map<String, String>> response =
+                assertDoesNotThrow(() -> handler.internalError(new RuntimeException("database secret"), request));
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("An unexpected error occurred", response.getBody().get("message"));
+        assertTrue(CorrelationIds.isValid(response.getBody().get("correlationId")));
     }
 }
