@@ -50,6 +50,7 @@ Everything lives in `deploy/backup/` inside the release deploy bundle:
 | `connex-restore-pitr.sh` | Restore to a timestamp (full dump + binlog replay) |
 | `shims/` | Docker client wrappers — no MySQL client tools needed on the host |
 | `systemd/` + `install.sh` | Timers and a one-command root installer |
+| `tests/run-tests.sh` | Offline regression tests for the selection, coverage, and retention logic |
 
 All scripts log single-line structured events (`ts=… level=… event=…`) to stdout — journald
 captures them under the unit name — and exit nonzero with a documented per-class exit code on any
@@ -168,6 +169,18 @@ The vendor-side reference drill that produced the published RTO above is recorde
   (`event=binlog_server_retention`), warns when it crosses the 29-day prune threshold, and fails
   the run if it ever reaches 30 days — purge it with `PURGE BINARY LOGS BEFORE …` and fix the
   server setting.
+- **A hole in the binlog chain is written down, not papered over.** Two situations leave the
+  recoverable window with a piece missing: a closed binlog that is already past the retention
+  ceiling the first time the archive sees it (a long archive outage, or a first run against an old
+  server), and a cursor file the server has purged since the last run. Both fail the run
+  (`event=binlog_coverage_gap`, `reason=last_closed_file_missing`) — but only after the run records
+  what it found. Coverage stops at the last event the archive can actually replay instead of
+  advancing to the rotation timestamp, the cursor is re-based onto the newest closed log so the
+  archive is not stuck forever on a file that is never coming back, and the hole is appended to
+  `binlog/coverage-gap`, which no later archive run rewrites and the pruner never deletes. A PITR
+  whose replay window overlaps a recorded hole is refused (`reason=archive_coverage_gap`). The
+  remedy is the one the failure logs: take a new full backup to re-base the point-in-time
+  coordinate.
 - **Backups self-verify by default.** `CONNEX_BACKUP_RESTORE_VERIFY=true` restores each fresh dump
   into a throwaway scratch schema and compares base-table counts before the run is marked
   `COMPLETE`, so a gzip-valid but semantically incomplete dump cannot pass as good. Point the
@@ -177,7 +190,13 @@ The vendor-side reference drill that produced the published RTO above is recorde
   allowlist, so an unknown schema name is a refusal, not a pass — or contains account/global/
   database-level statements (`GRANT`, `CREATE USER`, `SET GLOBAL`, `CREATE DATABASE`, …) that a
   schema rewrite cannot contain, or a qualified reference split across lines that the rewriter
-  cannot safely retarget. `--force-overwrite` downgrades this refusal to a logged warning for the
+  cannot safely retarget. It also decodes the window a second time through the exact filter the
+  replay uses: statements the replay would drop while still naming the source schema — an
+  `ALTER TABLE src.foo …` issued under a different default database — are a refusal
+  (`reason=qualified_statement_without_matching_default_database`), because they would otherwise go
+  missing from an apparently successful restore. A window in which the source schema was merely
+  idle drops plenty of unrelated text and is not a refusal.
+  `--force-overwrite` downgrades this refusal to a logged warning for the
   rare case where you have vetted the window yourself. The default configuration replays into the
   **same server** the backup came from; the run logs `event=pitr_replay_target_shared` to say so.
   Point `CONNEX_BACKUP_RESTORE_DB_*` at a separate host when you can — a restore server that is
@@ -197,6 +216,14 @@ The vendor-side reference drill that produced the published RTO above is recorde
   (`event=prune_skipped`), never aborting the whole prune — one bad file can't silently freeze
   retention. The prune timer runs twice daily and a failed run retries every 15 minutes, so a
   transient failure still clears well inside the one-day margin under the legal ceiling.
+- **An archived binlog with no metadata is deleted on the failed-run grace, not the 29-day line.**
+  Without its `.meta` sidecar a binlog can never be validated or replayed, and the archive re-fetches
+  it for as long as the server still holds it, so it is quarantined after the 24-hour grace
+  (`reason=orphaned_binlog_without_metadata`). That is also the only clock that honours the ceiling:
+  the file's mtime is the local fetch time, so a catch-up archive run would otherwise keep month-old
+  events for another 29 days. Anything in the binlog root that is not shaped like a binlog — an
+  operator's own file, a future sidecar — keeps its advisory `event=prune_skipped` warning and is
+  never deleted.
 - **The newest complete dump is never pruned.** Retention deletes by age, but the single newest
   complete run is exempt: a deployment whose backups have been failing for a month keeps its last
   good dump rather than ending up with nothing. If your data-protection commitments require the

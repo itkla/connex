@@ -510,16 +510,25 @@ backup_schema_in_list() {
 
 backup_schema_selected() {
     local schema="$1"
-    # A restore-verify scratch schema abandoned by an interrupted run holds a
-    # copy of source data; it must never be discovered and backed up as if it
-    # were customer data of its own.
-    if [[ "$schema" == connex_verify_* ]]; then
-        return 1
-    fi
     if [ -n "$CONNEX_BACKUP_SCHEMA_INCLUDE" ] && ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
         return 1
     fi
     if backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_EXCLUDE"; then
+        # Naming a schema in both lists is a configuration conflict, and a
+        # backup that quietly drops a schema the operator asked for is the
+        # failure this guard exists to make visible.
+        if backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
+            backup_log warn schema_skipped reason include_overridden_by_exclude schema "$schema"
+        fi
+        return 1
+    fi
+    # A restore-verify scratch schema abandoned by an interrupted run holds a
+    # copy of source data; it must never be discovered and backed up as if it
+    # were customer data of its own. An operator who genuinely owns a schema
+    # with that prefix keeps it by naming it in CONNEX_BACKUP_SCHEMA_INCLUDE,
+    # and the drop is never silent either way.
+    if [[ "$schema" == connex_verify_* ]] && ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
+        backup_log info schema_skipped reason restore_verify_scratch schema "$schema"
         return 1
     fi
     return 0

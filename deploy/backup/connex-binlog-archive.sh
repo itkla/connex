@@ -22,6 +22,10 @@ ARCHIVE_SERVER_VERSION=
 ARCHIVE_COVERAGE_UTC=
 ARCHIVE_COVERAGE_EPOCH=0
 ARCHIVE_RETENTION_GAP=false
+ARCHIVE_COVERAGE_PINNED=false
+ARCHIVE_CONTIGUOUS_LAST=
+ARCHIVE_DEFERRED_EXIT=0
+ARCHIVE_DEFERRED_PHASE=
 ARCHIVE_ACTIVE_FILE=
 ARCHIVE_LAST_CLOSED=
 declare -a ARCHIVE_SERVER_LOGS=()
@@ -130,6 +134,44 @@ archive_validate_state() {
         backup_log error binlog_state reason server_uuid_changed previous_uuid "$state_uuid" current_uuid "$ARCHIVE_SERVER_UUID"
         return "$EXIT_BINLOG_ARCHIVE"
     fi
+}
+
+# archive-state is rewritten in full on every run and the in-memory gap flag is
+# reset on every invocation, so a hole recorded only there is erased fifteen
+# minutes later and the archive goes back to claiming continuous coverage. This
+# sidecar is append-only, is never rewritten by archive_publish_state, and is on
+# the pruner's keep list, so the hole survives for the PITR guard to refuse on.
+archive_record_coverage_gap() {
+    local file="$1"
+    local from_epoch="$2"
+    local through_epoch="$3"
+    local marker="$CONNEX_BACKUP_ROOT/binlog/coverage-gap"
+    printf 'gap\t%s\t%s\t%s\t%s\n' "$file" "$from_epoch" "$through_epoch" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$marker"
+}
+
+# Coverage may never advance across a hole. Pin it to the last event the archive
+# can actually replay - the newest contiguously archived file, or the coverage
+# already published when this run archived nothing - rather than to the flush
+# timestamp, which would report a recoverable window that has a piece missing.
+archive_pin_coverage() {
+    local file="$1"
+    local meta="$CONNEX_BACKUP_ROOT/binlog/$file.meta"
+    local epoch=
+    if [ -n "$file" ] && [ -f "$meta" ]; then
+        epoch="$(backup_meta_value "$meta" last_event_epoch)" || epoch=
+    fi
+    if [ -z "$epoch" ]; then
+        epoch="$(archive_state_value coverage_through_epoch || true)"
+    fi
+    if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch=0
+    fi
+    ARCHIVE_COVERAGE_EPOCH="$epoch"
+    ARCHIVE_COVERAGE_UTC=
+    if [ "$epoch" -gt 0 ]; then
+        ARCHIVE_COVERAGE_UTC="$(date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+    ARCHIVE_COVERAGE_PINNED=true
 }
 
 archive_event_stamp_to_epoch() {
@@ -289,6 +331,7 @@ archive_publish_file() {
         rm -f "$temporary_file"
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
         ARCHIVE_RETENTION_GAP=true
+        archive_record_coverage_gap "$file" "$created_epoch" "$last_event_epoch" || return "$EXIT_BINLOG_ARCHIVE"
         backup_log warn binlog_skipped file "$file" reason outside_retention file_created_utc "$created_utc"
         return 0
     fi
@@ -345,9 +388,13 @@ archive_fetch_file() {
 }
 
 archive_process_logs() {
-    local last_archived line file server_size
+    local last_archived line file server_size previous_coverage rebased=
     local seen_state=false processed_last=
     last_archived="$(archive_state_value last_closed_file || true)"
+    previous_coverage="$(archive_state_value coverage_through_epoch || true)"
+    if [[ ! "$previous_coverage" =~ ^[0-9]+$ ]]; then
+        previous_coverage=0
+    fi
     if [ -z "$last_archived" ]; then
         seen_state=true
     fi
@@ -368,18 +415,39 @@ archive_process_logs() {
         fi
         archive_fetch_file "$file" "$server_size" || return $?
         processed_last="$file"
+        if [ "$ARCHIVE_RETENTION_GAP" = false ]; then
+            ARCHIVE_CONTIGUOUS_LAST="$file"
+        fi
     done
+    # The file the archive stopped at is gone from the server, so the run can
+    # never resume from it. Returning here would leave last_closed_file pointing
+    # at a file that is never coming back and every later run would take this
+    # same branch, stalling the archive permanently. Re-base onto the newest
+    # closed log instead: everything between the hole and that log is already
+    # unrecoverable, because the broken chain makes it unreachable from the last
+    # full backup. The caller publishes the re-based state before failing.
+    if [ -n "$last_archived" ] && [ "$seen_state" = false ]; then
+        if [ "${#ARCHIVE_SERVER_LOGS[@]}" -gt 1 ]; then
+            IFS=$'\t' read -r rebased _ _ <<< "${ARCHIVE_SERVER_LOGS[-2]}"
+        fi
+        archive_record_coverage_gap "$last_archived" "$previous_coverage" "$(date +%s)" || return "$EXIT_BINLOG_ARCHIVE"
+        archive_pin_coverage "$ARCHIVE_CONTIGUOUS_LAST"
+        ARCHIVE_LAST_CLOSED="$rebased"
+        ARCHIVE_DEFERRED_EXIT="$EXIT_BINLOG_ARCHIVE"
+        ARCHIVE_DEFERRED_PHASE="$BACKUP_PHASE"
+        backup_log error binlog_state reason last_closed_file_missing file "$last_archived" rebased_to "${rebased:-none}"
+        return 0
+    fi
     # A closed binlog that is already past the retention ceiling cannot be
     # archived, so the recoverable window has a hole. Publishing coverage across
     # it would report success while a later PITR fails on the missing file.
     if [ "$ARCHIVE_RETENTION_GAP" = true ]; then
+        archive_pin_coverage "$ARCHIVE_CONTIGUOUS_LAST"
+        ARCHIVE_DEFERRED_EXIT="$EXIT_BINLOG_ARCHIVE"
+        ARCHIVE_DEFERRED_PHASE="$BACKUP_PHASE"
         backup_log error binlog_coverage_gap reason unarchivable_file_past_retention \
+            coverage_through "${ARCHIVE_COVERAGE_UTC:-none}" \
             remedy "take a new full backup to re-base the point-in-time coordinate"
-        return "$EXIT_BINLOG_ARCHIVE"
-    fi
-    if [ -n "$last_archived" ] && [ "$seen_state" = false ]; then
-        backup_log error binlog_state reason last_closed_file_missing file "$last_archived"
-        return "$EXIT_BINLOG_ARCHIVE"
     fi
     if [ -z "$processed_last" ]; then
         processed_last="$last_archived"
@@ -393,7 +461,7 @@ archive_process_logs() {
 archive_publish_state() {
     local state="$CONNEX_BACKUP_ROOT/binlog/archive-state"
     local temporary="$state.tmp.$$"
-    if [ "$CONNEX_BACKUP_BINLOG_FLUSH" = false ] && [ -n "$ARCHIVE_LAST_CLOSED" ] && [ -f "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" ]; then
+    if [ "$ARCHIVE_COVERAGE_PINNED" = false ] && [ "$CONNEX_BACKUP_BINLOG_FLUSH" = false ] && [ -n "$ARCHIVE_LAST_CLOSED" ] && [ -f "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" ]; then
         ARCHIVE_COVERAGE_EPOCH="$(backup_meta_value "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" last_event_epoch)" || return "$EXIT_BINLOG_ARCHIVE"
         ARCHIVE_COVERAGE_UTC="$(date -u -d "@$ARCHIVE_COVERAGE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
     fi
@@ -428,6 +496,13 @@ archive_run() {
     archive_process_logs || return $?
     BACKUP_PHASE=binlog_publish
     archive_publish_state || return "$EXIT_BINLOG_ARCHIVE"
+    # A coverage hole fails the run, but only after the state it discovered has
+    # been written down: failing first would discard the re-based cursor and the
+    # pinned coverage, and the next run would rediscover the same hole forever.
+    if [ "$ARCHIVE_DEFERRED_EXIT" -ne 0 ]; then
+        BACKUP_PHASE="$ARCHIVE_DEFERRED_PHASE"
+        return "$ARCHIVE_DEFERRED_EXIT"
+    fi
 }
 
 main() {

@@ -20,6 +20,7 @@ PITR_SOURCE_SCHEMA=
 PITR_TARGET_SCHEMA=
 PITR_FORCE=false
 PITR_RUN_DIR=
+PITR_DUMP_CAPTURE_EPOCH=0
 PITR_BINLOG_POSITION=
 PITR_TABLE_COUNT=0
 PITR_ROW_COUNT=0
@@ -126,6 +127,7 @@ pitr_select_run() {
         if [ "$capture_epoch" -le "$PITR_TARGET_EPOCH" ]; then
             PITR_RUN_DIR="$candidate"
             PITR_SOURCE_SCHEMA="$source"
+            PITR_DUMP_CAPTURE_EPOCH="$capture_epoch"
             return 0
         fi
     done < <(find "$CONNEX_BACKUP_ROOT/full" -mindepth 1 -maxdepth 1 -type d -name '*Z' -exec test -f '{}/COMPLETE' ';' -print | sort -r)
@@ -187,6 +189,40 @@ pitr_validate_sequence() {
         backup_log error restore_refused reason starting_binlog_missing file "$start_file"
         return "$EXIT_RESTORE_GUARD"
     fi
+}
+
+# The archive appends a record here for every hole it could not fill and never
+# rewrites the file, because archive-state is rebuilt from scratch every run and
+# would otherwise forget the hole within one timer interval. Coverage arithmetic
+# alone cannot see a hole the archive already stepped over, so refuse whenever a
+# recorded hole overlaps the window between the selected dump and the target.
+pitr_verify_no_coverage_gap() {
+    local marker="$CONNEX_BACKUP_ROOT/binlog/coverage-gap"
+    local record file from_epoch through_epoch detected_utc
+    if [ -L "$marker" ]; then
+        backup_log error restore_refused reason coverage_gap_marker_not_regular path "$marker"
+        return "$EXIT_RESTORE_GUARD"
+    fi
+    if [ ! -f "$marker" ]; then
+        return 0
+    fi
+    while IFS=$'\t' read -r record file from_epoch through_epoch detected_utc; do
+        if [ "$record" != gap ]; then
+            continue
+        fi
+        if [[ ! "$from_epoch" =~ ^[0-9]+$ || ! "$through_epoch" =~ ^[0-9]+$ ]]; then
+            backup_log error restore_refused reason unreadable_coverage_gap_record file "$file"
+            return "$EXIT_RESTORE_GUARD"
+        fi
+        if [ "$through_epoch" -lt "$PITR_DUMP_CAPTURE_EPOCH" ] || [ "$from_epoch" -gt "$PITR_TARGET_EPOCH" ]; then
+            continue
+        fi
+        backup_log error restore_refused reason archive_coverage_gap file "$file" \
+            gap_from_epoch "$from_epoch" gap_through_epoch "$through_epoch" detected_utc "$detected_utc" \
+            dump_capture_epoch "$PITR_DUMP_CAPTURE_EPOCH" target_epoch "$PITR_TARGET_EPOCH"
+        return "$EXIT_RESTORE_GUARD"
+    done < "$marker"
+    return 0
 }
 
 pitr_extract_query_statements() {
@@ -357,9 +393,17 @@ pitr_scan_unsafe_statements() {
 # "ALTER TABLE src.foo ..." issued without selecting src therefore passes this
 # preflight but is silently dropped from the replay, so PITR can report success
 # with a schema that never received the change. Decode the window a second time
-# with the filter the replay uses and refuse on anything it removes.
+# with the filter the replay uses and compare.
+#
+# Dropping lines is normal and harmless on its own: every ROW-format transaction
+# carries a BEGIN whose default database is the busy schema, so a window in which
+# the source schema was merely idle drops plenty of text without losing anything.
+# What cannot be tolerated is dropped text that names the source schema, because
+# a different default database is exactly what makes such a statement invisible
+# to the replay. Blank separator lines are stripped first: they are an artifact
+# of the extractor and would otherwise cancel out real dropped statements.
 pitr_verify_no_statement_is_filtered_away() {
-    local dropped
+    local -a dropped=()
     PITR_FILTERED_SCRATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-filtered.XXXXXX")" || return 1
     if ! backup_mysqlbinlog_local \
         --verify-binlog-checksum \
@@ -370,10 +414,13 @@ pitr_verify_no_statement_is_filtered_away() {
         backup_log error pitr_preflight_failed reason filtered_decode
         return 1
     fi
-    dropped="$(comm -23 <(sort -u "$PITR_SCRATCH_FILE") <(sort -u "$PITR_FILTERED_SCRATCH_FILE") | head -1)"
-    if [ -n "$dropped" ]; then
+    mapfile -t dropped < <(comm -23 \
+        <(grep -v '^[[:space:]]*$' "$PITR_SCRATCH_FILE" | sort -u) \
+        <(grep -v '^[[:space:]]*$' "$PITR_FILTERED_SCRATCH_FILE" | sort -u) |
+        grep -F -- "$PITR_SOURCE_SCHEMA")
+    if [ "${#dropped[@]}" -gt 0 ]; then
         backup_log error pitr_preflight_failed reason qualified_statement_without_matching_default_database \
-            source_schema "$PITR_SOURCE_SCHEMA"
+            source_schema "$PITR_SOURCE_SCHEMA" dropped_lines "${#dropped[@]}" dropped_first "${dropped[0]:0:200}"
         return 1
     fi
     return 0
@@ -650,6 +697,7 @@ pitr_run() {
     PITR_BINLOG_POSITION="$(backup_manifest_schema_field "$PITR_RUN_DIR/manifest" "$PITR_SOURCE_SCHEMA" binlog_position)" || return "$EXIT_INTEGRITY"
     BACKUP_PHASE=validating_binlogs
     pitr_validate_sequence "$start_file" || return $?
+    pitr_verify_no_coverage_gap || return $?
     pitr_query_preflight || return $?
     BACKUP_PHASE=restoring_full
     pitr_replay_target_notice

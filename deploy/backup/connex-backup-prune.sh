@@ -118,19 +118,21 @@ prune_binlog_triplet() {
 # A binlog whose sidecars are missing or unreadable can never be classified, so
 # an unconditional skip would retain customer data past the hard retention
 # ceiling. Fall back to the file's own mtime and quarantine-delete it once it is
-# older than the legal age.
+# older than the caller's ceiling. The mtime is a local fetch time, not a content
+# time, so callers that can prove the file is unusable pass the short failed-run
+# grace instead of the legal age.
 prune_quarantine_expired_binlog() {
     local raw="$1"
     local reason="$2"
     local now="$3"
-    local legal_age="$4"
+    local max_age="$4"
     local mtime age
     if ! mtime="$(stat -c %Y "$raw" 2>/dev/null)"; then
         prune_skip reason "$reason" file "$(basename "$raw")"
         return 0
     fi
     age=$((now - mtime))
-    if [ "$age" -ge "$legal_age" ]; then
+    if [ "$age" -ge "$max_age" ]; then
         if prune_binlog_triplet "$raw"; then
             backup_log warn binlog_quarantine_pruned reason "$reason" file "$(basename "$raw")" age_seconds "$age"
         else
@@ -142,9 +144,10 @@ prune_quarantine_expired_binlog() {
 }
 
 prune_binlogs() {
-    local now legal_age meta raw created_epoch age entry name
+    local now legal_age orphan_grace meta raw created_epoch age entry name
     now="$(date +%s)"
     legal_age=$(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 ))
+    orphan_grace=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
     while IFS= read -r meta; do
         raw="${meta%.meta}"
         if ! backup_validate_binlog_triplet "$raw"; then
@@ -171,13 +174,30 @@ prune_binlogs() {
     while IFS= read -r entry; do
         name="$(basename "$entry")"
         case "$name" in
-            archive-state|*.meta|*.sha256)
+            archive-state|coverage-gap|*.meta|*.sha256)
                 ;;
             *)
-                if [ -f "$entry.meta" ] && [ -f "$entry.sha256" ]; then
+                # Anything with a .meta was already classified by the loop above,
+                # on the legal-age clock.
+                if [ -f "$entry.meta" ]; then
                     continue
                 fi
-                prune_skip reason unclassifiable_binlog_entry file "$name"
+                # A raw binlog with no metadata can never be validated or
+                # replayed, and the archive re-fetches it while the server still
+                # holds it, so the short failed-run grace is both safe and the
+                # only clock that actually meets the ceiling: mtime is the local
+                # fetch time, which a catch-up run sets to now for content that
+                # is already nearly a month old. Everything else - operator
+                # files, future sidecars - keeps its advisory warning instead of
+                # becoming a delete target.
+                case "$name" in
+                    *.[0-9][0-9][0-9][0-9][0-9][0-9])
+                        prune_quarantine_expired_binlog "$entry" orphaned_binlog_without_metadata "$now" "$orphan_grace"
+                        ;;
+                    *)
+                        prune_skip reason unclassifiable_binlog_entry file "$name"
+                        ;;
+                esac
                 ;;
         esac
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f ! -name '*.pending' -print | sort)
