@@ -452,7 +452,7 @@ reports it (best-effort) to this deployment's own `/api/client-errors` sink, so 
 line is found by grepping for the digest value itself:
 `journalctl -u <backend-unit> | grep '<reference>'` — the `CLIENT`-source entry carries the
 digest, the page path, and the client stack. Both lookups run entirely against the deployment's
-own logs — that pairing is the support path for deployments Connex cannot access.
+own logs — that pairing is the support path for deployments Connex does not operate.
 
 ## Local evaluation (not for production)
 
