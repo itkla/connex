@@ -10,9 +10,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 import {
+    DEFAULT_CAPABILITIES,
+    getActiveWorkspaceMembersResultFromCookie,
     getActivitiesPage,
     getActivityVolumeFromCookie,
     getAllStagesFromCookie,
+    getCapabilities,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
@@ -32,6 +35,7 @@ import {
     getNotesPage,
     getNotifications,
     getPipelinesFromCookie,
+    getProviderConnections,
     getRecentMovesFromCookie,
     getTaskSummaryFromCookie,
     getTasksPage,
@@ -57,6 +61,7 @@ import type {
     DealStageDistribution,
     NotificationPage,
     Page,
+    ProviderConnection,
     RelationshipDashboard,
     Task,
     TaskSummary as TaskSummaryCounts,
@@ -92,6 +97,14 @@ import StageFunnel from '@/app/components/overview/analytics/StageFunnel';
 import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
 import type { RollingRangeKey } from '@/app/components/overview/analytics/metrics';
+import ActivationPanel from '@/app/components/dashboard/activation/ActivationPanel';
+import {
+    activationGaps,
+    buildActivationSteps,
+    isActivated,
+    selectFirstInsight,
+    type ActivationCounts,
+} from '@/app/lib/activation';
 
 const EMPTY_DEAL_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -166,6 +179,33 @@ function dominantCurrency(metrics: DealMetrics): string {
 
 function present<T>(value: T | null): value is T {
     return value != null;
+}
+
+/**
+ * Loads the workspace-membership and connected-account inputs the setup checklist needs. It runs
+ * only while a required setup step is still outstanding, so an established workspace pays nothing
+ * for it. Every fetch degrades to the value that leaves its step undone rather than claiming done.
+ */
+async function loadActivationExtras(cookie: string | null): Promise<{
+    members: number;
+    connectedAccounts: number;
+    connectedAccountsAvailable: boolean;
+}> {
+    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' } as const;
+    const [membersResult, capabilities] = await Promise.all([
+        getActiveWorkspaceMembersResultFromCookie(cookie),
+        getCapabilities(init).catch(() => DEFAULT_CAPABILITIES),
+    ]);
+    const connectedAccountsAvailable =
+        capabilities.connectedAccounts.google || capabilities.connectedAccounts.microsoft;
+    const connections = connectedAccountsAvailable
+        ? await getProviderConnections(init).catch(() => [] as ProviderConnection[])
+        : [];
+    return {
+        members: membersResult.ok ? membersResult.data.length : 1,
+        connectedAccounts: connections.filter((connection) => connection.status === 'connected').length,
+        connectedAccountsAvailable,
+    };
 }
 
 export default async function Dashboard() {
@@ -245,6 +285,21 @@ export default async function Dashboard() {
     const closingSoon = closingSoonCount.count;
     const upcomingActivities = upcomingActivityCount.count;
 
+    const setupCounts = {
+        contacts: contactsPage.total,
+        companies: companiesPage.total,
+        hasInteractions: activities.length > 0,
+        pipelines: pipelines.length,
+        stages: stages.length,
+    };
+    const requiredStepsOnly = buildActivationSteps({
+        ...setupCounts,
+        members: 1,
+        connectedAccounts: 0,
+        connectedAccountsAvailable: false,
+    });
+    const activationExtrasPromise = isActivated(requiredStepsOnly) ? null : loadActivationExtras(cookie);
+
     const currency = dominantCurrency(dealMetrics);
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
@@ -261,6 +316,19 @@ export default async function Dashboard() {
 
     const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
+
+    const activationExtras = activationExtrasPromise ? await activationExtrasPromise : null;
+    const activationCounts: ActivationCounts | null = activationExtras
+        ? { ...setupCounts, ...activationExtras }
+        : null;
+    const activationSteps = activationCounts ? buildActivationSteps(activationCounts) : null;
+    const activationInsight = activationCounts
+        ? selectFirstInsight({
+            dealRisks: relationshipDashboard.dealRisks,
+            coolingContacts: relationshipDashboard.coolingContacts,
+            introSuggestions,
+        })
+        : null;
 
     const chartCard = (child: ReactNode) => (
         <div className="h-full rounded-2xl border border-border bg-card p-6">{child}</div>
@@ -341,6 +409,15 @@ export default async function Dashboard() {
                         upcomingActivities={upcomingActivities}
                     />
                 </Rise>
+                {activationSteps && activationCounts ? (
+                    <Rise delay={0.09}>
+                        <ActivationPanel
+                            steps={activationSteps}
+                            insight={activationInsight}
+                            gaps={activationGaps(activationCounts, activationInsight != null)}
+                        />
+                    </Rise>
+                ) : null}
                 <Rise delay={0.18}>
                     <DashboardGrid
                         initialWidgets={initialWidgets}
