@@ -60,6 +60,84 @@
     "empty": "No recent job changes among workspace contacts.",
     "unknown": "Unknown"
   },
+  "DashboardActivation": {
+    "sectionTitle": "Getting started",
+    "checklistTitle": "Set up this workspace",
+    "checklistProgress": "{done} of {total}",
+    "optionalLabel": "Optional",
+    "doneLabel": "Done:",
+    "evidenceTitle": "The evidence",
+    "followUp": "Schedule a follow-up",
+    "steps": {
+      "contacts": {
+        "title": "Bring in your contacts",
+        "body": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding one.",
+        "cta": "Import contacts",
+        "done": "{count, plural, =1 {# contact} other {# contacts}}"
+      },
+      "companies": {
+        "title": "Add the companies they work for",
+        "body": "Shared-company introductions are built from these links.",
+        "cta": "Import companies",
+        "done": "{count, plural, =1 {# company} other {# companies}}"
+      },
+      "interactions": {
+        "title": "Log an interaction",
+        "body": "Calls, emails and meetings are the only input relationship warmth is computed from.",
+        "cta": "Log an activity",
+        "done": "Interactions logged"
+      },
+      "pipeline": {
+        "title": "Create a pipeline",
+        "body": "A new workspace starts with no stages, so deals have nowhere to sit yet.",
+        "cta": "Set up a pipeline",
+        "done": "{count, plural, =1 {# pipeline} other {# pipelines}}"
+      },
+      "team": {
+        "title": "Bring a colleague in",
+        "body": "Warm-intro paths get stronger with every colleague's network.",
+        "cta": "Invite a colleague",
+        "done": "{count, plural, =1 {# member} other {# members}}"
+      },
+      "connections": {
+        "title": "Connect your mailbox",
+        "body": "A connected mailbox keeps interactions current without logging each one by hand.",
+        "cta": "Connect an account",
+        "done": "Account connected"
+      }
+    },
+    "insight": {
+      "dealRisk": {
+        "headline": "This deal needs attention",
+        "open": "Open deal"
+      },
+      "coolingContact": {
+        "headline": "This relationship is cooling",
+        "open": "Open contact"
+      },
+      "introPath": {
+        "headline": "You can make a warm introduction",
+        "open": "See introductions"
+      }
+    },
+    "evidence": {
+      "lastTouch": "Last contact on {date}",
+      "touchCount": "{count, plural, =1 {# interaction recorded} other {# interactions recorded}}",
+      "goesCold": "Predicted to go cold by {date}",
+      "mutualConnections": "{count, plural, =1 {# mutual connection} other {# mutual connections}}",
+      "sharedCompany": "Both connected to {company}"
+    },
+    "missing": {
+      "title": "Not enough evidence yet",
+      "body": "Connex works relationship warmth out from the interactions you log. There is nothing here to work from, and a score without evidence would be a fabricated judgement, so there is no score.",
+      "gapsTitle": "What is missing",
+      "gap": {
+        "contacts": "No contacts yet",
+        "interactions": "No interactions logged",
+        "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
+      }
+    }
+  },
   "DashboardGreeting": {
     "workingLate": "Working late,",
     "goodMorning": "Good morning,",
