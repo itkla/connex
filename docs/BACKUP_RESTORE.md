@@ -27,9 +27,14 @@ database backups (see [DEPLOYMENT.md](DEPLOYMENT.md) and the upgrade runbook in
   run rotates the active binlog (`FLUSH BINARY LOGS`) and fetches every closed binlog, so at most
   the last timer interval of writes is at risk if the database host is lost entirely. (If only the
   database *process* is lost, the server's own binlogs usually close the gap to seconds.)
-- **RTO (recovery time objective): FILL_FROM_DRILL** measured in the shipped restore drill on a
-  seeded database (FILL_SIZE); your time scales with database size and hardware. Measure your own
-  RTO in your first drill and re-measure whenever your data volume grows materially.
+- **RTO (recovery time objective): about 5 minutes** — a point-in-time restore measured at 295
+  seconds in the shipped drill, against a seeded database of 107 tables and roughly 65,000 rows
+  (20.5 MB): 5,000 contacts, 1,000 companies, 2,000 deals, 20,000 activities, 5,000 notes, 3,000
+  tasks and 1,000 attachment rows. That figure covers dump restore plus binlog replay and excludes
+  the time an operator spends deciding and starting the restore. Taking the daily full backup is a
+  separate 9 minutes on the same data, most of it the `RESTORE_VERIFY` scratch restore, and does not
+  count against RTO. Your time scales with database size and hardware — measure your own RTO in your
+  first drill and re-measure whenever your data volume grows materially.
 
 ## What ships
 
