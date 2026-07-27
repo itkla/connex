@@ -612,34 +612,38 @@
         )
       LEFT JOIN (
         SELECT warmth_touch.person_id,
-               SUM(warmth_touch.weight * POW(2.0, -warmth_touch.age_days / 30.0)) AS raw_weight
+               SUM(warmth_touch.weight
+                 * POW(#{model.decayBase}, -warmth_touch.age_days / #{model.halfLifeDays})) AS raw_weight
         FROM (
           SELECT a.person_id,
                  CASE LOWER(a.type)
-                   WHEN 'meeting' THEN 1.0
-                   WHEN 'call' THEN 0.8
-                   WHEN 'email' THEN 0.6
-                   ELSE 0.5
+                   WHEN 'meeting' THEN #{model.meetingWeight}
+                   WHEN 'call' THEN #{model.callWeight}
+                   WHEN 'email' THEN #{model.emailWeight}
+                   ELSE #{model.otherActivityWeight}
                  END AS weight,
                  GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, a.timestamp, #{query.endUtc}) / 86400000000.0) AS age_days
+                   TIMESTAMPDIFF(MICROSECOND, a.timestamp, #{warmthReference})
+                     / #{model.microsecondsPerDay}) AS age_days
           FROM activity a
           WHERE a.workspace_id = #{query.workspaceId}
             AND a.person_id IS NOT NULL
             AND a.timestamp &lt; #{query.endUtc}
           UNION ALL
-          SELECT n.person_id, 0.4 AS weight,
+          SELECT n.person_id, #{model.noteWeight} AS weight,
                  GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, n.created_at, #{query.endUtc}) / 86400000000.0) AS age_days
+                   TIMESTAMPDIFF(MICROSECOND, n.created_at, #{warmthReference})
+                     / #{model.microsecondsPerDay}) AS age_days
           FROM note n
           WHERE n.workspace_id = #{query.workspaceId}
             AND n.visibility = 'workspace'
             AND n.person_id IS NOT NULL
             AND n.created_at &lt; #{query.endUtc}
           UNION ALL
-          SELECT t.person_id, 0.3 AS weight,
+          SELECT t.person_id, #{model.taskWeight} AS weight,
                  GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, t.created_at, #{query.endUtc}) / 86400000000.0) AS age_days
+                   TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                     / #{model.microsecondsPerDay}) AS age_days
           FROM task t
           WHERE t.workspace_id = #{query.workspaceId}
             AND t.person_id IS NOT NULL
@@ -677,7 +681,7 @@
       </if>
       GROUP BY c.id, c.name
       HAVING COUNT(DISTINCT CASE
-        WHEN ROUND(100.0 * (1.0 - POW(2.0, -COALESCE(person_warmth.raw_weight, 0.0) / 0.7))) &gt;= 35
+        WHEN COALESCE(person_warmth.raw_weight, 0.0) &gt;= #{model.warmMinimumRawWeight}
         THEN gap_person.id
         ELSE NULL
       END) &lt;= 1

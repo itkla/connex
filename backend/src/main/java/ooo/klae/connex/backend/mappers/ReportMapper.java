@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
  * Data access for workspace-shared report definitions and frozen snapshots.
@@ -72,7 +73,19 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregateCompanies(@Param("query") ReportAggregateQuery query);
 
-    List<ReportAggregateRow> aggregateCoverageGaps(@Param("query") ReportAggregateQuery query);
+    /**
+     * Aggregates coverage immediately before the report period's exclusive end instant.
+     *
+     * <p>The strict touch cutoff preserves the report engine's half-open {@code [start, end)}
+     * periods. Decay is evaluated at {@code warmthReference}, which callers align with the
+     * millisecond-normalized Java snapshot immediately before {@code end}. An interaction exactly
+     * at {@code end} belongs to the following period.
+     */
+    List<ReportAggregateRow> aggregateCoverageGaps(
+        @Param("query") ReportAggregateQuery query,
+        @Param("warmthReference") java.time.LocalDateTime warmthReference,
+        @Param("model") SqlParameters model
+    );
 
     List<ReportAggregateRow> aggregateSingleThreadedDeals(@Param("query") ReportAggregateQuery query);
 

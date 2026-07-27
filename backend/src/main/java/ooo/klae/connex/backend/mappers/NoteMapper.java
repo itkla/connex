@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -35,6 +36,16 @@ public interface NoteMapper {
             @Param("limit") int limit);
     List<Note> getWorkspaceNotesByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
+    int countOwnPrivateNotesForPersonEvidence(
+            @Param("workspaceId") int workspaceId,
+            @Param("personId") int personId,
+            @Param("currentUserId") int currentUserId,
+            @Param("reference") LocalDateTime reference);
+    int countOwnPrivateNotesForCompanyEvidence(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId,
+            @Param("currentUserId") int currentUserId,
+            @Param("reference") LocalDateTime reference);
     Note getVisibleNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("currentUserId") int currentUserId);
     List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType, @Param("refId") int refId, @Param("currentUserId") int currentUserId);

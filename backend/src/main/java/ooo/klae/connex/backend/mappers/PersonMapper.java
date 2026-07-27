@@ -9,7 +9,9 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
  * Mapper interface for {@code Person} persistence.
@@ -25,7 +27,14 @@ public interface PersonMapper {
             @Param("limit") int limit);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
             @Param("workspaceId") int workspaceId,
-            @Param("reference") LocalDateTime reference);
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model);
+    List<RelationshipEvidenceRowDto> getRelationshipEvidence(
+            @Param("workspaceId") int workspaceId,
+            @Param("personId") int personId,
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model,
+            @Param("limit") int limit);
     List<Person> getPersonsByCompanyId(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") Integer limit);
     List<CompanyEngagementPersonDto> getCompanyEngagementPeople(@Param("workspaceId") int workspaceId,
