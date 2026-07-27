@@ -7,7 +7,7 @@ test.describe("auth", () => {
     test("visiting a protected route while logged out redirects to login", async ({ page }) => {
         await page.goto("/dashboard");
         await expect(page).toHaveURL(/\/auth\/login/);
-        await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     });
 
     test("registering through the UI lands on the dashboard", async ({ page }) => {
@@ -26,7 +26,7 @@ test.describe("auth", () => {
         await page.goto("/auth/login");
         await page.getByLabel("Username or email").fill(fixture.username);
         await page.getByLabel("Password", { exact: true }).fill(fixture.password);
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("button", { name: "Sign in", exact: true }).click();
         await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
     });
 
@@ -35,7 +35,7 @@ test.describe("auth", () => {
         await page.goto("/auth/login");
         await page.getByLabel("Username or email").fill(fixture.username);
         await page.getByLabel("Password", { exact: true }).fill("Wrong!Password1");
-        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("button", { name: "Sign in", exact: true }).click();
         await expect(page.getByRole("alert")).toContainText("Invalid username or password");
     });
 });

@@ -9,7 +9,7 @@ test.describe("records browse and peek", () => {
 
         const row = page.getByRole("row").filter({ hasText: contact.name });
         await expect(row).toBeVisible();
-        await row.getByRole("cell", { name: contact.name }).click();
+        await row.getByRole("cell", { name: contact.name, exact: true }).click();
 
         const peek = page.locator("[data-record-peek]");
         await expect(peek).toBeVisible();

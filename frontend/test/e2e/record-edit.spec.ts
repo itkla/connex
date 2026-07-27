@@ -17,9 +17,9 @@ test.describe("record inline edit", () => {
         await input.fill(newTitle);
         await input.press("Enter");
 
-        await expect(page.getByRole("cell", { name: newTitle })).toBeVisible();
+        await expect(editCell).toHaveText(newTitle);
 
         await page.goto(listUrl);
-        await expect(page.getByRole("cell", { name: newTitle })).toBeVisible();
+        await expect(page.getByRole("button", { name: `Edit Title for ${contact.name}` })).toHaveText(newTitle);
     });
 });
