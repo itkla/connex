@@ -136,6 +136,7 @@ public class TaskService {
         lockTaskBoard(workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
+        task.setCreatedAt(null);
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),

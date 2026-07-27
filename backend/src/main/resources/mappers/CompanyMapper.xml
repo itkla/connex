@@ -495,9 +495,9 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
+    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url, created_at)
     VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry},
-      #{phone}, #{address}, #{logoUrl})
+      #{phone}, #{address}, #{logoUrl}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">

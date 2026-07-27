@@ -345,6 +345,7 @@ public class CompanyService {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         company.setOwnerId(authService.getCurrentUser().getId());
         company.setLogoUrl(null);
+        company.setCreatedAt(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
         auditService.record("company.create", "company", company.getId(), company.getName(),

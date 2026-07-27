@@ -82,6 +82,7 @@ public class DealDto {
     private int[] taskIds;
     private int[] tagIds;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
 
