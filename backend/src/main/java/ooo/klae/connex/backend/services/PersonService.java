@@ -107,17 +107,27 @@ public class PersonService {
         return personMapper.getPersonsByDealId(workspaceId, dealId);
     }
 
+    /**
+     * One page of the contacts browser. {@code archived} selects the archived set instead of the
+     * active one, so the reversible archive has a place to be reviewed and restored from.
+     */
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, MemberScope memberScope, int limit, int offset) {
+            List<String> titles, boolean noCompany, MemberScope memberScope, boolean archived,
+            int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
-            companies, titles, noCompany, memberScope, limit, offset);
+            companies, titles, noCompany, memberScope, archived, limit, offset);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
-            MemberScope memberScope) {
-        return personMapper.countPersons(
-            workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany, memberScope);
+            MemberScope memberScope, boolean archived) {
+        return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(),
+            query, companies, titles, noCompany, memberScope, archived);
+    }
+
+    /** How many contacts the active workspace currently holds archived. */
+    public long countArchivedPersons() {
+        return personMapper.countArchivedPersons(workspaceService.getCurrentWorkspaceId());
     }
 
     /**
@@ -126,18 +136,18 @@ public class PersonService {
      * bulk action can target the whole filtered set, not just the loaded page.
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
-            boolean noCompany, MemberScope memberScope) {
-        if (!hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
+            boolean noCompany, MemberScope memberScope, boolean archived) {
+        if (!archived && !hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = personMapper.countPersons(
-            workspaceId, query, companies, titles, noCompany, memberScope);
+            workspaceId, query, companies, titles, noCompany, memberScope, archived);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, MAX_MATCHING_IDS);
+            workspaceId, query, companies, titles, noCompany, memberScope, archived, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
@@ -257,7 +267,7 @@ public class PersonService {
             String sourceRowRef) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
-        validateCompanyVisible(workspaceId, person);
+        validateCompanyVisible(workspaceId, null, person);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
@@ -285,7 +295,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         Person before = requireOwnedPerson(workspaceId, id);
-        validateCompanyVisible(workspaceId, person);
+        validateCompanyVisible(workspaceId, companyIdOf(before), person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(before.getOwnerId());
@@ -423,9 +433,17 @@ public class PersonService {
             ? null : person.getCompany().getId();
     }
 
-    private void validateCompanyVisible(int workspaceId, Person person) {
+    /**
+     * Rejects a company link the workspace cannot see. An unchanged link is accepted as-is so a
+     * contact whose employer was archived stays editable instead of failing every save; only a
+     * newly requested company must be visible (and therefore not archived).
+     */
+    private void validateCompanyVisible(int workspaceId, Integer currentCompanyId, Person person) {
         Integer companyId = companyIdOf(person);
-        if (companyId != null && !companyMapper.exists(workspaceId, companyId)) {
+        if (companyId == null || Objects.equals(companyId, currentCompanyId)) {
+            return;
+        }
+        if (!companyMapper.exists(workspaceId, companyId)) {
             throw new BadRequestException("Company not found with id: " + companyId);
         }
     }
@@ -440,24 +458,69 @@ public class PersonService {
     }
 
     /**
-     * Deletes a {@code Person} in the active workspace.
+     * Archives a {@code Person} in the active workspace: the contact leaves every ordinary read
+     * while every row that used to be destroyed by the hard delete — employment history,
+     * relationship edges, deal links, tags, shares, identities, custom field values, the profile
+     * image, and the append-only channel-consent history — is retained so {@link #restore(int)}
+     * returns the record intact.
+     *
+     * <p>Authorized by {@link Permission#PERSON_DELETE}: archiving is the exact replacement for the
+     * delete it supersedes, so no actor gains or loses a capability.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_DELETE)
-    public void delete(int id) {
+    public Person archive(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
         Person before = requireOwnedPerson(workspaceId, id);
-        managedObjectService.deletePersonImageAfterCommit(
-            before.getWorkspaceId(), id, before.getImageUrl());
-        customFieldValueService.deleteByEntity("person", id);
-        personMapper.delete(workspaceId, id);
-        auditService.record("person.delete", "person", id, before.getName(),
-            "Deleted person " + before.getName(),
-            auditService.diff(before, null, AUDIT_FIELDS));
+        if (personMapper.archive(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
+        Person after = requireArchivedPerson(workspaceId, id);
+        auditService.record("person.archive", "person", id, before.getName(),
+            "Archived person " + before.getName(),
+            auditService.singleChange("archivedAt", null, after.getArchivedAt()));
+        notificationChanges.publish(workspaceId, "person", id);
+        return after;
+    }
+
+    /**
+     * Returns an archived {@code Person} to the active working set, with the owner, company,
+     * tags, and custom field values it held when it was archived.
+     *
+     * <p>Authorized by {@link Permission#PERSON_DELETE}: restore re-exposes data the workspace
+     * already owns, so gating it on the permission that could archive it is the conservative
+     * choice and opens no path an actor did not already have.
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_DELETE)
+    public Person restore(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (personMapper.lockById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
+        Person before = requireArchivedPerson(workspaceId, id);
+        if (personMapper.restore(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.restore", "person", id, after.getName(),
+            "Restored person " + after.getName(),
+            auditService.singleChange("archivedAt", before.getArchivedAt(), null));
+        notificationChanges.publish(workspaceId, "person", id);
+        ruleTriggers.publish(workspaceId, "person", id, "person.updated");
+        return after;
+    }
+
+    private Person requireArchivedPerson(int workspaceId, int id) {
+        Person person = personMapper.getOwnedArchivedPersonById(workspaceId, id);
+        if (person == null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
+        return person;
     }
 
     /**

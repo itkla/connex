@@ -396,7 +396,7 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
         long companyCount = companyMapper.countCompanies(
-            workspaceId, null, null, false, null, MemberScope.allTeam());
+            workspaceId, null, null, false, null, MemberScope.allTeam(), false);
         if (companyCount > MAX_BATCH_COMPANIES) {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");

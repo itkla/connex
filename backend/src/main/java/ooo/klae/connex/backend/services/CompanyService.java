@@ -223,16 +223,26 @@ public class CompanyService {
         List<Note> notes
     ) {}
 
+    /**
+     * One page of the companies browser. {@code archived} selects the archived set instead of the
+     * active one, so the reversible archive has a place to be reviewed and restored from.
+     */
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
-            boolean noIndustry, List<Integer> ids, MemberScope memberScope, int limit, int offset) {
+            boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
+            int limit, int offset) {
         return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
-            industry, noIndustry, ids, memberScope, limit, offset);
+            industry, noIndustry, ids, memberScope, archived, limit, offset);
     }
 
     public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope) {
-        return companyMapper.countCompanies(
-            workspaceService.getCurrentWorkspaceId(), query, industry, noIndustry, ids, memberScope);
+            MemberScope memberScope, boolean archived) {
+        return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId(),
+            query, industry, noIndustry, ids, memberScope, archived);
+    }
+
+    /** How many companies the active workspace currently holds archived. */
+    public long countArchivedCompanies() {
+        return companyMapper.countArchivedCompanies(workspaceService.getCurrentWorkspaceId());
     }
 
     /**
@@ -294,18 +304,18 @@ public class CompanyService {
      * broad requests before loading the ids.
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
-            List<Integer> ids, MemberScope memberScope) {
-        if (!hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
+            List<Integer> ids, MemberScope memberScope, boolean archived) {
+        if (!archived && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = companyMapper.countCompanies(
-            workspaceId, query, industry, noIndustry, ids, memberScope);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
         return companyMapper.getCompanyIdsFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, MAX_MATCHING_IDS, 0);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived, MAX_MATCHING_IDS, 0);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,
@@ -488,24 +498,68 @@ public class CompanyService {
     }
 
     /**
-     * Deletes a {@code Company} in the active workspace.
+     * Archives a {@code Company} in the active workspace: it leaves every ordinary read while every
+     * row the hard delete used to destroy or orphan — tags, shares, identities, custom field
+     * values, the logo, and the {@code company_id} of its people and deals — is retained so
+     * {@link #restoreCompany(int)} returns the record intact.
+     *
+     * <p>Authorized by {@link Permission#COMPANY_DELETE}: archiving is the exact replacement for the
+     * delete it supersedes, so no actor gains or loses a capability.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_DELETE)
-    public void deleteCompany(int id) {
+    public Company archiveCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Company not found with id: " + id);
         }
         Company before = requireOwnedCompany(workspaceId, id);
-        managedObjectService.deleteCompanyImageAfterCommit(
-            before.getWorkspaceId(), id, before.getLogoUrl());
-        customFieldValueService.deleteByEntity("company", id);
-        companyMapper.delete(workspaceId, id);
-        auditService.record("company.delete", "company", id, before.getName(),
-            "Deleted company " + before.getName(),
-            auditService.diff(before, null, AUDIT_FIELDS));
+        if (companyMapper.archive(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
+        Company after = requireArchivedCompany(workspaceId, id);
+        auditService.record("company.archive", "company", id, before.getName(),
+            "Archived company " + before.getName(),
+            auditService.singleChange("archivedAt", null, after.getArchivedAt()));
+        notificationChanges.publish(workspaceId, "company", id);
+        return after;
+    }
+
+    /**
+     * Returns an archived {@code Company} to the active working set, with the owner, tags, and
+     * custom field values it held when it was archived.
+     *
+     * <p>Authorized by {@link Permission#COMPANY_DELETE}: restore re-exposes data the workspace
+     * already owns, so gating it on the permission that could archive it is the conservative
+     * choice and opens no path an actor did not already have.
+     */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_DELETE)
+    public Company restoreCompany(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (companyMapper.lockById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
+        Company before = requireArchivedCompany(workspaceId, id);
+        if (companyMapper.restore(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
+        Company after = requireOwnedCompany(workspaceId, id);
+        auditService.record("company.restore", "company", id, after.getName(),
+            "Restored company " + after.getName(),
+            auditService.singleChange("archivedAt", before.getArchivedAt(), null));
+        notificationChanges.publish(workspaceId, "company", id);
+        ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        return after;
+    }
+
+    private Company requireArchivedCompany(int workspaceId, int id) {
+        Company company = companyMapper.getOwnedArchivedCompanyById(workspaceId, id);
+        if (company == null) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
+        return company;
     }
 
     /**

@@ -66,9 +66,15 @@ public class BulkOperationService {
     }
 
     @RequirePermission(Permission.PERSON_DELETE)
-    public BulkOperationResult deletePersons(List<Integer> ids) {
+    public BulkOperationResult archivePersons(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), personService::delete);
+        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), personService::archive);
+    }
+
+    @RequirePermission(Permission.PERSON_DELETE)
+    public BulkOperationResult restorePersons(List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return apply(ids, id -> personMapper.existsOwnedArchived(workspaceId, id), personService::restore);
     }
 
     @RequirePermission(Permission.PERSON_UPDATE)
@@ -94,9 +100,16 @@ public class BulkOperationService {
     }
 
     @RequirePermission(Permission.COMPANY_DELETE)
-    public BulkOperationResult deleteCompanies(List<Integer> ids) {
+    public BulkOperationResult archiveCompanies(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::deleteCompany);
+        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::archiveCompany);
+    }
+
+    @RequirePermission(Permission.COMPANY_DELETE)
+    public BulkOperationResult restoreCompanies(List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return apply(ids, id -> companyMapper.existsOwnedArchived(workspaceId, id),
+            companyService::restoreCompany);
     }
 
     @RequirePermission(Permission.COMPANY_UPDATE)

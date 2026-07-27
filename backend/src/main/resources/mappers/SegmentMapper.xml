@@ -3,16 +3,16 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.SegmentMapper">
 
     <select id="companyIdsInWorkspace" resultType="int">
-        SELECT id FROM company WHERE workspace_id = #{workspaceId}
+        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
     </select>
 
     <select id="personIdsInWorkspace" resultType="int">
         SELECT id FROM person
-        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL AND archived_at IS NULL
     </select>
 
     <select id="personIdsInWorkspaceIncludingRestricted" resultType="int">
-        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+        SELECT id FROM person WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
     </select>
 
     <select id="dealIdsInWorkspace" resultType="int">
@@ -23,11 +23,13 @@
         SELECT EXISTS (
             <choose>
                 <when test="recordType == 'company'">
-                    SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{entityId}
+                    SELECT 1 FROM company
+                    WHERE workspace_id = #{workspaceId} AND id = #{entityId} AND archived_at IS NULL
                 </when>
                 <when test="recordType == 'person'">
                     SELECT 1 FROM person
-                    WHERE workspace_id = #{workspaceId} AND id = #{entityId} AND suspended_at IS NULL
+                    WHERE workspace_id = #{workspaceId} AND id = #{entityId}
+                      AND suspended_at IS NULL AND archived_at IS NULL
                 </when>
                 <when test="recordType == 'deal'">
                     SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{entityId}
@@ -51,6 +53,7 @@
         SELECT c.id
         FROM company c
         WHERE c.workspace_id = #{workspaceId}
+          AND c.archived_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
@@ -59,6 +62,7 @@
                     SELECT 1 FROM person processable
                     WHERE processable.id = a.person_id
                       AND processable.suspended_at IS NULL
+                      AND processable.archived_at IS NULL
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
                           SELECT 1 FROM person_share processable_share
@@ -72,7 +76,9 @@
                         ))
                 ))
                 AND (
-                    a.person_id IN (SELECT p.id FROM person p WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id)
+                    a.person_id IN (SELECT p.id FROM person p
+                        WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id
+                          AND p.archived_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
                 )
           )
@@ -83,6 +89,7 @@
         FROM person p
         WHERE p.workspace_id = #{workspaceId}
           AND p.suspended_at IS NULL
+          AND p.archived_at IS NULL
           AND p.company_id IS NOT NULL
           AND p.id IN
           <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
@@ -94,6 +101,7 @@
                     SELECT 1 FROM person processable
                     WHERE processable.id = a.person_id
                       AND processable.suspended_at IS NULL
+                      AND processable.archived_at IS NULL
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
                           SELECT 1 FROM person_share processable_share
@@ -110,7 +118,8 @@
                     a.person_id IN (SELECT p2.id FROM person p2
                         WHERE p2.workspace_id = #{workspaceId}
                           AND p2.company_id = p.company_id
-                          AND p2.suspended_at IS NULL)
+                          AND p2.suspended_at IS NULL
+                          AND p2.archived_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
                 )
           )
@@ -162,6 +171,7 @@
         AND EXISTS (
             SELECT 1 FROM company visible_company
             WHERE visible_company.id = person.company_id
+              AND visible_company.archived_at IS NULL
               AND (visible_company.workspace_id = #{workspaceId}
                 OR EXISTS (
                     SELECT 1 FROM company_share visible_share
@@ -176,7 +186,7 @@
     </sql>
 
     <select id="companyIdsMatching" resultType="int">
-        SELECT id FROM company WHERE workspace_id = #{workspaceId}
+        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
         <choose>
             <when test="field == 'industry'"><include refid="stringOp"><property name="col" value="industry"/></include></when>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
@@ -201,7 +211,7 @@
 
     <select id="personIdsMatching" resultType="int">
         SELECT id FROM person
-        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL AND archived_at IS NULL
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
@@ -227,7 +237,7 @@
 
     <select id="personIdsMatchingIncludingRestricted" resultType="int">
         SELECT id FROM person
-        WHERE workspace_id = #{workspaceId}
+        WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
@@ -315,7 +325,8 @@
     </sql>
 
     <select id="companyExistence" resultType="int">
-        SELECT c.id FROM company c WHERE c.workspace_id = #{workspaceId}
+        SELECT c.id FROM company c
+        WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
         <choose>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
@@ -328,7 +339,7 @@
 
     <select id="personExistence" resultType="int">
         SELECT p.id FROM person p
-        WHERE p.workspace_id = #{workspaceId}
+        WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
         <if test="!includeRestrictedPeople">AND p.suspended_at IS NULL</if>
         <include refid="existencePredicate">
             <property name="alias" value="p"/>
@@ -348,13 +359,13 @@
 
     <select id="companyLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
         SELECT id, name AS label FROM company
-        WHERE workspace_id = #{workspaceId}
+        WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
           AND id IN <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
     </select>
 
     <select id="personLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
         SELECT id, name AS label FROM person
-        WHERE workspace_id = #{workspaceId}
+        WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
           AND id IN <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
     </select>
 
@@ -366,7 +377,8 @@
 
     <select id="distinctIndustries" resultType="string">
         SELECT DISTINCT industry FROM company
-        WHERE workspace_id = #{workspaceId} AND industry IS NOT NULL AND industry != ''
+        WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+          AND industry IS NOT NULL AND industry != ''
         ORDER BY industry
     </select>
 

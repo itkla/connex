@@ -4,25 +4,34 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at, logo_url
+    id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at,
+    logo_url, archived_at
   </sql>
 
   <sql id="qualifiedCompanyColumns">
     c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
-    c.created_at, c.updated_at, c.logo_url
+    c.created_at, c.updated_at, c.logo_url, c.archived_at
   </sql>
 
-  <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any
-       workspace it has been shared with (company_share). The share branch carries the same-org
+  <!-- Owned-or-shared visibility WITHOUT the archive predicate. Only the deliberate archive-aware
+       browser statements (which offer an explicit archived toggle) may include this fragment; every
+       ordinary read must include `visible` instead. The share branch carries the same-org
        ceiling the write path enforces (owner and grantee workspaces must share an organization),
        so a share row that spans an org boundary grants no read visibility. Writes stay
        owned-only. Requires the table aliased `c`. -->
-  <sql id="visible">
+  <sql id="visibleAny">
     (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
         JOIN workspace vws ON vws.id = cs.workspace_id
         JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <!-- The ordinary read predicate (#854): owned-or-shared AND not archived. Archiving replaced the
+       hard delete, so every statement that used to be unable to observe a deleted row must now be
+       unable to observe an archived one. Enrolled in ArchiveVisibilityRegistry. -->
+  <sql id="visible">
+    <include refid="visibleAny"/> AND c.archived_at IS NULL
   </sql>
 
   <sql id="visiblePerson">
@@ -31,6 +40,7 @@
         JOIN workspace pvws ON pvws.id = ps.workspace_id
         JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+    AND p.archived_at IS NULL
   </sql>
 
   <!-- Normalized interaction type and model weight for one activity row, shared by the
@@ -378,7 +388,11 @@
 
   <sql id="pageWhere">
     <where>
-      AND <include refid="visible"/>
+      AND <include refid="visibleAny"/>
+      <choose>
+        <when test="archived">AND c.archived_at IS NOT NULL</when>
+        <otherwise>AND c.archived_at IS NULL</otherwise>
+      </choose>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
           OR c.phone LIKE #{query} OR c.address LIKE #{query})
@@ -473,7 +487,8 @@
           resultType="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
     SELECT
       (SELECT COUNT(*) FROM person p
-       WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}) AS person_count,
+       WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+         AND p.archived_at IS NULL) AS person_count,
       (SELECT COUNT(*) FROM deal d
        WHERE d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}) AS num_deals,
       (SELECT COUNT(*) FROM activity a
@@ -657,14 +672,19 @@
     SELECT COALESCE(CAST(c.owner_id AS CHAR), '__empty__') AS `key`,
            COUNT(*) AS count, NULL AS label
     FROM company c
-    WHERE c.workspace_id = #{workspaceId}
+    WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
     GROUP BY c.owner_id
+  </select>
+
+  <select id="countArchivedCompanies" resultType="long">
+    SELECT COUNT(*) FROM company c
+    WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NOT NULL
   </select>
 
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
       c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
-      c.created_at, c.updated_at, c.logo_url
+      c.created_at, c.updated_at, c.logo_url, c.archived_at
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
     WHERE (c.workspace_id = #{workspaceId}
@@ -673,6 +693,7 @@
               JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
               WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
       AND ct.tag_id = #{tagId}
+      AND c.archived_at IS NULL
     ORDER BY c.name, c.id
   </select>
 
@@ -688,12 +709,22 @@
     FOR UPDATE
   </select>
 
+  <select id="getOwnedArchivedCompanyById" resultType="Company">
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+      AND c.archived_at IS NOT NULL
+  </select>
+
   <select id="getCompaniesWithWebsite" resultType="Company">
-    SELECT id, website FROM company WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
+    SELECT id, website FROM company
+    WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
+      AND archived_at IS NULL
   </select>
 
   <select id="getCompaniesForDedup" resultType="Company">
-    SELECT id, name, website FROM company WHERE workspace_id = #{workspaceId}
+    SELECT id, name, website FROM company
+    WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
   </select>
 
   <select id="getByIds" resultType="Company">
@@ -709,7 +740,12 @@
     )
   </select>
   <select id="existsOwned" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{id})
+    SELECT EXISTS(SELECT 1 FROM company
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
+  </select>
+  <select id="existsOwnedArchived" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM company
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL)
   </select>
 
   <select id="search" resultType="Company">
@@ -772,7 +808,17 @@
     UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
-  <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+  <!-- Archive replaces the former hard DELETE (#854). Nothing cascades, so company tags, shares and
+       identities survive, and the people and deals that pointed at it keep their company_id. -->
+  <update id="archive">
+    UPDATE company SET archived_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="restore">
+    UPDATE company SET archived_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL
+  </update>
 
   <insert id="addTag">
     INSERT IGNORE INTO company_tag (company_id, tag_id)

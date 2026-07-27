@@ -4,10 +4,12 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.ShareMapper">
 
   <select id="ownsCompany" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{id})
+    SELECT EXISTS(SELECT 1 FROM company
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
   </select>
   <select id="ownsPerson" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND id = #{id})
+    SELECT EXISTS(SELECT 1 FROM person
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
   </select>
   <select id="ownsPipeline" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id})
@@ -28,6 +30,7 @@
     JOIN workspace ow ON ow.id = c.workspace_id
     JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE c.id = #{id} AND c.workspace_id = #{workspaceId}
+      AND c.archived_at IS NULL
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePerson">
@@ -38,6 +41,7 @@
     JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE p.id = #{id} AND p.workspace_id = #{workspaceId}
       AND p.provision_ceased_at IS NULL
+      AND p.archived_at IS NULL
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePipeline">

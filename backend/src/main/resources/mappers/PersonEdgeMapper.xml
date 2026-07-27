@@ -20,6 +20,7 @@
         JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
           ON org_workspace.id = source_person.workspace_id
         WHERE ps.person_id = source_person.id AND ps.workspace_id = #{workspaceId}))
+    AND source_person.archived_at IS NULL
   </sql>
 
   <sql id="visibleTargetPerson">
@@ -28,6 +29,7 @@
         JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
           ON org_workspace.id = target_person.workspace_id
         WHERE ps.person_id = target_person.id AND ps.workspace_id = #{workspaceId}))
+    AND target_person.archived_at IS NULL
   </sql>
 
   <sql id="visibleCompanyJoin">
@@ -36,6 +38,7 @@
         JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
           ON org_workspace.id = c.workspace_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+    AND c.archived_at IS NULL
   </sql>
 
   <!-- Re-adding an existing pair edits it (row-alias upsert; VALUES() is removed in MySQL 9). -->

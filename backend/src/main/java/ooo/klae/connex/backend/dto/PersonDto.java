@@ -83,6 +83,9 @@ public class PersonDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime provisionCeasedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime archivedAt;
+
     public static PersonDto from(Person p) {
         if (p == null) return null;
         return populate(new PersonDto(), p);
@@ -111,6 +114,7 @@ public class PersonDto {
         dto.setIntroExcluded(p.isIntroExcluded());
         dto.setSuspendedAt(p.getSuspendedAt());
         dto.setProvisionCeasedAt(p.getProvisionCeasedAt());
+        dto.setArchivedAt(p.getArchivedAt());
         return dto;
     }
 

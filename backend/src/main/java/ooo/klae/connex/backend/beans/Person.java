@@ -41,6 +41,7 @@ public class Person {
     private boolean introExcluded;
     private LocalDateTime suspendedAt;
     private LocalDateTime provisionCeasedAt;
+    private LocalDateTime archivedAt;
 
     public int getId() {
         return id;

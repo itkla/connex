@@ -56,6 +56,7 @@
         JOIN workspace vws ON vws.id = cs.workspace_id
         JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+    AND c.archived_at IS NULL
   </sql>
 
   <sql id="visiblePersonJoin">
@@ -64,6 +65,7 @@
         JOIN workspace vws ON vws.id = ps.workspace_id
         JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+    AND p.archived_at IS NULL
   </sql>
 
   <sql id="visiblePipelineJoin">

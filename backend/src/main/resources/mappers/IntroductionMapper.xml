@@ -9,6 +9,7 @@
         JOIN workspace vws ON vws.id = cs.workspace_id
         JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+    AND c.archived_at IS NULL
   </sql>
 
   <!-- Recording a made intro on an existing pair refreshes it (row-alias upsert; VALUES() is
@@ -45,9 +46,13 @@
            i.introduced_at   AS introduced_at
     FROM introduction i
     JOIN person pa ON pa.id = i.person_a_id AND pa.workspace_id = i.workspace_id
+      AND pa.archived_at IS NULL
     JOIN person pb ON pb.id = i.person_b_id AND pb.workspace_id = i.workspace_id
+      AND pb.archived_at IS NULL
     LEFT JOIN company ca ON ca.id = pa.company_id AND ca.workspace_id = i.workspace_id
+      AND ca.archived_at IS NULL
     LEFT JOIN company cb ON cb.id = pb.company_id AND cb.workspace_id = i.workspace_id
+      AND cb.archived_at IS NULL
   </sql>
 
   <select id="findLineage" resultType="ooo.klae.connex.backend.dto.IntroductionDto">
@@ -88,6 +93,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.intro_excluded = FALSE
       AND p.suspended_at IS NULL
+      AND p.archived_at IS NULL
       AND (
         EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
         OR EXISTS (SELECT 1 FROM note n
@@ -108,6 +114,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.intro_excluded = FALSE
       AND p.suspended_at IS NULL
+      AND p.archived_at IS NULL
       AND (
         EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
         OR EXISTS (SELECT 1 FROM note n
@@ -190,6 +197,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.intro_excluded = FALSE
       AND p.suspended_at IS NULL
+      AND p.archived_at IS NULL
   </select>
 
   <select id="findWarmPathDismissals" resultType="ooo.klae.connex.backend.beans.WarmPathDismissal">

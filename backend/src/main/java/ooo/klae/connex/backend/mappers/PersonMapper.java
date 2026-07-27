@@ -52,40 +52,55 @@ public interface PersonMapper {
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Person getVisiblePersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Person getOwnedPersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** The owned contact only when it is archived; the restore path's pre-image read. */
+    Person getOwnedArchivedPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
     List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    /** True only when the workspace OWNS the contact (excludes records merely shared in); for write scoping. */
+    /**
+     * True only when the workspace OWNS an ACTIVE contact (excludes records merely shared in and
+     * records that have been archived); for write scoping.
+     */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** True only when the workspace owns the contact AND it is archived; for restore write scoping. */
+    boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
     List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
+    /** One page of the browser list; {@code archived} selects the archived set instead of the active one. */
     List<Person> getPersonsPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived,
             @Param("limit") int limit, @Param("offset") int offset);
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany,
-            @Param("memberScope") MemberScope memberScope);
-    /** CSV export using the browser filters and member scope, excluding suspended contacts. */
+            @Param("memberScope") MemberScope memberScope, @Param("archived") boolean archived);
+    /**
+     * CSV export using the browser filters and member scope, excluding suspended contacts.
+     * Callers pass {@code archived = false}: an export is defined as the active working set.
+     */
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope);
+            @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
-            @Param("limit") int limit);
+            @Param("archived") boolean archived, @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    /** How many contacts the workspace currently holds archived; drives the browser's archived toggle. */
+    long countArchivedPersons(@Param("workspaceId") int workspaceId);
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
     List<Integer> getEngagedPersonIds(int workspaceId);
     int insert(Person person);
@@ -114,7 +129,21 @@ public interface PersonMapper {
         @Param("suspended") boolean suspended,
         @Param("provisionCeased") boolean provisionCeased
     );
-    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Archives an active contact. There is deliberately no hard-delete statement: archiving replaced
+     * it in #854 so no cascade can destroy employment, edges, identities, or the append-only
+     * consent history. Whole-workspace erasure remains {@code TenantLifecycleMapper}'s job.
+     *
+     * @return 1 when an active owned row was archived, 0 otherwise
+     */
+    int archive(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /**
+     * Clears the archive tombstone, returning the contact to the active working set.
+     *
+     * @return 1 when an archived owned row was restored, 0 otherwise
+     */
+    int restore(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /** Clears contact ownership held by one member within one workspace. */
     void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

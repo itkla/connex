@@ -305,8 +305,10 @@ class IdentityMapperTest extends AbstractMapperTest {
         insertCompanyIdentity(
             workspace.getId(), company.getId(), "domain", company.getWebsite(), "example.com", "manual");
 
-        personMapper.delete(workspace.getId(), person.getId());
-        companyMapper.delete(workspace.getId(), company.getId());
+        jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), person.getId());
+        jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), company.getId());
 
         assertEquals(
             0,

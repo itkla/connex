@@ -18,6 +18,7 @@
     <result property="introExcluded" column="intro_excluded"/>
     <result property="suspendedAt" column="suspended_at"/>
     <result property="provisionCeasedAt" column="provision_ceased_at"/>
+    <result property="archivedAt" column="archived_at"/>
     <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
       <result property="name" column="company_name"/>
@@ -32,7 +33,7 @@
 
   <sql id="personColumns">
     p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
-    p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at
+    p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at, p.archived_at
   </sql>
 
   <sql id="companyJoinColumns">
@@ -48,17 +49,25 @@
           WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
-  <!-- Owned-or-shared visibility: a person is visible to its owning workspace and any workspace it
-       has been shared with (person_share). The share branch carries the same-org ceiling the write
-       path enforces (owner and grantee workspaces must share an organization), so a share row that
-       spans an org boundary grants no read visibility. Writes stay owned-only. Requires the
-       table aliased `p`. -->
-  <sql id="visible">
+  <!-- Owned-or-shared visibility WITHOUT the archive predicate. Only the deliberate archive-aware
+       browser statements (which offer an explicit archived toggle) and the lifecycle-facing
+       lookups may include this fragment; every ordinary read must include `visible` instead.
+       The share branch carries the same-org ceiling the write path enforces (owner and grantee
+       workspaces must share an organization), so a share row that spans an org boundary grants no
+       read visibility. Writes stay owned-only. Requires the table aliased `p`. -->
+  <sql id="visibleAny">
     (p.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM person_share ps
         JOIN workspace vws ON vws.id = ps.workspace_id
         JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <!-- The ordinary read predicate (#854): owned-or-shared AND not archived. Archiving replaced the
+       hard delete, so every statement that used to be unable to observe a deleted row must now be
+       unable to observe an archived one. Enrolled in ArchiveVisibilityRegistry. -->
+  <sql id="visible">
+    <include refid="visibleAny"/> AND p.archived_at IS NULL
   </sql>
 
   <select id="getAllPersons" resultMap="PersonResult">
@@ -285,6 +294,7 @@
       SELECT person.*
       FROM person
       WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
+        AND person.archived_at IS NULL
       ORDER BY name, id
       <if test="limit != null">LIMIT #{limit}</if>
     ) p
@@ -297,6 +307,7 @@
     SELECT p.id, p.name, p.image_url
     FROM person p
     WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+      AND p.archived_at IS NULL
     ORDER BY p.name, p.id
     LIMIT #{limit}
   </select>
@@ -307,6 +318,7 @@
     <include refid="companyJoin"/>
     JOIN person_tag pt ON pt.person_id = p.id
     WHERE p.workspace_id = #{workspaceId} AND pt.tag_id = #{tagId}
+      AND p.archived_at IS NULL
     ORDER BY p.name
   </select>
 
@@ -334,11 +346,21 @@
     FOR UPDATE
   </select>
 
+  <!-- Deliberately archive-agnostic: APPI processing restrictions must remain applicable to a
+       contact whose record has been archived, so this administrative lock read still reaches it. -->
   <select id="getOwnedPersonByIdForUpdate" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
     FOR UPDATE
+  </select>
+
+  <select id="getOwnedArchivedPersonById" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+      AND p.archived_at IS NOT NULL
   </select>
 
   <select id="getProcessablePersonIds" resultType="int">
@@ -379,15 +401,25 @@
                 JOIN workspace ows ON ows.id = person.workspace_id AND ows.org_id = vws.org_id
                 WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
         AND id = #{id}
+        AND person.archived_at IS NULL
     )
   </select>
   <select id="existsOwned" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND id = #{id})
+    SELECT EXISTS(SELECT 1 FROM person
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
+  </select>
+  <select id="existsOwnedArchived" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM person
+      WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL)
   </select>
 
   <sql id="pageWhere">
     <where>
-      AND <include refid="visible"/>
+      AND <include refid="visibleAny"/>
+      <choose>
+        <when test="archived">AND p.archived_at IS NOT NULL</when>
+        <otherwise>AND p.archived_at IS NULL</otherwise>
+      </choose>
       <if test="query != null">
         AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
           OR p.title LIKE #{query} OR c.name LIKE #{query})
@@ -481,6 +513,7 @@
     FROM person p
     <include refid="companyJoin"/>
     WHERE p.workspace_id = #{workspaceId} AND c.name IS NOT NULL AND c.name &lt;&gt; ''
+      AND p.archived_at IS NULL
     ORDER BY c.name
   </select>
 
@@ -488,19 +521,26 @@
     SELECT DISTINCT p.title
     FROM person p
     WHERE p.workspace_id = #{workspaceId} AND p.title IS NOT NULL AND p.title &lt;&gt; ''
+      AND p.archived_at IS NULL
     ORDER BY p.title
   </select>
 
   <select id="hasPersonWithoutCompany" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND company_id IS NULL)
+    SELECT EXISTS(SELECT 1 FROM person
+      WHERE workspace_id = #{workspaceId} AND company_id IS NULL AND archived_at IS NULL)
   </select>
 
   <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
     SELECT COALESCE(CAST(p.owner_id AS CHAR), '__empty__') AS `key`,
            COUNT(*) AS count, NULL AS label
     FROM person p
-    WHERE p.workspace_id = #{workspaceId}
+    WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
     GROUP BY p.owner_id
+  </select>
+
+  <select id="countArchivedPersons" resultType="long">
+    SELECT COUNT(*) FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL
   </select>
 
   <!-- Contacts the team has engaged (any activity, note, or task): warm-intro entry points. -->
@@ -533,6 +573,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
+      AND p.archived_at IS NULL
       AND p.email IN
       <foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
   </select>
@@ -622,7 +663,17 @@
     UPDATE person SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
-  <delete id="delete">DELETE FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+  <!-- Archive replaces the former hard DELETE (#854). Nothing cascades, so employment, edges, tags,
+       shares, identities, custom field values and the append-only consent history all survive. -->
+  <update id="archive">
+    UPDATE person SET archived_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="restore">
+    UPDATE person SET archived_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL
+  </update>
 
   <insert id="addTag">
     INSERT IGNORE INTO person_tag (person_id, tag_id)

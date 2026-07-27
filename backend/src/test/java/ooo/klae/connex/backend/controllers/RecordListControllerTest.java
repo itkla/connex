@@ -102,16 +102,16 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
-            null, null, null, null, null, false, memberScope, 100, 0)).thenReturn(List.of());
-        when(personService.countPersons(null, null, null, false, memberScope)).thenReturn(0L);
+            null, null, null, null, null, false, memberScope, false, 100, 0)).thenReturn(List.of());
+        when(personService.countPersons(null, null, null, false, memberScope, false)).thenReturn(0L);
 
         var response = controller.getPersonsPage(
-            0, 500, null, null, null, null, null, false, null, null);
+            0, 500, null, null, null, null, null, false, null, null, false);
 
         assertEquals(0, response.total());
         verify(personService).getPersonsPage(
-            null, null, null, null, null, false, memberScope, 100, 0);
-        verify(personService).countPersons(null, null, null, false, memberScope);
+            null, null, null, null, null, false, memberScope, false, 100, 0);
+        verify(personService).countPersons(null, null, null, false, memberScope, false);
     }
 
     @Test
@@ -119,10 +119,10 @@ class RecordListControllerTest {
         PersonController controller = personController();
 
         assertThrows(BadRequestException.class, () -> controller.getPersonsPage(
-            1, 25, null, "warmth", "desc", null, null, false, null, null));
+            1, 25, null, "warmth", "desc", null, null, false, null, null, false));
 
         verify(personService, never()).getPersonsPage(
-            null, "warmth", "desc", null, null, false, null, 25, 0);
+            null, "warmth", "desc", null, null, false, null, false, 25, 0);
     }
 
     @Test
@@ -133,20 +133,20 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, 25, 25)).thenReturn(List.of());
+            memberScope, false, 25, 25)).thenReturn(List.of());
         when(personService.countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope)).thenReturn(4L);
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope, false)).thenReturn(4L);
 
         var response = controller.getPersonsPage(
             2, 25, "Target", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            "members", List.of(3, 5));
+            "members", List.of(3, 5), false);
 
         assertEquals(4, response.total());
         verify(personService).getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, 25, 25);
+            memberScope, false, 25, 25);
         verify(personService).countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope);
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope, false);
     }
 
     @Test
@@ -156,9 +156,9 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getPersonIds(null, null, null, false, null, null));
+            () -> controller.getPersonIds(null, null, null, false, null, null, false));
 
-        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam());
+        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam(), false);
     }
 
     @Test
@@ -177,17 +177,17 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(companyService.getCompaniesPage(
-            null, null, null, null, false, null, memberScope, 100, 0))
+            null, null, null, null, false, null, memberScope, false, 100, 0))
             .thenReturn(List.of());
-        when(companyService.countCompanies(null, null, false, null, memberScope)).thenReturn(0L);
+        when(companyService.countCompanies(null, null, false, null, memberScope, false)).thenReturn(0L);
 
         var response = controller.getCompaniesPage(
-            0, 500, null, null, null, null, false, null, null, null);
+            0, 500, null, null, null, null, false, null, null, null, false);
 
         assertEquals(0, response.total());
         verify(companyService).getCompaniesPage(
-            null, null, null, null, false, null, memberScope, 100, 0);
-        verify(companyService).countCompanies(null, null, false, null, memberScope);
+            null, null, null, null, false, null, memberScope, false, 100, 0);
+        verify(companyService).countCompanies(null, null, false, null, memberScope, false);
     }
 
     @Test
@@ -240,18 +240,18 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
         when(companyService.getCompaniesPage(
-            query, "industry", "desc", industries, true, ids, memberScope, 25, 25))
+            query, "industry", "desc", industries, true, ids, memberScope, false, 25, 25))
             .thenReturn(List.of());
-        when(companyService.countCompanies(query, industries, true, ids, memberScope)).thenReturn(7L);
+        when(companyService.countCompanies(query, industries, true, ids, memberScope, false)).thenReturn(7L);
 
         var response = controller.getCompaniesPage(
             2, 25, "50%_Company", "industry", "desc", industries, true, ids,
-            "members", List.of(3, 5));
+            "members", List.of(3, 5), false);
 
         assertEquals(7, response.total());
         verify(companyService).getCompaniesPage(
-            query, "industry", "desc", industries, true, ids, memberScope, 25, 25);
-        verify(companyService).countCompanies(query, industries, true, ids, memberScope);
+            query, "industry", "desc", industries, true, ids, memberScope, false, 25, 25);
+        verify(companyService).countCompanies(query, industries, true, ids, memberScope, false);
     }
 
     @Test
@@ -261,10 +261,10 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null));
+            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null, false));
 
         verify(companyService, never()).getMatchingCompanyIds(
-            null, List.of(), false, List.of(), MemberScope.allTeam());
+            null, List.of(), false, List.of(), MemberScope.allTeam(), false);
     }
 
     @Test
@@ -273,12 +273,12 @@ class RecordListControllerTest {
         List<Integer> ids = List.of(3, 5);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
-        when(companyService.getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam()))
+        when(companyService.getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam(), false))
             .thenReturn(ids);
 
-        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null));
+        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null, false));
 
-        verify(companyService).getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam());
+        verify(companyService).getMatchingCompanyIds(null, null, false, ids, MemberScope.allTeam(), false);
     }
 
     @Test
