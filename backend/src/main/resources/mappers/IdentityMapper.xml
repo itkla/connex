@@ -4,27 +4,21 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.IdentityMapper">
 
   <select id="findPersonBackfillCandidates" resultType="PersonIdentityBackfillCandidate">
-    SELECT p.id, p.email, p.phone, p.created_at
+    SELECT p.id, p.name, p.email, p.phone, p.created_at
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id &gt; #{afterId}
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND (
-        (p.email IS NOT NULL AND TRIM(p.email) &lt;&gt; '')
-        OR (p.phone IS NOT NULL AND TRIM(p.phone) &lt;&gt; '')
-      )
     ORDER BY p.id
     LIMIT #{limit}
   </select>
 
   <select id="findCompanyBackfillCandidates" resultType="CompanyIdentityBackfillCandidate">
-    SELECT c.id, c.website, c.created_at
+    SELECT c.id, c.name, c.website, c.phone, c.created_at
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.id &gt; #{afterId}
-      AND c.website IS NOT NULL
-      AND TRIM(c.website) &lt;&gt; ''
     ORDER BY c.id
     LIMIT #{limit}
   </select>
@@ -36,6 +30,7 @@
     WHERE pi.workspace_id = #{workspaceId}
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
+      AND pi.superseded_at IS NULL
       AND pi.person_id IN
       <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
         #{recordId}
@@ -47,86 +42,361 @@
     FROM company_identity ci
     JOIN company c ON c.workspace_id = ci.workspace_id AND c.id = ci.company_id
     WHERE ci.workspace_id = #{workspaceId}
+      AND ci.superseded_at IS NULL
       AND ci.company_id IN
       <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
         #{recordId}
       </foreach>
   </select>
 
-  <insert id="insertBackfilledPersonEmailIfAbsent">
+  <sql id="visiblePerson">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleCompany">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace vws ON vws.id = cs.workspace_id
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visiblePersonCompany">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace cvws ON cvws.id = cs.workspace_id
+        JOIN workspace cows ON cows.id = c.workspace_id AND cows.org_id = cvws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <select id="findVisiblePersonIdentityMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH ranked_matches AS (
+      SELECT p.id AS record_id,
+             p.workspace_id AS record_workspace_id,
+             p.name,
+             c.name AS company_name,
+             p.title,
+             NULL AS website,
+             NULL AS industry,
+             pi.kind,
+             pi.normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY pi.kind, pi.normalized_value
+               ORDER BY CASE WHEN p.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                        p.id
+             ) AS match_rank
+      FROM person_identity pi
+      JOIN person p
+        ON p.workspace_id = pi.workspace_id
+        AND p.id = pi.person_id
+      LEFT JOIN company c
+        ON c.id = p.company_id
+        AND <include refid="visiblePersonCompany"/>
+      WHERE pi.superseded_at IS NULL
+        AND p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+        AND <include refid="visiblePerson"/>
+        AND (
+          <foreach item="key" collection="keys" separator=" OR ">
+            (pi.kind = #{key.kind} AND pi.normalized_value = #{key.normalizedValue})
+          </foreach>
+        )
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY kind, normalized_value, record_id
+  </select>
+
+  <select id="findVisibleCompanyIdentityMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH ranked_matches AS (
+      SELECT c.id AS record_id,
+             c.workspace_id AS record_workspace_id,
+             c.name,
+             NULL AS company_name,
+             NULL AS title,
+             c.website,
+             c.industry,
+             ci.kind,
+             ci.normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY ci.kind, ci.normalized_value
+               ORDER BY CASE WHEN c.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                        c.id
+             ) AS match_rank
+      FROM company_identity ci
+      JOIN company c
+        ON c.workspace_id = ci.workspace_id
+        AND c.id = ci.company_id
+      WHERE ci.superseded_at IS NULL
+        AND <include refid="visibleCompany"/>
+        AND (
+          <foreach item="key" collection="keys" separator=" OR ">
+            (ci.kind = #{key.kind} AND ci.normalized_value = #{key.normalizedValue})
+          </foreach>
+        )
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY kind, normalized_value, record_id
+  </select>
+
+  <select id="findVisiblePersonNameMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH requested_names AS (
+      <foreach item="key" collection="keys" separator=" UNION ALL ">
+        SELECT #{key.normalizedName} AS normalized_name
+      </foreach>
+    ),
+    ranked_matches AS (
+      SELECT p.id AS record_id,
+             p.workspace_id AS record_workspace_id,
+             p.name,
+             c.name AS company_name,
+             p.title,
+             NULL AS website,
+             NULL AS industry,
+             'name' AS kind,
+             requested_names.normalized_name AS normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY requested_names.normalized_name
+               ORDER BY CASE WHEN p.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                 p.id
+             ) AS match_rank
+      FROM requested_names
+      JOIN person p ON p.normalized_name = requested_names.normalized_name
+      LEFT JOIN company c
+        ON c.id = p.company_id
+        AND <include refid="visiblePersonCompany"/>
+      WHERE p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+        AND <include refid="visiblePerson"/>
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY normalized_value, record_id
+  </select>
+
+  <select id="findVisibleCompanyNameMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH requested_names AS (
+      <foreach item="key" collection="keys" separator=" UNION ALL ">
+        SELECT #{key.normalizedName} AS normalized_name
+      </foreach>
+    ),
+    ranked_matches AS (
+      SELECT c.id AS record_id,
+             c.workspace_id AS record_workspace_id,
+             c.name,
+             NULL AS company_name,
+             NULL AS title,
+             c.website,
+             c.industry,
+             'name' AS kind,
+             requested_names.normalized_name AS normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY requested_names.normalized_name
+               ORDER BY CASE WHEN c.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                 c.id
+             ) AS match_rank
+      FROM requested_names
+      JOIN company c ON c.normalized_name = requested_names.normalized_name
+      WHERE <include refid="visibleCompany"/>
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY normalized_value, record_id
+  </select>
+
+  <update id="updatePersonNormalizedName">
+    UPDATE person
+    SET normalized_name = #{normalizedName,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{personId}
+      AND CAST(name AS BINARY) = CAST(#{rawName} AS BINARY)
+  </update>
+
+  <update id="updateCompanyNormalizedName">
+    UPDATE company
+    SET normalized_name = #{normalizedName,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{companyId}
+      AND CAST(name AS BINARY) = CAST(#{rawName} AS BINARY)
+  </update>
+
+  <select id="lockPersonIdentityParent" resultType="PersonIdentityBackfillCandidate">
+    SELECT id, name, email, phone, created_at
+    FROM person
+    WHERE workspace_id = #{workspaceId} AND id = #{personId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockCompanyIdentityParent" resultType="CompanyIdentityBackfillCandidate">
+    SELECT id, name, website, phone, created_at
+    FROM company
+    WHERE workspace_id = #{workspaceId} AND id = #{companyId}
+    FOR UPDATE
+  </select>
+
+  <update id="supersedePersonEmailIdentities">
+    UPDATE person_identity pi
+    JOIN person p
+      ON p.workspace_id = pi.workspace_id
+      AND p.id = pi.person_id
+    SET pi.superseded_at = #{supersededAt}
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.kind = 'email'
+      AND pi.superseded_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND (
+        (p.email IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(p.email AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND pi.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedePersonPhoneIdentities">
+    UPDATE person_identity pi
+    JOIN person p
+      ON p.workspace_id = pi.workspace_id
+      AND p.id = pi.person_id
+    SET pi.superseded_at = #{supersededAt}
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.kind = 'phone'
+      AND pi.superseded_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND (
+        (p.phone IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(p.phone AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND pi.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedeCompanyDomainIdentities">
+    UPDATE company_identity ci
+    JOIN company c
+      ON c.workspace_id = ci.workspace_id
+      AND c.id = ci.company_id
+    SET ci.superseded_at = #{supersededAt}
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.kind = 'domain'
+      AND ci.superseded_at IS NULL
+      AND (
+        (c.website IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(c.website AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND ci.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedeCompanyPhoneIdentities">
+    UPDATE company_identity ci
+    JOIN company c
+      ON c.workspace_id = ci.workspace_id
+      AND c.id = ci.company_id
+    SET ci.superseded_at = #{supersededAt}
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.kind = 'phone'
+      AND ci.superseded_at IS NULL
+      AND (
+        (c.phone IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(c.phone AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND ci.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <insert id="upsertPersonEmailIdentity">
     INSERT INTO person_identity (
       workspace_id, person_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT p.workspace_id, p.id, 'email', p.email, #{normalizedValue},
-           'backfill', 'person.email', NULL, CONCAT('person:', p.id),
-           p.created_at, NULL
+    SELECT p.workspace_id, p.id, 'email', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'person.email', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.email AS BINARY) = CAST(#{rawValue} AS BINARY)
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM person_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.person_id = #{personId}
-          AND existing.kind = 'email'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
-  <insert id="insertBackfilledPersonPhoneIfAbsent">
+  <insert id="upsertPersonPhoneIdentity">
     INSERT INTO person_identity (
       workspace_id, person_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT p.workspace_id, p.id, 'phone', p.phone, #{normalizedValue},
-           'backfill', 'person.phone', NULL, CONCAT('person:', p.id),
-           p.created_at, NULL
+    SELECT p.workspace_id, p.id, 'phone', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'person.phone', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM person_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.person_id = #{personId}
-          AND existing.kind = 'phone'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
-  <insert id="insertBackfilledCompanyDomainIfAbsent">
+  <insert id="upsertCompanyDomainIdentity">
     INSERT INTO company_identity (
       workspace_id, company_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT c.workspace_id, c.id, 'domain', c.website, #{normalizedValue},
-           'backfill', 'company.website', NULL, CONCAT('company:', c.id),
-           c.created_at, NULL
+    SELECT c.workspace_id, c.id, 'domain', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'company.website', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.id = #{companyId}
       AND CAST(c.website AS BINARY) = CAST(#{rawValue} AS BINARY)
-      AND NOT EXISTS (
-        SELECT 1
-        FROM company_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.company_id = #{companyId}
-          AND existing.kind = 'domain'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE company_identity.id = company_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
+  </insert>
+
+  <insert id="upsertCompanyPhoneIdentity">
+    INSERT INTO company_identity (
+      workspace_id, company_id, kind, `value`, normalized_value,
+      source_system, source_channel, source_external_id, source_row_ref,
+      acquired_at, purpose_of_use_code
+    )
+    SELECT c.workspace_id, c.id, 'phone', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'company.phone', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id = #{companyId}
+      AND CAST(c.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
   <delete id="deletePersonIdentitiesForWorkspace">

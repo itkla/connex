@@ -12,6 +12,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class CompanyIdentityBackfillCandidate {
     private int id;
+    private String name;
     private String website;
+    private String phone;
     private LocalDateTime createdAt;
 }
