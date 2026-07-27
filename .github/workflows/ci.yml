@@ -165,7 +165,7 @@ jobs:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
         env:
           MYSQL_ROOT_PASSWORD: ci-${{ github.run_id }}-e2e-root
-          MYSQL_DATABASE: connexdb
+          MYSQL_DATABASE: connex_seed_e2e
         ports:
           - 3306:3306
         options: >-
@@ -204,11 +204,26 @@ jobs:
       - name: Build bootWar
         working-directory: backend
         run: bash gradlew bootWar --no-daemon -Pversion=ci
+      - name: Seed deterministic fixtures into the fresh e2e schema
+        working-directory: backend
+        env:
+          CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
+          CONNEX_DB_USERNAME: root
+          CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
+        run: |
+          set -euo pipefail
+          mkdir -p ../frontend/test/e2e/.artifacts
+          bash gradlew seedData --no-daemon \
+            -PseederProfile=small \
+            -PseederSeed=853 \
+            -PseederWorkspaces=1 \
+            -PseederAnchorDate=2026-01-15 \
+            | tee ../frontend/test/e2e/.artifacts/seeder.log
       - name: Boot backend (dev profile, fresh schema)
         working-directory: backend
         env:
           SPRING_PROFILES_ACTIVE: dev
-          CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
+          CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
         run: |
@@ -264,5 +279,6 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
+            frontend/test/e2e/.artifacts/seeder.log
           retention-days: 7
           if-no-files-found: ignore
