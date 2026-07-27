@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -246,7 +247,8 @@ class IntroductionRankingTest {
     }
 
     private static RelationshipTemperatureDto temperature(int id, int score, String band) {
-        return new RelationshipTemperatureDto(id, score, band, "steady", null, null, 0, null, null);
+        return new RelationshipTemperatureDto(
+            id, score, band, "steady", null, null, 0, null, null, "test-model", Instant.EPOCH);
     }
 
     private static long pairKey(int x, int y) {

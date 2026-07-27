@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 class PersonMapperTest extends AbstractMapperTest {
 
@@ -243,7 +244,8 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getPersonsByCompanyIds(workspace.getId(), List.of(company.getId())).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getRelationshipScoreAggregates(
-            workspace.getId(), LocalDateTime.now().plusDays(1)).stream()
+            workspace.getId(), LocalDateTime.now().plusDays(1),
+            RelationshipWarmthModel.current().sqlParameters()).stream()
             .anyMatch(score -> score.id() == suspended.getId()));
         assertFalse(personMapper.getEngagedPersonIds(workspace.getId()).contains(suspended.getId()));
         assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()

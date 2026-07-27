@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportOffsetSegment;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /** Verifies the report mapper XML and every dynamic aggregate branch can be resolved. */
 class ReportMapperXmlTest {
@@ -128,6 +129,22 @@ class ReportMapperXmlTest {
             assertTrue(sql.contains("open_deal.won IS NULL"));
             assertTrue(sql.contains("SET eligible_history.conversion_eligible = TRUE"));
         }
+    }
+
+    @Test
+    void coverageWarmthUsesBoundModelAndAlignedReference() throws Exception {
+        String mapper = resourceText("mappers/ReportMapper.xml");
+        int start = mapper.indexOf("<select id=\"aggregateCoverageGaps\"");
+        int end = mapper.indexOf("<select id=\"aggregateSingleThreadedDeals\"", start);
+        String coverage = mapper.substring(start, end);
+
+        assertTrue(coverage.contains("#{warmthReference}"));
+        assertTrue(coverage.contains("#{model.decayBase}"));
+        assertTrue(coverage.contains("#{model.halfLifeDays}"));
+        assertTrue(coverage.contains("#{model.warmMinimumRawWeight}"));
+        assertFalse(coverage.contains("ROUND(100.0"));
+        assertFalse(coverage.contains("/ 30.0"));
+        assertFalse(coverage.contains("/ 0.7"));
     }
 
     @Test
@@ -238,7 +255,11 @@ class ReportMapperXmlTest {
     private static void assertWorkspaceScoped(
             Configuration configuration, String statement, ReportAggregateQuery query) {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
-                .getBoundSql(Map.of("query", query)).getSql();
+                .getBoundSql(Map.of(
+                    "query", query,
+                    "warmthReference", query.endUtc().minusNanos(1_000_000),
+                    "model", RelationshipWarmthModel.current().sqlParameters()))
+                .getSql();
         assertNotNull(sql);
         assertTrue(sql.contains("workspace_id = ?"));
     }

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Instant;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -84,6 +85,7 @@ class RelationshipDashboardServiceTest {
 
     private static RelationshipTemperatureDto temperature(int id, String trend, int daysSinceTouch) {
         return new RelationshipTemperatureDto(
-            id, 20, "cool", trend, "2026-06-01 00:00:00", daysSinceTouch, 1, null, null);
+            id, 20, "cool", trend, "2026-06-01 00:00:00", daysSinceTouch, 1, null, null,
+            "test-model", Instant.EPOCH);
     }
 }

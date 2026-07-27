@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -111,7 +112,8 @@ class DealBriefAssemblerTest {
         task.setCompleted(false);
 
         RelationshipTemperatureDto temperature = new RelationshipTemperatureDto(
-                PERSON_ID, 64, "warm", "cooling", "2026-06-29 10:00:00", 10, 2, null, null);
+                PERSON_ID, 64, "warm", "cooling", "2026-06-29 10:00:00", 10, 2,
+                null, null, "test-model", Instant.EPOCH);
         DealRiskFactor riskFactor = new DealRiskFactor(
                 "stakeholder_cold",
                 "medium",
