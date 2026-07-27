@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
@@ -89,5 +90,24 @@ class RequestPathRedactorTest {
                 Source.CLIENT, "id", 1, 2, "Render failed", "stack", "/invite/aBc123defGhi456jklMno");
 
         assertEquals("/invite/{token}", error.path());
+    }
+
+    @Test
+    void masksTheHexWebhookTokenTheDeliveryControllerTreatsAsItsOnlyCredential() {
+        String token = HexFormat.of().formatHex(new byte[32]);
+        assertEquals("/api/delivery/webhooks/sendgrid/{token}",
+                RequestPathRedactor.redact("/api/delivery/webhooks/sendgrid/" + token));
+        byte[] random = new byte[32];
+        new SecureRandom().nextBytes(random);
+        assertEquals("/api/delivery/webhooks/postmark/{token}",
+                RequestPathRedactor.redact("/api/delivery/webhooks/postmark/" + HexFormat.of().formatHex(random)));
+    }
+
+    @Test
+    void keepsNumericRowIdsOnTheWorkspaceAdminInviteRoutes() {
+        assertEquals("/api/workspaces/12/invites/348",
+                RequestPathRedactor.redact("/api/workspaces/12/invites/348"));
+        assertEquals("/api/workspaces/12/invite-links/9",
+                RequestPathRedactor.redact("/api/workspaces/12/invite-links/9"));
     }
 }
