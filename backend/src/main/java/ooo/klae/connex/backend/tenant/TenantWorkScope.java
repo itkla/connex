@@ -1,17 +1,20 @@
 package ooo.klae.connex.backend.tenant;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
@@ -30,11 +33,11 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * catalog — the nested-{@code runAs} cache-poisoning fix).
  */
 @Component
-@RequiredArgsConstructor
 public class TenantWorkScope {
 
     private static final class WorkspaceRoutes {
         private final Map<Integer, WorkspaceRoute> routes = new HashMap<>();
+        private final Set<Integer> lifecycleResolved = new HashSet<>();
         private int depth;
     }
 
@@ -45,6 +48,32 @@ public class TenantWorkScope {
     private final TenantContext tenantContext;
     private final TenantCatalogResolver tenantCatalogResolver;
     private final WorkspaceMapper workspaceMapper;
+    private final Function<Integer, Integer> lifecycleOrgResolver;
+
+    /** Creates the production scope with ordinary and trusted lifecycle resolvers. */
+    @Autowired
+    public TenantWorkScope(
+            TenantContext tenantContext,
+            TenantCatalogResolver tenantCatalogResolver,
+            WorkspaceMapper workspaceMapper,
+            TenantLifecycleControlMapper tenantLifecycleControlMapper) {
+        this.tenantContext = tenantContext;
+        this.tenantCatalogResolver = tenantCatalogResolver;
+        this.workspaceMapper = workspaceMapper;
+        this.lifecycleOrgResolver =
+            tenantLifecycleControlMapper::findWorkspaceOrgIdForLifecycle;
+    }
+
+    /** Creates an ordinary-routing scope for focused unit and routing tests. */
+    public TenantWorkScope(
+            TenantContext tenantContext,
+            TenantCatalogResolver tenantCatalogResolver,
+            WorkspaceMapper workspaceMapper) {
+        this.tenantContext = tenantContext;
+        this.tenantCatalogResolver = tenantCatalogResolver;
+        this.workspaceMapper = workspaceMapper;
+        this.lifecycleOrgResolver = workspaceMapper::getOrgId;
+    }
 
     /**
      * Runs control-plane work on the default catalog regardless of any routed
@@ -77,7 +106,7 @@ public class TenantWorkScope {
      * @throws IllegalStateException when the workspace does not exist
      */
     public <T> T inWorkspace(int workspaceId, Supplier<T> work) {
-        return runInWorkspace(workspaceId, route -> work.get());
+        return runInWorkspace(workspaceId, false, route -> work.get());
     }
 
     /**
@@ -92,10 +121,32 @@ public class TenantWorkScope {
      * @return the work's result
      */
     public <T> T withWorkspacePlacement(int workspaceId, BiFunction<Integer, String, T> work) {
-        return runInWorkspace(workspaceId, route -> work.apply(route.orgId(), route.catalog()));
+        return runInWorkspace(
+            workspaceId,
+            false,
+            route -> work.apply(route.orgId(), route.catalog()));
     }
 
-    private <T> T runInWorkspace(int workspaceId, Function<WorkspaceRoute, T> work) {
+    /**
+     * Routes trusted cleanup and reconciliation through a workspace whose
+     * lifecycle state may already be {@code tearing_down}.
+     */
+    public <T> T inLifecycleWorkspace(int workspaceId, Supplier<T> work) {
+        return runInWorkspace(workspaceId, true, route -> work.get());
+    }
+
+    /** {@link #inLifecycleWorkspace(int, Supplier)} for void cleanup work. */
+    public void inLifecycleWorkspace(int workspaceId, Runnable work) {
+        inLifecycleWorkspace(workspaceId, () -> {
+            work.run();
+            return null;
+        });
+    }
+
+    private <T> T runInWorkspace(
+            int workspaceId,
+            boolean lifecycle,
+            Function<WorkspaceRoute, T> work) {
         WorkspaceRoutes routes = CURRENT_WORKSPACE_ROUTES.get();
         boolean root = routes == null;
         if (root) {
@@ -107,7 +158,7 @@ public class TenantWorkScope {
             CURRENT_WORKSPACE_ROUTES.set(routes);
         }
         try {
-            WorkspaceRoute route = routeFor(routes, workspaceId);
+            WorkspaceRoute route = routeFor(routes, workspaceId, lifecycle);
             routes.depth++;
             try {
                 return runWithOverride(Optional.ofNullable(route.catalog()), () -> work.apply(route));
@@ -148,13 +199,24 @@ public class TenantWorkScope {
         return runWithOverride(Optional.ofNullable(catalog), work);
     }
 
-    private WorkspaceRoute routeFor(WorkspaceRoutes routes, int workspaceId) {
+    private WorkspaceRoute routeFor(
+            WorkspaceRoutes routes,
+            int workspaceId,
+            boolean lifecycle) {
         WorkspaceRoute existing = routes.routes.get(workspaceId);
-        if (existing != null) {
+        if (existing != null
+                && (lifecycle || !routes.lifecycleResolved.contains(workspaceId))) {
             return existing;
         }
-        WorkspaceRoute resolved = resolveRouteForWorkspace(workspaceId);
+        WorkspaceRoute resolved = lifecycle
+            ? resolveLifecycleRouteForWorkspace(workspaceId)
+            : resolveRouteForWorkspace(workspaceId);
         routes.routes.put(workspaceId, resolved);
+        if (lifecycle) {
+            routes.lifecycleResolved.add(workspaceId);
+        } else {
+            routes.lifecycleResolved.remove(workspaceId);
+        }
         return resolved;
     }
 
@@ -177,6 +239,16 @@ public class TenantWorkScope {
     private WorkspaceRoute resolveRouteForWorkspace(int workspaceId) {
         return unrouted(() -> {
             Integer orgId = workspaceMapper.getOrgId(workspaceId);
+            if (orgId == null) {
+                throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
+            }
+            return new WorkspaceRoute(orgId, tenantCatalogResolver.resolveCatalog(orgId));
+        });
+    }
+
+    private WorkspaceRoute resolveLifecycleRouteForWorkspace(int workspaceId) {
+        return unrouted(() -> {
+            Integer orgId = lifecycleOrgResolver.apply(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
             }

@@ -85,6 +85,10 @@ public class AuditIntegrityService {
         entry.setChainIndex(chainIndex);
         entry.setPrevHash(head.getCurrentHash());
         entry.setCreatedAt(now());
+        entry.setIntegrityWorkspaceId(entry.getWorkspaceId());
+        entry.setIntegrityOrgId(entry.getOrgId());
+        entry.setIntegrityActorId(entry.getActorId());
+        entry.setIntegrityReferenceState("captured");
         entry.setRowHash(hmacHex(canonicalPayload(entry)));
 
         auditLogMapper.insert(entry);
@@ -118,6 +122,18 @@ public class AuditIntegrityService {
         return canonicalPayload(entry);
     }
 
+    /**
+     * Returns whether a stored row with fully captured immutable references
+     * still matches its canonical HMAC payload. Rows marked
+     * {@code legacy_unknown} remain retained but cannot be represented as
+     * verifiable because a reference had already been nulled before V126.
+     */
+    public boolean hasValidIntegrity(AuditLog entry) {
+        return entry != null && "captured".equals(entry.getIntegrityReferenceState())
+            && entry.getRowHash() != null
+            && entry.getRowHash().equals(hmacHex(canonicalPayload(entry)));
+    }
+
     private AuditScope scopeFor(AuditLog entry) {
         if (entry.getWorkspaceId() != null) {
             return new AuditScope("workspace", entry.getWorkspaceId());
@@ -138,12 +154,12 @@ public class AuditIntegrityService {
         payload.put("chainScopeId", entry.getChainScopeId());
         payload.put("chainIndex", entry.getChainIndex());
         payload.put("prevHash", entry.getPrevHash());
-        payload.put("workspaceId", entry.getWorkspaceId());
-        payload.put("orgId", entry.getOrgId());
+        payload.put("workspaceId", entry.getIntegrityWorkspaceId());
+        payload.put("orgId", entry.getIntegrityOrgId());
         payload.put("action", entry.getAction());
         payload.put("entityType", entry.getEntityType());
         payload.put("entityId", entry.getEntityId());
-        payload.put("actorId", entry.getActorId());
+        payload.put("actorId", entry.getIntegrityActorId());
         payload.put("actorLabel", entry.getActorLabel());
         payload.put("targetLabel", entry.getTargetLabel());
         payload.put("outcome", entry.getOutcome());

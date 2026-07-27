@@ -13,4 +13,5 @@ public interface OrganizationMapper {
     Organization getById(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    Integer lockActiveByIdForShare(int id);
 }
