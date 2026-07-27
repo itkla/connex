@@ -39,7 +39,9 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * Name evidence is {@link DuplicateMatchStrength#WEAK} and is accepted only when
  * {@link MatchingService#normalizeName(String)} is exactly equal. No fuzzy or edit-distance
  * matching is performed. Every persistence query applies owned-or-shared visibility before
- * ranking or limits, so invisible records cannot influence the response.
+ * ranking or limits, so invisible records cannot influence the response. The same-organization
+ * ceiling on shared records is hydrated here from the control plane as a workspace allowlist
+ * rather than joined inside the tenant mapper.
  */
 @Service
 @RequiredArgsConstructor
@@ -56,6 +58,7 @@ public class DuplicatePreflightService {
     private final IdentityMapper identityMapper;
     private final MatchingService matchingService;
     private final WorkspaceService workspaceService;
+    private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final DuplicatePreflightRateLimiter rateLimiter;
 
     /**
@@ -147,6 +150,8 @@ public class DuplicatePreflightService {
             IdentityQuery identityQuery,
             NameQuery nameQuery) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson =
+            workspaceScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<DuplicateIdentityKey> identityKeys = requests.stream()
             .flatMap(request -> request.identityKeys().stream())
             .distinct()
@@ -159,9 +164,9 @@ public class DuplicatePreflightService {
             .toList();
         int perKeyLimit = candidateLimit + 1;
         Map<DuplicateIdentityKey, List<DuplicateCandidateRow>> identityRows =
-            identityRows(workspaceId, identityKeys, perKeyLimit, identityQuery);
+            identityRows(workspaceId, orgWorkspaceIdsJson, identityKeys, perKeyLimit, identityQuery);
         Map<String, List<DuplicateCandidateRow>> nameRows =
-            nameRows(workspaceId, nameKeys, perKeyLimit, nameQuery);
+            nameRows(workspaceId, orgWorkspaceIdsJson, nameKeys, perKeyLimit, nameQuery);
         List<DuplicatePreflightResponse> responses = new ArrayList<>(requests.size());
         for (NormalizedRequest request : requests) {
             responses.add(response(
@@ -226,6 +231,7 @@ public class DuplicatePreflightService {
 
     private Map<DuplicateIdentityKey, List<DuplicateCandidateRow>> identityRows(
             int workspaceId,
+            String orgWorkspaceIdsJson,
             List<DuplicateIdentityKey> keys,
             int perKeyLimit,
             IdentityQuery query) {
@@ -233,7 +239,8 @@ public class DuplicatePreflightService {
         for (int offset = 0; offset < keys.size(); offset += IDENTITY_KEY_CHUNK_SIZE) {
             List<DuplicateIdentityKey> chunk =
                 keys.subList(offset, Math.min(offset + IDENTITY_KEY_CHUNK_SIZE, keys.size()));
-            for (DuplicateCandidateRow row : query.apply(workspaceId, chunk, perKeyLimit)) {
+            for (DuplicateCandidateRow row
+                    : query.apply(workspaceId, orgWorkspaceIdsJson, chunk, perKeyLimit)) {
                 DuplicateIdentityKey key = new DuplicateIdentityKey(
                     Objects.requireNonNull(row.getKind(), "match kind"),
                     Objects.requireNonNull(row.getNormalizedValue(), "match value"));
@@ -245,6 +252,7 @@ public class DuplicatePreflightService {
 
     private Map<String, List<DuplicateCandidateRow>> nameRows(
             int workspaceId,
+            String orgWorkspaceIdsJson,
             List<DuplicateNameKey> keys,
             int perKeyLimit,
             NameQuery query) {
@@ -252,7 +260,8 @@ public class DuplicatePreflightService {
         for (int offset = 0; offset < keys.size(); offset += NAME_KEY_CHUNK_SIZE) {
             List<DuplicateNameKey> chunk =
                 keys.subList(offset, Math.min(offset + NAME_KEY_CHUNK_SIZE, keys.size()));
-            for (DuplicateCandidateRow row : query.apply(workspaceId, chunk, perKeyLimit)) {
+            for (DuplicateCandidateRow row
+                    : query.apply(workspaceId, orgWorkspaceIdsJson, chunk, perKeyLimit)) {
                 String normalizedName =
                     Objects.requireNonNull(row.getNormalizedValue(), "normalized name");
                 rows.computeIfAbsent(normalizedName, ignored -> new ArrayList<>()).add(row);
@@ -456,6 +465,7 @@ public class DuplicatePreflightService {
     private interface IdentityQuery {
         List<DuplicateCandidateRow> apply(
             int workspaceId,
+            String orgWorkspaceIdsJson,
             List<DuplicateIdentityKey> keys,
             int perKeyLimit);
     }
@@ -464,6 +474,7 @@ public class DuplicatePreflightService {
     private interface NameQuery {
         List<DuplicateCandidateRow> apply(
             int workspaceId,
+            String orgWorkspaceIdsJson,
             List<DuplicateNameKey> keys,
             int perKeyLimit);
     }

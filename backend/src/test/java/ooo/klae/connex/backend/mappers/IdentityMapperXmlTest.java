@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +23,7 @@ class IdentityMapperXmlTest {
         Configuration configuration = configuration();
         Map<String, Object> parameters = Map.of(
             "workspaceId", 7,
+            "orgWorkspaceIdsJson", "[7,9]",
             "keys", List.of(
                 new DuplicateIdentityKey("email", "probe@example.com"),
                 new DuplicateIdentityKey("phone", "+819012345678")),
@@ -33,13 +35,19 @@ class IdentityMapperXmlTest {
         assertTrue(people.contains("p.suspended_at IS NULL"));
         assertTrue(people.contains("p.provision_ceased_at IS NULL"));
         assertTrue(people.contains("person_share ps"));
-        assertTrue(people.contains("ows.org_id = vws.org_id"));
+        assertTrue(people.contains(
+            "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = p.workspace_id"));
+        assertFalse(people.contains("JOIN workspace "));
         assertTrue(people.contains(
             "CASE WHEN p.workspace_id = ? THEN 0 ELSE 1 END"));
         assertTrue(people.indexOf("person_share ps") < people.indexOf("WHERE match_rank <= ?"));
         assertTrue(companies.contains("ci.superseded_at IS NULL"));
         assertTrue(companies.contains("company_share cs"));
-        assertTrue(companies.contains("ows.org_id = vws.org_id"));
+        assertTrue(companies.contains(
+            "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = c.workspace_id"));
+        assertFalse(companies.contains("JOIN workspace "));
         assertTrue(companies.contains(
             "CASE WHEN c.workspace_id = ? THEN 0 ELSE 1 END"));
         assertTrue(companies.indexOf("company_share cs") < companies.indexOf("WHERE match_rank <= ?"));
@@ -50,6 +58,7 @@ class IdentityMapperXmlTest {
         Configuration configuration = configuration();
         Map<String, Object> parameters = Map.of(
             "workspaceId", 7,
+            "orgWorkspaceIdsJson", "[7,9]",
             "keys", List.of(
                 new DuplicateNameKey("ada lovelace"),
                 new DuplicateNameKey("山田 太郎")),
@@ -64,9 +73,17 @@ class IdentityMapperXmlTest {
         assertTrue(people.contains("p.suspended_at IS NULL"));
         assertTrue(people.contains("p.provision_ceased_at IS NULL"));
         assertTrue(people.contains("person_share ps"));
+        assertTrue(people.contains(
+            "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = p.workspace_id"));
+        assertFalse(people.contains("JOIN workspace "));
         assertTrue(companies.contains(
             "JOIN company c ON c.normalized_name = requested_names.normalized_name"));
         assertTrue(companies.contains("company_share cs"));
+        assertTrue(companies.contains(
+            "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = c.workspace_id"));
+        assertFalse(companies.contains("JOIN workspace "));
     }
 
     @Test

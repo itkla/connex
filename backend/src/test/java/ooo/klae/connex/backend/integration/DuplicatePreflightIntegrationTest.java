@@ -7,8 +7,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import jakarta.servlet.Filter;
 
@@ -22,10 +24,14 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -42,6 +48,11 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
+/**
+ * End-to-end duplicate-preflight visibility. Organizations and workspaces are committed
+ * because the same-organization ceiling is resolved from the control plane in its own
+ * transaction; the tenant fixture stays inside the rolled-back test transaction.
+ */
 @SpringBootTest
 @Transactional
 class DuplicatePreflightIntegrationTest {
@@ -58,6 +69,10 @@ class DuplicatePreflightIntegrationTest {
     @Autowired private CompanyMapper companyMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
+
+    private final List<Integer> committedWorkspaceIds = new ArrayList<>();
+    private final List<Integer> committedOrganizationIds = new ArrayList<>();
 
     private MockMvc mockMvc;
 
@@ -66,6 +81,19 @@ class DuplicatePreflightIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
+    }
+
+    @AfterTransaction
+    void removeCommittedControlFixtures() {
+        committed(() -> {
+            committedWorkspaceIds.forEach(id ->
+                jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
+            committedOrganizationIds.forEach(id ->
+                jdbcTemplate.update("DELETE FROM organization WHERE id = ?", id));
+            return null;
+        });
+        committedWorkspaceIds.clear();
+        committedOrganizationIds.clear();
     }
 
     @Test
@@ -213,7 +241,8 @@ class DuplicatePreflightIntegrationTest {
         Organization organization = new Organization();
         organization.setName("Preflight Org " + suffix);
         organization.setSlug("preflight-org-" + suffix);
-        organizationMapper.insert(organization);
+        committed(() -> organizationMapper.insert(organization));
+        committedOrganizationIds.add(organization.getId());
         return organization;
     }
 
@@ -223,8 +252,15 @@ class DuplicatePreflightIntegrationTest {
         workspace.setOrgId(organization.getId());
         workspace.setName("Preflight " + prefix + " " + suffix);
         workspace.setSlug("preflight-" + prefix + "-" + suffix);
-        workspaceMapper.insert(workspace);
+        committed(() -> workspaceMapper.insert(workspace));
+        committedWorkspaceIds.add(workspace.getId());
         return workspace;
+    }
+
+    private <T> T committed(Supplier<T> work) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transaction.execute(status -> work.get());
     }
 
     private User newMember(Workspace workspace, String role) {

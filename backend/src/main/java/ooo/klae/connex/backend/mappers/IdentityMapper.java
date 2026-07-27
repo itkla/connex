@@ -37,21 +37,25 @@ public interface IdentityMapper {
 
     List<DuplicateCandidateRow> findVisiblePersonIdentityMatches(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("keys") List<DuplicateIdentityKey> keys,
         @Param("perKeyLimit") int perKeyLimit);
 
     List<DuplicateCandidateRow> findVisibleCompanyIdentityMatches(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("keys") List<DuplicateIdentityKey> keys,
         @Param("perKeyLimit") int perKeyLimit);
 
     List<DuplicateCandidateRow> findVisiblePersonNameMatches(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("keys") List<DuplicateNameKey> keys,
         @Param("perKeyLimit") int perKeyLimit);
 
     List<DuplicateCandidateRow> findVisibleCompanyNameMatches(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("keys") List<DuplicateNameKey> keys,
         @Param("perKeyLimit") int perKeyLimit);
 

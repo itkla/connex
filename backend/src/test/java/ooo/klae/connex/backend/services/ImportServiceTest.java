@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,6 +21,10 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.transaction.AfterTransaction;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -48,6 +54,10 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
+/**
+ * CSV import behaviour. Sibling workspaces are committed because duplicate preflight resolves
+ * its same-organization ceiling from the control plane in its own transaction.
+ */
 class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
@@ -66,6 +76,19 @@ class ImportServiceTest extends AbstractServiceTest {
     @MockitoSpyBean CompanyMapper companyMapperSpy;
     @MockitoSpyBean DealMapper dealMapperSpy;
     @MockitoSpyBean PipelineMapper pipelineMapperSpy;
+    @Autowired PlatformTransactionManager transactionManager;
+
+    private final List<Integer> committedWorkspaceIds = new ArrayList<>();
+
+    @AfterTransaction
+    void removeCommittedWorkspaces() {
+        committed(() -> {
+            committedWorkspaceIds.forEach(id ->
+                jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
+            return null;
+        });
+        committedWorkspaceIds.clear();
+    }
 
     private static ColumnMapping map(String column, String field) {
         return new ColumnMapping(column, field, null, null, null);
@@ -1185,8 +1208,15 @@ class ImportServiceTest extends AbstractServiceTest {
         other.setName("Shared owner " + unique());
         other.setSlug("shared-owner-" + unique());
         other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
-        workspaceMapper.insert(other);
+        committed(() -> workspaceMapper.insert(other));
+        committedWorkspaceIds.add(other.getId());
         return other;
+    }
+
+    private <T> T committed(Supplier<T> work) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transaction.execute(status -> work.get());
     }
 
     private Workspace newForeignWorkspace() {

@@ -52,24 +52,16 @@
   <sql id="visiblePerson">
     (p.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM person_share ps
-        JOIN workspace vws ON vws.id = ps.workspace_id
-        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = p.workspace_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
   <sql id="visibleCompany">
     (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
-        JOIN workspace vws ON vws.id = cs.workspace_id
-        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
-        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
-  </sql>
-
-  <sql id="visiblePersonCompany">
-    (c.workspace_id = #{workspaceId}
-     OR EXISTS (SELECT 1 FROM company_share cs
-        JOIN workspace cvws ON cvws.id = cs.workspace_id
-        JOIN workspace cows ON cows.id = c.workspace_id AND cows.org_id = cvws.org_id
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = c.workspace_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
@@ -96,7 +88,7 @@
         AND p.id = pi.person_id
       LEFT JOIN company c
         ON c.id = p.company_id
-        AND <include refid="visiblePersonCompany"/>
+        AND <include refid="visibleCompany"/>
       WHERE pi.superseded_at IS NULL
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
@@ -176,7 +168,7 @@
       JOIN person p ON p.normalized_name = requested_names.normalized_name
       LEFT JOIN company c
         ON c.id = p.company_id
-        AND <include refid="visiblePersonCompany"/>
+        AND <include refid="visibleCompany"/>
       WHERE p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
         AND <include refid="visiblePerson"/>

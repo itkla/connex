@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -43,10 +44,18 @@ class OrgShareCeilingArchTest {
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
+        "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
     );
+
+    /**
+     * Mappers already hydrated for the plane split: their organization ceiling arrives as a
+     * control-derived workspace allowlist instead of a join against the control table.
+     */
+    private static final Set<String> CONTROL_DERIVED_CEILING_MAPPERS = Set.of(
+        "mappers/IdentityMapper.xml", "mappers/PersonEdgeMapper.xml");
 
     @Test
     void every_share_read_predicate_carries_the_same_org_ceiling() throws Exception {
@@ -54,7 +63,7 @@ class OrgShareCeilingArchTest {
         for (var entry : SHARE_READERS.entrySet()) {
             String xml = loadMapperText(entry.getKey());
             int shareReads = count(entry.getValue(), xml);
-            Pattern ceiling = entry.getKey().equals("mappers/PersonEdgeMapper.xml")
+            Pattern ceiling = CONTROL_DERIVED_CEILING_MAPPERS.contains(entry.getKey())
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
