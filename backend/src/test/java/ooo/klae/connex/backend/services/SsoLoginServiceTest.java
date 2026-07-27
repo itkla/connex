@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
@@ -42,6 +43,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     @Autowired private OrgAllowedDomainMapper orgAllowedDomainMapper;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private AuditService auditService;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private int orgId;
 
@@ -116,6 +118,30 @@ class SsoLoginServiceTest extends AbstractServiceTest {
                 orgId,
                 "No JIT Workspace"));
         assertNull(userMapper.getUserByEmail("no-jit-workspace@" + OWNED_DOMAIN));
+    }
+
+    @Test
+    void resolveFailsClosedWhileTheOrganizationIsTearingDown() {
+        jdbcTemplate.update(
+            "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            orgId);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> ssoLoginService.resolve(
+                PROVIDER,
+                ISSUER,
+                "sub-tearing-down",
+                "tearing-down@" + OWNED_DOMAIN,
+                true,
+                orgId,
+                "Tearing Down"));
+        assertNull(userMapper.getUserByEmail("tearing-down@" + OWNED_DOMAIN));
+        assertNull(federatedIdentityMapper.findByProviderIssuerSubject(
+            PROVIDER,
+            ISSUER,
+            "sub-tearing-down"),
+            "a fenced organization must never gain a new federated identity row");
     }
 
     @Test

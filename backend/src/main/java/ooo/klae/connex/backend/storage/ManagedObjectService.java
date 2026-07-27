@@ -526,14 +526,19 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private StoredObject get(String key) {
+        StoredObject stored;
         try {
-            return objectStorage.get(key);
+            stored = objectStorage.get(key);
         } catch (ObjectStorageNotFoundException exception) {
             throw new ResourceNotFoundException("Stored file was not found");
         } catch (ObjectStorageException exception) {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
         }
+        if (stored == null) {
+            throw new ResourceNotFoundException("Stored file was not found");
+        }
+        return stored;
     }
 
     private StoredObject getForResponse(String key) {

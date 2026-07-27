@@ -72,4 +72,13 @@ public class TenantExportTableReadTransaction {
         return List.copyOf(
             mapper.findActiveObjectReferencesAfter(workspaceId, afterKey, limit));
     }
+
+    /**
+     * Re-reads one exact active managed-object reference in a fresh transaction so a
+     * streaming export can tell a committed metadata delete from missing bytes.
+     */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public ActiveObjectReference activeObject(int workspaceId, String objectKey) {
+        return mapper.findActiveObjectReference(workspaceId, objectKey);
+    }
 }

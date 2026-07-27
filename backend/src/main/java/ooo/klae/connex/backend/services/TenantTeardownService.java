@@ -57,6 +57,13 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * references while immutable integrity reference snapshots and chain-scope
  * identifiers preserve the verifiable accountability record. The audit trail
  * is outside tenant data return under the DPA.
+ *
+ * <p>Retained APPI data-subject requests are handled at both ends: an open
+ * request linked to the target refuses teardown at the entry point, before any
+ * data is destroyed and while the organization is still resolvable, and the
+ * terminal root deletion clears the subject workspace and person link of the
+ * records that remain, so no retained compliance record is left pointing at a
+ * deleted workspace.
  */
 @Service
 @RequiredArgsConstructor
@@ -103,6 +110,7 @@ public class TenantTeardownService {
             throw new ResourceNotFoundException("Workspace not found");
         }
         requireConfirmation(target.slug(), confirmation);
+        controlOperations.requireNoOpenSubjectRequestsForWorkspace(orgId, workspaceId);
         auditService.recordStrictIndependentScoped(
             WORKSPACE_ACTION,
             "workspace",
@@ -142,6 +150,7 @@ public class TenantTeardownService {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireConfirmation(organization.slug(), confirmation);
+        controlOperations.requireNoOpenSubjectRequestsForOrganization(orgId);
         int workspaceCount = controlMapper.countWorkspaces(orgId);
         auditService.recordStrictIndependentScoped(
             ORGANIZATION_ACTION,

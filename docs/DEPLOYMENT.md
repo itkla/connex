@@ -437,7 +437,11 @@ deployment unless the operator explicitly configures a vendor integration.
   traffic. Safe for load-balancer checks; carries no version or build information.
 - `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable and all
   Flyway migrations are applied, otherwise `503`. Status words only — the body never carries
-  exception details. Gate restarts/upgrades on this endpoint.
+  exception details. Gate restarts/upgrades on this endpoint. `checks.auditGuard` additionally
+  reports whether the append-only `audit_log` trigger is visible; it is **reported, never gating**
+  (an application user without the MySQL `TRIGGER` privilege cannot see it), so alert on a `DOWN`
+  there and on the matching `ERROR` log line rather than letting it take an instance out of
+  rotation.
 - `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. **Never anonymous**:
   authenticate with a logged-in session or configure a static scrape token and send it as
   `Authorization: Bearer <token>`. Unset token = endpoint unavailable to scrapers.

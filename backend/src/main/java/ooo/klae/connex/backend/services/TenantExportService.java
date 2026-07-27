@@ -3,12 +3,14 @@ package ooo.klae.connex.backend.services;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -18,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.TenantLifecycleAccess.Route;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.AcquiredWorkspace;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.OperationLease;
@@ -41,11 +46,20 @@ import tools.jackson.databind.ObjectMapper;
  * offboarding export represents the organization's complete lawful holdings.
  * A failure after response streaming starts necessarily produces a truncated
  * ZIP; strict authorization audit is durable before any response body begins.
+ *
+ * <p>An object whose bytes are missing is skipped only when its metadata row is
+ * provably gone — re-read in a fresh routed transaction — so a rotated bucket,
+ * a wrong key prefix, or a restore against empty storage still fails hard
+ * instead of returning an attachment-free bundle. Every skip carries a strict
+ * audit entry, the manifest reports written and skipped counts that sum to the
+ * enumerated total, and exceeding the skip ceiling aborts the bundle.
  */
 @Service
 @RequiredArgsConstructor
 public class TenantExportService {
     private static final String AUDIT_ACTION = "org.workspace.export";
+    private static final String SKIP_AUDIT_ACTION = "org.workspace.export.object_skipped";
+    private static final long ADMISSION_RETRY_NANOS = Duration.ofMillis(100).toNanos();
 
     private final OrgMemberService orgMemberService;
     private final SessionSecurityService sessionSecurityService;
@@ -158,6 +172,7 @@ public class TenantExportService {
         Instant generatedAt = clock.instant();
         List<ManifestTable> tables = new ArrayList<>();
         long objectCount = 0;
+        long skippedObjectCount = 0;
         try (ZipOutputStream zip = new ZipOutputStream(output)) {
             for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
                 long rows = readTransaction.writeTable(workspaceId, declaration, zip);
@@ -178,8 +193,12 @@ public class TenantExportService {
                     break;
                 }
                 for (ActiveObjectReference reference : page) {
-                    objectCount++;
-                    writeObject(zip, workspaceId, actorId, reference);
+                    if (writeObject(zip, workspaceId, actorId, reference)) {
+                        objectCount++;
+                    } else {
+                        skippedObjectCount++;
+                        recordSkippedObject(orgId, workspaceId, reference, skippedObjectCount);
+                    }
                 }
                 afterKey = page.getLast().objectKey();
             }
@@ -190,7 +209,8 @@ public class TenantExportService {
                 workspaceId,
                 "jsonl",
                 List.copyOf(tables),
-                objectCount);
+                objectCount,
+                skippedObjectCount);
             zip.putNextEntry(new ZipEntry("manifest.json"));
             zip.write(objectMapper.writeValueAsBytes(manifest));
             zip.write('\n');
@@ -199,22 +219,86 @@ public class TenantExportService {
         }
     }
 
-    private void writeObject(
+    private boolean writeObject(
             ZipOutputStream zip,
             int workspaceId,
             int actorId,
             ActiveObjectReference reference) throws IOException {
-        try (ManagedTenantObject object = managedObjectService.openTenantExportObject(
-                workspaceId,
-                actorId,
-                reference,
-                properties.getExportObjectReadTimeout())) {
+        ManagedTenantObject object;
+        try {
+            object = openExportObject(workspaceId, actorId, reference);
+        } catch (ResourceNotFoundException exception) {
+            if (readTransaction.activeObject(workspaceId, reference.objectKey()) != null) {
+                throw exception;
+            }
+            return false;
+        }
+        try (object) {
             zip.putNextEntry(new ZipEntry("objects/" + object.objectKey()));
             long copied = object.inputStream().transferTo(zip);
             zip.closeEntry();
             if (copied != object.expectedLength()) {
                 throw new IOException("Managed export object length changed while streaming");
             }
+        }
+        return true;
+    }
+
+    private ManagedTenantObject openExportObject(
+            int workspaceId,
+            int actorId,
+            ActiveObjectReference reference) {
+        Duration timeout = properties.getExportObjectReadTimeout();
+        Instant deadline = clock.instant().plus(timeout);
+        while (true) {
+            try {
+                return managedObjectService.openTenantExportObject(
+                    workspaceId,
+                    actorId,
+                    reference,
+                    timeout);
+            } catch (TooManyRequestsException exception) {
+                if (!clock.instant().isBefore(deadline)) {
+                    throw exception;
+                }
+                parkUntil(deadline);
+            }
+        }
+    }
+
+    private void parkUntil(Instant deadline) {
+        long remaining = Duration.between(clock.instant(), deadline).toNanos();
+        LockSupport.parkNanos(Math.min(Math.max(remaining, 1), ADMISSION_RETRY_NANOS));
+        if (Thread.interrupted()) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException("Tenant export admission wait was interrupted");
+        }
+    }
+
+    private void recordSkippedObject(
+            int orgId,
+            int workspaceId,
+            ActiveObjectReference reference,
+            long skippedObjectCount) {
+        tenantWorkScope.unrouted(() -> {
+            auditService.recordStrictIndependentScoped(
+                SKIP_AUDIT_ACTION,
+                "workspace",
+                workspaceId,
+                null,
+                orgId,
+                "workspace:" + workspaceId,
+                "Tenant export skipped an object deleted while streaming",
+                Map.of(
+                    "objectKind", reference.kind(),
+                    "objectOwnerId", reference.ownerId(),
+                    "skippedObjectCount", skippedObjectCount));
+            return null;
+        });
+        if (skippedObjectCount > properties.getMaxSkippedExportObjects()) {
+            throw new IllegalStateException(
+                "Tenant export skipped more objects than the configured ceiling allows for workspace "
+                    + workspaceId);
         }
     }
 
@@ -288,7 +372,8 @@ public class TenantExportService {
             int workspaceId,
             String format,
             List<ManifestTable> tables,
-            long objectCount) {
+            long objectCount,
+            long skippedObjectCount) {
     }
 
     private record ManifestTable(String name, String path, long rowCount) {

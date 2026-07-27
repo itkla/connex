@@ -43,6 +43,14 @@ public class TenantLifecycleProperties {
     @Max(10_000)
     private int workspacePageSize = 100;
 
+    @Min(1)
+    @Max(1_000)
+    private int maxConcurrentExports = 4;
+
+    @Min(0)
+    @Max(10_000)
+    private int maxSkippedExportObjects = 10;
+
     /** Whether all duration settings are positive or zero where waiting is optional. */
     @AssertTrue(message = "tenant lifecycle durations are invalid")
     public boolean durationsValid() {

@@ -43,6 +43,10 @@ public interface TenantLifecycleMapper {
         @Param("afterKey") String afterKey,
         @Param("limit") int limit);
 
+    ActiveObjectReference findActiveObjectReference(
+        @Param("workspaceId") int workspaceId,
+        @Param("objectKey") String objectKey);
+
     List<String> findLifecycleObjectKeysAfter(
         @Param("workspaceId") int workspaceId,
         @Param("afterKey") String afterKey,

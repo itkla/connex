@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.HealthService.Readiness;
 import ooo.klae.connex.backend.services.HealthService.Status;
@@ -41,6 +44,7 @@ class HealthServiceTest {
     @Mock private MigrationInfoService migrationInfoService;
     @Mock private TenantCatalogResolver tenantCatalogResolver;
     @Mock private WorkspaceMapper workspaceMapper;
+    @Mock private AuditIntegrityMapper auditIntegrityMapper;
 
     private TenantContext tenantContext;
     private HealthService healthService;
@@ -48,9 +52,10 @@ class HealthServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         tenantContext = new TenantContext();
+        lenient().when(auditIntegrityMapper.appendOnlyGuardInstalled()).thenReturn(true);
         TenantWorkScope tenantWorkScope =
                 new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
-        healthService = new HealthService(dataSource, flyway, tenantWorkScope);
+        healthService = new HealthService(dataSource, flyway, tenantWorkScope, auditIntegrityMapper);
     }
 
     @Test
@@ -58,8 +63,8 @@ class HealthServiceTest {
         stubDatabaseReady();
         stubMigrationsReady();
 
-        assertEquals(new Readiness(Status.UP, Status.UP), healthService.readiness());
-        assertEquals(new Readiness(Status.UP, Status.UP), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), healthService.readiness());
 
         verify(dataSource).getConnection();
         verify(connection).close();
@@ -72,7 +77,7 @@ class HealthServiceTest {
         when(connection.isValid(2)).thenReturn(false);
         stubMigrationsReady();
 
-        assertEquals(new Readiness(Status.DOWN, Status.UP), healthService.readiness());
+        assertEquals(new Readiness(Status.DOWN, Status.UP, Status.UP), healthService.readiness());
     }
 
     @Test
@@ -80,7 +85,7 @@ class HealthServiceTest {
         when(dataSource.getConnection()).thenThrow(new SQLException("jdbc:mysql://secret"));
         stubMigrationsReady();
 
-        assertEquals(new Readiness(Status.DOWN, Status.UP), healthService.readiness());
+        assertEquals(new Readiness(Status.DOWN, Status.UP, Status.UP), healthService.readiness());
     }
 
     @Test
@@ -89,7 +94,7 @@ class HealthServiceTest {
         when(flyway.info()).thenReturn(migrationInfoService);
         when(migrationInfoService.pending()).thenReturn(new MigrationInfo[] { mock(MigrationInfo.class) });
 
-        assertEquals(new Readiness(Status.UP, Status.DOWN), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.DOWN, Status.UP), healthService.readiness());
     }
 
     @Test
@@ -101,7 +106,7 @@ class HealthServiceTest {
         when(migrationInfoService.pending()).thenReturn(new MigrationInfo[0]);
         when(migrationInfoService.all()).thenReturn(new MigrationInfo[] { migration });
 
-        assertEquals(new Readiness(Status.UP, Status.DOWN), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.DOWN, Status.UP), healthService.readiness());
     }
 
     @Test
@@ -109,7 +114,33 @@ class HealthServiceTest {
         stubDatabaseReady();
         when(flyway.info()).thenThrow(new IllegalStateException("V999__secret.sql"));
 
-        assertEquals(new Readiness(Status.UP, Status.DOWN), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.DOWN, Status.UP), healthService.readiness());
+    }
+
+    @Test
+    void missingAppendOnlyAuditGuardIsReportedWithoutTakingTheInstanceOutOfRotation()
+            throws Exception {
+        stubDatabaseReady();
+        stubMigrationsReady();
+        when(auditIntegrityMapper.appendOnlyGuardInstalled()).thenReturn(false);
+
+        Readiness readiness = healthService.readiness();
+
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.DOWN), readiness);
+        assertTrue(readiness.isUp());
+    }
+
+    @Test
+    void unreadableTriggerMetadataDegradesTheAuditGuardCheckOnly() throws Exception {
+        stubDatabaseReady();
+        stubMigrationsReady();
+        when(auditIntegrityMapper.appendOnlyGuardInstalled())
+                .thenThrow(new IllegalStateException("SELECT command denied"));
+
+        Readiness readiness = healthService.readiness();
+
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.DOWN), readiness);
+        assertTrue(readiness.isUp());
     }
 
     @Test
@@ -127,7 +158,7 @@ class HealthServiceTest {
         when(migrationInfoService.pending()).thenReturn(new MigrationInfo[0]);
         when(migrationInfoService.all()).thenReturn(new MigrationInfo[0]);
 
-        assertEquals(new Readiness(Status.UP, Status.UP), healthService.readiness());
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), healthService.readiness());
         assertEquals("connex_tenant", tenantContext.getCatalog());
     }
 
@@ -149,8 +180,8 @@ class HealthServiceTest {
             Future<Readiness> second = executor.submit(healthService::readiness);
             release.countDown();
 
-            assertEquals(new Readiness(Status.UP, Status.UP), first.get(5, TimeUnit.SECONDS));
-            assertEquals(new Readiness(Status.UP, Status.UP), second.get(5, TimeUnit.SECONDS));
+            assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), first.get(5, TimeUnit.SECONDS));
+            assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), second.get(5, TimeUnit.SECONDS));
             verify(dataSource).getConnection();
             verify(flyway).info();
         } finally {
@@ -162,10 +193,11 @@ class HealthServiceTest {
     void servesStaleSnapshotInsteadOfQueueingBehindASlowProbe() throws Exception {
         TenantWorkScope tenantWorkScope =
                 new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
-        HealthService alwaysStale = new HealthService(dataSource, flyway, tenantWorkScope, 0L);
+        HealthService alwaysStale =
+                new HealthService(dataSource, flyway, tenantWorkScope, auditIntegrityMapper, 0L);
         stubDatabaseReady();
         stubMigrationsReady();
-        assertEquals(new Readiness(Status.UP, Status.UP), alwaysStale.readiness());
+        assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), alwaysStale.readiness());
 
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -179,10 +211,10 @@ class HealthServiceTest {
             Future<Readiness> slowProbe = executor.submit(alwaysStale::readiness);
             entered.await(5, TimeUnit.SECONDS);
 
-            assertEquals(new Readiness(Status.UP, Status.UP), alwaysStale.readiness());
+            assertEquals(new Readiness(Status.UP, Status.UP, Status.UP), alwaysStale.readiness());
 
             release.countDown();
-            assertEquals(new Readiness(Status.DOWN, Status.UP), slowProbe.get(5, TimeUnit.SECONDS));
+            assertEquals(new Readiness(Status.DOWN, Status.UP, Status.UP), slowProbe.get(5, TimeUnit.SECONDS));
         } finally {
             executor.shutdownNow();
         }

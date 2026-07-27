@@ -37,21 +37,34 @@ class HealthControllerTest {
 
     @Test
     void readyReturnsExactAllUpBody() throws Exception {
-        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP));
+        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP, Status.UP));
 
         mockMvc.perform(get("/api/health/ready"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(
-                        "{\"status\":\"UP\",\"checks\":{\"db\":\"UP\",\"migrations\":\"UP\"}}"));
+                        "{\"status\":\"UP\",\"checks\":{\"db\":\"UP\",\"migrations\":\"UP\","
+                                + "\"auditGuard\":\"UP\"}}"));
     }
 
     @Test
     void readyReturnsOnlyStatusWordsWhenChecksFail() throws Exception {
-        when(healthService.readiness()).thenReturn(new Readiness(Status.DOWN, Status.UP));
+        when(healthService.readiness()).thenReturn(new Readiness(Status.DOWN, Status.UP, Status.UP));
 
         mockMvc.perform(get("/api/health/ready"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().string(
-                        "{\"status\":\"DOWN\",\"checks\":{\"db\":\"DOWN\",\"migrations\":\"UP\"}}"));
+                        "{\"status\":\"DOWN\",\"checks\":{\"db\":\"DOWN\",\"migrations\":\"UP\","
+                                + "\"auditGuard\":\"UP\"}}"));
+    }
+
+    @Test
+    void aDegradedAuditGuardIsReportedWithoutFailingReadiness() throws Exception {
+        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP, Status.DOWN));
+
+        mockMvc.perform(get("/api/health/ready"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(
+                        "{\"status\":\"UP\",\"checks\":{\"db\":\"UP\",\"migrations\":\"UP\","
+                                + "\"auditGuard\":\"DOWN\"}}"));
     }
 }

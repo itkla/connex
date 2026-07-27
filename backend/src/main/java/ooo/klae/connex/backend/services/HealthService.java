@@ -10,36 +10,59 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Probes instance database and migration readiness without exposing diagnostic details.
+ * Probes instance database, migration, and audit-guard readiness without exposing
+ * diagnostic details.
+ *
+ * <p>The append-only {@code audit_log} guard is reported but deliberately kept out of
+ * {@link Readiness#isUp()}: no application statement can update {@code audit_log}, so a
+ * missing trigger is a defence-in-depth regression to alert on, never a reason to take an
+ * instance out of rotation. A deployment whose application user lacks the {@code TRIGGER}
+ * privilege cannot see the trigger at all and must not be failed for it.
  */
 @Service
 public class HealthService {
+    private static final Logger log = LoggerFactory.getLogger(HealthService.class);
     private static final long CACHE_NANOS = TimeUnit.SECONDS.toNanos(3);
 
     private final DataSource dataSource;
     private final Flyway flyway;
     private final TenantWorkScope tenantWorkScope;
+    private final AuditIntegrityMapper auditIntegrityMapper;
     private final long cacheNanos;
 
     private final ReentrantLock probeLock = new ReentrantLock();
 
     private volatile Snapshot snapshot;
+    private volatile Status lastAuditGuardStatus;
 
     @Autowired
-    public HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope) {
-        this(dataSource, flyway, tenantWorkScope, CACHE_NANOS);
+    public HealthService(
+            DataSource dataSource,
+            Flyway flyway,
+            TenantWorkScope tenantWorkScope,
+            AuditIntegrityMapper auditIntegrityMapper) {
+        this(dataSource, flyway, tenantWorkScope, auditIntegrityMapper, CACHE_NANOS);
     }
 
-    HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope, long cacheNanos) {
+    HealthService(
+            DataSource dataSource,
+            Flyway flyway,
+            TenantWorkScope tenantWorkScope,
+            AuditIntegrityMapper auditIntegrityMapper,
+            long cacheNanos) {
         this.dataSource = dataSource;
         this.flyway = flyway;
         this.tenantWorkScope = tenantWorkScope;
+        this.auditIntegrityMapper = auditIntegrityMapper;
         this.cacheNanos = cacheNanos;
     }
 
@@ -69,7 +92,10 @@ public class HealthService {
                 return current.readiness();
             }
             Readiness readiness = tenantWorkScope.unrouted(
-                    () -> new Readiness(status(databaseReady()), status(migrationsReady())));
+                    () -> new Readiness(
+                            status(databaseReady()),
+                            status(migrationsReady()),
+                            auditGuardStatus()));
             snapshot = new Snapshot(System.nanoTime(), readiness);
             return readiness;
         } finally {
@@ -106,6 +132,30 @@ public class HealthService {
         }
     }
 
+    private Status auditGuardStatus() {
+        Status current = status(auditAppendOnlyGuardInstalled());
+        Status previous = lastAuditGuardStatus;
+        lastAuditGuardStatus = current;
+        if (current == previous) {
+            return current;
+        }
+        if (current == Status.DOWN) {
+            log.error("Append-only audit_log guard trg_audit_log_no_update is not visible on this "
+                    + "catalog; the immutability control is degraded until it is restored");
+        } else if (previous != null) {
+            log.info("Append-only audit_log guard trg_audit_log_no_update is installed again");
+        }
+        return current;
+    }
+
+    private boolean auditAppendOnlyGuardInstalled() {
+        try {
+            return auditIntegrityMapper.appendOnlyGuardInstalled();
+        } catch (Throwable exception) {
+            return false;
+        }
+    }
+
     private static Status status(boolean ready) {
         return ready ? Status.UP : Status.DOWN;
     }
@@ -123,10 +173,11 @@ public class HealthService {
      *
      * @param db database connectivity status
      * @param migrations migration status
+     * @param auditGuard append-only audit-log guard status, reported but not gating
      */
-    public record Readiness(Status db, Status migrations) {
+    public record Readiness(Status db, Status migrations, Status auditGuard) {
         /**
-         * Returns whether every readiness check is up.
+         * Returns whether every rotation-gating readiness check is up.
          *
          * @return whether the instance is ready
          */

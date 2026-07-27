@@ -15,11 +15,20 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
-/** Executes data-subject request lifecycle work against the control catalog. */
+/**
+ * Executes data-subject request lifecycle work against the control catalog.
+ *
+ * <p>Every subject-linked mutation takes a shared lock on the linked workspace inside
+ * the writing transaction, so it serialises against tenant teardown's exclusive
+ * workspace lock: a request can never be linked to a workspace that teardown has
+ * already fenced, and a request committed just before the fence is still caught by
+ * teardown's link clearing.
+ */
 @Component
 @RequiredArgsConstructor
 public class DataSubjectRequestControlOperations {
@@ -76,6 +85,7 @@ public class DataSubjectRequestControlOperations {
     @Transactional
     public DataSubjectRequestDto create(int orgId, int actorId, DataSubjectRequest request) {
         requireMutationAccess(orgId, actorId);
+        lockSubjectWorkspace(orgId, request.getSubjectWorkspaceId());
         dataSubjectRequestMapper.insert(request);
         auditService.record("appi.subject_request.create", "organization", orgId,
             requestLabel(request.getId()), "APPI data-subject request created", auditChanges(request));
@@ -86,6 +96,7 @@ public class DataSubjectRequestControlOperations {
     public DataSubjectRequestDto update(int orgId, long requestId, int actorId,
             DataSubjectRequest before, DataSubjectRequest request) {
         requireMutationAccess(orgId, actorId);
+        lockSubjectWorkspace(orgId, request.getSubjectWorkspaceId());
         if (dataSubjectRequestMapper.update(request) != 1) {
             throw new ResourceNotFoundException("Data-subject request not found: " + requestId);
         }
@@ -132,6 +143,16 @@ public class DataSubjectRequestControlOperations {
             requestLabel(requestId), "Subject-scoped disclosure export assembled",
             Map.of("requestId", requestId, "subjectPersonId", personId,
                 "subjectWorkspaceId", workspaceId));
+    }
+
+    private void lockSubjectWorkspace(int orgId, Integer workspaceId) {
+        if (workspaceId == null) {
+            return;
+        }
+        if (workspaceMapper.lockActiveWorkspaceInOrgForShare(orgId, workspaceId) == null) {
+            throw new ConflictException(
+                "The subject person's workspace is being removed and cannot be linked");
+        }
     }
 
     private WorkspaceSnapshot workspaceSnapshot(int orgId) {

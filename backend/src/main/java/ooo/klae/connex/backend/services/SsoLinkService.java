@@ -21,10 +21,12 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoLinkChallenge;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -47,6 +49,7 @@ public class SsoLinkService {
 
     private final SsoLinkChallengeMapper ssoLinkChallengeMapper;
     private final FederatedIdentityMapper federatedIdentityMapper;
+    private final TenantLifecycleControlMapper tenantLifecycleControlMapper;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final LoginRateLimiter loginRateLimiter;
@@ -93,6 +96,7 @@ public class SsoLinkService {
      * @return the now-linked, signed-in user
      * @throws TooManyRequestsException when the client IP is over the failure cap
      * @throws ResourceNotFoundException when the challenge is missing, consumed, or expired
+     * @throws ForbiddenException when the challenged organization is being removed
      * @throws BadCredentialsException when the account has no password or the password is wrong
      */
     public User confirm(String rawToken, String password, String clientIp,
@@ -112,6 +116,7 @@ public class SsoLinkService {
         if (user == null) {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
+        requireActiveOrganization(challenge.getOrgId());
         String username = user.getUsername();
         if (loginRateLimiter.isBlocked(clientIp, username, now)) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
@@ -132,6 +137,15 @@ public class SsoLinkService {
         User authenticatedUser = authService.establishAuthenticatedSession(user, httpRequest, httpResponse);
         recordFederatedLinkLogin(challenge, authenticatedUser);
         return authenticatedUser;
+    }
+
+    private void requireActiveOrganization(Integer orgId) {
+        if (orgId == null) {
+            return;
+        }
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForFederation(orgId) == null) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
     }
 
     private boolean linkIdentity(SsoLinkChallenge challenge, int userId) {

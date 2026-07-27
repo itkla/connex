@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
@@ -237,6 +239,64 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 + " AND chain_scope_id = ?",
             Integer.class,
             orgId) > 0);
+    }
+
+    @Test
+    void openSubjectRequestBlocksTeardownAndTerminalDeletionClearsTheRetainedLink() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        Person subject = newPerson(newCompany());
+        long requestId = insertOpenSubjectRequest(orgId, workspaceId, subject.getId());
+
+        assertThrows(
+            ConflictException.class,
+            () -> teardownService.teardownWorkspace(
+                orgId,
+                workspaceId,
+                currentUser.getId(),
+                drillWorkspace.getSlug()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workspace WHERE id = ?",
+            Integer.class,
+            workspaceId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person WHERE id = ?",
+            Integer.class,
+            subject.getId()));
+
+        jdbcTemplate.update(
+            "UPDATE data_subject_request SET status = 'closed', closed_at = NOW() WHERE id = ?",
+            requestId);
+        teardownService.teardownWorkspace(
+            orgId,
+            workspaceId,
+            currentUser.getId(),
+            drillWorkspace.getSlug());
+
+        Map<String, Object> retained = jdbcTemplate.queryForMap(
+            "SELECT org_id, subject_workspace_id, subject_person_id"
+                + " FROM data_subject_request WHERE id = ?",
+            requestId);
+        assertEquals(orgId, retained.get("org_id"));
+        assertNull(retained.get("subject_workspace_id"));
+        assertNull(retained.get("subject_person_id"));
+    }
+
+    private long insertOpenSubjectRequest(int orgId, int workspaceId, int personId) {
+        jdbcTemplate.update(
+            "INSERT INTO data_subject_request"
+                + " (org_id, request_type, status, requester_name, subject_name,"
+                + " subject_workspace_id, subject_person_id)"
+                + " VALUES (?, 'disclosure', 'received', ?, ?, ?, ?)",
+            orgId,
+            "Requester " + unique(),
+            "Subject " + unique(),
+            workspaceId,
+            personId);
+        Long requestId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        assertNotNull(requestId);
+        return requestId;
     }
 
     private void createDedicatedDrillRoots() {

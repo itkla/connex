@@ -12,7 +12,9 @@ import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
+import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 
 /** Short control-plane transactions for lifecycle roots and operation leases. */
 @Service
@@ -22,6 +24,7 @@ public class TenantLifecycleControlOperations {
     private static final String TEARDOWN = "teardown";
 
     private final TenantLifecycleControlMapper mapper;
+    private final TenantLifecycleProperties properties;
 
     /** Atomically validates an active workspace and acquires an export lease. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -66,6 +69,33 @@ public class TenantLifecycleControlOperations {
             lease.workspaceId(),
             lease.kind(),
             lease.token());
+    }
+
+    /**
+     * Refuses workspace teardown while an open APPI data-subject request still
+     * points at that workspace, before any tenant data is destroyed and while
+     * the organization is still resolvable, so an administrator can finish the
+     * obligation and retry.
+     */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public void requireNoOpenSubjectRequestsForWorkspace(int orgId, int workspaceId) {
+        if (mapper.countOpenSubjectRequestsForWorkspace(orgId, workspaceId) > 0) {
+            throw new ConflictException(
+                "An open data-subject request still references this workspace");
+        }
+    }
+
+    /**
+     * Refuses organization teardown while any APPI data-subject request is still
+     * open. Deleting the organization root cascades the request rows themselves
+     * away, so an unfinished obligation must be closed first rather than erased.
+     */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public void requireNoOpenSubjectRequestsForOrganization(int orgId) {
+        if (mapper.countOpenSubjectRequestsForOrg(orgId) > 0) {
+            throw new ConflictException(
+                "An open data-subject request is still recorded for this organization");
+        }
     }
 
     /** Counts export leases that a fenced workspace must drain before sweeping. */
@@ -139,6 +169,7 @@ public class TenantLifecycleControlOperations {
         }
         if (workspace != null) {
             mapper.clearSsoJitWorkspace(orgId, workspaceId);
+            mapper.clearSubjectRequestWorkspaceLinks(orgId, workspaceId);
             mapper.insertCleanupTombstone(
                 workspace.id(),
                 workspace.orgId(),
@@ -201,6 +232,11 @@ public class TenantLifecycleControlOperations {
     }
 
     private OperationLease insertLease(int orgId, int workspaceId, String kind) {
+        if (EXPORT.equals(kind)
+                && mapper.countOperationLeasesOfKind(EXPORT) >= properties.getMaxConcurrentExports()) {
+            throw new TooManyRequestsException(
+                "Too many tenant exports are already streaming; retry shortly");
+        }
         OperationLease lease = new OperationLease(
             orgId,
             workspaceId,

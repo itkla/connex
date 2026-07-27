@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 
 class AuditIntegrityServiceTest extends AbstractServiceTest {
@@ -29,6 +32,7 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     @Autowired private AuditService auditService;
     @Autowired private AuditIntegrityService auditIntegrityService;
     @Autowired private AuditLogMapper auditLogMapper;
+    @Autowired private AuditIntegrityMapper auditIntegrityMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
@@ -134,12 +138,38 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void auditLogStaysAppendOnlyOnTheMigratedSchema() {
+        String summary = "append-only-" + unique();
+        auditService.record("test.integrity.append_only", "company", 1, "Acme", summary, null);
+        AuditLog entry = findBySummary(auditService.recent(20, 0), summary);
+
+        RuntimeException failure = assertThrows(
+            RuntimeException.class,
+            () -> jdbcTemplate.update(
+                "UPDATE audit_log SET summary = ? WHERE id = ?",
+                "tampered",
+                entry.getId()));
+
+        assertEquals("45000", sqlState(failure));
+        assertTrue(auditIntegrityMapper.appendOnlyGuardInstalled());
+    }
+
+    @Test
     void legacyUnknownReferencesAreNotReportedAsVerifiable() {
         AuditLog entry = new AuditLog();
         entry.setIntegrityReferenceState("legacy_unknown");
         entry.setRowHash("c".repeat(64));
 
         assertFalse(auditIntegrityService.hasValidIntegrity(entry));
+    }
+
+    private static String sqlState(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof SQLException sqlException) {
+                return sqlException.getSQLState();
+            }
+        }
+        return null;
     }
 
     private int checkpointCount(int auditLogId) {

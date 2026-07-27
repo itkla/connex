@@ -116,6 +116,13 @@
     FOR UPDATE
   </select>
 
+  <select id="lockActiveOrganizationForFederation" resultType="java.lang.Integer">
+    SELECT id
+    FROM organization
+    WHERE id = #{orgId} AND lifecycle_state = 'active'
+    FOR SHARE
+  </select>
+
   <select id="findWorkspacesInOrgAfter"
           resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
     SELECT id, orgId, name, slug, lifecycleState
@@ -196,6 +203,12 @@
     WHERE workspace_id = #{workspaceId} AND lease_kind = #{leaseKind}
   </select>
 
+  <select id="countOperationLeasesOfKind" resultType="int">
+    SELECT COUNT(*)
+    FROM tenant_operation_lease
+    WHERE lease_kind = #{leaseKind}
+  </select>
+
   <update id="markWorkspaceTearingDown">
     UPDATE workspace
     SET lifecycle_state = 'tearing_down'
@@ -231,6 +244,28 @@
     WHERE org_id = #{orgId}
     LIMIT #{limit}
   </delete>
+
+  <select id="countOpenSubjectRequestsForWorkspace" resultType="int">
+    SELECT COUNT(*)
+    FROM data_subject_request
+    WHERE org_id = #{orgId}
+      AND subject_workspace_id = #{workspaceId}
+      AND status NOT IN ('closed', 'refused')
+  </select>
+
+  <select id="countOpenSubjectRequestsForOrg" resultType="int">
+    SELECT COUNT(*)
+    FROM data_subject_request
+    WHERE org_id = #{orgId}
+      AND status NOT IN ('closed', 'refused')
+  </select>
+
+  <update id="clearSubjectRequestWorkspaceLinks">
+    UPDATE data_subject_request
+    SET subject_workspace_id = NULL,
+        subject_person_id = NULL
+    WHERE org_id = #{orgId} AND subject_workspace_id = #{workspaceId}
+  </update>
 
   <delete id="deleteWorkspace">
     DELETE FROM workspace

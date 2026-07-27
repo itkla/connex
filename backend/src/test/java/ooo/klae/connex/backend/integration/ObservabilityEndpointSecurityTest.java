@@ -50,7 +50,7 @@ class ObservabilityEndpointSecurityTest {
 
     @BeforeEach
     void setUp() {
-        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP));
+        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP, Status.UP));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();

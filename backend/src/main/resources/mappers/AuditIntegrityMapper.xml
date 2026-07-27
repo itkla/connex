@@ -23,6 +23,16 @@
     FOR UPDATE
   </select>
 
+  <select id="appendOnlyGuardInstalled" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM information_schema.TRIGGERS
+      WHERE TRIGGER_SCHEMA = DATABASE()
+        AND EVENT_OBJECT_TABLE = 'audit_log'
+        AND TRIGGER_NAME = 'trg_audit_log_no_update'
+    )
+  </select>
+
   <update id="advanceHead">
     UPDATE audit_log_integrity_head
     SET next_chain_index = #{newNextChainIndex}, current_hash = #{currentHash}

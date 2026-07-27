@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -38,6 +39,10 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * </ol>
  * The target workspace, organization, and default role are read only from the stored
  * {@link SsoConnection}; nothing about the destination is taken from the caller.
+ *
+ * <p>Every resolution first pins the organization's lifecycle row with a shared lock, so a
+ * federation write can neither start against an organization already fenced for teardown nor
+ * commit a new identity row between teardown's identity sweep and its terminal root deletion.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +52,7 @@ public class SsoLoginService {
     private final UserMapper userMapper;
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
+    private final TenantLifecycleControlMapper tenantLifecycleControlMapper;
     private final WorkspaceService workspaceService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final SsoUserProvisioner ssoUserProvisioner;
@@ -62,13 +68,15 @@ public class SsoLoginService {
      * @param orgId the organization whose connection minted this login
      * @param displayName the IdP-asserted display name, used when provisioning
      * @return a login outcome, or a link-required outcome when the email collides with a password account
-     * @throws ForbiddenException when the email is unverified, its domain is not owned by this
-     *         organization, or the account is already federated to a different organization
+     * @throws ForbiddenException when the organization is being removed, the email is unverified,
+     *         its domain is not owned by this organization, or the account is already federated to
+     *         a different organization
      * @throws BadRequestException when the organization has no SSO connection
      */
     @Transactional
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
             boolean emailVerified, int orgId, String displayName) {
+        requireActiveOrganization(orgId);
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
@@ -127,6 +135,12 @@ public class SsoLoginService {
                 "Federated identity linked", Map.of("userId", user.getId(), "provider", provider));
 
         return SsoLoginResult.login(user);
+    }
+
+    private void requireActiveOrganization(int orgId) {
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForFederation(orgId) == null) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
     }
 
     private boolean isDomainAuthorizedForOrg(String email, int orgId) {
