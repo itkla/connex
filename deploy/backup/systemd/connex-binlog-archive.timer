@@ -1,0 +1,13 @@
+# Connex on-prem binary-log archive schedule.
+# install.sh renders OnCalendar from CONNEX_BACKUP_BINLOG_CALENDAR.
+
+[Unit]
+Description=Schedule Connex MySQL binary-log archive
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=connex-binlog-archive.service
+
+[Install]
+WantedBy=timers.target

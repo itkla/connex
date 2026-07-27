@@ -22,7 +22,8 @@ migration-discipline part of #87 §9 / #102).
   intermediate minors is best-effort; skipping across a **major** requires stepping through the last
   minor of the prior major first.
 - Every upgrade is **forward-only**. Downgrades are not supported (migrations are not reversed);
-  recover by restoring the pre-upgrade backup.
+  recover by restoring the pre-upgrade backup taken with the shipped backup tooling
+  (`deploy/backup/`, see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
 
 ## Migration discipline
 
@@ -57,7 +58,8 @@ migration-discipline part of #87 §9 / #102).
 2. **Quiesce writers** — stop external ingress plus the frontend, backend, and OCR services. Keep the
    database running. Confirm no application or maintenance container remains able to create or delete
    records or objects.
-3. **Back up the quiesced set and exact deployment inputs** — snapshot the database, private object
+3. **Back up the quiesced set and exact deployment inputs** — snapshot the database (a
+   `connex-backup-full.sh` run — see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)), private object
    storage, and any staged legacy media as one recovery point. Download and verify the currently
    deployed release manifest, signature bundle, and exact `connex-<version>-deploy.tar`; preserve the
    extracted bundle without modification. Copy the mode-0600 `deploy/.env` byte-for-byte into the

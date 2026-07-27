@@ -1,0 +1,23 @@
+# Connex on-prem daily full database backup.
+# Docker shim mode requires access to /var/run/docker.sock, which is equivalent
+# to root access on the host. install.sh renders path allowlists while retaining
+# ProtectSystem=strict, NoNewPrivileges, and PrivateTmp.
+# Operators may add OnFailure= to a local drop-in for their alerting target.
+
+[Unit]
+Description=Connex daily full database backup
+Wants=network-online.target
+After=network-online.target docker.service
+Before=connex-backup-prune.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/connex-backup/backup.env
+ExecStart=/usr/local/lib/connex-backup/connex-backup-full.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/connex /run/connex-backup /var/run/docker.sock
+ReadOnlyPaths=/etc/connex-backup
+TimeoutStartSec=infinity

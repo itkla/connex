@@ -1,0 +1,27 @@
+# Connex on-prem backup-retention service.
+# Docker shim mode requires access to /var/run/docker.sock, which is equivalent
+# to root access on the host. install.sh renders path allowlists while retaining
+# ProtectSystem=strict, NoNewPrivileges, and PrivateTmp.
+# Operators may add OnFailure= to a local drop-in for their alerting target.
+# A failed prune retries every 15 minutes (up to 6 starts in 6 hours) so a
+# transient failure cannot consume the one-day margin under the legal ceiling.
+
+[Unit]
+Description=Connex database backup retention and freshness check
+After=connex-backup.service connex-binlog-archive.service
+StartLimitIntervalSec=6h
+StartLimitBurst=6
+
+[Service]
+Type=oneshot
+Restart=on-failure
+RestartSec=15min
+EnvironmentFile=/etc/connex-backup/backup.env
+ExecStart=/usr/local/lib/connex-backup/connex-backup-prune.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/connex /run/connex-backup /var/run/docker.sock
+ReadOnlyPaths=/etc/connex-backup
+TimeoutStartSec=1800

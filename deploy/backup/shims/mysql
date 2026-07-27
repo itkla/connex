@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# Runs mysql inside the Connex Compose db container by default, or from the
+# configured throwaway client image when Docker run mode is selected.
+# shellcheck source=deploy/backup/shims/docker-client-lib.sh
+
+set -euo pipefail
+
+umask 077
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SHIM_DIR/docker-client-lib.sh"
+
+main() {
+    shim_run_database_client mysql "$@"
+}
+
+main "$@"
