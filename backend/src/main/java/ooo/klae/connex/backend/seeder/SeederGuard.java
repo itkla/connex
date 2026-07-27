@@ -8,11 +8,14 @@ import java.sql.SQLException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 import javax.sql.DataSource;
 
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
@@ -33,6 +36,10 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
  * <p>Configured URLs are checked before opening a JDBC connection because MySQL's
  * {@code createDatabaseIfNotExist=true} option can create a catalog during connection
  * establishment. Effective datasource metadata is then checked again.
+ *
+ * <p>Every configured URL must resolve to the same {@code host:port/database}, and every
+ * configured Flyway schema must name that agreed database, so Flyway cannot migrate one
+ * catalog while the fixture writers populate another.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,6 +47,11 @@ public class SeederGuard {
 
     private static final String PRODUCTION_DATABASE = "connex_pub";
     private static final String SEEDER = "seeder";
+    private static final int DEFAULT_MYSQL_PORT = 3306;
+    private static final String[] FLYWAY_SCHEMA_PROPERTIES = {
+        "spring.flyway.schemas",
+        "spring.flyway.default-schema"
+    };
     private static final Set<String> DATABASE_SELECTING_QUERY_KEYS = Set.of("dbname", "database");
     private static final Set<String> LOOPBACK_HOSTS = Set.of(
         "localhost",
@@ -74,16 +86,8 @@ public class SeederGuard {
                     + " is never seedable");
         }
 
-        Set<String> databases = new LinkedHashSet<>();
-        for (String url : configuredUrls()) {
-            verifyJdbcUrl(url, properties.isAllowRemoteHost());
-            databases.add(parse(url.strip()).database().toLowerCase(Locale.ROOT));
-        }
-        if (databases.size() > 1) {
-            throw new IllegalStateException(
-                "Seeder refused: configured JDBC URLs disagree on the target database " + databases);
-        }
-        verifyConfiguredSchemas();
+        JdbcTarget configuredTarget = verifyConfiguredUrls();
+        verifyConfiguredSchemas(configuredTarget.database());
 
         Set<DataSource> effectiveDataSources =
             Collections.newSetFromMap(new IdentityHashMap<>());
@@ -141,6 +145,27 @@ public class SeederGuard {
         }
     }
 
+    private JdbcTarget verifyConfiguredUrls() {
+        JdbcTarget agreedTarget = null;
+        Set<String> canonicalTargets = new LinkedHashSet<>();
+        for (String url : configuredUrls()) {
+            verifyJdbcUrl(url, properties.isAllowRemoteHost());
+            JdbcTarget target = parse(url.strip());
+            if (canonicalTargets.add(target.canonicalTarget())) {
+                agreedTarget = target;
+            }
+        }
+        if (canonicalTargets.size() > 1) {
+            throw new IllegalStateException(
+                "Seeder refused: configured JDBC URLs disagree on the target host, port"
+                    + " or database " + canonicalTargets);
+        }
+        if (agreedTarget == null) {
+            throw new IllegalStateException("Seeder refused: no JDBC URL is configured");
+        }
+        return agreedTarget;
+    }
+
     private Set<String> configuredUrls() {
         Set<String> urls = new LinkedHashSet<>();
         addConfiguredUrl(urls, "spring.datasource.url", true);
@@ -161,20 +186,29 @@ public class SeederGuard {
         urls.add(value.strip());
     }
 
-    private void verifyConfiguredSchemas() {
-        for (String propertyName : new String[] {"spring.flyway.schemas", "spring.flyway.default-schema"}) {
-            String value = environment.getProperty(propertyName);
-            if (!StringUtils.hasText(value)) {
-                continue;
-            }
-            for (String schema : value.split(",")) {
-                if (PRODUCTION_DATABASE.equalsIgnoreCase(schema.strip())) {
-                    throw new IllegalStateException(
-                        "Seeder refused: " + propertyName
-                            + " names the protected production target connex_pub");
+    private void verifyConfiguredSchemas(String targetDatabase) {
+        for (String propertyName : FLYWAY_SCHEMA_PROPERTIES) {
+            for (String schema : configuredSchemas(propertyName)) {
+                String candidate = schema.strip();
+                if (!StringUtils.hasText(candidate) || candidate.equalsIgnoreCase(targetDatabase)) {
+                    continue;
                 }
+                throw new IllegalStateException(
+                    "Seeder refused: " + propertyName + " names " + candidate
+                        + " instead of the configured target database " + targetDatabase);
             }
         }
+    }
+
+    private List<String> configuredSchemas(String propertyName) {
+        List<String> bound = Binder.get(environment)
+            .bind(propertyName, Bindable.listOf(String.class))
+            .orElseGet(List::of);
+        if (!bound.isEmpty()) {
+            return bound;
+        }
+        String value = environment.getProperty(propertyName);
+        return StringUtils.hasText(value) ? List.of(value.split(",")) : List.of();
     }
 
     private void verifyMetadata(DataSource effectiveDataSource) {
@@ -215,7 +249,8 @@ public class SeederGuard {
             if (!StringUtils.hasText(database)) {
                 throw new IllegalStateException("Seeder refused: JDBC URL database name is blank");
             }
-            return new JdbcTarget(host, database);
+            int port = uri.getPort() < 0 ? DEFAULT_MYSQL_PORT : uri.getPort();
+            return new JdbcTarget(host, port, database);
         } catch (IllegalArgumentException ex) {
             throw new IllegalStateException("Seeder refused: JDBC URL is malformed", ex);
         }
@@ -244,6 +279,20 @@ public class SeederGuard {
         return host;
     }
 
-    private record JdbcTarget(String host, String database) {
+    private record JdbcTarget(String host, int port, String database) {
+
+        /**
+         * Renders the comparable identity of this target, so that two configured URLs agree only
+         * when they name the same MySQL server and the same database on it.
+         *
+         * @return the lowercase {@code host:port/database} identity of this target
+         */
+        String canonicalTarget() {
+            return host.toLowerCase(Locale.ROOT)
+                + ":"
+                + port
+                + "/"
+                + database.toLowerCase(Locale.ROOT);
+        }
     }
 }

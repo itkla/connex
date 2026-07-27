@@ -176,12 +176,181 @@ class SeederGuardTest {
         assertTrue(exception.getMessage().contains("catalog connex_pub"));
     }
 
+    @Test
+    void refusesConfiguredUrlsThatAgreeOnDatabaseButNameDifferentPorts() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED"
+            );
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            mock(DataSource.class)
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("disagree"));
+    }
+
+    @Test
+    void refusesConfiguredUrlsThatNameDifferentRemoteHostsEvenWithOverride() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://db-one.example.test:3306/connex_seeder?sslMode=VERIFY_IDENTITY"
+            )
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://db-two.example.test:3306/connex_seeder?sslMode=VERIFY_IDENTITY"
+            );
+        SeederProperties properties = new SeederProperties();
+        properties.setAllowRemoteHost(true);
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            properties,
+            mock(DataSource.class)
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("disagree"));
+    }
+
+    @Test
+    void refusesConfiguredUrlsThatSpellTheLoopbackHostDifferently() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://localhost:3306/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED"
+            );
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            mock(DataSource.class)
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("disagree"));
+    }
+
+    @Test
+    void permitsConfiguredUrlsThatOnlyDifferOnTheImplicitDefaultPort() throws SQLException {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED"
+            );
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            seederDataSource("jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED")
+        );
+
+        assertDoesNotThrow(() -> guard.verify());
+    }
+
+    @Test
+    void refusesFlywayDefaultSchemaThatIsNotTheConfiguredTargetDatabase() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.flyway.default-schema", "connex_dev");
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            mock(DataSource.class)
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("spring.flyway.default-schema"));
+        assertTrue(exception.getMessage().contains("connex_dev"));
+    }
+
+    @Test
+    void refusesFlywaySchemasDeclaredAsAnIndexedList() {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.flyway.schemas[0]", "connex_dev");
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            mock(DataSource.class)
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
+        assertTrue(exception.getMessage().contains("connex_dev"));
+    }
+
+    @Test
+    void permitsFlywaySchemaThatIsTheConfiguredTargetDatabase() throws SQLException {
+        MockEnvironment environment = seederEnvironment()
+            .withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            )
+            .withProperty("spring.flyway.schemas", "connex_seeder")
+            .withProperty("spring.flyway.default-schema", "connex_seeder");
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            seederDataSource("jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED")
+        );
+
+        assertDoesNotThrow(() -> guard.verify());
+    }
+
     private static MockEnvironment seederEnvironment() {
         MockEnvironment environment = new MockEnvironment()
             .withProperty("connex.maintenance.mode", "seeder")
             .withProperty("spring.main.web-application-type", "none");
         environment.setActiveProfiles("seeder");
         return environment;
+    }
+
+    private static DataSource seederDataSource(String url) throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metaData = mock(DatabaseMetaData.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getMetaData()).thenReturn(metaData);
+        when(metaData.getURL()).thenReturn(url);
+        when(connection.getCatalog()).thenReturn("connex_seeder");
+        return dataSource;
     }
 
     @Test

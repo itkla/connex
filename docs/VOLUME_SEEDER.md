@@ -95,13 +95,18 @@ never arm fixture writing on a serving deployment:
 
 It then refuses the target itself:
 
-- a database named `connex_pub`, case-insensitively, in the configured URL, in
-  `spring.flyway.schemas` / `spring.flyway.default-schema`, or in the effective connection catalog;
+- a database named `connex_pub`, case-insensitively, in the configured URL or in the effective
+  connection catalog;
 - a JDBC URL that selects its database through a `dbname`/`database` query parameter rather than
   the URL path, which would otherwise hide the real target from the path check;
 - any non-loopback or ambiguous JDBC host unless `-PseederAllowRemoteHost=true` is explicit;
-- a `spring.flyway.url` that names a different database than the application datasource, which
-  would otherwise migrate one database while seeding another; and
+- a `spring.flyway.url` that names a different host, port, or database than the application
+  datasource, which would otherwise migrate one database while seeding another — the comparison is
+  the literal `host:port/database`, so an implicit port matches `3306` but `localhost` and
+  `127.0.0.1` are treated as different servers;
+- a `spring.flyway.schemas` / `spring.flyway.default-schema` entry naming anything other than that
+  agreed target database, in either the comma-separated or the YAML list form — on MySQL a Flyway
+  schema is a catalog, so a divergent entry migrates a database the seeder never writes; and
 - every deployment whose authoritative `connex.deployment.profile` is explicitly configured
   (`saas`, `silo`, or `on-prem`) — production editions are never seedable.
 
@@ -117,6 +122,12 @@ normal `backend/.env` loaded will happily seed your own development database. Al
 explicit throwaway schema. Likewise, `connex.deployment.profile` is optional during soft launch, so
 the deployment-profile refusal only fires where an operator set it; the non-web and loopback
 requirements are the load-bearing ones.
+
+The URL agreement check compares configured properties, not the catalog the driver finally
+resolves. An operator who overrides the database through
+`spring.datasource.hikari.data-source-properties.dbname` or `spring.flyway.jdbc-properties.dbname`
+can still point one datasource at a different non-production database; only `connex_pub` is caught
+there, by the effective-catalog check.
 
 Seeded accounts are org owners whose password is the published constant below. Treat any schema the
 seeder has touched as compromised for authentication purposes and never expose it.
