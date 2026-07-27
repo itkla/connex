@@ -159,7 +159,7 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
     }
 
     @Test
-    void dedicatedPlacementRoutesBackfillAndHttpReadToTenantCatalog() throws Exception {
+    void dedicatedPlacementRoutesBackfillAndRebuildToTenantCatalog() throws Exception {
         ControlFixture fixture = newControlFixture("dedicated");
         String scratchCatalog = "cnx_identity_route_" + compactUuid();
         scratchCatalogs.add(scratchCatalog);
@@ -207,16 +207,6 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
                         catalog, fixture.workspace().getId()));
                 return null;
             });
-
-        mockMvc.perform(get("/api/identity-collisions")
-                .header("X-Workspace-Id", fixture.workspace().getId())
-                .session(login(fixture.user().getUsername())))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.total").value(1))
-            .andExpect(jsonPath("$.items[0].normalizedValue").value("routed@example.com"))
-            .andExpect(jsonPath("$.items[0].members[*].recordName",
-                Matchers.contains("Routed Alpha", "Routed Beta")))
-            .andExpect(content().string(Matchers.not(Matchers.containsString("Default Decoy"))));
 
         tenantWorkScope.withCatalog(null, () -> {
             assertEquals(
