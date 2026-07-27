@@ -37,6 +37,30 @@ install_configuration() {
     backup_validate_absolute_path CONNEX_BACKUP_ROOT "$CONNEX_BACKUP_ROOT"
     backup_validate_absolute_path CONNEX_BACKUP_LOCK_DIR "$CONNEX_BACKUP_LOCK_DIR"
     backup_validate_integer CONNEX_BACKUP_RETENTION_DAYS "$CONNEX_BACKUP_RETENTION_DAYS" 1 30
+    install_resolve_lock_directory
+}
+
+# A lock directory under the volatile /run must be declared as a systemd
+# RuntimeDirectory: ProtectSystem=strict resolves ReadWritePaths before
+# ExecStart, so a path that does not survive reboot fails namespace setup
+# before any script can create it. Directories elsewhere are persistent and are
+# created here instead.
+install_resolve_lock_directory() {
+    case "$CONNEX_BACKUP_LOCK_DIR" in
+        /run/*)
+            INSTALL_RUNTIME_DIRECTORY="${CONNEX_BACKUP_LOCK_DIR#/run/}"
+            INSTALL_LOCK_READ_WRITE_PATH=""
+            ;;
+        /run)
+            printf 'CONNEX_BACKUP_LOCK_DIR must be a directory under /run, not /run itself\n' >&2
+            return "$EXIT_CONFIG"
+            ;;
+        *)
+            INSTALL_RUNTIME_DIRECTORY=""
+            INSTALL_LOCK_READ_WRITE_PATH=" $CONNEX_BACKUP_LOCK_DIR"
+            install -d -m 0700 "$CONNEX_BACKUP_LOCK_DIR"
+            ;;
+    esac
 }
 
 install_programs() {
@@ -83,8 +107,15 @@ install_render_service_dropin() {
     install -d -m 0755 "$directory"
     {
         printf '[Service]\n'
+        printf 'RuntimeDirectory=\n'
+        if [ -n "$INSTALL_RUNTIME_DIRECTORY" ]; then
+            printf 'RuntimeDirectory=%s\n' "$INSTALL_RUNTIME_DIRECTORY"
+            printf 'RuntimeDirectoryMode=0700\n'
+            printf 'RuntimeDirectoryPreserve=yes\n'
+        fi
         printf 'ReadWritePaths=\n'
-        printf 'ReadWritePaths=%s %s /var/run/docker.sock\n' "$CONNEX_BACKUP_ROOT" "$CONNEX_BACKUP_LOCK_DIR"
+        printf 'ReadWritePaths=%s%s /var/run/docker.sock\n' \
+            "$CONNEX_BACKUP_ROOT" "$INSTALL_LOCK_READ_WRITE_PATH"
         printf 'ReadOnlyPaths=\n'
         printf 'ReadOnlyPaths=%s %s %s\n' "$source_defaults_dir" "$verify_defaults_dir" "$restore_defaults_dir"
     } > "$directory/50-connex-backup-paths.conf"

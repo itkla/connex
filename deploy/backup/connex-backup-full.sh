@@ -17,8 +17,21 @@ FULL_RUN_DIR=
 FULL_RUN_ID=
 FULL_RUN_STARTED_EPOCH=0
 FULL_RUN_SUCCEEDED=false
+FULL_SCRATCH_SCHEMA=""
 FULL_SCHEMA_COUNT=0
 FULL_TOTAL_BYTES=0
+
+# A restore-verify import can be interrupted by a service stop, reboot, or OOM
+# kill. Without this the scratch schema — a full copy of source data — would
+# survive on the verify server indefinitely.
+full_cleanup() {
+    if [ -n "$FULL_SCRATCH_SCHEMA" ]; then
+        backup_drop_schema verify "$FULL_SCRATCH_SCHEMA" || true
+        FULL_SCRATCH_SCHEMA=""
+    fi
+}
+
+trap full_cleanup EXIT INT TERM
 
 full_mark_failed() {
     local exit_code="$1"
@@ -61,14 +74,22 @@ full_source_preflight() {
 }
 
 full_list_schemas() {
-    local schema
+    local schema listing
     FULL_SCHEMAS=()
+    # Materialize the listing before iterating: a process substitution discards
+    # the query's exit status, so a connection lost mid-stream would yield a
+    # partial schema list that still reaches full_publish_complete.
+    if ! listing="$(backup_mysql_query source "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name;")"; then
+        backup_log error schema_selection reason schema_listing_failed
+        return "$EXIT_DB_PREFLIGHT"
+    fi
     while IFS= read -r schema; do
+        [ -n "$schema" ] || continue
         backup_validate_schema "$schema" || return "$EXIT_CONFIG"
         if backup_schema_selected "$schema"; then
             FULL_SCHEMAS+=("$schema")
         fi
-    done < <(backup_mysql_query source "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name;")
+    done <<< "$listing"
     if [ "${#FULL_SCHEMAS[@]}" -eq 0 ]; then
         backup_log error schema_selection reason no_schemas_selected
         return "$EXIT_CONFIG"
@@ -188,6 +209,7 @@ full_verify_schema() {
     expected="$(backup_manifest_schema_field "$FULL_RUN_DIR/manifest" "$schema" base_table_count)" || return "$EXIT_RESTORE_VERIFY"
     backup_log info restore_verify_started schema "$schema" scratch_schema "$scratch"
     backup_drop_schema verify "$scratch" || return "$EXIT_RESTORE_VERIFY"
+    FULL_SCRATCH_SCHEMA="$scratch"
     if ! backup_restore_artifact "$FULL_RUN_DIR" "$schema" "$scratch" true verify; then
         backup_drop_schema verify "$scratch" || true
         backup_log error restore_verify_failed reason import schema "$schema"
@@ -203,6 +225,7 @@ full_verify_schema() {
         return "$EXIT_RESTORE_VERIFY"
     fi
     backup_drop_schema verify "$scratch" || return "$EXIT_RESTORE_VERIFY"
+    FULL_SCRATCH_SCHEMA=""
     backup_log info restore_verify_completed schema "$schema" table_count "$actual"
 }
 
@@ -224,9 +247,21 @@ full_restore_verify() {
 
 full_publish_complete() {
     BACKUP_PHASE=publishing
-    printf 'completed_at\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FULL_RUN_DIR/COMPLETE.tmp"
-    mv "$FULL_RUN_DIR/COMPLETE.tmp" "$FULL_RUN_DIR/COMPLETE"
-    rm -f "$FULL_RUN_DIR/IN_PROGRESS"
+    # errexit is disabled inside this function because the caller invokes it as
+    # the left operand of ||, so every step is checked explicitly: an ENOSPC or
+    # read-only filesystem here must not report a successful backup.
+    if ! printf 'completed_at\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FULL_RUN_DIR/COMPLETE.tmp"; then
+        backup_log error publish_failed reason complete_marker_write run_id "$FULL_RUN_ID"
+        return "$EXIT_INTEGRITY"
+    fi
+    if ! mv "$FULL_RUN_DIR/COMPLETE.tmp" "$FULL_RUN_DIR/COMPLETE"; then
+        backup_log error publish_failed reason complete_marker_publish run_id "$FULL_RUN_ID"
+        return "$EXIT_INTEGRITY"
+    fi
+    if ! rm -f "$FULL_RUN_DIR/IN_PROGRESS"; then
+        backup_log error publish_failed reason in_progress_marker_remove run_id "$FULL_RUN_ID"
+        return "$EXIT_INTEGRITY"
+    fi
     FULL_RUN_SUCCEEDED=true
 }
 

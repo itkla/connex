@@ -21,6 +21,7 @@ ARCHIVE_SERVER_UUID=
 ARCHIVE_SERVER_VERSION=
 ARCHIVE_COVERAGE_UTC=
 ARCHIVE_COVERAGE_EPOCH=0
+ARCHIVE_RETENTION_GAP=false
 ARCHIVE_ACTIVE_FILE=
 ARCHIVE_LAST_CLOSED=
 declare -a ARCHIVE_SERVER_LOGS=()
@@ -287,6 +288,7 @@ archive_publish_file() {
     if [ $(( $(date +%s) - created_epoch )) -ge $(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 )) ]; then
         rm -f "$temporary_file"
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
+        ARCHIVE_RETENTION_GAP=true
         backup_log warn binlog_skipped file "$file" reason outside_retention file_created_utc "$created_utc"
         return 0
     fi
@@ -367,6 +369,14 @@ archive_process_logs() {
         archive_fetch_file "$file" "$server_size" || return $?
         processed_last="$file"
     done
+    # A closed binlog that is already past the retention ceiling cannot be
+    # archived, so the recoverable window has a hole. Publishing coverage across
+    # it would report success while a later PITR fails on the missing file.
+    if [ "$ARCHIVE_RETENTION_GAP" = true ]; then
+        backup_log error binlog_coverage_gap reason unarchivable_file_past_retention \
+            remedy "take a new full backup to re-base the point-in-time coordinate"
+        return "$EXIT_BINLOG_ARCHIVE"
+    fi
     if [ -n "$last_archived" ] && [ "$seen_state" = false ]; then
         backup_log error binlog_state reason last_closed_file_missing file "$last_archived"
         return "$EXIT_BINLOG_ARCHIVE"
