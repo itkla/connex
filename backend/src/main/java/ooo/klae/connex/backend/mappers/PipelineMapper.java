@@ -16,6 +16,10 @@ public interface PipelineMapper {
     List<Pipeline> getAllPipelines(int workspaceId);
     Pipeline getPipelineById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Pipeline getOwnedPipelineById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Locks a visible pipeline before an import writes a dependent deal. */
+    Integer lockVisiblePipelineById(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
     List<Pipeline> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean pipelineExists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insertPipeline(Pipeline pipeline);
@@ -23,6 +27,10 @@ public interface PipelineMapper {
     int deletePipeline(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     Stage getStageById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Locks a visible stage before an import writes a dependent deal. */
+    Integer lockVisibleStageById(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
     List<Stage> getAllStages(int workspaceId);
     /** A stage visible through ownership or a same-organization pipeline share. */
     Stage getVisibleStageById(@Param("workspaceId") int workspaceId, @Param("id") int id);

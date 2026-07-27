@@ -53,6 +53,13 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="lockVisiblePipelineById" resultType="java.lang.Integer">
+    SELECT id
+    FROM pipeline
+    WHERE <include refid="visible"/> AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="search" resultType="Pipeline">
     SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
     WHERE <include refid="visible"/> AND name LIKE #{query}
@@ -82,6 +89,21 @@
     FROM stage
     JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
     WHERE pipeline.workspace_id = #{workspaceId} AND stage.id = #{id}
+  </select>
+
+  <select id="lockVisibleStageById" resultType="java.lang.Integer">
+    SELECT stage.id
+    FROM stage
+    JOIN pipeline
+      ON pipeline.id = stage.pipeline_id
+      AND pipeline.workspace_id = stage.workspace_id
+    WHERE stage.id = #{id}
+      AND (pipeline.workspace_id = #{workspaceId}
+           OR EXISTS (SELECT 1 FROM pipeline_share ps
+              JOIN workspace vws ON vws.id = ps.workspace_id
+              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+    FOR UPDATE
   </select>
 
   <select id="getVisibleStageById" resultMap="StageResult">

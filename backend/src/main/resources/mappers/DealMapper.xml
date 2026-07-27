@@ -1073,6 +1073,27 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateFromImport">
+    UPDATE deal
+    SET name = #{deal.name},
+        value = #{deal.value},
+        actual_value = #{deal.actualValue},
+        currency = #{deal.currency},
+        <if test="updateStage">
+          pipeline_id = #{deal.pipelineId},
+          stage_id = #{deal.stageId},
+        </if>
+        position = #{deal.position},
+        <if test="updateCompany">
+          company_id = #{deal.companyId},
+        </if>
+        expected_close_date = #{deal.expectedCloseDate},
+        closed_at = #{deal.closedAt},
+        closed_reason = #{deal.closedReason},
+        won = #{deal.won}
+    WHERE workspace_id = #{deal.workspaceId} AND id = #{deal.id}
+  </update>
+
   <update id="updateName">
     UPDATE deal SET name = #{name}
     WHERE workspace_id = #{workspaceId} AND id = #{id}

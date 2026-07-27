@@ -322,6 +322,14 @@ public interface DealMapper {
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
     int update(Deal deal);
+    /**
+     * Updates a matched CSV deal while touching foreign keys only after their dependency rows have
+     * been locked in the import coordinator's global order.
+     */
+    int updateFromImport(
+        @Param("deal") Deal deal,
+        @Param("updateCompany") boolean updateCompany,
+        @Param("updateStage") boolean updateStage);
     int updateName(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
