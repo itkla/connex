@@ -227,7 +227,9 @@ public class SeedDataGenerator {
             : "https://company-" + (index + 1) + "-w" + (workspaceIndex + 1) + ".seed.invalid");
         company.setIndustry(INDUSTRIES[
             DeterministicSeederRandom.bounded(workspaceSeed, COMPANY_SALT, index, 1, INDUSTRIES.length)]);
-        company.setPhone(index % 11 == 0 ? "" : "+81-3-" + fourDigits(index * 37 + 1200));
+        company.setPhone(index % 11 == 0
+            ? ""
+            : "+81-3-" + fourDigits(index * 37 + 1200) + "-" + fourDigits(index * 41 + 5100));
         company.setAddress(index % 9 == 0
             ? "東京都千代田区1-" + (index + 1) + " 🗼"
             : (100 + index) + " Seed Avenue");
@@ -258,7 +260,9 @@ public class SeedDataGenerator {
         person.setEmail(email(workspaceSeed, workspaceIndex, index, companies));
         person.setPhone(index == 0 || index % 17 == 0
             ? ""
-            : index % 9 == 0 ? null : "+81-90-" + fourDigits(2000 + index * 17));
+            : index % 9 == 0
+                ? null
+                : "+81-90-" + fourDigits(2000 + index * 17) + "-" + fourDigits(3100 + index * 29));
         if (index % 7 != 4) {
             person.setCompany(companies.get(
                 DeterministicSeederRandom.bounded(workspaceSeed, PERSON_SALT, index, 1, companies.size())));
