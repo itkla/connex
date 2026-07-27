@@ -13,13 +13,27 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Installs one injection-safe correlation identifier for every request and response.
+ *
+ * <p>The identifier is stashed as a request attribute so async re-dispatches (for example a
+ * {@code StreamingResponseBody} failure) keep the identifier already echoed on the response
+ * instead of minting a divergent one.
  */
 public class CorrelationIdFilter extends OncePerRequestFilter {
+    private static final String REQUEST_ATTRIBUTE = CorrelationIdFilter.class.getName() + ".ID";
+
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String correlationId = inboundCorrelationId(request);
+        String correlationId = request.getAttribute(REQUEST_ATTRIBUTE) instanceof String stashed
+                && CorrelationIds.isValid(stashed)
+                    ? stashed
+                    : inboundCorrelationId(request);
+        request.setAttribute(REQUEST_ATTRIBUTE, correlationId);
         response.setHeader(CorrelationIds.HEADER_NAME, correlationId);
         MDC.put(CorrelationIds.MDC_KEY, correlationId);
         try {

@@ -158,6 +158,36 @@ class HealthServiceTest {
         }
     }
 
+    @Test
+    void servesStaleSnapshotInsteadOfQueueingBehindASlowProbe() throws Exception {
+        TenantWorkScope tenantWorkScope =
+                new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
+        HealthService alwaysStale = new HealthService(dataSource, flyway, tenantWorkScope, 0L);
+        stubDatabaseReady();
+        stubMigrationsReady();
+        assertEquals(new Readiness(Status.UP, Status.UP), alwaysStale.readiness());
+
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(dataSource.getConnection()).thenAnswer(invocation -> {
+            entered.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            throw new SQLException("database gone");
+        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Readiness> slowProbe = executor.submit(alwaysStale::readiness);
+            entered.await(5, TimeUnit.SECONDS);
+
+            assertEquals(new Readiness(Status.UP, Status.UP), alwaysStale.readiness());
+
+            release.countDown();
+            assertEquals(new Readiness(Status.DOWN, Status.UP), slowProbe.get(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private void stubDatabaseReady() throws Exception {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(2)).thenReturn(true);

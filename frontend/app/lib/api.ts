@@ -719,13 +719,21 @@ export class ApiError extends Error {
     status: number;
     code?: string;
     fieldErrors?: ApiFieldErrors;
+    correlationId?: string;
 
-    constructor(message: string, status: number, code?: string, fieldErrors?: ApiFieldErrors) {
+    constructor(
+        message: string,
+        status: number,
+        code?: string,
+        fieldErrors?: ApiFieldErrors,
+        correlationId?: string,
+    ) {
         super(message);
         this.name = "ApiError";
         this.status = status;
         this.code = code;
         this.fieldErrors = fieldErrors;
+        this.correlationId = correlationId;
     }
 }
 
@@ -821,7 +829,7 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isStringRecord(data)) {
-            const { message, error, code, ...fieldErrors } = data;
+            const { message, error, code, correlationId, ...fieldErrors } = data;
             const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 
             return new ApiError(
@@ -829,6 +837,7 @@ async function getApiError(res: Response): Promise<ApiError> {
                 res.status,
                 code,
                 fields,
+                correlationId,
             );
         }
 

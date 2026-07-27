@@ -17,8 +17,6 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class ClientErrorService {
-    private static final int MAX_DETAIL_LENGTH = 8_192;
-
     private final ErrorReporter errorReporter;
     private final ClientErrorRateLimiter rateLimiter;
     private final TenantContext tenantContext;
@@ -60,13 +58,6 @@ public class ClientErrorService {
             }
             detail.append("Stack:\n").append(request.stack());
         }
-        if (detail.length() <= MAX_DETAIL_LENGTH) {
-            return detail.toString();
-        }
-        int end = MAX_DETAIL_LENGTH;
-        if (Character.isHighSurrogate(detail.charAt(end - 1))) {
-            end--;
-        }
-        return detail.substring(0, end);
+        return detail.toString();
     }
 }

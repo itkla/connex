@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.integration;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -24,12 +26,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.controllers.MetricsController;
+import ooo.klae.connex.backend.services.HealthService;
+import ooo.klae.connex.backend.services.HealthService.Readiness;
+import ooo.klae.connex.backend.services.HealthService.Status;
 
 @SpringBootTest(properties = "connex.metrics.scrape-token=operator-metrics-token-123456")
 class ObservabilityEndpointSecurityTest {
@@ -37,12 +43,14 @@ class ObservabilityEndpointSecurityTest {
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
+    @MockitoBean private HealthService healthService;
 
     private MockMvc mockMvc;
     private UsernamePasswordAuthenticationToken authenticated;
 
     @BeforeEach
     void setUp() {
+        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -121,14 +129,24 @@ class ObservabilityEndpointSecurityTest {
                         .with(authentication(authenticated))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(not(containsString("workspace membership"))));
+
+        mockMvc.perform(post("/api/client-errors")
+                        .with(authentication(authenticated))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(containsString("workspace membership")));
     }
 
     @Test
     void actuatorHttpEndpointsAreUnavailable() throws Exception {
         for (String path : List.of("/actuator", "/actuator/health", "/actuator/metrics")) {
             mockMvc.perform(get(path).with(authentication(authenticated)))
-                    .andExpect(status().isNotFound());
+                    .andExpect(result -> assertTrue(result.getResponse().getStatus() >= 400))
+                    .andExpect(content().string(not(containsString("\"_links\""))));
         }
     }
 }

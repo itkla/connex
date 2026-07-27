@@ -240,6 +240,30 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void internalErrorReportsCauseChainClassesAndFramesWithoutMessages() {
+        IllegalStateException root = new IllegalStateException("password=secret");
+        root.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Repository", "query", "Repository.java", 7)
+        });
+        RuntimeException wrapper = new RuntimeException("outer secret", root);
+        wrapper.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Service", "run", "Service.java", 3)
+        });
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fail");
+
+        handler.internalError(wrapper, request);
+
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        String detail = captor.getValue().detail();
+        assertEquals(String.join("\n",
+                "example.Service.run(Service.java:3)",
+                "Caused by: " + IllegalStateException.class.getName(),
+                "example.Repository.query(Repository.java:7)"), detail);
+        assertFalse(detail.contains("secret"));
+    }
+
+    @Test
     void reporterFailureCannotAlterStableInternalErrorResponse() {
         doThrow(new IllegalStateException("vendor secret")).when(errorReporter).report(
                 org.mockito.ArgumentMatchers.any());

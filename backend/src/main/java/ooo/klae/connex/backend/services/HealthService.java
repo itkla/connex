@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.sql.Connection;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.sql.DataSource;
 
@@ -11,35 +12,56 @@ import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Probes instance database and migration readiness without exposing diagnostic details.
  */
 @Service
-@RequiredArgsConstructor
 public class HealthService {
     private static final long CACHE_NANOS = TimeUnit.SECONDS.toNanos(3);
 
     private final DataSource dataSource;
     private final Flyway flyway;
     private final TenantWorkScope tenantWorkScope;
+    private final long cacheNanos;
+
+    private final ReentrantLock probeLock = new ReentrantLock();
 
     private volatile Snapshot snapshot;
+
+    public HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope) {
+        this(dataSource, flyway, tenantWorkScope, CACHE_NANOS);
+    }
+
+    HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope, long cacheNanos) {
+        this.dataSource = dataSource;
+        this.flyway = flyway;
+        this.tenantWorkScope = tenantWorkScope;
+        this.cacheNanos = cacheNanos;
+    }
 
     /**
      * Returns a briefly cached readiness snapshot.
      *
+     * <p>Only one caller probes at a time; while a probe is in flight, concurrent callers are
+     * served the previous snapshot (even a just-expired one) instead of queueing request threads
+     * behind a potentially slow database probe.
+     *
      * @return the database and migration readiness statuses
      */
     public Readiness readiness() {
-        long now = System.nanoTime();
         Snapshot current = snapshot;
-        if (isCurrent(current, now)) {
+        if (isCurrent(current, System.nanoTime())) {
             return current.readiness();
         }
-        synchronized (this) {
+        if (current != null && !probeLock.tryLock()) {
+            return current.readiness();
+        }
+        if (current == null) {
+            probeLock.lock();
+        }
+        try {
             current = snapshot;
             if (isCurrent(current, System.nanoTime())) {
                 return current.readiness();
@@ -48,11 +70,13 @@ public class HealthService {
                     () -> new Readiness(status(databaseReady()), status(migrationsReady())));
             snapshot = new Snapshot(System.nanoTime(), readiness);
             return readiness;
+        } finally {
+            probeLock.unlock();
         }
     }
 
-    private static boolean isCurrent(Snapshot snapshot, long now) {
-        return snapshot != null && now - snapshot.probedAtNanos() < CACHE_NANOS;
+    private boolean isCurrent(Snapshot snapshot, long now) {
+        return snapshot != null && now - snapshot.probedAtNanos() < cacheNanos;
     }
 
     private boolean databaseReady() {

@@ -112,6 +112,23 @@ class CorrelationIdFilterTest {
         assertNull(MDC.get(CorrelationIds.MDC_KEY));
     }
 
+    @Test
+    void reusesTheGeneratedIdentifierAcrossAsyncRedispatch() throws Exception {
+        MockHttpServletRequest request = request();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, new MockFilterChain());
+        String initial = response.getHeader(CorrelationIds.HEADER_NAME);
+        assertTrue(CorrelationIds.isValid(initial));
+        AtomicReference<String> duringRedispatch = new AtomicReference<>();
+
+        filter.doFilter(request, response,
+                (ignoredRequest, ignoredResponse) -> duringRedispatch.set(MDC.get(CorrelationIds.MDC_KEY)));
+
+        assertEquals(initial, duringRedispatch.get());
+        assertEquals(initial, response.getHeader(CorrelationIds.HEADER_NAME));
+        assertNull(MDC.get(CorrelationIds.MDC_KEY));
+    }
+
     private void assertGenerated(String inbound) throws Exception {
         MockHttpServletRequest request = request();
         if (inbound != null) {

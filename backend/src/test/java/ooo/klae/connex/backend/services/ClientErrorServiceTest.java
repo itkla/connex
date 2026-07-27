@@ -74,16 +74,17 @@ class ClientErrorServiceTest {
     }
 
     @Test
-    void boundsCombinedDetailWithoutSplittingSurrogatePairs() {
+    void composesMaximalValidatedFieldsWithinTheReporterDetailCap() {
         tenantContext.set(7, 8, 9, "member", null);
-        String stack = "a".repeat(8_100) + "\uD83D\uDE00";
-        ClientErrorRequest request = new ClientErrorRequest("d".repeat(128), "Render failed", stack, null);
+        ClientErrorRequest request = new ClientErrorRequest(
+                "d".repeat(128), "Render failed", "s".repeat(8_000), null);
 
         service.report(request);
 
         ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
         verify(errorReporter).report(captor.capture());
-        assertEquals(8_192, captor.getValue().detail().length());
-        assertEquals(false, captor.getValue().detail().endsWith("\uD83D"));
+        assertEquals("Digest: " + "d".repeat(128) + "\nStack:\n" + "s".repeat(8_000),
+                captor.getValue().detail());
+        assertEquals(true, captor.getValue().detail().length() <= 8_192);
     }
 }

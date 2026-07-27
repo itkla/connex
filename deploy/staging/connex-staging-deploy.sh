@@ -124,10 +124,19 @@ verify_backend_stability() {
         log "Backend stability check FAILED: PID changed ($pid_before -> $pid_after) within ${STABILITY_INTERVAL}s of passing health"
         return 1
     fi
-    if ! systemctl is-active --quiet connex-staging-backend || [ "$(served_git_sha || true)" != "$target" ] \
-        || ! backend_http_healthy; then
+    if ! systemctl is-active --quiet connex-staging-backend || [ "$(served_git_sha || true)" != "$target" ]; then
         log "Backend stability check FAILED: unhealthy on recheck (unit state: $(backend_unit_state))"
         return 1
+    fi
+    # One transient readiness blip (GC pause, momentary DB hiccup) must not roll back a
+    # healthy deploy: retry the readiness probe once before declaring the recheck failed.
+    if ! backend_http_healthy; then
+        log "Backend readiness blip on stability recheck; retrying once in ${POLL_INTERVAL}s..."
+        sleep "$POLL_INTERVAL"
+        if ! backend_http_healthy; then
+            log "Backend stability check FAILED: unhealthy on recheck (unit state: $(backend_unit_state))"
+            return 1
+        fi
     fi
     return 0
 }

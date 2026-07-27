@@ -443,12 +443,16 @@ deployment unless the operator explicitly configures a vendor integration.
   `Authorization: Bearer <token>`. Unset token = endpoint unavailable to scrapers.
 
 **Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
-unexpected `500` responses include the same id in the JSON body; the frontend error screen shows a
-`Reference:` digest for rendering failures. Production logs are structured JSON (ECS) and include
-the `correlationId` field, so when a user quotes the reference from the error screen or response,
-the operator can find the exact server-side stack trace with e.g.
-`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket —
-that pairing is the support path for deployments Connex cannot access.
+unexpected `500` responses include the same id in the JSON body. Production logs are structured
+JSON (ECS) and include the `correlationId` field, so when a user quotes that id the operator can
+find the exact server-side stack trace with e.g.
+`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket.
+For rendering failures the frontend error screen shows a `Reference:` digest instead; the app
+reports it (best-effort) to this deployment's own `/api/client-errors` sink, so the matching log
+line is found by grepping for the digest value itself:
+`journalctl -u <backend-unit> | grep '<reference>'` — the `CLIENT`-source entry carries the
+digest, the page path, and the client stack. Both lookups run entirely against the deployment's
+own logs — that pairing is the support path for deployments Connex cannot access.
 
 ## Local evaluation (not for production)
 

@@ -5,6 +5,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Structured logging fallback for application error reports.
+ *
+ * <p>The multiline {@code detail} field keeps {@code \n}/{@code \t} for readable stack traces,
+ * which is injection-safe only while the production encoder is structured JSON
+ * ({@code logging.structured.format.console}) that escapes key-value payloads. Any replacement
+ * reporter or plain-text pattern that renders these key-values must escape newlines itself.
  */
 public class LoggingErrorReporter implements ErrorReporter {
     private static final int MAX_CORRELATION_ID_LENGTH = 64;

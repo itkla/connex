@@ -36,6 +36,7 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final int MAX_STACK_DETAIL_LENGTH = 8_000;
     private static final int MAX_STACK_FRAMES = 32;
+    private static final int MAX_CAUSE_DEPTH = 5;
 
     private final ErrorReporter errorReporter;
     private final TenantContext tenantContext;
@@ -204,7 +205,8 @@ public class GlobalExceptionHandler {
                     stackDetail(ex),
                     request.getRequestURI()));
         } catch (Throwable reportingFailure) {
-            log.error("Application error reporter failed");
+            log.error("Application error reporter failed", reportingFailure);
+            log.error("Unhandled exception", ex);
         }
         Map<String, String> response = new LinkedHashMap<>();
         response.put("message", "An unexpected error occurred");
@@ -230,25 +232,32 @@ public class GlobalExceptionHandler {
 
     private static String stackDetail(Throwable throwable) {
         StringBuilder detail = new StringBuilder();
-        StackTraceElement[] frames = throwable.getStackTrace();
-        int count = Math.min(frames.length, MAX_STACK_FRAMES);
-        for (int index = 0; index < count; index++) {
-            String frame = frames[index].toString();
-            int separatorLength = detail.isEmpty() ? 0 : 1;
-            int remaining = MAX_STACK_DETAIL_LENGTH - detail.length() - separatorLength;
-            if (remaining <= 0) {
-                break;
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth < MAX_CAUSE_DEPTH && detail.length() < MAX_STACK_DETAIL_LENGTH) {
+            if (depth > 0) {
+                appendLine(detail, "Caused by: " + current.getClass().getName());
             }
-            if (separatorLength != 0) {
-                detail.append('\n');
+            StackTraceElement[] frames = current.getStackTrace();
+            int count = Math.min(frames.length, MAX_STACK_FRAMES);
+            for (int index = 0; index < count && detail.length() < MAX_STACK_DETAIL_LENGTH; index++) {
+                appendLine(detail, frames[index].toString());
             }
-            if (frame.length() <= remaining) {
-                detail.append(frame);
-            } else {
-                detail.append(frame, 0, remaining);
-                break;
-            }
+            current = current.getCause() == current ? null : current.getCause();
+            depth++;
         }
         return detail.toString();
+    }
+
+    private static void appendLine(StringBuilder detail, String line) {
+        int separatorLength = detail.isEmpty() ? 0 : 1;
+        int remaining = MAX_STACK_DETAIL_LENGTH - detail.length() - separatorLength;
+        if (remaining <= 0) {
+            return;
+        }
+        if (separatorLength != 0) {
+            detail.append('\n');
+        }
+        detail.append(line, 0, Math.min(line.length(), remaining));
     }
 }
