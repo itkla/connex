@@ -18,7 +18,7 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 
 ## Running the stack locally
 
-The verify loops require a running stack. **Prerequisites:** Node `^20.19.0 || ^22.12.0 || >=24.0.0` (the frontend toolchain's floor, declared in `frontend/package.json` `engines` — 21.x, 22.0–22.11 and 23.x are excluded; CI runs 22 and the frontend image runs 26), Java 26 (the backend toolchain), and Docker. Bring it up in this order:
+The verify loops require a running stack. **Prerequisites:** Node `^22.13.0 || >=24.0.0` (the frontend toolchain's floor, declared in `frontend/package.json` `engines` — 20.x, 21.x, 22.0–22.12 and 23.x are excluded; CI runs 22 and the frontend image runs 26), Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
 1. **Database** — from `backend/`: create `backend/.env` from `backend/.env.example`, fill local-only database passwords, then run `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`).
 2. **OCR (when testing card scanning)** — set a unique local `CONNEX_OCR_SERVICE_TOKEN` of at least 32 characters in `backend/.env`, then from `backend/` run `docker compose --profile ocr up -d ocr` (private service exposed to the host on `127.0.0.1:8090`). The image build pre-fetches its models; runtime model downloads are forbidden.
