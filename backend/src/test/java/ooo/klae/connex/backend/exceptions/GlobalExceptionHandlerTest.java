@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.exceptions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.doThrow;
@@ -12,11 +13,13 @@ import static org.mockito.Mockito.verify;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
@@ -28,6 +31,9 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.observability.ReportedError;
@@ -276,5 +282,72 @@ class GlobalExceptionHandlerTest {
         assertNotNull(response.getBody());
         assertEquals("An unexpected error occurred", response.getBody().get("message"));
         assertTrue(CorrelationIds.isValid(response.getBody().get("correlationId")));
+    }
+
+    @Test
+    void reporterFailureFallbackKeepsBothFrameSetsAndNoThrowableMessages() {
+        doThrow(new IllegalStateException("vendor secret")).when(errorReporter)
+                .report(org.mockito.ArgumentMatchers.any());
+        RuntimeException failure = new RuntimeException("database secret");
+        failure.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Controller", "handle", "Controller.java", 42)
+        });
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fail");
+
+        List<ILoggingEvent> events = captureHandlerLogs(() -> handler.internalError(failure, request));
+
+        assertEquals(1, events.size());
+        ILoggingEvent event = events.getFirst();
+        String message = event.getFormattedMessage();
+        assertNull(event.getThrowableProxy(), "no throwable may reach the log");
+        assertTrue(Pattern.compile("reporterDetail=\\S*\\.java:\\d+").matcher(message).find(),
+                "the reporter's own frames must survive the fallback");
+        assertTrue(message.contains("example.Controller.handle(Controller.java:42)"));
+        assertTrue(message.contains(IllegalStateException.class.getName()));
+        assertTrue(message.contains(RuntimeException.class.getName()));
+        assertFalse(message.contains("vendor secret"));
+        assertFalse(message.contains("database secret"));
+    }
+
+    @Test
+    void alwaysOnWarnPathsLogFramesWithoutThrowableMessages() {
+        IllegalStateException failure = new IllegalStateException("Failed to decrypt secret: bad AES key length");
+        failure.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.Service", "run", "Service.java", 3)
+        });
+
+        List<ILoggingEvent> events = captureHandlerLogs(() -> handler.illegalState(failure));
+
+        assertEquals(1, events.size());
+        ILoggingEvent event = events.getFirst();
+        assertNull(event.getThrowableProxy(), "no throwable may reach the log");
+        assertTrue(event.getFormattedMessage().contains("example.Service.run(Service.java:3)"));
+        assertFalse(event.getFormattedMessage().contains("bad AES key length"));
+    }
+
+    @Test
+    void internalErrorRedactsCredentialBearingRequestPaths() {
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("GET", "/api/invites/aBc123defGhi456jklMno/accept");
+
+        handler.internalError(new RuntimeException("boom"), request);
+
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        assertEquals("/api/invites/{token}/accept", captor.getValue().path());
+    }
+
+    private static List<ILoggingEvent> captureHandlerLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+            return List.copyOf(appender.list);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 }

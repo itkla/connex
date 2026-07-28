@@ -435,12 +435,18 @@ deployment unless the operator explicitly configures a vendor integration.
 
 - `GET /api/health` — liveness. Anonymous, returns `200 {"status":"UP"}` while the process serves
   traffic. Safe for load-balancer checks; carries no version or build information.
-- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable and all
-  Flyway migrations are applied, otherwise `503`. Status words only — the body never carries
-  exception details. Gate restarts/upgrades on this endpoint.
-- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. **Never anonymous**:
-  authenticate with a logged-in session or configure a static scrape token and send it as
-  `Authorization: Bearer <token>`. Unset token = endpoint unavailable to scrapers.
+- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable, all Flyway
+  migrations are applied, and every startup task has finished, otherwise `503`. The body reports
+  the three checks separately (`checks.db`, `checks.migrations`, `checks.startup`) as status words
+  only — never exception details. Because the embedded server accepts connections before startup
+  tasks finish, this endpoint — not TCP connectivity — is what restarts and upgrades must gate on.
+  Startup tasks (backfills, secret rewrap) run once per upgrade and can take minutes on a large
+  dataset, so give any deployment health gate a timeout that accommodates them.
+- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. Readable **only** with
+  the operator-configured scrape token (`CONNEX_METRICS_SCRAPE_TOKEN`), sent as
+  `Authorization: Bearer <token>`; an ordinary authenticated session cannot read it and neither can
+  a `HEAD` request. Unset token = endpoint unavailable to every caller, which the backend warns
+  about at startup.
 
 **Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
 unexpected `500` responses include the same id in the JSON body. Production logs are structured

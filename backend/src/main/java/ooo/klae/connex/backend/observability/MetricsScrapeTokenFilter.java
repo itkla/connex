@@ -22,11 +22,16 @@ import jakarta.servlet.http.HttpServletResponse;
  * Authenticates only the metrics scrape route with the operator-configured bearer token.
  */
 public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
+    /**
+     * The only authority that may read the metrics endpoint.
+     */
+    public static final String SCRAPE_AUTHORITY = "METRICS_SCRAPE";
+
     private static final String METRICS_PATH = "/api/metrics";
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String PRINCIPAL = "metrics-scraper";
     private static final SimpleGrantedAuthority AUTHORITY =
-            new SimpleGrantedAuthority("METRICS_SCRAPE");
+            new SimpleGrantedAuthority(SCRAPE_AUTHORITY);
 
     private final byte[] configuredToken;
 
