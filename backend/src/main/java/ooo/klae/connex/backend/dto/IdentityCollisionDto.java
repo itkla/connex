@@ -10,8 +10,9 @@ import java.util.List;
  * @param normalizedValue canonical colliding value
  * @param collisionSize number of currently visible members
  * @param rebuiltAt collision artifact rebuild timestamp
- * @param members bounded sample of the visible records participating in the collision, shorter
- *     than {@code collisionSize} when the group exceeds the per-group member bound
+ * @param members bounded first page of the visible records participating in the collision
+ * @param membersTruncated whether the group holds more visible members than {@code members}
+ *     carries, in which case the remainder is reachable through the group member endpoint
  */
 public record IdentityCollisionDto(
         String recordType,
@@ -19,5 +20,6 @@ public record IdentityCollisionDto(
         String normalizedValue,
         int collisionSize,
         LocalDateTime rebuiltAt,
-        List<IdentityCollisionMemberDto> members) {
+        List<IdentityCollisionMemberDto> members,
+        boolean membersTruncated) {
 }

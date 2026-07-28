@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.IdentityCollisionDto;
+import ooo.klae.connex.backend.dto.IdentityCollisionMemberDto;
+import ooo.klae.connex.backend.dto.IdentityCollisionMemberQuery;
 import ooo.klae.connex.backend.dto.IdentityCollisionQuery;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.IdentityCollisionService;
@@ -34,5 +36,17 @@ public class IdentityCollisionController {
     public PageResponse<IdentityCollisionDto> list(
             @Valid @ModelAttribute IdentityCollisionQuery query) {
         return identityCollisionService.list(query);
+    }
+
+    /**
+     * Returns one keyset page of a single collision group's visible members.
+     * @param query group identity and member cursor
+     * @return collision member page
+     */
+    @GetMapping("/members")
+    @RequirePermission(Permission.REPORT_READ)
+    public PageResponse<IdentityCollisionMemberDto> listMembers(
+            @Valid @ModelAttribute IdentityCollisionMemberQuery query) {
+        return identityCollisionService.listMembers(query);
     }
 }

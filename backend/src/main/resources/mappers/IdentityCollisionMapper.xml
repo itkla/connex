@@ -3,6 +3,11 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.IdentityCollisionMapper">
 
+  <sql id="visiblePersonRestriction">
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
+  </sql>
+
   <sql id="visibleCollisionMembers">
     SELECT 'person' AS record_type,
            pi.kind,
@@ -19,8 +24,7 @@
       AND p.id = pi.person_id
     WHERE ic.workspace_id = #{workspaceId}
       AND ic.person_identity_id IS NOT NULL
-      AND p.suspended_at IS NULL
-      AND p.provision_ceased_at IS NULL
+      <include refid="visiblePersonRestriction"/>
     UNION ALL
     SELECT 'company' AS record_type,
            ci.kind,
@@ -130,38 +134,86 @@
 
   <select id="findVisibleMembers"
           resultType="ooo.klae.connex.backend.dto.IdentityCollisionMemberRow">
-    WITH visible_collision_members AS (
-      <include refid="visibleCollisionMembers"/>
-    ),
-    sized_collision_members AS (
-      SELECT record_type,
-             kind,
-             normalized_value,
-             record_id,
-             record_name,
-             COUNT(*) OVER (
-               PARTITION BY record_type, kind, normalized_value
-             ) AS collision_size,
-             ROW_NUMBER() OVER (
-               PARTITION BY record_type, kind, normalized_value
-               ORDER BY record_id
-             ) AS member_rank
-      FROM visible_collision_members
-    )
     SELECT record_type, kind, normalized_value, record_id, record_name
-    FROM sized_collision_members
-    WHERE collision_size &gt;= 2
-      AND member_rank &lt;= #{memberLimit}
-      AND (
-        <foreach item="group" collection="groups" separator=" OR ">
-          (
-            record_type = #{group.recordType}
-            AND kind = #{group.kind}
-            AND normalized_value = #{group.normalizedValue}
-          )
-        </foreach>
-      )
+    FROM (
+      <foreach item="group" collection="groups" separator=" UNION ALL ">
+        <choose>
+          <when test="group.recordType == 'person'">
+            (SELECT 'person' AS record_type,
+                    pi.kind AS kind,
+                    pi.normalized_value AS normalized_value,
+                    pi.person_id AS record_id,
+                    p.name AS record_name
+             FROM person_identity pi
+             JOIN identity_collision ic
+               ON ic.workspace_id = pi.workspace_id
+               AND ic.person_identity_id = pi.id
+             JOIN person p
+               ON p.workspace_id = pi.workspace_id
+               AND p.id = pi.person_id
+             WHERE pi.workspace_id = #{workspaceId}
+               AND pi.kind = #{group.kind}
+               AND pi.normalized_value = #{group.normalizedValue}
+               AND pi.person_id &gt; #{afterRecordId}
+               <include refid="visiblePersonRestriction"/>
+             ORDER BY pi.person_id
+             LIMIT #{memberLimit})
+          </when>
+          <otherwise>
+            (SELECT 'company' AS record_type,
+                    ci.kind AS kind,
+                    ci.normalized_value AS normalized_value,
+                    ci.company_id AS record_id,
+                    c.name AS record_name
+             FROM company_identity ci
+             JOIN identity_collision ic
+               ON ic.workspace_id = ci.workspace_id
+               AND ic.company_identity_id = ci.id
+             JOIN company c
+               ON c.workspace_id = ci.workspace_id
+               AND c.id = ci.company_id
+             WHERE ci.workspace_id = #{workspaceId}
+               AND ci.kind = #{group.kind}
+               AND ci.normalized_value = #{group.normalizedValue}
+               AND ci.company_id &gt; #{afterRecordId}
+             ORDER BY ci.company_id
+             LIMIT #{memberLimit})
+          </otherwise>
+        </choose>
+      </foreach>
+    ) bounded_members
     ORDER BY record_type, kind, normalized_value, record_id
+  </select>
+
+  <select id="countVisibleGroupMembers" resultType="long">
+    SELECT COUNT(*)
+    <choose>
+      <when test="recordType == 'person'">
+        FROM person_identity pi
+        JOIN identity_collision ic
+          ON ic.workspace_id = pi.workspace_id
+          AND ic.person_identity_id = pi.id
+        JOIN person p
+          ON p.workspace_id = pi.workspace_id
+          AND p.id = pi.person_id
+        WHERE pi.workspace_id = #{workspaceId}
+          AND pi.kind = #{kind}
+          AND pi.normalized_value = #{normalizedValue}
+          <include refid="visiblePersonRestriction"/>
+      </when>
+      <otherwise>
+        FROM company_identity ci
+        JOIN identity_collision ic
+          ON ic.workspace_id = ci.workspace_id
+          AND ic.company_identity_id = ci.id
+        JOIN company c
+          ON c.workspace_id = ci.workspace_id
+          AND c.id = ci.company_id
+        WHERE ci.workspace_id = #{workspaceId}
+          AND ci.kind = #{kind}
+          AND ci.normalized_value = #{normalizedValue}
+      </otherwise>
+    </choose>
   </select>
 
 </mapper>

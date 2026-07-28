@@ -26,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -46,7 +47,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * Full security-filter-chain coverage for the workspace collision report endpoint.
  */
 @SpringBootTest
-@Transactional
+@Transactional(isolation = Isolation.REPEATABLE_READ)
 class IdentityCollisionIntegrationTest {
 
     private static final String PASSWORD = "Identity-Collision-Pw1!";
@@ -233,6 +234,185 @@ class IdentityCollisionIntegrationTest {
             .andExpect(jsonPath("$.items").isEmpty())
             .andExpect(content().string(Matchers.not(Matchers.containsString("Suspended Two"))))
             .andExpect(content().string(Matchers.not(Matchers.containsString("Ceased Two"))));
+    }
+
+    @Test
+    void unauthenticatedMemberPageRequestIsRejected() throws Exception {
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "anything.example"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void memberPageRequiresReportReadAndValidatedGroupIdentity() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace("identity-member-rbac");
+        User denied = newMember(workspace, "member");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Identity member denied " + suffix());
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("GOAL_READ"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), denied.getId(), role.getId());
+        User reader = newMember(workspace, "member");
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "anything.example")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(login(denied.getUsername())))
+            .andExpect(status().isForbidden());
+
+        MockHttpSession session = login(reader.getUsername());
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "person")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "anything.example")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "anything.example")
+                .queryParam("size", "101")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void oversizedGroupsFlagTruncationAndStayFullyReachableThroughTheMemberCursor() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace("identity-truncated");
+        User reader = newMember(workspace, "member");
+        List<String> names = new java.util.ArrayList<>();
+        for (int index = 0; index < 25; index++) {
+            names.add("Crowded Company " + index);
+        }
+        createCompanyDomainGroup(workspace, "crowded.example", names);
+        rebuild(workspace.getId());
+        MockHttpSession session = login(reader.getUsername());
+        List<Integer> memberIds = jdbcTemplate.queryForList(
+            """
+            SELECT company_id
+            FROM company_identity
+            WHERE workspace_id = ? AND kind = 'domain' AND normalized_value = 'crowded.example'
+            ORDER BY company_id
+            """,
+            Integer.class,
+            workspace.getId());
+
+        mockMvc.perform(get("/api/identity-collisions")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].collisionSize").value(25))
+            .andExpect(jsonPath("$.items[0].members.length()").value(20))
+            .andExpect(jsonPath("$.items[0].membersTruncated").value(true))
+            .andExpect(jsonPath("$.items[0].members[0].recordId").value(memberIds.getFirst()))
+            .andExpect(jsonPath("$.items[0].members[19].recordId").value(memberIds.get(19)));
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "crowded.example")
+                .queryParam("afterRecordId", String.valueOf(memberIds.get(19)))
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(25))
+            .andExpect(jsonPath("$.items.length()").value(5))
+            .andExpect(jsonPath("$.items[0].recordId").value(memberIds.get(20)))
+            .andExpect(jsonPath("$.items[4].recordId").value(memberIds.get(24)))
+            .andExpect(content().string(Matchers.containsString("Crowded Company 24")));
+    }
+
+    @Test
+    void memberPagesNeverCrossWorkspaces() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace current = newWorkspace("identity-member-current");
+        Workspace other = newWorkspace("identity-member-foreign");
+        User reader = newMember(current, "member");
+        workspaceMapper.addMember(other.getId(), reader.getId(), "member");
+        createCompanyDomainGroup(
+            current, "shared-value.example", List.of("Local Member One", "Local Member Two"));
+        createCompanyDomainGroup(
+            other,
+            "shared-value.example",
+            List.of("Foreign Member One", "Foreign Member Two", "Foreign Member Three"));
+        rebuild(current.getId());
+        rebuild(other.getId());
+        MockHttpSession session = login(reader.getUsername());
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "shared-value.example")
+                .header("X-Workspace-Id", current.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(2))
+            .andExpect(content().string(Matchers.containsString("Local Member One")))
+            .andExpect(content().string(Matchers.not(Matchers.containsString("Foreign Member"))));
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "shared-value.example")
+                .header("X-Workspace-Id", other.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(3))
+            .andExpect(content().string(Matchers.not(Matchers.containsString("Local Member"))));
+    }
+
+    @Test
+    void memberPagesStaySilentForSuppressedAndNonCollidingValues() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace("identity-member-suppressed");
+        User reader = newMember(workspace, "member");
+        List<Person> restricted = createPersonEmailGroup(
+            workspace,
+            "member-suppressed@example.com",
+            List.of("Member Suppressed One", "Member Suppressed Two"),
+            List.of("member-suppressed-one@example.com", "member-suppressed-two@example.com"));
+        rebuild(workspace.getId());
+        personMapper.updateProcessingRestrictions(
+            workspace.getId(), restricted.getFirst().getId(), true, false);
+        MockHttpSession session = login(reader.getUsername());
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "person")
+                .queryParam("kind", "email")
+                .queryParam("normalizedValue", "member-suppressed@example.com")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(0))
+            .andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(content().string(Matchers.not(Matchers.containsString("Member Suppressed Two"))));
+
+        mockMvc.perform(get("/api/identity-collisions/members")
+                .queryParam("recordType", "company")
+                .queryParam("kind", "domain")
+                .queryParam("normalizedValue", "never-collided.example")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(0))
+            .andExpect(jsonPath("$.items").isEmpty());
     }
 
     private void rebuild(int workspaceId) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupKey;
 import ooo.klae.connex.backend.dto.IdentityCollisionGroupRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberRow;
 
@@ -200,7 +202,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         List<IdentityCollisionGroupRow> page =
             collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 1, 1);
         List<IdentityCollisionMemberRow> members =
-            collisionMapper.findVisibleMembers(workspace.getId(), page, 10);
+            collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 10);
 
         assertEquals(3L, collisionMapper.countVisibleGroups(
             workspace.getId(), "company", "domain"));
@@ -224,22 +226,122 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         List<IdentityCollisionGroupRow> page =
             collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 10, 0);
         List<IdentityCollisionMemberRow> members =
-            collisionMapper.findVisibleMembers(workspace.getId(), page, 2);
+            collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 2);
 
         assertEquals(5, page.getFirst().getCollisionSize());
         assertEquals(
-            jdbcTemplate.queryForList(
-                """
-                SELECT company_id
-                FROM company_identity
-                WHERE workspace_id = ? AND kind = 'domain' AND normalized_value = ?
-                ORDER BY company_id
-                LIMIT 2
-                """,
-                Integer.class,
-                workspace.getId(),
-                "bounded.example"),
+            memberIds("bounded.example", 0, 2),
             members.stream().map(member -> member.getRecordId()).toList());
+    }
+
+    @Test
+    void everyRequestedGroupGetsItsOwnBoundedPageInOneRead() {
+        createCompanyDomainGroup("first-bounded.example", 4);
+        createCompanyDomainGroup("second-bounded.example", 5);
+        rebuild(workspace.getId());
+
+        List<IdentityCollisionGroupRow> page =
+            collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 10, 0);
+        List<IdentityCollisionMemberRow> members =
+            collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 2);
+
+        assertEquals(2, page.size());
+        assertEquals(4, members.size());
+        assertEquals(
+            List.of(
+                "first-bounded.example", "first-bounded.example",
+                "second-bounded.example", "second-bounded.example"),
+            members.stream().map(member -> member.getNormalizedValue()).toList());
+        assertEquals(
+            memberIds("first-bounded.example", 0, 2),
+            members.stream()
+                .filter(member -> "first-bounded.example".equals(member.getNormalizedValue()))
+                .map(member -> member.getRecordId())
+                .toList());
+        assertEquals(
+            memberIds("second-bounded.example", 0, 2),
+            members.stream()
+                .filter(member -> "second-bounded.example".equals(member.getNormalizedValue()))
+                .map(member -> member.getRecordId())
+                .toList());
+    }
+
+    @Test
+    void theMemberCursorReachesEveryRecordPastTheReportBound() {
+        createCompanyDomainGroup("cursor.example", 5);
+        rebuild(workspace.getId());
+        IdentityCollisionGroupKey key =
+            new IdentityCollisionGroupKey("company", "domain", "cursor.example");
+        List<Integer> all = memberIds("cursor.example", 0, 5);
+
+        List<IdentityCollisionMemberRow> second =
+            collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), all.get(1), 2);
+        List<IdentityCollisionMemberRow> last =
+            collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), all.get(3), 2);
+        List<IdentityCollisionMemberRow> exhausted =
+            collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), all.getLast(), 2);
+
+        assertEquals(
+            List.of(all.get(2), all.get(3)),
+            second.stream().map(member -> member.getRecordId()).toList());
+        assertEquals(
+            List.of(all.get(4)),
+            last.stream().map(member -> member.getRecordId()).toList());
+        assertEquals(List.of(), exhausted);
+    }
+
+    @Test
+    void restrictedMembersNeverConsumeASlotInABoundedMemberPage() {
+        Company company = newCompany();
+        List<Person> people = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+            Person person = newPerson(
+                workspace, company, "slot@example.com", "090-5555-000" + index);
+            insertPersonIdentity(person, "email", "slot@example.com");
+            people.add(person);
+        }
+        assertEquals(4, rebuild(workspace.getId()));
+        personMapper.updateProcessingRestrictions(
+            workspace.getId(), people.getFirst().getId(), true, false);
+        IdentityCollisionGroupKey key =
+            new IdentityCollisionGroupKey("person", "email", "slot@example.com");
+
+        List<IdentityCollisionMemberRow> members =
+            collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), 0, 2);
+
+        assertEquals(
+            3L,
+            collisionMapper.countVisibleGroupMembers(
+                workspace.getId(), "person", "email", "slot@example.com"));
+        assertEquals(
+            List.of(people.get(1).getId(), people.get(2).getId()),
+            members.stream().map(member -> member.getRecordId()).toList());
+    }
+
+    @Test
+    void groupMemberCountsAreWorkspaceScopedAndRestrictionAware() {
+        createCompanyDomainGroup("counted.example", 3);
+        rebuild(workspace.getId());
+        Workspace other = newWorkspace("collision-count");
+        createCompanyDomainGroup(other, "counted.example", 4);
+        rebuild(other.getId());
+
+        assertEquals(
+            3L,
+            collisionMapper.countVisibleGroupMembers(
+                workspace.getId(), "company", "domain", "counted.example"));
+        assertEquals(
+            4L,
+            collisionMapper.countVisibleGroupMembers(
+                other.getId(), "company", "domain", "counted.example"));
+        assertEquals(
+            0L,
+            collisionMapper.countVisibleGroupMembers(
+                workspace.getId(), "company", "domain", "absent.example"));
+        assertEquals(
+            0L,
+            collisionMapper.countVisibleGroupMembers(
+                workspace.getId(), "person", "email", "counted.example"));
     }
 
     @Test
@@ -286,6 +388,32 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         assertEquals(1L, collisionMapper.countVisibleGroups(workspace.getId(), null, null));
         assertEquals(List.of("local.example"),
             local.stream().map(group -> group.getNormalizedValue()).toList());
+    }
+
+    private static List<IdentityCollisionGroupKey> keysOf(List<IdentityCollisionGroupRow> groups) {
+        return groups.stream()
+            .map(group -> new IdentityCollisionGroupKey(
+                group.getRecordType(), group.getKind(), group.getNormalizedValue()))
+            .toList();
+    }
+
+    private List<Integer> memberIds(String normalizedValue, int afterCompanyId, int limit) {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT company_id
+            FROM company_identity
+            WHERE workspace_id = ?
+              AND kind = 'domain'
+              AND normalized_value = ?
+              AND company_id > ?
+            ORDER BY company_id
+            LIMIT ?
+            """,
+            Integer.class,
+            workspace.getId(),
+            normalizedValue,
+            afterCompanyId,
+            limit);
     }
 
     private int rebuild(int workspaceId) {
