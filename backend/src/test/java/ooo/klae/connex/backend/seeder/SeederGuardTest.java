@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.seeder;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -11,10 +14,13 @@ import static org.mockito.Mockito.when;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
+import java.util.List;
+import java.util.Map;
 
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
@@ -125,7 +131,7 @@ class SeederGuardTest {
             )
         );
 
-        assertTrue(exception.getMessage().contains("dbname"));
+        assertTrue(exception.getMessage().contains("Connector/J query property"));
     }
 
     @Test
@@ -140,7 +146,7 @@ class SeederGuardTest {
                 selector
             );
 
-            assertTrue(exception.getMessage().contains("query parameter"), selector);
+            assertTrue(exception.getMessage().contains("Connector/J query property"), selector);
         }
         for (String selector : new String[] {"db%6Eame", "data%62ase"}) {
             IllegalStateException exception = assertThrows(
@@ -152,7 +158,7 @@ class SeederGuardTest {
                 selector
             );
 
-            assertTrue(exception.getMessage().contains("query parameter"), selector);
+            assertTrue(exception.getMessage().contains("Connector/J query property"), selector);
         }
     }
 
@@ -166,7 +172,7 @@ class SeederGuardTest {
             )
         );
 
-        assertTrue(exception.getMessage().contains("host"));
+        assertTrue(exception.getMessage().startsWith("Seeder refused:"));
     }
 
     @Test
@@ -368,29 +374,33 @@ class SeederGuardTest {
     }
 
     @Test
-    void permitsAbsentAndWhitespaceOnlyHikariConnectionTestQuery() throws SQLException {
-        for (String statement : new String[] {null, " \t "}) {
-            MockEnvironment environment = seederEnvironment().withProperty(
-                "spring.datasource.url",
+    void permitsOnlyAbsentHikariConnectionTestQuery() throws SQLException {
+        MockEnvironment environment = seederEnvironment().withProperty(
+            "spring.datasource.url",
+            "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+        );
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            seederDataSource(
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
-            );
-            if (statement != null) {
-                environment.withProperty(
-                    "spring.datasource.hikari.connection-test-query",
-                    statement
-                );
-            }
-            SeederGuard guard = new SeederGuard(
-                environment,
-                new DeploymentProperties(),
-                new SeederProperties(),
-                seederDataSource(
-                    "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
-                )
-            );
+            )
+        );
 
-            assertDoesNotThrow(() -> guard.verify());
-        }
+        assertDoesNotThrow(() -> guard.verify());
+
+        environment.withProperty("spring.datasource.hikari.connection-test-query", " ");
+        DataSource dataSource = mock(DataSource.class);
+        SeederGuard blankQueryGuard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        assertThrows(IllegalStateException.class, blankQueryGuard::verify);
+        verifyNoInteractions(dataSource);
     }
 
     @Test
@@ -461,7 +471,6 @@ class SeederGuardTest {
             assertThrows(IllegalStateException.class, guard::verify);
 
         assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
-        assertTrue(exception.getMessage().contains("scratch"));
     }
 
     @Test
@@ -483,17 +492,16 @@ class SeederGuardTest {
             assertThrows(IllegalStateException.class, guard::verify);
 
         assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
-        assertTrue(exception.getMessage().contains("connex_pub"));
     }
 
     @Test
     void refusesEveryExplicitlyConfiguredDeploymentProfile() {
         for (String profile : new String[] {"saas", "silo", "on-prem"}) {
-            DeploymentProperties deployment = new DeploymentProperties();
-            deployment.setProfile(profile);
+            MockEnvironment environment = seederEnvironment()
+                .withProperty("connex.deployment.profile", profile);
             SeederGuard guard = new SeederGuard(
-                seederEnvironment(),
-                deployment,
+                environment,
+                new DeploymentProperties(),
                 new SeederProperties(),
                 mock(DataSource.class)
             );
@@ -501,7 +509,7 @@ class SeederGuardTest {
             IllegalStateException exception =
                 assertThrows(IllegalStateException.class, guard::verify);
 
-            assertTrue(exception.getMessage().contains(profile));
+            assertTrue(exception.getMessage().contains("connex.deployment.profile"));
         }
     }
 
@@ -528,7 +536,146 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, guard::verify);
 
-        assertTrue(exception.getMessage().contains("catalog connex_pub"));
+        assertTrue(exception.getMessage().contains("protected connex_pub"));
+    }
+
+    @Test
+    void sanitizesUncheckedDatasourceAcquisitionFailure() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        when(dataSource.getConnection()).thenThrow(
+            new IllegalStateException("jdbc:mysql://secret.example/connex_pub")
+        );
+        SeederGuard guard = new SeederGuard(
+            seederEnvironment().withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            ),
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertCleanRefusal(
+            exception,
+            "Seeder refused: could not verify effective JDBC target"
+        );
+    }
+
+    @Test
+    void sanitizesNullConnectionMetadata() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getMetaData()).thenReturn(null);
+        SeederGuard guard = new SeederGuard(
+            seederEnvironment().withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            ),
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertCleanRefusal(
+            exception,
+            "Seeder refused: could not verify effective JDBC target"
+        );
+    }
+
+    @Test
+    void sanitizesUncheckedMetadataDriverFailure() throws SQLException {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metaData = mock(DatabaseMetaData.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getMetaData()).thenReturn(metaData);
+        when(metaData.getURL()).thenThrow(
+            new IllegalArgumentException("driver exposed a sensitive target")
+        );
+        SeederGuard guard = new SeederGuard(
+            seederEnvironment().withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            ),
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertCleanRefusal(
+            exception,
+            "Seeder refused: could not verify effective JDBC target"
+        );
+    }
+
+    @Test
+    void sanitizesStandaloneUncheckedConnectionCloseFailure() throws SQLException {
+        DataSource dataSource = dataSourceAt(
+            "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED",
+            "connex_seeder",
+            null
+        );
+        Connection connection = dataSource.getConnection();
+        doThrow(new IllegalStateException("close exposed a sensitive target"))
+            .when(connection)
+            .close();
+        SeederGuard guard = new SeederGuard(
+            seederEnvironment().withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            ),
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertCleanRefusal(
+            exception,
+            "Seeder refused: could not verify effective JDBC target"
+        );
+    }
+
+    @Test
+    void cleansIntentionalMismatchWithSuppressedCloseFailure() throws SQLException {
+        DataSource dataSource = dataSourceAt(
+            "jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED",
+            "connex_seeder",
+            null
+        );
+        Connection connection = dataSource.getConnection();
+        doThrow(new SQLException("close exposed a sensitive target"))
+            .when(connection)
+            .close();
+        SeederGuard guard = new SeederGuard(
+            seederEnvironment().withProperty(
+                "spring.datasource.url",
+                "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
+            ),
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertCleanRefusal(
+            exception,
+            "Seeder refused: effective datasource metadata URL disagrees with spring.datasource.url"
+        );
     }
 
     @Test
@@ -565,13 +712,12 @@ class SeederGuardTest {
             .withProperty(
                 "spring.flyway.url",
                 "jdbc:mysql://db-two.example.test:3306/connex_seeder?sslMode=VERIFY_IDENTITY"
-            );
-        SeederProperties properties = new SeederProperties();
-        properties.setAllowRemoteHost(true);
+            )
+            .withProperty("connex.seeder.allow-remote-host", "true");
         SeederGuard guard = new SeederGuard(
             environment,
             new DeploymentProperties(),
-            properties,
+            new SeederProperties(),
             mock(DataSource.class)
         );
 
@@ -669,7 +815,6 @@ class SeederGuardTest {
             assertThrows(IllegalStateException.class, guard::verify);
 
         assertTrue(exception.getMessage().contains("spring.flyway.default-schema"));
-        assertTrue(exception.getMessage().contains("connex_dev"));
     }
 
     @Test
@@ -691,7 +836,6 @@ class SeederGuardTest {
             assertThrows(IllegalStateException.class, guard::verify);
 
         assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
-        assertTrue(exception.getMessage().contains("connex_dev"));
     }
 
     @Test
@@ -713,7 +857,6 @@ class SeederGuardTest {
             assertThrows(IllegalStateException.class, guard::verify);
 
         assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
-        assertTrue(exception.getMessage().contains("Connex_Seeder"));
     }
 
     @Test
@@ -757,7 +900,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, guard::verify);
 
-        assertTrue(exception.getMessage().contains("connex_archive"));
+        assertTrue(exception.getMessage().contains("spring.flyway.schemas"));
     }
 
     @Test
@@ -928,8 +1071,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, () -> guard.verify());
 
-        assertTrue(exception.getMessage().contains("connex_dev"));
-        assertTrue(exception.getMessage().contains("connex_seeder"));
+        assertTrue(exception.getMessage().contains("exact configured target"));
     }
 
     @Test
@@ -952,8 +1094,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, guard::verify);
 
-        assertTrue(exception.getMessage().contains("connex_seeder"));
-        assertTrue(exception.getMessage().contains("Connex_Seeder"));
+        assertTrue(exception.getMessage().contains("exact configured target"));
     }
 
     @Test
@@ -978,7 +1119,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, () -> guard.verify(flywayDataSource));
 
-        assertTrue(exception.getMessage().contains("connex_dev"));
+        assertTrue(exception.getMessage().contains("exact configured target"));
     }
 
     @Test
@@ -1042,8 +1183,31 @@ class SeederGuardTest {
 
     private static MockEnvironment seederEnvironment() {
         MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.seeder.enabled", "true")
             .withProperty("connex.maintenance.mode", "seeder")
-            .withProperty("spring.main.web-application-type", "none");
+            .withProperty("spring.main.web-application-type", "none")
+            .withProperty("connex.tenancy.routing.mode", "single-database")
+            .withProperty("connex.object-storage.legacy-migration.mode", "off")
+            .withProperty("spring.flyway.placeholder-replacement", "false");
+        environment.getPropertySources().addLast(new MapPropertySource(
+            "Config resource 'class path resource [application-seeder.yml]'",
+            Map.of(
+                "spring.flyway.locations",
+                "classpath:db/migration",
+                "spring.flyway.callback-locations",
+                List.of(),
+                "spring.sql.init.mode",
+                "never",
+                "spring.sql.init.data-locations",
+                SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION,
+                "mybatis.mapper-locations",
+                SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS,
+                "mybatis.type-aliases-package",
+                SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE,
+                "mybatis.configuration.map-underscore-to-camel-case",
+                true
+            )
+        ));
         environment.setActiveProfiles("seeder");
         return environment;
     }
@@ -1063,6 +1227,14 @@ class SeederGuardTest {
         when(connection.getCatalog()).thenReturn(catalog);
         when(connection.getSchema()).thenReturn(schema);
         return dataSource;
+    }
+
+    private static void assertCleanRefusal(
+            IllegalStateException exception,
+            String expectedMessage) {
+        assertEquals(expectedMessage, exception.getMessage());
+        assertNull(exception.getCause());
+        assertEquals(0, exception.getSuppressed().length);
     }
 
     @Test

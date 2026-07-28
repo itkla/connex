@@ -104,7 +104,7 @@ tasks.named('test') {
 tasks.register('seedData', org.springframework.boot.gradle.tasks.run.BootRun) {
 	group = 'application'
 	description = 'Seeds deterministic tenant-scoped CRM data into a guarded database.'
-	mainClass = 'ooo.klae.connex.backend.BackendApplication'
+	mainClass = 'ooo.klae.connex.backend.seeder.SeederApplication'
 	classpath = sourceSets.main.runtimeClasspath
 	systemProperty 'spring.devtools.restart.enabled', 'false'
 	args '--spring.main.web-application-type=none',

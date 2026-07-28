@@ -11,12 +11,15 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -43,13 +46,19 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             "CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED"
         );
+        SeederStartupConfigurationValidator.JdbcTarget configuredTarget =
+            SeederStartupConfigurationValidator.verifiedTarget(
+                configuredUrl,
+                "CONNEX_DB_URL",
+                false
+            );
         username = System.getenv("CONNEX_DB_USERNAME");
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(
             username != null && password != null,
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping seeder routing test"
         );
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
+        bootstrapUrl = mysqlBootstrapUrl(configuredTarget);
         try (Connection connection = DriverManager.getConnection(
                 bootstrapUrl,
                 username,
@@ -59,16 +68,16 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             statement.execute("DROP DATABASE IF EXISTS `" + CONTROL_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + BLOCKED_CATALOG + "`");
             databaseAccessible = true;
-        } catch (SQLException exception) {
+        } catch (SQLException ignored) {
             throw new IllegalStateException(
                 "Cannot prepare seeder guard scratch catalogs",
-                exception
+                (Throwable) null
             );
         }
     }
 
     @AfterAll
-    static void removeScratchCatalogs() throws SQLException {
+    static void removeScratchCatalogs() {
         if (!databaseAccessible) {
             return;
         }
@@ -80,6 +89,11 @@ class SeederGuardDatabaseRoutingIntegrationTest {
                 Statement statement = connection.createStatement()) {
             statement.execute("DROP DATABASE IF EXISTS `" + CONTROL_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + BLOCKED_CATALOG + "`");
+        } catch (SQLException ignored) {
+            throw new IllegalStateException(
+                "Cannot remove seeder guard scratch catalogs",
+                (Throwable) null
+            );
         }
     }
 
@@ -149,20 +163,42 @@ class SeederGuardDatabaseRoutingIntegrationTest {
     }
 
     private static MockEnvironment seederEnvironment() {
-        return new MockEnvironment()
-            .withProperty("spring.profiles.active", "seeder")
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.seeder.enabled", "true")
             .withProperty("connex.maintenance.mode", "seeder")
             .withProperty("spring.main.web-application-type", "none")
-            .withProperty("connex.tenancy.routing.mode", "single-database");
+            .withProperty("connex.tenancy.routing.mode", "single-database")
+            .withProperty("connex.object-storage.legacy-migration.mode", "off")
+            .withProperty("spring.flyway.placeholder-replacement", "false");
+        environment.getPropertySources().addLast(new MapPropertySource(
+            "Config resource 'class path resource [application-seeder.yml]'",
+            Map.of(
+                "spring.flyway.locations",
+                "classpath:db/migration",
+                "spring.flyway.callback-locations",
+                List.of(),
+                "spring.sql.init.mode",
+                "never",
+                "spring.sql.init.data-locations",
+                SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION,
+                "mybatis.mapper-locations",
+                SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS,
+                "mybatis.type-aliases-package",
+                SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE,
+                "mybatis.configuration.map-underscore-to-camel-case",
+                true
+            )
+        ));
+        environment.setActiveProfiles("seeder");
+        return environment;
     }
 
-    private static String withCatalog(String jdbcUrl, String catalog) {
-        int authorityEnd = jdbcUrl.indexOf('/', "jdbc:mysql://".length());
-        if (authorityEnd < 0) {
-            throw new IllegalArgumentException("CONNEX_DB_URL must include a database path");
-        }
-        int queryStart = jdbcUrl.indexOf('?', authorityEnd);
-        String suffix = queryStart < 0 ? "" : jdbcUrl.substring(queryStart);
-        return jdbcUrl.substring(0, authorityEnd + 1) + catalog + suffix;
+    private static String mysqlBootstrapUrl(
+            SeederStartupConfigurationValidator.JdbcTarget configuredTarget) {
+        String authorityHost = configuredTarget.host().contains(":")
+            ? "[" + configuredTarget.host() + "]"
+            : configuredTarget.host();
+        return "jdbc:mysql://" + authorityHost + ":" + configuredTarget.port()
+            + "/mysql?allowPublicKeyRetrieval=true&sslMode=DISABLED";
     }
 }
