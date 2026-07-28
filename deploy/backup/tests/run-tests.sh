@@ -5,9 +5,10 @@
 # stripped, stubs the few functions that would talk to a server, and drives the
 # selection, coverage, and retention logic against a sandbox backup root.
 #
-# The sandbox cannot live under /tmp because backup_validate_absolute_path
-# rejects it; override the parent with CONNEX_BACKUP_TEST_ROOT if /var/tmp is
-# unsuitable.
+# The sandbox parent is run through the real backup_validate_absolute_path
+# before anything is created, so it cannot live under /tmp any more than a
+# production backup root can; override it with CONNEX_BACKUP_TEST_ROOT if
+# /var/tmp is unsuitable.
 #
 # Usage: deploy/backup/tests/run-tests.sh
 
@@ -17,6 +18,15 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 SANDBOX_PARENT="${CONNEX_BACKUP_TEST_ROOT:-/var/tmp/connex-backup-tests}"
 FAILURES=0
+
+if ! (
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$BACKUP_DIR/connex-backup-lib.sh"
+    backup_validate_absolute_path CONNEX_BACKUP_TEST_ROOT "$SANDBOX_PARENT"
+); then
+    printf 'harness error: sandbox parent %s is not a valid backup root\n' "$SANDBOX_PARENT" >&2
+    exit 1
+fi
 
 mkdir -p "$SANDBOX_PARENT"
 SANDBOX="$(mktemp -d "$SANDBOX_PARENT/run.XXXXXX")"
@@ -109,6 +119,7 @@ case_schema_selection() {
     local status
     CONNEX_BACKUP_SCHEMA_INCLUDE=
     CONNEX_BACKUP_SCHEMA_EXCLUDE=information_schema,performance_schema,mysql,sys
+    CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE=
 
     : > "$log"
     backup_schema_selected connexdb >> "$log"
@@ -129,6 +140,18 @@ case_schema_selection() {
     status=$?
     assert_status scratch_shaped_without_include 1 "$status" || return 1
     assert_contains scratch_shaped_logged 'schema=connex_verify_prod' "$log" || return 1
+
+    CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE=connex_verify_prod
+    : > "$log"
+    backup_schema_selected connex_verify_prod >> "$log"
+    status=$?
+    assert_status scratch_override_wins 0 "$status" || return 1
+    assert_equals scratch_override_silent '' "$(cat "$log")" || return 1
+
+    : > "$log"
+    backup_schema_selected connexdb >> "$log"
+    assert_status scratch_override_keeps_other_schemas 0 "$?" || return 1
+    CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE=
 
     CONNEX_BACKUP_SCHEMA_INCLUDE=connex_verify_prod
     : > "$log"
@@ -205,6 +228,29 @@ case_pitr_filtered_statements() {
     status=$?
     assert_status idle_source_schema_window 0 "$status" || return 1
     assert_equals idle_window_silent '' "$(cat "$log")" || return 1
+
+    {
+        printf '#260101 12:00:00 server id 1  end_log_pos 100 \tQuery\tthread_id=5\texec_time=0\terror_code=0\n'
+        printf 'SET TIMESTAMP=1767268800/*!*/;\n'
+        printf 'ALTER TABLE src.foo ADD COLUMN c INT\n'
+        printf '/*!*/;\n'
+        printf '#260101 12:00:01 server id 1  end_log_pos 200 \tQuery\tthread_id=6\texec_time=0\terror_code=0\n'
+        printf 'SET TIMESTAMP=1767268801/*!*/;\n'
+        printf "ALTER TABLE other.bar COMMENT = '\x00binary'\n"
+        printf '/*!*/;\n'
+    } > "$unfiltered"
+    pitr_extract_query_statements < "$unfiltered" > "$PITR_SCRATCH_FILE"
+    if [ "$(tr -dc '\0' < "$PITR_SCRATCH_FILE" | wc -c)" -eq 0 ]; then
+        printf 'harness error: the decoded window lost its NUL byte\n'
+        return 1
+    fi
+
+    : > "$log"
+    pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
+    status=$?
+    assert_status nul_byte_does_not_blind_the_guard 1 "$status" || return 1
+    assert_contains nul_refusal_reason 'reason=qualified_statement_without_matching_default_database' "$log" || return 1
+    assert_contains nul_dropped_count 'dropped_lines=1' "$log" || return 1
 }
 
 case_pitr_coverage_gap_guard() {
@@ -252,13 +298,15 @@ case_archive_rebases_missing_cursor() {
     source "$SANDBOX/archive-lib.sh"
     local root="$SANDBOX/archive-rebase"
     local log="$SANDBOX/archive-rebase.log"
-    local state
+    local fetched="$SANDBOX/archive-rebase.fetched"
+    local state created_epoch
     mkdir -p "$root/binlog"
     CONNEX_BACKUP_ROOT="$root"
     CONNEX_BACKUP_RETENTION_DAYS=30
     CONNEX_BACKUP_BINLOG_FLUSH=true
     CONNEX_BACKUP_BINLOG_FETCH_MODE=stream
     state="$root/binlog/archive-state"
+    created_epoch=1767830400
     {
         printf 'state_version\t1\n'
         printf 'server_uuid\ttest-uuid\n'
@@ -270,9 +318,16 @@ case_archive_rebases_missing_cursor() {
         printf 'fetch_mode\tstream\n'
     } > "$state"
 
+    : > "$fetched"
     archive_fetch_file() {
-        printf 'unexpected fetch of %s\n' "$1"
-        return 1
+        printf '%s\n' "$1" >> "$fetched"
+        {
+            printf 'metadata_version\t1\n'
+            printf 'file\t%s\n' "$1"
+            printf 'file_created_epoch\t%s\n' "$created_epoch"
+            printf 'last_event_epoch\t%s\n' "$((created_epoch + 600))"
+        } > "$CONNEX_BACKUP_ROOT/binlog/$1.meta"
+        return 0
     }
 
     ARCHIVE_SERVER_UUID=test-uuid
@@ -280,6 +335,7 @@ case_archive_rebases_missing_cursor() {
     ARCHIVE_COVERAGE_UTC=2030-03-17T18:26:40Z
     ARCHIVE_ACTIVE_FILE=binlog.000006
     ARCHIVE_SERVER_LOGS=(
+        "$(printf 'binlog.000004\t120\tNo')"
         "$(printf 'binlog.000005\t120\tNo')"
         "$(printf 'binlog.000006\t60\tNo')"
     )
@@ -292,8 +348,10 @@ case_archive_rebases_missing_cursor() {
     assert_equals deferred_exit 71 "$ARCHIVE_DEFERRED_EXIT" || return 1
     assert_equals rebased_cursor binlog.000005 "$ARCHIVE_LAST_CLOSED" || return 1
     assert_equals coverage_not_advanced 1767225600 "$ARCHIVE_COVERAGE_EPOCH" || return 1
+    assert_equals available_logs_archived "$(printf 'binlog.000004\nbinlog.000005')" "$(cat "$fetched")" || return 1
     assert_file_exists gap_marker "$root/binlog/coverage-gap" || return 1
     assert_contains gap_record 'binlog.000001' "$root/binlog/coverage-gap" || return 1
+    assert_contains gap_scoped_to_first_available "$(printf 'gap\tbinlog.000001\t1767225600\t%s\t' "$created_epoch")" "$root/binlog/coverage-gap" || return 1
 
     archive_publish_state || return 1
     assert_contains published_cursor "$(printf 'last_closed_file\tbinlog.000005')" "$state" || return 1
@@ -302,16 +360,14 @@ case_archive_rebases_missing_cursor() {
     ARCHIVE_DEFERRED_EXIT=0
     ARCHIVE_DEFERRED_PHASE=
     ARCHIVE_COVERAGE_PINNED=false
-    ARCHIVE_CONTIGUOUS_LAST=
     ARCHIVE_LAST_CLOSED=
-    archive_fetch_file() {
-        return 0
-    }
+    : > "$fetched"
     : > "$log"
     archive_process_logs >> "$log" 2>&1
     assert_status second_run_status 0 "$?" || return 1
     assert_equals second_run_not_stalled 0 "$ARCHIVE_DEFERRED_EXIT" || return 1
     assert_equals second_run_cursor binlog.000005 "$ARCHIVE_LAST_CLOSED" || return 1
+    assert_equals second_run_fetches_nothing '' "$(cat "$fetched")" || return 1
     assert_absent second_run_clean 'last_closed_file_missing' "$log" || return 1
 }
 
@@ -388,12 +444,18 @@ case_archive_retention_gap() {
     assert_file_exists archived_recent_file "$root/binlog/binlog.000002" || return 1
     assert_contains gap_marker_record 'binlog.000001' "$root/binlog/coverage-gap" || return 1
 
+    assert_equals gap_coverage_utc "$(date -u -d '@1767225600' +%Y-%m-%dT%H:%M:%SZ)" "$ARCHIVE_COVERAGE_UTC" || return 1
+
     archive_publish_state || return 1
     assert_contains gap_published_coverage "$(printf 'coverage_through_epoch\t1767225600')" "$state" || return 1
 
+    # A first-ever run has no published coverage to fall back on, so a hole
+    # leaves coverage at 0 and PITR fail-closed until the next clean run.
+    printf 'state_version\t1\n' > "$state"
     ARCHIVE_COVERAGE_PINNED=false
-    archive_pin_coverage binlog.000002
-    assert_equals pin_to_contiguous_file "$recent_last" "$ARCHIVE_COVERAGE_EPOCH" || return 1
+    archive_pin_coverage
+    assert_equals pin_without_prior_coverage 0 "$ARCHIVE_COVERAGE_EPOCH" || return 1
+    assert_equals pin_without_prior_coverage_utc '' "$ARCHIVE_COVERAGE_UTC" || return 1
 
     archive_verify_server_retention >> "$log" 2>&1
     assert_status retention_warns_below_ceiling 0 "$?" || return 1
@@ -414,12 +476,23 @@ case_prune_orphan_binlogs() {
     now="$(date +%s)"
     old_created=$((now - 2592000))
 
+    {
+        printf 'state_version\t1\n'
+        printf 'server_uuid\ttest-uuid\n'
+        printf 'last_closed_file\tbinlog.000012\n'
+        printf 'active_file\tbinlog.000013\n'
+    } > "$binlog_dir/archive-state"
+
     write_fake_binlog "$binlog_dir/binlog.000009"
     touch -d '25 hours ago' "$binlog_dir/binlog.000009"
+    write_fake_binlog "$binlog_dir/binlog.0000013"
+    touch -d '25 hours ago' "$binlog_dir/binlog.0000013"
     write_fake_binlog "$binlog_dir/binlog.000010"
     touch -d '1 hour ago' "$binlog_dir/binlog.000010"
     printf 'operator note\n' > "$binlog_dir/operator-notes.txt"
     touch -d '40 days ago' "$binlog_dir/operator-notes.txt"
+    write_fake_binlog "$binlog_dir/legacy-export.202401"
+    touch -d '40 days ago' "$binlog_dir/legacy-export.202401"
     printf 'gap\tbinlog.000001\t1\t2\t2026-01-01T00:00:00Z\n' > "$binlog_dir/coverage-gap"
     touch -d '40 days ago' "$binlog_dir/coverage-gap"
 
@@ -447,9 +520,13 @@ case_prune_orphan_binlogs() {
     prune_binlogs >> "$log" 2>&1
     assert_status prune_status 0 "$?" || return 1
     assert_file_missing expired_orphan_removed "$binlog_dir/binlog.000009" || return 1
+    assert_file_missing long_suffix_orphan_removed "$binlog_dir/binlog.0000013" || return 1
     assert_file_exists young_orphan_kept "$binlog_dir/binlog.000010" || return 1
     assert_file_exists operator_file_kept "$binlog_dir/operator-notes.txt" || return 1
+    assert_file_exists operator_binlog_shaped_file_kept "$binlog_dir/legacy-export.202401" || return 1
+    assert_contains operator_binlog_shaped_file_warned 'file=legacy-export.202401' "$log" || return 1
     assert_file_exists coverage_gap_kept "$binlog_dir/coverage-gap" || return 1
+    assert_file_exists archive_state_kept "$binlog_dir/archive-state" || return 1
     assert_file_missing expired_triplet_removed "$binlog_dir/binlog.000011" || return 1
     assert_file_exists recent_triplet_kept "$binlog_dir/binlog.000012" || return 1
     assert_contains orphan_reason 'reason=orphaned_binlog_without_metadata' "$log" || return 1

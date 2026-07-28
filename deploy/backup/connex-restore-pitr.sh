@@ -402,6 +402,13 @@ pitr_scan_unsafe_statements() {
 # a different default database is exactly what makes such a statement invisible
 # to the replay. Blank separator lines are stripped first: they are an artifact
 # of the extractor and would otherwise cancel out real dropped statements.
+#
+# The whole comparison runs byte-oriented under LC_ALL=C with grep -a. A single
+# NUL byte anywhere in the decoded window - a DDL carrying a binary DEFAULT or
+# COMMENT literal, which mysqlbinlog prints verbatim - otherwise makes grep call
+# the input binary, print nothing and exit 0, which would empty the comparison
+# and turn this guard into an unconditional pass in exactly the case it exists
+# to catch.
 pitr_verify_no_statement_is_filtered_away() {
     local -a dropped=()
     PITR_FILTERED_SCRATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-filtered.XXXXXX")" || return 1
@@ -414,10 +421,13 @@ pitr_verify_no_statement_is_filtered_away() {
         backup_log error pitr_preflight_failed reason filtered_decode
         return 1
     fi
-    mapfile -t dropped < <(comm -23 \
-        <(grep -v '^[[:space:]]*$' "$PITR_SCRATCH_FILE" | sort -u) \
-        <(grep -v '^[[:space:]]*$' "$PITR_FILTERED_SCRATCH_FILE" | sort -u) |
-        grep -F -- "$PITR_SOURCE_SCHEMA")
+    mapfile -t dropped < <(
+        export LC_ALL=C
+        comm -23 \
+            <(grep -a -v '^[[:space:]]*$' "$PITR_SCRATCH_FILE" | sort -u) \
+            <(grep -a -v '^[[:space:]]*$' "$PITR_FILTERED_SCRATCH_FILE" | sort -u) |
+            grep -a -F -- "$PITR_SOURCE_SCHEMA"
+    )
     if [ "${#dropped[@]}" -gt 0 ]; then
         backup_log error pitr_preflight_failed reason qualified_statement_without_matching_default_database \
             source_schema "$PITR_SOURCE_SCHEMA" dropped_lines "${#dropped[@]}" dropped_first "${dropped[0]:0:200}"

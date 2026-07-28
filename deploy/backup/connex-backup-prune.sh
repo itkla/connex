@@ -143,11 +143,59 @@ prune_quarantine_expired_binlog() {
     prune_skip reason "$reason" file "$(basename "$raw")" age_seconds "$age"
 }
 
+# The archive's own file naming, taken from archive-state and - when an operator
+# has removed that file - from the metadata sidecars that are still there. A
+# digit-shaped suffix alone is not the archive's naming: the binlog root is an
+# operator-visible directory, so matching any "*.NNNNNN" would make a file such
+# as legacy-export.202401 a delete target.
+prune_binlog_prefix() {
+    local state="$CONNEX_BACKUP_ROOT/binlog/archive-state"
+    local key candidate meta name
+    for key in active_file last_closed_file; do
+        candidate=
+        if [ -f "$state" ]; then
+            candidate="$(backup_meta_value "$state" "$key" 2>/dev/null)" || candidate=
+        fi
+        if [[ "$candidate" =~ ^(.+)[.][0-9]+$ ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done
+    while IFS= read -r meta; do
+        name="$(basename "${meta%.meta}")"
+        if [[ "$name" =~ ^(.+)[.][0-9]+$ ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f -name '*.meta' ! -name '*.pending' -print | sort)
+    return 0
+}
+
+# An orphan is a file that carries the archive's naming *and* the binary-log
+# magic. Both are required: the name alone would catch operator files, and the
+# magic alone would catch a binlog an operator copied in under a name of their
+# own. The suffix is matched as a number rather than as six digits so a server
+# that has rotated past 999999 is still classified.
+prune_is_orphaned_binlog() {
+    local entry="$1"
+    local prefix="$2"
+    local name
+    name="$(basename "$entry")"
+    if [ "$name" = "${name%.*}" ] || [[ ! "${name##*.}" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if [ -z "$prefix" ] || [ "${name%.*}" != "$prefix" ]; then
+        return 1
+    fi
+    [ "$(od -An -t x1 -N4 "$entry" | tr -d ' \n')" = fe62696e ]
+}
+
 prune_binlogs() {
-    local now legal_age orphan_grace meta raw created_epoch age entry name
+    local now legal_age orphan_grace meta raw created_epoch age entry name prefix
     now="$(date +%s)"
     legal_age=$(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 ))
     orphan_grace=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
+    prefix="$(prune_binlog_prefix)"
     while IFS= read -r meta; do
         raw="${meta%.meta}"
         if ! backup_validate_binlog_triplet "$raw"; then
@@ -188,16 +236,14 @@ prune_binlogs() {
                 # only clock that actually meets the ceiling: mtime is the local
                 # fetch time, which a catch-up run sets to now for content that
                 # is already nearly a month old. Everything else - operator
-                # files, future sidecars - keeps its advisory warning instead of
-                # becoming a delete target.
-                case "$name" in
-                    *.[0-9][0-9][0-9][0-9][0-9][0-9])
-                        prune_quarantine_expired_binlog "$entry" orphaned_binlog_without_metadata "$now" "$orphan_grace"
-                        ;;
-                    *)
-                        prune_skip reason unclassifiable_binlog_entry file "$name"
-                        ;;
-                esac
+                # files, future sidecars, and anything at all when the archive's
+                # naming cannot be determined - keeps its advisory warning
+                # instead of becoming a delete target.
+                if prune_is_orphaned_binlog "$entry" "$prefix"; then
+                    prune_quarantine_expired_binlog "$entry" orphaned_binlog_without_metadata "$now" "$orphan_grace"
+                else
+                    prune_skip reason unclassifiable_binlog_entry file "$name"
+                fi
                 ;;
         esac
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f ! -name '*.pending' -print | sort)

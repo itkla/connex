@@ -83,6 +83,15 @@ backup** (the full run logs `event=backup_summary status=success`).
    --version`) — discover a missing replay tool during a drill, not during a disaster. Air-gapped deployments must mirror that image alongside
    the release images.
 
+   Schema selection defaults to "every schema the server has, minus the system ones".
+   `CONNEX_BACKUP_SCHEMA_INCLUDE` is an **exclusive allowlist**: leave it empty unless you mean
+   to restrict the backup, because once it is set, a schema missing from it is dropped from the
+   backup (the run still succeeds and reports `event=schema_selection schema_count=…`). To keep a
+   schema of your own that happens to be named `connex_verify_*` — the shape the restore-verify
+   scratch schemas use, which are skipped with `reason=restore_verify_scratch` — name it in
+   `CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE`, which lifts only that prefix rule and leaves the rest
+   of the backup scope alone.
+
 3. Verify the first run end-to-end:
 
    ```bash
@@ -174,13 +183,21 @@ The vendor-side reference drill that produced the published RTO above is recorde
   ceiling the first time the archive sees it (a long archive outage, or a first run against an old
   server), and a cursor file the server has purged since the last run. Both fail the run
   (`event=binlog_coverage_gap`, `reason=last_closed_file_missing`) — but only after the run records
-  what it found. Coverage stops at the last event the archive can actually replay instead of
-  advancing to the rotation timestamp, the cursor is re-based onto the newest closed log so the
-  archive is not stuck forever on a file that is never coming back, and the hole is appended to
-  `binlog/coverage-gap`, which no later archive run rewrites and the pruner never deletes. A PITR
-  whose replay window overlaps a recorded hole is refused (`reason=archive_coverage_gap`). The
-  remedy is the one the failure logs: take a new full backup to re-base the point-in-time
-  coordinate.
+  what it found. When the cursor is gone the run still archives every closed log the server does
+  still hold, starting from the oldest, and re-bases the cursor onto the newest of them, so the
+  archive is neither stuck forever on a file that is never coming back nor throwing away logs that
+  are sitting there and fetchable. The hole it appends to `binlog/coverage-gap` therefore spans
+  only what is genuinely missing — from the previously published coverage to the creation of the
+  oldest log still on the server — so a full backup taken after the hole opened stays restorable.
+  That file is append-only: no later archive run rewrites it and the pruner never deletes it.
+  A PITR whose replay window overlaps a recorded hole is refused
+  (`reason=archive_coverage_gap`); the remedy is the one the failure logs — take a new full backup
+  to re-base the point-in-time coordinate, which moves the dump past the hole.
+  A run that hit a hole also refuses to advance published coverage, since it cannot prove it can
+  replay through the hole: it republishes the coverage of the last clean run, and the next clean
+  run (one timer interval later) moves it forward again. A *first-ever* run that hits a hole has no
+  earlier coverage to republish, so it publishes `coverage_through_epoch 0` and PITR is refused
+  with `reason=target_not_archived` until that next run — expected, fail-closed, and transient.
 - **Backups self-verify by default.** `CONNEX_BACKUP_RESTORE_VERIFY=true` restores each fresh dump
   into a throwaway scratch schema and compares base-table counts before the run is marked
   `COMPLETE`, so a gzip-valid but semantically incomplete dump cannot pass as good. Point the
@@ -221,9 +238,11 @@ The vendor-side reference drill that produced the published RTO above is recorde
   it for as long as the server still holds it, so it is quarantined after the 24-hour grace
   (`reason=orphaned_binlog_without_metadata`). That is also the only clock that honours the ceiling:
   the file's mtime is the local fetch time, so a catch-up archive run would otherwise keep month-old
-  events for another 29 days. Anything in the binlog root that is not shaped like a binlog — an
-  operator's own file, a future sidecar — keeps its advisory `event=prune_skipped` warning and is
-  never deleted.
+  events for another 29 days. "Archived binlog" is decided by the archive's own naming — the file
+  prefix recorded in `binlog/archive-state`, or in the metadata sidecars if that file is gone —
+  *and* the binary-log magic bytes. Anything else in the binlog root — an operator's own file, a
+  future sidecar, anything at all when neither source can tell the pruner what the archive's files
+  are called — keeps its advisory `event=prune_skipped` warning and is never deleted.
 - **The newest complete dump is never pruned.** Retention deletes by age, but the single newest
   complete run is exempt: a deployment whose backups have been failing for a month keeps its last
   good dump rather than ending up with nothing. If your data-protection commitments require the

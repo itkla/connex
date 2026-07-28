@@ -164,6 +164,7 @@ backup_set_defaults() {
     : "${CONNEX_BACKUP_FAILED_GRACE_HOURS:=24}"
     : "${CONNEX_BACKUP_SCHEMA_INCLUDE:=}"
     : "${CONNEX_BACKUP_SCHEMA_EXCLUDE:=information_schema,performance_schema,mysql,sys}"
+    : "${CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE:=}"
     : "${CONNEX_BACKUP_DB_HOST:=db}"
     : "${CONNEX_BACKUP_DB_PORT:=3306}"
     : "${CONNEX_BACKUP_DB_USER:=root}"
@@ -204,6 +205,7 @@ backup_set_defaults() {
     export CONNEX_BACKUP_ROOT CONNEX_BACKUP_RETENTION_DAYS
     export CONNEX_BACKUP_MIN_FREE_BYTES CONNEX_BACKUP_FAILED_GRACE_HOURS
     export CONNEX_BACKUP_SCHEMA_INCLUDE CONNEX_BACKUP_SCHEMA_EXCLUDE
+    export CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE
     export CONNEX_BACKUP_DB_HOST CONNEX_BACKUP_DB_PORT CONNEX_BACKUP_DB_USER
     export CONNEX_BACKUP_SOURCE_DEFAULTS_FILE CONNEX_BACKUP_RESTORE_VERIFY
     export CONNEX_BACKUP_VERIFY_DB_HOST CONNEX_BACKUP_VERIFY_DB_PORT
@@ -348,6 +350,7 @@ backup_validate_common() {
     backup_validate_boolean CONNEX_BACKUP_BINLOG_NO_FLUSH_ACK "$CONNEX_BACKUP_BINLOG_NO_FLUSH_ACK" || return "$EXIT_CONFIG"
     backup_validate_schema_list CONNEX_BACKUP_SCHEMA_INCLUDE "$CONNEX_BACKUP_SCHEMA_INCLUDE" || return "$EXIT_CONFIG"
     backup_validate_schema_list CONNEX_BACKUP_SCHEMA_EXCLUDE "$CONNEX_BACKUP_SCHEMA_EXCLUDE" || return "$EXIT_CONFIG"
+    backup_validate_schema_list CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE "$CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE" || return "$EXIT_CONFIG"
     backup_validate_schema_list CONNEX_BACKUP_PROTECTED_SCHEMAS "$CONNEX_BACKUP_PROTECTED_SCHEMAS" || return "$EXIT_CONFIG"
     backup_validate_pattern "$CONNEX_BACKUP_PROTECTED_SCHEMA_PATTERN" || return "$EXIT_CONFIG"
     backup_validate_defaults_file CONNEX_BACKUP_SOURCE_DEFAULTS_FILE "$CONNEX_BACKUP_SOURCE_DEFAULTS_FILE" || return "$EXIT_CONFIG"
@@ -525,9 +528,13 @@ backup_schema_selected() {
     # A restore-verify scratch schema abandoned by an interrupted run holds a
     # copy of source data; it must never be discovered and backed up as if it
     # were customer data of its own. An operator who genuinely owns a schema
-    # with that prefix keeps it by naming it in CONNEX_BACKUP_SCHEMA_INCLUDE,
-    # and the drop is never silent either way.
-    if [[ "$schema" == connex_verify_* ]] && ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
+    # with that prefix names it in CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE, which
+    # only lifts this prefix rule; CONNEX_BACKUP_SCHEMA_INCLUDE would work too
+    # but is an allowlist, so reaching for it here would silently drop every
+    # other schema from the backup. The drop is never silent either way.
+    if [[ "$schema" == connex_verify_* ]] &&
+        ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE" &&
+        ! backup_schema_in_list "$schema" "$CONNEX_BACKUP_SCHEMA_INCLUDE"; then
         backup_log info schema_skipped reason restore_verify_scratch schema "$schema"
         return 1
     fi

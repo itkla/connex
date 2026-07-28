@@ -74,7 +74,7 @@ GTID-disabled servers are the normal Connex configuration. GTID-enabled sources 
 deploy/backup/tests/run-tests.sh
 ```
 
-Offline regression tests for schema selection, the PITR preflight refusals, binlog coverage-gap handling, and retention pruning. They source the real scripts with stubbed server calls against a sandbox backup root, so they need no database, Docker, or root. The sandbox parent defaults to `/var/tmp/connex-backup-tests` and can be moved with `CONNEX_BACKUP_TEST_ROOT` — it cannot live under `/tmp`, which the path validator rejects.
+Offline regression tests for schema selection, the PITR preflight refusals, binlog coverage-gap handling, and retention pruning. They source the real scripts with stubbed server calls against a sandbox backup root, so they need no database, Docker, or root, and they run in CI on every pull request. The sandbox parent defaults to `/var/tmp/connex-backup-tests` and can be moved with `CONNEX_BACKUP_TEST_ROOT`; the harness runs that path through the real `backup_validate_absolute_path` before creating anything, so it cannot live under `/tmp` any more than a production backup root can.
 
 ## Exit codes
 
