@@ -9,7 +9,7 @@ package ooo.klae.connex.backend.observability;
  * @param userId resolved user identifier, or null
  * @param message bounded error summary
  * @param detail bounded diagnostic detail
- * @param path request path without query parameters
+ * @param path request path without query parameters, redacted at construction
  */
 public record ReportedError(
         Source source,
@@ -19,6 +19,14 @@ public record ReportedError(
         String message,
         String detail,
         String path) {
+
+    /**
+     * Redacts credential-bearing path segments so no reporter implementation and no caller can
+     * publish a request path that carries an invite, unsubscribe or managed-object token.
+     */
+    public ReportedError {
+        path = RequestPathRedactor.redact(path);
+    }
 
     /**
      * Error origin.

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -50,7 +51,8 @@ class ObservabilityEndpointSecurityTest {
 
     @BeforeEach
     void setUp() {
-        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP, Status.UP));
+        when(healthService.readiness())
+                .thenReturn(new Readiness(Status.UP, Status.UP, Status.UP, Status.UP));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -69,7 +71,9 @@ class ObservabilityEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"))
                 .andExpect(jsonPath("$.checks.db").value("UP"))
-                .andExpect(jsonPath("$.checks.migrations").value("UP"));
+                .andExpect(jsonPath("$.checks.migrations").value("UP"))
+                .andExpect(jsonPath("$.checks.startup").value("UP"))
+                .andExpect(jsonPath("$.checks.auditGuard").value("UP"));
         mockMvc.perform(post("/api/health").with(csrf().asHeader()))
                 .andExpect(status().isUnauthorized());
     }
@@ -100,12 +104,17 @@ class ObservabilityEndpointSecurityTest {
     }
 
     @Test
-    void sessionAuthenticationStillReadsMetricsWithoutTenantResolution() throws Exception {
+    void sessionAuthenticationAloneCannotReadMetricsOnAnyMethod() throws Exception {
         mockMvc.perform(get("/api/metrics")
                         .header("X-Workspace-Id", Integer.MAX_VALUE)
                         .with(authentication(authenticated)))
-                .andExpect(status().isOk())
-                .andExpect(content().string(containsString("jvm_memory_used_bytes")));
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(not(containsString("jvm_memory_used_bytes"))));
+
+        mockMvc.perform(head("/api/metrics")
+                        .with(authentication(authenticated)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(not(containsString("jvm_memory_used_bytes"))));
     }
 
     @Test
