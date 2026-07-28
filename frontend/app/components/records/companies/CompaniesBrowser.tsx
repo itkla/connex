@@ -969,15 +969,15 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                             />
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
-                        detailPath={(item) => `/records/companies/${item.id}`}
-                        onRowClick={(item) => peek.openPeek(item.id)}
+                        detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
+                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
                         displayMode={displayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={quickEditOne}
+                        onQuickEdit={showArchived ? undefined : quickEditOne}
                         onDelete={archiveOne}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}

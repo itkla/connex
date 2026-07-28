@@ -832,15 +832,15 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                             />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
-                        detailPath={(item) => `/records/contacts/${item.id}`}
-                        onRowClick={(item) => peek.openPeek(item.id)}
+                        detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}
+                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
                         displayMode={displayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={quickEditOne}
+                        onQuickEdit={showArchived ? undefined : quickEditOne}
                         onDelete={archiveOne}
                         entityLabel="contact"
                         selectionActions={selectionActions}
