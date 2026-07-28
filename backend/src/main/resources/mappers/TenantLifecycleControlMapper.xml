@@ -116,7 +116,7 @@
     FOR UPDATE
   </select>
 
-  <select id="lockActiveOrganizationForFederation" resultType="java.lang.Integer">
+  <select id="lockActiveOrganizationForShare" resultType="java.lang.Integer">
     SELECT id
     FROM organization
     WHERE id = #{orgId} AND lifecycle_state = 'active'
@@ -203,11 +203,20 @@
     WHERE workspace_id = #{workspaceId} AND lease_kind = #{leaseKind}
   </select>
 
-  <select id="countOperationLeasesOfKind" resultType="int">
+  <select id="countRecentOperationLeasesInOrg" resultType="int">
     SELECT COUNT(*)
     FROM tenant_operation_lease
-    WHERE lease_kind = #{leaseKind}
+    WHERE org_id = #{orgId}
+      AND lease_kind = #{leaseKind}
+      AND created_at &gt; NOW(6) - INTERVAL #{maxAgeSeconds} SECOND
   </select>
+
+  <delete id="deleteStaleOperationLeases">
+    DELETE FROM tenant_operation_lease
+    WHERE lease_kind = #{leaseKind}
+      AND created_at &lt;= NOW(6) - INTERVAL #{maxAgeSeconds} SECOND
+    LIMIT #{limit}
+  </delete>
 
   <update id="markWorkspaceTearingDown">
     UPDATE workspace

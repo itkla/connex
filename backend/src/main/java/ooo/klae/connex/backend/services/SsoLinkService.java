@@ -143,7 +143,7 @@ public class SsoLinkService {
         if (orgId == null) {
             return;
         }
-        if (tenantLifecycleControlMapper.lockActiveOrganizationForFederation(orgId) == null) {
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(orgId) == null) {
             throw new ForbiddenException("This organization is not accepting sign-ins");
         }
     }

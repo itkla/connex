@@ -36,7 +36,7 @@ public interface TenantLifecycleControlMapper {
 
     OrganizationLifecycleRef lockOrganization(@Param("orgId") int orgId);
 
-    Integer lockActiveOrganizationForFederation(@Param("orgId") int orgId);
+    Integer lockActiveOrganizationForShare(@Param("orgId") int orgId);
 
     List<WorkspaceLifecycleRef> findWorkspacesInOrgAfter(
         @Param("orgId") int orgId,
@@ -71,7 +71,15 @@ public interface TenantLifecycleControlMapper {
         @Param("workspaceId") int workspaceId,
         @Param("leaseKind") String leaseKind);
 
-    int countOperationLeasesOfKind(@Param("leaseKind") String leaseKind);
+    int countRecentOperationLeasesInOrg(
+        @Param("orgId") int orgId,
+        @Param("leaseKind") String leaseKind,
+        @Param("maxAgeSeconds") long maxAgeSeconds);
+
+    int deleteStaleOperationLeases(
+        @Param("leaseKind") String leaseKind,
+        @Param("maxAgeSeconds") long maxAgeSeconds,
+        @Param("limit") int limit);
 
     int markWorkspaceTearingDown(
         @Param("orgId") int orgId,

@@ -49,9 +49,11 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Pins the export bundle's object-consistency policy: bytes that vanish are
  * tolerated only when the metadata row is provably gone too, every skip is
- * audited and counted separately from what the ZIP actually contains, the skip
- * ceiling aborts a whole-bucket outage, and a per-object admission refusal is
- * retried instead of truncating a committed response.
+ * audited with the exact object key and counted separately from what the ZIP
+ * actually contains, the manifest carries the enumerated total both counts must
+ * reconcile against, the skip ceiling aborts a whole-bucket outage, and a
+ * per-object admission refusal is retried instead of truncating a committed
+ * response.
  */
 @ExtendWith(MockitoExtension.class)
 class TenantExportObjectSkipTest {
@@ -119,6 +121,7 @@ class TenantExportObjectSkipTest {
 
         String manifest = exportManifest();
 
+        assertEquals(1, countManifestValue(manifest, "enumeratedObjectCount"));
         assertEquals(0, countManifestValue(manifest, "objectCount"));
         assertEquals(1, countManifestValue(manifest, "skippedObjectCount"));
         verify(auditService).recordStrictIndependentScoped(
@@ -129,7 +132,11 @@ class TenantExportObjectSkipTest {
             eq(ORG_ID),
             anyString(),
             anyString(),
-            any());
+            eq(Map.of(
+                "objectKey", OBJECT_KEY,
+                "objectKind", "attachment",
+                "objectOwnerId", 0,
+                "skippedObjectCount", 1L)));
     }
 
     @Test
@@ -173,6 +180,7 @@ class TenantExportObjectSkipTest {
 
         assertArrayEquals(BINARY, entries.get("objects/" + OBJECT_KEY));
         String manifest = new String(entries.get("manifest.json"), StandardCharsets.UTF_8);
+        assertEquals(1, countManifestValue(manifest, "enumeratedObjectCount"));
         assertEquals(1, countManifestValue(manifest, "objectCount"));
         assertEquals(0, countManifestValue(manifest, "skippedObjectCount"));
     }

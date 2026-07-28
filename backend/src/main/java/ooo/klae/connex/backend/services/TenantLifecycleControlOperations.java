@@ -72,30 +72,43 @@ public class TenantLifecycleControlOperations {
     }
 
     /**
+     * Clears export leases older than the export request timeout so a killed or
+     * crashed streaming request cannot permanently consume its organization's
+     * concurrent-export budget. Teardown leases keep failing closed for
+     * privileged operator clearance.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int reapStaleExportLeases() {
+        return mapper.deleteStaleOperationLeases(
+            EXPORT,
+            exportLeaseMaxAgeSeconds(),
+            properties.getTableBatchSize());
+    }
+
+    /**
      * Refuses workspace teardown while an open APPI data-subject request still
-     * points at that workspace, before any tenant data is destroyed and while
-     * the organization is still resolvable, so an administrator can finish the
-     * obligation and retry.
+     * points at that workspace, before the strict start audit and while the
+     * organization is still resolvable, so an administrator can finish the
+     * obligation and retry. This unlocked read only reports the state ahead of
+     * the fence; the authoritative refusal runs under the workspace lock in
+     * {@link #acquireWorkspaceTeardown(int, int, int)}.
      */
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public void requireNoOpenSubjectRequestsForWorkspace(int orgId, int workspaceId) {
-        if (mapper.countOpenSubjectRequestsForWorkspace(orgId, workspaceId) > 0) {
-            throw new ConflictException(
-                "An open data-subject request still references this workspace");
-        }
+        requireNoOpenWorkspaceSubjectRequests(orgId, workspaceId);
     }
 
     /**
      * Refuses organization teardown while any APPI data-subject request is still
      * open. Deleting the organization root cascades the request rows themselves
      * away, so an unfinished obligation must be closed first rather than erased.
+     * This unlocked read only reports the state ahead of the fence; the
+     * authoritative refusal runs under the organization lock in
+     * {@link #markOrganizationTearingDown(int, int)}.
      */
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public void requireNoOpenSubjectRequestsForOrganization(int orgId) {
-        if (mapper.countOpenSubjectRequestsForOrg(orgId) > 0) {
-            throw new ConflictException(
-                "An open data-subject request is still recorded for this organization");
-        }
+        requireNoOpenOrganizationSubjectRequests(orgId);
     }
 
     /** Counts export leases that a fenced workspace must drain before sweeping. */
@@ -104,7 +117,12 @@ public class TenantLifecycleControlOperations {
         return mapper.countOperationLeases(workspaceId, EXPORT);
     }
 
-    /** Marks an exact workspace as tearing down and acquires its exclusive teardown lease. */
+    /**
+     * Marks an exact workspace as tearing down and acquires its exclusive
+     * teardown lease. The open data-subject request refusal runs here, under the
+     * exclusive workspace lock that subject-linked writes contend for, so a
+     * request committed after an earlier unlocked check still refuses the fence.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public AcquiredWorkspace acquireWorkspaceTeardown(
             int orgId,
@@ -119,6 +137,7 @@ public class TenantLifecycleControlOperations {
             throw new ResourceNotFoundException("Workspace not found");
         }
         requireOwner(orgId, actorId);
+        requireNoOpenWorkspaceSubjectRequests(orgId, workspaceId);
         OperationLease lease = insertLease(orgId, workspaceId, TEARDOWN);
         if (rootExists) {
             mapper.markWorkspaceTearingDown(orgId, workspaceId);
@@ -136,13 +155,20 @@ public class TenantLifecycleControlOperations {
         return acquireWorkspaceTeardown(orgId, workspaceId, actorId);
     }
 
-    /** Fences an organization against ordinary work after locked owner revalidation. */
+    /**
+     * Fences an organization against ordinary work after locked owner
+     * revalidation. The open data-subject request refusal runs under the same
+     * exclusive organization lock that every subject request write takes a
+     * shared lock on, so no request can be created into the fence window and
+     * then cascade away with the organization root.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markOrganizationTearingDown(int orgId, int actorId) {
         if (mapper.lockOrganization(orgId) == null) {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
+        requireNoOpenOrganizationSubjectRequests(orgId);
         mapper.markOrganizationTearingDown(orgId);
     }
 
@@ -233,7 +259,8 @@ public class TenantLifecycleControlOperations {
 
     private OperationLease insertLease(int orgId, int workspaceId, String kind) {
         if (EXPORT.equals(kind)
-                && mapper.countOperationLeasesOfKind(EXPORT) >= properties.getMaxConcurrentExports()) {
+                && mapper.countRecentOperationLeasesInOrg(orgId, EXPORT, exportLeaseMaxAgeSeconds())
+                    >= properties.getMaxConcurrentExports()) {
             throw new TooManyRequestsException(
                 "Too many tenant exports are already streaming; retry shortly");
         }
@@ -248,6 +275,24 @@ public class TenantLifecycleControlOperations {
             throw new ConflictException("Tenant teardown is already in progress");
         }
         return lease;
+    }
+
+    private void requireNoOpenWorkspaceSubjectRequests(int orgId, int workspaceId) {
+        if (mapper.countOpenSubjectRequestsForWorkspace(orgId, workspaceId) > 0) {
+            throw new ConflictException(
+                "An open data-subject request still references this workspace");
+        }
+    }
+
+    private void requireNoOpenOrganizationSubjectRequests(int orgId) {
+        if (mapper.countOpenSubjectRequestsForOrg(orgId) > 0) {
+            throw new ConflictException(
+                "An open data-subject request is still recorded for this organization");
+        }
+    }
+
+    private long exportLeaseMaxAgeSeconds() {
+        return Math.max(1, properties.getExportTimeout().toSeconds());
     }
 
     private void requireOwner(int orgId, int actorId) {

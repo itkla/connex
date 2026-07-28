@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
@@ -27,7 +28,9 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * the writing transaction, so it serialises against tenant teardown's exclusive
  * workspace lock: a request can never be linked to a workspace that teardown has
  * already fenced, and a request committed just before the fence is still caught by
- * teardown's link clearing.
+ * teardown's link clearing. A mutation with no workspace link takes the same shared
+ * lock on the organization root instead, so an unlinked request cannot be created
+ * into an organization teardown window and then cascade away with the deleted root.
  */
 @Component
 @RequiredArgsConstructor
@@ -42,6 +45,7 @@ public class DataSubjectRequestControlOperations {
 
     private final DataSubjectRequestMapper dataSubjectRequestMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final TenantLifecycleControlMapper tenantLifecycleControlMapper;
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
@@ -147,6 +151,10 @@ public class DataSubjectRequestControlOperations {
 
     private void lockSubjectWorkspace(int orgId, Integer workspaceId) {
         if (workspaceId == null) {
+            if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(orgId) == null) {
+                throw new ConflictException(
+                    "The organization is being removed and cannot record data-subject requests");
+            }
             return;
         }
         if (workspaceMapper.lockActiveWorkspaceInOrgForShare(orgId, workspaceId) == null) {

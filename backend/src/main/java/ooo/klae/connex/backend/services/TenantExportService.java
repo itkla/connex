@@ -51,8 +51,9 @@ import tools.jackson.databind.ObjectMapper;
  * provably gone — re-read in a fresh routed transaction — so a rotated bucket,
  * a wrong key prefix, or a restore against empty storage still fails hard
  * instead of returning an attachment-free bundle. Every skip carries a strict
- * audit entry, the manifest reports written and skipped counts that sum to the
- * enumerated total, and exceeding the skip ceiling aborts the bundle.
+ * audit entry naming the exact object key, the manifest reports the enumerated
+ * total alongside the written and skipped counts that must sum to it, and
+ * exceeding the skip ceiling aborts the bundle.
  */
 @Service
 @RequiredArgsConstructor
@@ -171,6 +172,7 @@ public class TenantExportService {
             OutputStream output) throws IOException {
         Instant generatedAt = clock.instant();
         List<ManifestTable> tables = new ArrayList<>();
+        long enumeratedObjectCount = 0;
         long objectCount = 0;
         long skippedObjectCount = 0;
         try (ZipOutputStream zip = new ZipOutputStream(output)) {
@@ -193,6 +195,7 @@ public class TenantExportService {
                     break;
                 }
                 for (ActiveObjectReference reference : page) {
+                    enumeratedObjectCount++;
                     if (writeObject(zip, workspaceId, actorId, reference)) {
                         objectCount++;
                     } else {
@@ -209,6 +212,7 @@ public class TenantExportService {
                 workspaceId,
                 "jsonl",
                 List.copyOf(tables),
+                enumeratedObjectCount,
                 objectCount,
                 skippedObjectCount);
             zip.putNextEntry(new ZipEntry("manifest.json"));
@@ -290,6 +294,7 @@ public class TenantExportService {
                 "workspace:" + workspaceId,
                 "Tenant export skipped an object deleted while streaming",
                 Map.of(
+                    "objectKey", reference.objectKey(),
                     "objectKind", reference.kind(),
                     "objectOwnerId", reference.ownerId(),
                     "skippedObjectCount", skippedObjectCount));
@@ -372,6 +377,7 @@ public class TenantExportService {
             int workspaceId,
             String format,
             List<ManifestTable> tables,
+            long enumeratedObjectCount,
             long objectCount,
             long skippedObjectCount) {
     }

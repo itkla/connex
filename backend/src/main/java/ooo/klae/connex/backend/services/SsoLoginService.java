@@ -138,7 +138,7 @@ public class SsoLoginService {
     }
 
     private void requireActiveOrganization(int orgId) {
-        if (tenantLifecycleControlMapper.lockActiveOrganizationForFederation(orgId) == null) {
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(orgId) == null) {
             throw new ForbiddenException("This organization is not accepting sign-ins");
         }
     }

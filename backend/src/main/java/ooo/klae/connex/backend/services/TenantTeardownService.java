@@ -42,9 +42,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * writer-drain protocol is explicitly deferred under issue #853.
  *
  * <p>Retries safely repeat registry preparations, object enqueue operations,
- * and bounded deletes while the control root survives. Export and teardown
- * leases have no automatic expiry, so a process crash can leave a stale lease
- * that fails closed pending privileged operator clearance outside this wave.
+ * and bounded deletes while the control root survives. A crashed export leaves
+ * a lease that keeps failing closed until {@link TenantOperationLeaseReaper}
+ * clears it past the export timeout; a crashed teardown leaves a lease that
+ * fails closed pending privileged operator clearance outside this wave.
  * Before deleting a workspace root, teardown persists a root-independent
  * cleanup tombstone. The tombstone retains its organization placement route
  * until the post-root scan is clean, makes handled failures HTTP-resumable, and
@@ -60,10 +61,12 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  *
  * <p>Retained APPI data-subject requests are handled at both ends: an open
  * request linked to the target refuses teardown at the entry point, before any
- * data is destroyed and while the organization is still resolvable, and the
- * terminal root deletion clears the subject workspace and person link of the
- * records that remain, so no retained compliance record is left pointing at a
- * deleted workspace.
+ * data is destroyed and while the organization is still resolvable, the
+ * authoritative refusal repeats inside the lifecycle fence transaction that
+ * holds the workspace or organization lock so a concurrently created request
+ * cannot slip past it, and the terminal root deletion clears the subject
+ * workspace and person link of the records that remain, so no retained
+ * compliance record is left pointing at a deleted workspace.
  */
 @Service
 @RequiredArgsConstructor

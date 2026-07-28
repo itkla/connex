@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -61,7 +62,8 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = {
         "connex.tenant-lifecycle.teardown-settle-delay=0s",
-        "connex.tenant-lifecycle.export-lease-wait-timeout=1s"
+        "connex.tenant-lifecycle.export-lease-wait-timeout=1s",
+        "connex.tenant-lifecycle.lease-reaper-initial-delay-ms=600000"
     })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
@@ -70,6 +72,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private TenantLifecycleControlMapper controlMapper;
+    @Autowired private TenantLifecycleControlOperations controlOperations;
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
@@ -84,11 +87,24 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private Organization drillOrganization;
+    private Organization otherOrganization;
     private Workspace drillWorkspace;
 
     @AfterEach
     void cleanCommittedDrillRoots() {
+        if (otherOrganization != null) {
+            jdbcTemplate.update(
+                "DELETE FROM organization WHERE id = ?",
+                otherOrganization.getId());
+        }
         if (drillOrganization != null) {
+            jdbcTemplate.update(
+                "DELETE FROM tenant_operation_lease WHERE org_id = ?",
+                drillOrganization.getId());
+            jdbcTemplate.update(
+                "UPDATE data_subject_request SET status = 'closed', closed_at = NOW()"
+                    + " WHERE org_id = ? AND status NOT IN ('closed', 'refused')",
+                drillOrganization.getId());
             WorkspaceLifecycleRef remaining = drillWorkspace == null
                 ? null
                 : controlMapper.findWorkspaceInOrg(
@@ -281,6 +297,97 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertEquals(orgId, retained.get("org_id"));
         assertNull(retained.get("subject_workspace_id"));
         assertNull(retained.get("subject_person_id"));
+    }
+
+    @Test
+    void aSubjectRequestOpenedAfterTheUnlockedCheckStillRefusesTheLifecycleFence() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        Person subject = newPerson(newCompany());
+        insertOpenSubjectRequest(orgId, workspaceId, subject.getId());
+
+        assertThrows(
+            ConflictException.class,
+            () -> controlOperations.acquireWorkspaceTeardown(
+                orgId,
+                workspaceId,
+                currentUser.getId()));
+        assertEquals("active", jdbcTemplate.queryForObject(
+            "SELECT lifecycle_state FROM workspace WHERE id = ?",
+            String.class,
+            workspaceId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM tenant_operation_lease WHERE workspace_id = ?",
+            Integer.class,
+            workspaceId));
+
+        assertThrows(
+            ConflictException.class,
+            () -> controlOperations.markOrganizationTearingDown(orgId, currentUser.getId()));
+        assertEquals("active", jdbcTemplate.queryForObject(
+            "SELECT lifecycle_state FROM organization WHERE id = ?",
+            String.class,
+            orgId));
+    }
+
+    @Test
+    void theExportCapSeesOnlyItsOwnRecentLeasesAndStaleExportLeasesAreReaped() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        otherOrganization = new Organization();
+        otherOrganization.setName("Lifecycle Neighbour " + unique());
+        otherOrganization.setSlug("lifecycle-neighbour-" + unique());
+        organizationMapper.insert(otherOrganization);
+        String fresh = insertOperationLease(orgId, workspaceId, "export", 0);
+        String stale = insertOperationLease(orgId, workspaceId, "export", 60);
+        String teardown = insertOperationLease(orgId, workspaceId, "teardown", 60);
+        String neighbour = insertOperationLease(
+            otherOrganization.getId(),
+            workspaceId + 1,
+            "export",
+            0);
+
+        assertEquals(1, controlMapper.countRecentOperationLeasesInOrg(orgId, "export", 1800));
+        assertEquals(1, controlMapper.countRecentOperationLeasesInOrg(
+            otherOrganization.getId(),
+            "export",
+            1800));
+
+        assertTrue(controlOperations.reapStaleExportLeases() > 0);
+
+        assertTrue(leaseExists(fresh));
+        assertFalse(leaseExists(stale));
+        assertTrue(leaseExists(teardown));
+        assertTrue(leaseExists(neighbour));
+    }
+
+    private String insertOperationLease(
+            int orgId,
+            int workspaceId,
+            String leaseKind,
+            int ageMinutes) {
+        String token = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+            "INSERT INTO tenant_operation_lease"
+                + " (org_id, workspace_id, lease_kind, lease_token, created_at)"
+                + " VALUES (?, ?, ?, ?, NOW(6) - INTERVAL ? MINUTE)",
+            orgId,
+            workspaceId,
+            leaseKind,
+            token,
+            ageMinutes);
+        return token;
+    }
+
+    private boolean leaseExists(String leaseToken) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM tenant_operation_lease WHERE lease_token = ?",
+            Integer.class,
+            leaseToken);
+        assertNotNull(count);
+        return count == 1;
     }
 
     private long insertOpenSubjectRequest(int orgId, int workspaceId, int personId) {
