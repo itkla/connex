@@ -1,0 +1,200 @@
+name: Audit open issues against merged PRs
+
+on:
+  push:
+    branches:
+      - issue-audit-20260728
+    paths:
+      - .github/workflows/issue-pr-audit.yml
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Build merged-PR/open-issue audit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const headers = {
+              accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2026-03-10",
+            };
+            const { owner, repo } = context.repo;
+
+            const allItems = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: "all",
+              per_page: 100,
+            });
+            const openIssues = allItems.filter(
+              (item) => !item.pull_request && item.state === "open"
+            );
+            const openByNumber = new Map(openIssues.map((item) => [item.number, item]));
+
+            const closedPulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "closed",
+              sort: "updated",
+              direction: "desc",
+              per_page: 100,
+            });
+            const mergedPulls = closedPulls.filter((pull) => pull.merged_at);
+
+            const closers = new Map();
+            let cursor = null;
+            do {
+              const data = await github.graphql(
+                `query($owner:String!, $repo:String!, $cursor:String) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequests(first:100, after:$cursor, states:MERGED, orderBy:{field:CREATED_AT, direction:DESC}) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes {
+                        number
+                        title
+                        url
+                        mergedAt
+                        closingIssuesReferences(first:20) {
+                          nodes { number title state url }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner, repo, cursor }
+              );
+              const connection = data.repository.pullRequests;
+              for (const pull of connection.nodes) {
+                for (const issue of pull.closingIssuesReferences.nodes) {
+                  if (!openByNumber.has(issue.number)) continue;
+                  if (!closers.has(issue.number)) closers.set(issue.number, []);
+                  closers.get(issue.number).push({
+                    number: pull.number,
+                    title: pull.title,
+                    merged_at: pull.mergedAt,
+                    url: pull.url,
+                  });
+                }
+              }
+              cursor = connection.pageInfo.hasNextPage
+                ? connection.pageInfo.endCursor
+                : null;
+            } while (cursor);
+
+            const mentions = new Map();
+            for (const pull of mergedPulls) {
+              const text = `${pull.title || ""}\n${pull.body || ""}`;
+              const numbers = new Set();
+              for (const match of text.matchAll(/#(\d+)\b/g)) {
+                const number = Number(match[1]);
+                if (openByNumber.has(number)) numbers.add(number);
+              }
+              for (const number of numbers) {
+                if (!mentions.has(number)) mentions.set(number, []);
+                mentions.get(number).push({
+                  number: pull.number,
+                  title: pull.title,
+                  merged_at: pull.merged_at,
+                  url: pull.html_url,
+                });
+              }
+            }
+
+            const candidates = openIssues.map((issue) => {
+              const body = issue.body || "";
+              const checked = (body.match(/^- \[[xX]\]/gm) || []).length;
+              const unchecked = (body.match(/^- \[ \]/gm) || []).length;
+              const title = issue.title || "";
+              const isParent =
+                /\[(?:epic|tracking)\]/i.test(title) ||
+                /^epic\b/i.test(title) ||
+                /\bparent (?:roadmap|epic|tracker)\s*:/i.test(body) ||
+                /##\s+(?:workstreams|roadmap|authoritative execution waves)\b/i.test(body);
+              const mergedClosers = (closers.get(issue.number) || []).sort(
+                (a, b) => new Date(b.merged_at) - new Date(a.merged_at)
+              );
+              const mergedMentions = (mentions.get(issue.number) || []).sort(
+                (a, b) => new Date(b.merged_at) - new Date(a.merged_at)
+              );
+              const latestMention = mergedMentions[0] || null;
+              const staleStatusLanguage = /\bnot started\b|\bstatus\s*:\s*(?:todo|planned|not started)|\[ \].{0,80}(?:shipped|landed|merged)/i.test(body);
+              return {
+                issue: issue.number,
+                title,
+                url: issue.html_url,
+                updated_at: issue.updated_at,
+                comments: issue.comments,
+                labels: (issue.labels || []).map((label) =>
+                  typeof label === "string" ? label : label.name
+                ),
+                is_parent: isParent,
+                checked,
+                unchecked,
+                stale_status_language: staleStatusLanguage,
+                merged_closers: mergedClosers,
+                merged_mentions_count: mergedMentions.length,
+                merged_mentions: mergedMentions.slice(0, 20),
+                latest_merged_mention: latestMention,
+              };
+            });
+
+            const closureCandidates = candidates
+              .filter((candidate) => candidate.merged_closers.length)
+              .sort((a, b) =>
+                new Date(b.merged_closers[0].merged_at) -
+                new Date(a.merged_closers[0].merged_at)
+              );
+
+            const nonParentWorkCandidates = candidates
+              .filter(
+                (candidate) =>
+                  !candidate.is_parent && candidate.merged_mentions_count > 0
+              )
+              .sort((a, b) => {
+                const staleDelta = Number(b.stale_status_language) - Number(a.stale_status_language);
+                if (staleDelta) return staleDelta;
+                const mentionDelta = b.merged_mentions_count - a.merged_mentions_count;
+                if (mentionDelta) return mentionDelta;
+                return new Date(b.latest_merged_mention?.merged_at || 0) - new Date(a.latest_merged_mention?.merged_at || 0);
+              });
+
+            const parentWorkCandidates = candidates
+              .filter(
+                (candidate) =>
+                  candidate.is_parent && candidate.merged_mentions_count > 0
+              )
+              .sort((a, b) => b.merged_mentions_count - a.merged_mentions_count);
+
+            const report = {
+              generated_at: new Date().toISOString(),
+              repository: `${owner}/${repo}`,
+              open_issue_count: openIssues.length,
+              merged_pr_count: mergedPulls.length,
+              closure_candidate_count: closureCandidates.length,
+              non_parent_work_candidate_count: nonParentWorkCandidates.length,
+              parent_work_candidate_count: parentWorkCandidates.length,
+              closure_candidates: closureCandidates,
+              non_parent_work_candidates: nonParentWorkCandidates,
+              parent_work_candidates: parentWorkCandidates,
+            };
+
+            const path = ".audit/open-issues-vs-merged-prs-20260728.json";
+            await github.request(
+              "PUT /repos/{owner}/{repo}/contents/{path}",
+              {
+                owner,
+                repo,
+                path,
+                message: "chore: record issue and merged PR audit",
+                content: Buffer.from(JSON.stringify(report, null, 2)).toString("base64"),
+                branch: context.ref.replace("refs/heads/", ""),
+                headers,
+              }
+            );
