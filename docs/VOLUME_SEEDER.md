@@ -96,23 +96,52 @@ never arm fixture writing on a serving deployment:
 It then refuses the target itself:
 
 - a database named `connex_pub`, case-insensitively, in the configured URL or in the effective
-  connection catalog;
-- a JDBC URL that selects its database through a `dbname`/`database` query parameter rather than
-  the URL path, which would otherwise hide the real target from the path check;
+  connection catalog/schema;
+- a JDBC URL containing a decoded, case- and punctuation-normalized target selector, routing
+  override, or pre-metadata executable hook — this includes direct database/host/port selectors;
+  `url` / `jdbcUrl`; DNS SRV, protocol, named-pipe path, socket-factory, SOCKS-proxy, host-priority
+  and affinity settings; `propertiesTransform`; `sessionVariables`; connection, query, and
+  exception interceptors; custom authentication handlers/plugins; logger/profiler handlers; and
+  Connector/J cache or load-balancer factories;
 - any non-loopback or ambiguous JDBC host unless `-PseederAllowRemoteHost=true` is explicit;
-- a `spring.flyway.url` that names a different host, port, or database than the application
-  datasource, which would otherwise migrate one database while seeding another — the comparison is
-  the literal `host:port/database`, so an implicit port matches `3306` but `localhost` and
-  `127.0.0.1` are treated as different servers;
-- a `spring.flyway.schemas` / `spring.flyway.default-schema` entry naming anything other than that
-  agreed target database, in either the comma-separated or the YAML list form — on MySQL a Flyway
-  schema is a catalog, so a divergent entry migrates a database the seeder never writes; and
+- a relaxed-bound `spring.datasource.hikari.jdbc-url` or `spring.flyway.url` override that names a
+  different host, port, or database than the required `spring.datasource.url` baseline, which
+  would otherwise open or migrate one database while seeding another — hosts compare
+  case-insensitively, an implicit port matches `3306`, database/catalog names compare with exact
+  case, and `localhost` and `127.0.0.1` remain different servers;
+- a scalar `spring.flyway.default-schema` or any entry in the comma-separated/indexed
+  `spring.flyway.schemas` collection naming anything other than that exact target database — on
+  MySQL a Flyway schema is a catalog, so a divergent entry migrates a database the seeder never
+  writes;
+- any of those target, routing, transform, SQL, interceptor, plugin, handler, or factory properties
+  in `spring.datasource.hikari.data-source-properties` or `spring.flyway.jdbc-properties`,
+  including relaxed-case and punctuation forms; these maps are checked before a connection because
+  `dbname` combined with `createDatabaseIfNotExist=true` can create its selected catalog, while
+  transforms and executable hooks can rewrite routing or run code before JDBC metadata is visible;
+- any `spring.flyway.init-sqls` statement at all, because Flyway installs it on every one of its
+  own connections before it detects the current schema, so a `USE other_db` there would migrate a
+  catalog no configured property names;
+- any nonblank relaxed-bound `spring.datasource.hikari.connection-init-sql` value other than the
+  exact project default `SET time_zone = '+00:00'` after stripping leading and trailing
+  whitespace; this allowlist is enforced before any datasource is opened because Connector/J can
+  leave `Connection.getCatalog()` and `Connection.getSchema()` stale after an initializer changes
+  the server session database;
+- any nonblank relaxed-bound `spring.datasource.hikari.connection-test-query` value, because
+  Hikari executes that SQL while establishing its first connection and a `USE other_db` validation
+  query can produce the same stale JDBC catalog before the guard inspects metadata;
+- any application or Flyway datasource whose effective metadata URL does not name the baseline
+  host, port, and exact database, or whose current catalog/schema is not that exact database,
+  which catches redirects that JDBC metadata reports, including a stray `@FlywayDataSource` bean,
+  rather than relying only on configured properties; and
 - every deployment whose authoritative `connex.deployment.profile` is explicitly configured
   (`saas`, `silo`, or `on-prem`) — production editions are never seedable.
 
-Configured URLs are checked before opening a connection, then application and Flyway datasource
-metadata are checked again. Remote operation still requires the normal verified MySQL TLS posture;
-the override does not permit plaintext remote transport.
+The required baseline, relaxed-bound URL overrides, unsafe URL-query and driver-map properties,
+schema and init settings, Hikari connection initializer, and Hikari validation query are checked
+before opening a connection, then the application and actual Flyway datasource metadata are checked
+again. A shared datasource is opened only once during one guard pass. Remote operation still
+requires the normal verified MySQL TLS posture; the override does not permit plaintext remote
+transport.
 
 ### What the guard does not protect against
 
@@ -123,11 +152,13 @@ explicit throwaway schema. Likewise, `connex.deployment.profile` is optional dur
 the deployment-profile refusal only fires where an operator set it; the non-web and loopback
 requirements are the load-bearing ones.
 
-The URL agreement check compares configured properties, not the catalog the driver finally
-resolves. An operator who overrides the database through
-`spring.datasource.hikari.data-source-properties.dbname` or `spring.flyway.jdbc-properties.dbname`
-can still point one datasource at a different non-production database; only `connex_pub` is caught
-there, by the effective-catalog check.
+The effective-catalog check reads JDBC metadata at guard time, but it is not authoritative for
+session changes that the driver does not reflect there. The pre-connection Hikari initializer
+allowlist and validation-query denial close the known configuration gaps. The guard still cannot
+see a redirect that happens later inside the migration run itself: a `USE other_db` statement in a
+migration script or in a Flyway callback still moves the session after the guard has passed.
+Migration scripts are repository content rather than operator configuration, so treat a `USE` in
+one as the defect it is.
 
 Seeded accounts are org owners whose password is the published constant below. Treat any schema the
 seeder has touched as compromised for authentication purposes and never expose it.
