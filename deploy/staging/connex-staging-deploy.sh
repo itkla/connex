@@ -17,9 +17,9 @@
 #     passes its health gate, so the live frontend keeps a consistent build dir.
 #   - Restarts the backend, then polls unit + HTTP health with a bounded timeout,
 #     verifies the served gitSha equals the target commit, and requires
-#     GET /api/health/ready to answer 200 (DB reachable, migrations applied; falls
-#     back to /api/version for pre-readiness JARs); rechecks the same PID after
-#     a stability interval. Only then swaps and restarts the frontend.
+#     GET /api/health/ready to answer 200 (DB reachable, migrations applied, startup
+#     runners finished; falls back to /api/version for pre-readiness JARs); rechecks
+#     the same PID after a stability interval. Only then swaps and restarts the frontend.
 #   - On backend health failure: restores the previous JAR, restarts, and exits
 #     nonzero without touching the frontend or the marker.
 #
@@ -43,8 +43,12 @@ FRONTEND_ENV=/etc/connex-staging/frontend.env
 
 BACKEND_URL=http://127.0.0.1:8081
 FRONTEND_URL=http://127.0.0.1:3001
-BACKEND_HEALTH_TIMEOUT=300
-ROLLBACK_HEALTH_TIMEOUT=180
+# /api/health/ready only turns green after every ApplicationRunner has finished (identity
+# backfill, legacy workflow backfill, secret rewrap), which is minutes on a large dataset and
+# runs on the rollback JAR too. These budgets must stay well clear of that or a healthy deploy
+# gets auto-rolled back — and the rollback then reports "manual intervention required".
+BACKEND_HEALTH_TIMEOUT=900
+ROLLBACK_HEALTH_TIMEOUT=600
 FRONTEND_HEALTH_TIMEOUT=90
 STABILITY_INTERVAL=15
 POLL_INTERVAL=5
@@ -71,9 +75,9 @@ served_git_sha() {
 }
 
 # Readiness-gated health: /api/health/ready must answer 200 (DB reachable, migrations
-# applied). A 404/405 means the running JAR predates the endpoint (e.g. a rollback
-# artifact), so fall back to the old /api/version liveness probe; any other status
-# (notably 503 = not ready) fails the check.
+# applied, startup runners finished). A 404/405 means the running JAR predates the
+# endpoint (e.g. a rollback artifact), so fall back to the old /api/version liveness
+# probe; any other status (notably 503 = not ready) fails the check.
 backend_http_healthy() {
     local code
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$BACKEND_URL/api/health/ready" 2>/dev/null)" || return 1

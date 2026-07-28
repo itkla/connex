@@ -2,10 +2,12 @@
 
 The frontend has two test layers, both living in `frontend/`:
 
-- **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution). Node environment, no DOM, no snapshots — behavioral assertions only.
+- **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
 - **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving eight critical flows through a real browser against a running full stack.
 
 ## Running locally
+
+**Node floor:** `^22.13.0 || >=24.0.0`, declared in `frontend/package.json` `engines` — the intersection of pinned pnpm 11.9's range (`>=22.13`), the locked Vite 8/rolldown range (`^20.19.0 || >=22.12.0`), Vitest 4's (`^20.0.0 || ^22.0.0 || >=24.0.0`), and the lint toolchain's `eslint-visitor-keys` range (`^20.19.0 || ^22.13.0 || >=24`). Node 20.x, 21.x, 22.0–22.12 and 23.x fall outside it. The `engines` field documents the floor; `frontend/test/unit/engines.test.ts` enforces the pinned package-manager version and fails when a dependency bump moves the locked floors away from the declared range. When it does, `frontend/package.json`, [`AGENTS.md`](../AGENTS.md) and this file have to be updated together.
 
 ```bash
 cd frontend
