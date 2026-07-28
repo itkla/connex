@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -33,6 +36,7 @@ public class IdentityBackfillRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(IdentityBackfillRunner.class);
     private static final int PAGE_SIZE = 500;
+    private static final int COLLISION_REBUILD_ATTEMPTS = 3;
 
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
@@ -116,8 +120,7 @@ public class IdentityBackfillRunner implements ApplicationRunner {
                 break;
             }
         }
-        int collisionMemberships =
-            backfillTransaction.rebuildCollisionReport(catalog, workspaceId);
+        int collisionMemberships = rebuildCollisionReport(catalog, workspaceId);
         log.info(
             "Canonical identity backfill completed workspace {}: scanned={}, created={}, existing={}, "
                 + "invalidEmail={}, invalidPhone={}, invalidDomain={}, skippedWrites={}, collisions={}",
@@ -130,6 +133,28 @@ public class IdentityBackfillRunner implements ApplicationRunner {
             summary.invalidDomains,
             summary.skippedWrites,
             collisionMemberships);
+    }
+
+    private int rebuildCollisionReport(String catalog, int workspaceId) {
+        List<DataAccessException> failures = new ArrayList<>();
+        for (int attempt = 1; attempt <= COLLISION_REBUILD_ATTEMPTS; attempt++) {
+            try {
+                return backfillTransaction.rebuildCollisionReport(catalog, workspaceId);
+            } catch (ConcurrencyFailureException | DuplicateKeyException contended) {
+                failures.add(contended);
+                if (attempt < COLLISION_REBUILD_ATTEMPTS) {
+                    log.warn(
+                        "Canonical identity collision rebuild retrying workspace {} after contended attempt {}",
+                        workspaceId,
+                        attempt);
+                }
+            }
+        }
+        DataAccessException lastFailure = failures.getLast();
+        for (DataAccessException earlier : failures.subList(0, failures.size() - 1)) {
+            lastFailure.addSuppressed(earlier);
+        }
+        throw lastFailure;
     }
 
     private void warnSkipped(int workspaceId, ServiceUnavailableException exception) {

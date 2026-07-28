@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,6 +13,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +34,9 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -204,6 +209,47 @@ class IdentityBackfillRunnerTest {
         assertTrue(output.getOut().contains(
             "workspace 7: scanned=1, created=1, existing=0, invalidEmail=0"));
         assertTrue(!output.getOut().contains("@") && !output.getOut().contains("+8190"));
+    }
+
+    @Test
+    void contendedCollisionRebuildIsRetriedWithinTheSameWorkspace() {
+        stubEnumeration(Arrays.asList((String) null), List.of(7));
+        serveWorkspace(7, null);
+        stubEmptyBackfillPages(7);
+        when(backfillTransaction.rebuildCollisionReport(null, 7))
+            .thenThrow(
+                new DuplicateKeyException("collision membership already rebuilt"),
+                new ConcurrencyFailureException("deadlock found when trying to get lock"))
+            .thenReturn(4);
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, times(3)).rebuildCollisionReport(null, 7);
+    }
+
+    @Test
+    void exhaustedCollisionRebuildRetriesRethrowTheLastFailureWithEarlierOnesSuppressed() {
+        stubEnumeration(Arrays.asList((String) null), List.of(7));
+        serveWorkspace(7, null);
+        stubEmptyBackfillPages(7);
+        DuplicateKeyException first = new DuplicateKeyException("first");
+        ConcurrencyFailureException second = new ConcurrencyFailureException("second");
+        DuplicateKeyException last = new DuplicateKeyException("last");
+        when(backfillTransaction.rebuildCollisionReport(null, 7)).thenThrow(first, second, last);
+
+        DataAccessException thrown =
+            assertThrows(DataAccessException.class, () -> runner.run(arguments));
+
+        assertSame(last, thrown);
+        assertArrayEquals(new Throwable[] {first, second}, thrown.getSuppressed());
+        verify(backfillTransaction, times(3)).rebuildCollisionReport(null, 7);
+    }
+
+    private void stubEmptyBackfillPages(int workspaceId) {
+        when(backfillTransaction.backfillPersonPage(null, workspaceId, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.backfillCompanyPage(null, workspaceId, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     private void stubEnumeration(List<String> catalogs, List<Integer> workspaceIds) {
