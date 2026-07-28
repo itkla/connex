@@ -1,0 +1,2967 @@
+{
+  "generated_at": "2026-07-28T07:50:22.476Z",
+  "repository": "itkla/connex",
+  "open_issue_count": 95,
+  "merged_pr_count": 496,
+  "closure_candidate_count": 0,
+  "non_parent_work_candidate_count": 47,
+  "parent_work_candidate_count": 17,
+  "closure_candidates": [],
+  "non_parent_work_candidates": [
+    {
+      "issue": 100,
+      "title": "[Architecture] §7 — Dual deployment: Connex-operated SaaS silos + customer-operated on-prem",
+      "url": "https://github.com/itkla/connex/issues/100",
+      "updated_at": "2026-07-28T07:13:00Z",
+      "comments": 5,
+      "labels": [
+        "Security",
+        "priority:p2",
+        "severity:high",
+        "value:high",
+        "complexity:xl"
+      ],
+      "is_parent": false,
+      "checked": 4,
+      "unchecked": 5,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 5,
+      "merged_mentions": [
+        {
+          "number": 515,
+          "title": "feat(deploy): compose bundle + per-profile templates + 3-profile boot smoke",
+          "merged_at": "2026-07-13T05:01:13Z",
+          "url": "https://github.com/itkla/connex/pull/515"
+        },
+        {
+          "number": 493,
+          "title": "fix(tenancy): make placement resolution fleet-consistent (#313)",
+          "merged_at": "2026-07-12T16:03:27Z",
+          "url": "https://github.com/itkla/connex/pull/493"
+        },
+        {
+          "number": 441,
+          "title": "feat(tenancy): org_placement registry read path (#313 Phase 3, defaulted to shared)",
+          "merged_at": "2026-07-11T05:15:39Z",
+          "url": "https://github.com/itkla/connex/pull/441"
+        },
+        {
+          "number": 438,
+          "title": "docs(tenancy): reinstate Connex-operated silo as a middle deployment tier",
+          "merged_at": "2026-07-11T04:46:22Z",
+          "url": "https://github.com/itkla/connex/pull/438"
+        },
+        {
+          "number": 142,
+          "title": "Organization tenant layer — Phase 0: object, workspace.org_id, cross-org sharing guard (#97)",
+          "merged_at": "2026-06-30T00:17:31Z",
+          "url": "https://github.com/itkla/connex/pull/142"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 515,
+        "title": "feat(deploy): compose bundle + per-profile templates + 3-profile boot smoke",
+        "merged_at": "2026-07-13T05:01:13Z",
+        "url": "https://github.com/itkla/connex/pull/515"
+      }
+    },
+    {
+      "issue": 406,
+      "title": "[Frontend] Add a persistent sidebar rail with favorites, recents, and useful badges",
+      "url": "https://github.com/itkla/connex/issues/406",
+      "updated_at": "2026-07-28T07:23:10Z",
+      "comments": 2,
+      "labels": [],
+      "is_parent": false,
+      "checked": 16,
+      "unchecked": 13,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 747,
+          "title": "feat(sidebar): persist navigation group state",
+          "merged_at": "2026-07-22T01:23:47Z",
+          "url": "https://github.com/itkla/connex/pull/747"
+        },
+        {
+          "number": 710,
+          "title": "feat(nav): recent records in the sidebar and command palette (#406)",
+          "merged_at": "2026-07-20T01:20:20Z",
+          "url": "https://github.com/itkla/connex/pull/710"
+        },
+        {
+          "number": 705,
+          "title": "feat(saved-views): sharing, pins, and defaults backend (#412)",
+          "merged_at": "2026-07-19T20:59:57Z",
+          "url": "https://github.com/itkla/connex/pull/705"
+        },
+        {
+          "number": 689,
+          "title": "feat(nav): collapsible icon rail mode for the desktop sidebar (#406 Phase 1)",
+          "merged_at": "2026-07-19T11:12:07Z",
+          "url": "https://github.com/itkla/connex/pull/689"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 747,
+        "title": "feat(sidebar): persist navigation group state",
+        "merged_at": "2026-07-22T01:23:47Z",
+        "url": "https://github.com/itkla/connex/pull/747"
+      }
+    },
+    {
+      "issue": 450,
+      "title": "[Frontend] Command & intelligence palette Phase 2 — shortcuts, recents/views, ranking, and contextual actions",
+      "url": "https://github.com/itkla/connex/issues/450",
+      "updated_at": "2026-07-28T07:32:25Z",
+      "comments": 1,
+      "labels": [],
+      "is_parent": false,
+      "checked": 12,
+      "unchecked": 42,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 744,
+          "title": "feat(actions): show platform-correct shortcut hints",
+          "merged_at": "2026-07-22T01:23:42Z",
+          "url": "https://github.com/itkla/connex/pull/744"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 744,
+        "title": "feat(actions): show platform-correct shortcut hints",
+        "merged_at": "2026-07-22T01:23:42Z",
+        "url": "https://github.com/itkla/connex/pull/744"
+      }
+    },
+    {
+      "issue": 868,
+      "title": "[1.0][Gate] Public distribution readiness — legal, pentest, verifications, procurement",
+      "url": "https://github.com/itkla/connex/issues/868",
+      "updated_at": "2026-07-28T06:02:01Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 33,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 146,
+          "title": "chore(deps): bump gradle/actions from 4 to 6",
+          "merged_at": "2026-06-30T01:35:33Z",
+          "url": "https://github.com/itkla/connex/pull/146"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 146,
+        "title": "chore(deps): bump gradle/actions from 4 to 6",
+        "merged_at": "2026-06-30T01:35:33Z",
+        "url": "https://github.com/itkla/connex/pull/146"
+      }
+    },
+    {
+      "issue": 313,
+      "title": "[Tenancy] Epic: org-tier data isolation — logical org_id → placement routing → dedicated per-org databases",
+      "url": "https://github.com/itkla/connex/issues/313",
+      "updated_at": "2026-07-20T10:52:25Z",
+      "comments": 5,
+      "labels": [
+        "enhancement",
+        "Security",
+        "priority:p1",
+        "complexity:xl"
+      ],
+      "is_parent": false,
+      "checked": 7,
+      "unchecked": 5,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 13,
+      "merged_mentions": [
+        {
+          "number": 493,
+          "title": "fix(tenancy): make placement resolution fleet-consistent (#313)",
+          "merged_at": "2026-07-12T16:03:27Z",
+          "url": "https://github.com/itkla/connex/pull/493"
+        },
+        {
+          "number": 486,
+          "title": "docs(tenancy): record #313 Phase 3 as shipped",
+          "merged_at": "2026-07-12T09:22:04Z",
+          "url": "https://github.com/itkla/connex/pull/486"
+        },
+        {
+          "number": 484,
+          "title": "fix(test): baseline DealMapper->workspace crossing (un-break main)",
+          "merged_at": "2026-07-12T07:43:55Z",
+          "url": "https://github.com/itkla/connex/pull/484"
+        },
+        {
+          "number": 479,
+          "title": "feat(tenancy): the control-plane wall — drop cross-plane FKs, plane registry, lineage split (#440 increment 3, PR2)",
+          "merged_at": "2026-07-12T07:27:42Z",
+          "url": "https://github.com/itkla/connex/pull/479"
+        },
+        {
+          "number": 446,
+          "title": "feat(tenancy): placement-keyed catalog routing with fail-closed resolution (#440 increment 2)",
+          "merged_at": "2026-07-11T10:12:17Z",
+          "url": "https://github.com/itkla/connex/pull/446"
+        },
+        {
+          "number": 441,
+          "title": "feat(tenancy): org_placement registry read path (#313 Phase 3, defaulted to shared)",
+          "merged_at": "2026-07-11T05:15:39Z",
+          "url": "https://github.com/itkla/connex/pull/441"
+        },
+        {
+          "number": 438,
+          "title": "docs(tenancy): reinstate Connex-operated silo as a middle deployment tier",
+          "merged_at": "2026-07-11T04:46:22Z",
+          "url": "https://github.com/itkla/connex/pull/438"
+        },
+        {
+          "number": 389,
+          "title": "docs: define dedicated CMK posture",
+          "merged_at": "2026-07-09T10:09:19Z",
+          "url": "https://github.com/itkla/connex/pull/389"
+        },
+        {
+          "number": 331,
+          "title": "feat(org): Organization admin area (members, domains, SSO, audit)",
+          "merged_at": "2026-07-05T01:12:40Z",
+          "url": "https://github.com/itkla/connex/pull/331"
+        },
+        {
+          "number": 325,
+          "title": "harden(tenancy): org-plane hardening — deletion guard, org audit trail, IDNA domains",
+          "merged_at": "2026-07-04T13:57:57Z",
+          "url": "https://github.com/itkla/connex/pull/325"
+        },
+        {
+          "number": 322,
+          "title": "feat(tenancy): org allowed-domains constrain workspace invites (Option B)",
+          "merged_at": "2026-07-04T10:30:18Z",
+          "url": "https://github.com/itkla/connex/pull/322"
+        },
+        {
+          "number": 321,
+          "title": "feat(tenancy): organization membership & roles — SSO config gated on org-admin",
+          "merged_at": "2026-07-04T09:53:00Z",
+          "url": "https://github.com/itkla/connex/pull/321"
+        },
+        {
+          "number": 318,
+          "title": "feat(tenancy): enforce the organization boundary — placement rule, SQL org ceiling, isolation suites",
+          "merged_at": "2026-07-04T06:04:25Z",
+          "url": "https://github.com/itkla/connex/pull/318"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 493,
+        "title": "fix(tenancy): make placement resolution fleet-consistent (#313)",
+        "merged_at": "2026-07-12T16:03:27Z",
+        "url": "https://github.com/itkla/connex/pull/493"
+      }
+    },
+    {
+      "issue": 409,
+      "title": "[Frontend] Persist form drafts and protect users from accidental discard",
+      "url": "https://github.com/itkla/connex/issues/409",
+      "updated_at": "2026-07-28T07:31:20Z",
+      "comments": 6,
+      "labels": [],
+      "is_parent": false,
+      "checked": 21,
+      "unchecked": 18,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 10,
+      "merged_mentions": [
+        {
+          "number": 740,
+          "title": "feat(notes): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:30Z",
+          "url": "https://github.com/itkla/connex/pull/740"
+        },
+        {
+          "number": 738,
+          "title": "feat(tasks): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:25Z",
+          "url": "https://github.com/itkla/connex/pull/738"
+        },
+        {
+          "number": 735,
+          "title": "fix(security): bind drafts and overlays to tenant",
+          "merged_at": "2026-07-22T01:23:09Z",
+          "url": "https://github.com/itkla/connex/pull/735"
+        },
+        {
+          "number": 699,
+          "title": "feat(records): discard guard on company/contact create dialogs (#409)",
+          "merged_at": "2026-07-19T15:11:12Z",
+          "url": "https://github.com/itkla/connex/pull/699"
+        },
+        {
+          "number": 691,
+          "title": "feat(composers): Cmd/Ctrl+Enter to submit (IME-safe) (#409)",
+          "merged_at": "2026-07-19T11:54:58Z",
+          "url": "https://github.com/itkla/connex/pull/691"
+        },
+        {
+          "number": 683,
+          "title": "feat(activity): persist composer drafts + resume banner (#409 slice 5)",
+          "merged_at": "2026-07-19T06:10:02Z",
+          "url": "https://github.com/itkla/connex/pull/683"
+        },
+        {
+          "number": 682,
+          "title": "feat(tasks): protect the task composer from accidental discard (#409 slice 4)",
+          "merged_at": "2026-07-19T04:37:32Z",
+          "url": "https://github.com/itkla/connex/pull/682"
+        },
+        {
+          "number": 681,
+          "title": "feat(deals): protect the deal composer from accidental discard (#409 slice 3)",
+          "merged_at": "2026-07-19T04:02:19Z",
+          "url": "https://github.com/itkla/connex/pull/681"
+        },
+        {
+          "number": 680,
+          "title": "feat(notes): protect the note composer from accidental discard (#409 slice 2)",
+          "merged_at": "2026-07-19T03:32:56Z",
+          "url": "https://github.com/itkla/connex/pull/680"
+        },
+        {
+          "number": 679,
+          "title": "feat(forms): accidental-discard guard + confirm dialog, wired to the activity composer (#409 slice 1)",
+          "merged_at": "2026-07-19T03:06:05Z",
+          "url": "https://github.com/itkla/connex/pull/679"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 740,
+        "title": "feat(notes): recover standalone composer drafts",
+        "merged_at": "2026-07-22T01:23:30Z",
+        "url": "https://github.com/itkla/connex/pull/740"
+      }
+    },
+    {
+      "issue": 419,
+      "title": "[Follow-on][AI] Hardening deferred from #94 review: rate limits, legacy org-1 re-home, strict audit, DNS pin, save/revoke CAS",
+      "url": "https://github.com/itkla/connex/issues/419",
+      "updated_at": "2026-07-28T07:03:52Z",
+      "comments": 8,
+      "labels": [],
+      "is_parent": false,
+      "checked": 5,
+      "unchecked": 3,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 7,
+      "merged_mentions": [
+        {
+          "number": 464,
+          "title": "fix(ai): brief/risk panels side-by-side + dedupe in-flight AI fetches",
+          "merged_at": "2026-07-11T16:29:20Z",
+          "url": "https://github.com/itkla/connex/pull/464"
+        },
+        {
+          "number": 462,
+          "title": "feat(ai): regenerate button for the deal brief & risk panels",
+          "merged_at": "2026-07-11T15:29:22Z",
+          "url": "https://github.com/itkla/connex/pull/462"
+        },
+        {
+          "number": 461,
+          "title": "feat(ai): enrich brief & risk with relationship graph + history, sharpen prompts",
+          "merged_at": "2026-07-11T15:06:58Z",
+          "url": "https://github.com/itkla/connex/pull/461"
+        },
+        {
+          "number": 458,
+          "title": "feat(ai): persist AI outputs in a table to stop re-prompting on every page load",
+          "merged_at": "2026-07-11T14:18:47Z",
+          "url": "https://github.com/itkla/connex/pull/458"
+        },
+        {
+          "number": 437,
+          "title": "feat(ai): AI 'why introduce them' rationale for reverse-intro suggestions (#163)",
+          "merged_at": "2026-07-11T03:29:00Z",
+          "url": "https://github.com/itkla/connex/pull/437"
+        },
+        {
+          "number": 435,
+          "title": "feat(ai): AI deal-risk narrative rationale (#196)",
+          "merged_at": "2026-07-11T01:58:39Z",
+          "url": "https://github.com/itkla/connex/pull/435"
+        },
+        {
+          "number": 421,
+          "title": "feat(ai): BYOP AI foundation + AI deal briefs (epic #94)",
+          "merged_at": "2026-07-10T09:30:44Z",
+          "url": "https://github.com/itkla/connex/pull/421"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 464,
+        "title": "fix(ai): brief/risk panels side-by-side + dedupe in-flight AI fetches",
+        "merged_at": "2026-07-11T16:29:20Z",
+        "url": "https://github.com/itkla/connex/pull/464"
+      }
+    },
+    {
+      "issue": 411,
+      "title": "[Frontend] Restore exact list context and deep-link search results to the matching item",
+      "url": "https://github.com/itkla/connex/issues/411",
+      "updated_at": "2026-07-28T07:07:08Z",
+      "comments": 5,
+      "labels": [],
+      "is_parent": false,
+      "checked": 12,
+      "unchecked": 8,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 6,
+      "merged_mentions": [
+        {
+          "number": 833,
+          "title": "fix(deals): sync query URL state",
+          "merged_at": "2026-07-23T04:55:56Z",
+          "url": "https://github.com/itkla/connex/pull/833"
+        },
+        {
+          "number": 706,
+          "title": "feat(records): saved-view sharing, pins, defaults, and share links (#412)",
+          "merged_at": "2026-07-19T21:44:00Z",
+          "url": "https://github.com/itkla/connex/pull/706"
+        },
+        {
+          "number": 676,
+          "title": "feat(activity): in-context ?activity=/?task= deep-link sheets (#411 slice 4)",
+          "merged_at": "2026-07-19T00:54:49Z",
+          "url": "https://github.com/itkla/connex/pull/676"
+        },
+        {
+          "number": 675,
+          "title": "feat(records): shareable sort/page URL for the deals browser + shared list-state helper (#411 slice 3)",
+          "merged_at": "2026-07-18T18:01:56Z",
+          "url": "https://github.com/itkla/connex/pull/675"
+        },
+        {
+          "number": 674,
+          "title": "feat(records): shareable list-state URL (sort/query/page) for companies & contacts (#411 slice 2)",
+          "merged_at": "2026-07-18T17:38:28Z",
+          "url": "https://github.com/itkla/connex/pull/674"
+        },
+        {
+          "number": 673,
+          "title": "feat(search): open task/note/activity results at their exact detail page (#411 slice 1)",
+          "merged_at": "2026-07-18T17:03:01Z",
+          "url": "https://github.com/itkla/connex/pull/673"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 833,
+        "title": "fix(deals): sync query URL state",
+        "merged_at": "2026-07-23T04:55:56Z",
+        "url": "https://github.com/itkla/connex/pull/833"
+      }
+    },
+    {
+      "issue": 485,
+      "title": "[Tenancy] catalog-per-placement flag-enable gate — prerequisites before routing can turn on (#313 Phase 4 runway)",
+      "url": "https://github.com/itkla/connex/issues/485",
+      "updated_at": "2026-07-23T06:15:45Z",
+      "comments": 11,
+      "labels": [
+        "enhancement",
+        "Security"
+      ],
+      "is_parent": false,
+      "checked": 3,
+      "unchecked": 7,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 6,
+      "merged_mentions": [
+        {
+          "number": 816,
+          "title": "[Tenancy] Remove TaskMapper control-plane workspace join",
+          "merged_at": "2026-07-23T01:49:33Z",
+          "url": "https://github.com/itkla/connex/pull/816"
+        },
+        {
+          "number": 814,
+          "title": "[Tenancy] Remove ActivityMapper control-plane workspace joins",
+          "merged_at": "2026-07-23T01:32:37Z",
+          "url": "https://github.com/itkla/connex/pull/814"
+        },
+        {
+          "number": 578,
+          "title": "feat(appi): data-subject request tracking + subject-scoped disclosure export (#221 increment 1)",
+          "merged_at": "2026-07-16T08:44:02Z",
+          "url": "https://github.com/itkla/connex/pull/578"
+        },
+        {
+          "number": 493,
+          "title": "fix(tenancy): make placement resolution fleet-consistent (#313)",
+          "merged_at": "2026-07-12T16:03:27Z",
+          "url": "https://github.com/itkla/connex/pull/493"
+        },
+        {
+          "number": 491,
+          "title": "feat(tenancy): whole-operation catalog routing for async/scheduled work (#485)",
+          "merged_at": "2026-07-12T13:01:19Z",
+          "url": "https://github.com/itkla/connex/pull/491"
+        },
+        {
+          "number": 486,
+          "title": "docs(tenancy): record #313 Phase 3 as shipped",
+          "merged_at": "2026-07-12T09:22:04Z",
+          "url": "https://github.com/itkla/connex/pull/486"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 816,
+        "title": "[Tenancy] Remove TaskMapper control-plane workspace join",
+        "merged_at": "2026-07-23T01:49:33Z",
+        "url": "https://github.com/itkla/connex/pull/816"
+      }
+    },
+    {
+      "issue": 413,
+      "title": "[Frontend] Record-table power mode — comfortable default, scoped density, column control, selection, and inline edit",
+      "url": "https://github.com/itkla/connex/issues/413",
+      "updated_at": "2026-07-28T07:25:10Z",
+      "comments": 3,
+      "labels": [],
+      "is_parent": false,
+      "checked": 17,
+      "unchecked": 27,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 6,
+      "merged_mentions": [
+        {
+          "number": 708,
+          "title": "feat(records): deals inline value editing (#413)",
+          "merged_at": "2026-07-19T23:35:18Z",
+          "url": "https://github.com/itkla/connex/pull/708"
+        },
+        {
+          "number": 703,
+          "title": "feat(deals): targeted name/value update endpoints (#413)",
+          "merged_at": "2026-07-19T19:36:21Z",
+          "url": "https://github.com/itkla/connex/pull/703"
+        },
+        {
+          "number": 700,
+          "title": "feat(records): inline cell editing (#413)",
+          "merged_at": "2026-07-19T16:34:36Z",
+          "url": "https://github.com/itkla/connex/pull/700"
+        },
+        {
+          "number": 698,
+          "title": "feat(records): shift-click range selection (#413)",
+          "merged_at": "2026-07-19T14:46:26Z",
+          "url": "https://github.com/itkla/connex/pull/698"
+        },
+        {
+          "number": 693,
+          "title": "feat(records): per-user column visibility control (#413)",
+          "merged_at": "2026-07-19T12:40:51Z",
+          "url": "https://github.com/itkla/connex/pull/693"
+        },
+        {
+          "number": 684,
+          "title": "feat(records): comfortable/compact row density for record tables (#413 Phase 1)",
+          "merged_at": "2026-07-19T08:30:21Z",
+          "url": "https://github.com/itkla/connex/pull/684"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 708,
+        "title": "feat(records): deals inline value editing (#413)",
+        "merged_at": "2026-07-19T23:35:18Z",
+        "url": "https://github.com/itkla/connex/pull/708"
+      }
+    },
+    {
+      "issue": 257,
+      "title": "[Emails] Japanese templates + per-recipient locale selection",
+      "url": "https://github.com/itkla/connex/issues/257",
+      "updated_at": "2026-07-28T07:04:32Z",
+      "comments": 2,
+      "labels": [
+        "enhancement"
+      ],
+      "is_parent": false,
+      "checked": 4,
+      "unchecked": 3,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 837,
+          "title": "feat(emails): localize known-recipient flows",
+          "merged_at": "2026-07-23T05:44:48Z",
+          "url": "https://github.com/itkla/connex/pull/837"
+        },
+        {
+          "number": 589,
+          "title": "chore(deps): bump pnpm/action-setup from 4.3.0 to 6.0.9",
+          "merged_at": "2026-07-22T03:26:49Z",
+          "url": "https://github.com/itkla/connex/pull/589"
+        },
+        {
+          "number": 258,
+          "title": "feat(emails): React Email authoring workspace for transactional templates",
+          "merged_at": "2026-07-02T09:27:17Z",
+          "url": "https://github.com/itkla/connex/pull/258"
+        },
+        {
+          "number": 145,
+          "title": "chore(deps): bump pnpm/action-setup from 4 to 6",
+          "merged_at": "2026-06-30T01:35:21Z",
+          "url": "https://github.com/itkla/connex/pull/145"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 837,
+        "title": "feat(emails): localize known-recipient flows",
+        "merged_at": "2026-07-23T05:44:48Z",
+        "url": "https://github.com/itkla/connex/pull/837"
+      }
+    },
+    {
+      "issue": 579,
+      "title": "[APPI][Follow-on] DSR residuals: admin UI, ai_output_cache purge on restriction, restriction badges",
+      "url": "https://github.com/itkla/connex/issues/579",
+      "updated_at": "2026-07-22T20:33:00Z",
+      "comments": 4,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 808,
+          "title": "fix: prevent restricted AI cache resurrection",
+          "merged_at": "2026-07-22T20:22:46Z",
+          "url": "https://github.com/itkla/connex/pull/808"
+        },
+        {
+          "number": 601,
+          "title": "feat(appi): purge person-keyed AI output cache on restriction (#579)",
+          "merged_at": "2026-07-16T16:24:11Z",
+          "url": "https://github.com/itkla/connex/pull/601"
+        },
+        {
+          "number": 597,
+          "title": "feat(appi): data-subject request panel + contact processing-restrictions UI (#579)",
+          "merged_at": "2026-07-16T15:41:34Z",
+          "url": "https://github.com/itkla/connex/pull/597"
+        },
+        {
+          "number": 580,
+          "title": "feat(appi): person cease-of-use + cease-provision enforcement (#221 increment 2)",
+          "merged_at": "2026-07-16T10:34:22Z",
+          "url": "https://github.com/itkla/connex/pull/580"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 808,
+        "title": "fix: prevent restricted AI cache resurrection",
+        "merged_at": "2026-07-22T20:22:46Z",
+        "url": "https://github.com/itkla/connex/pull/808"
+      }
+    },
+    {
+      "issue": 418,
+      "title": "[Frontend] Add reusable slash commands to quick notes and activity composers",
+      "url": "https://github.com/itkla/connex/issues/418",
+      "updated_at": "2026-07-28T07:20:51Z",
+      "comments": 5,
+      "labels": [],
+      "is_parent": false,
+      "checked": 12,
+      "unchecked": 9,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 806,
+          "title": "feat: add file references to activity edits",
+          "merged_at": "2026-07-22T18:53:11Z",
+          "url": "https://github.com/itkla/connex/pull/806"
+        },
+        {
+          "number": 799,
+          "title": "feat: add activity file references",
+          "merged_at": "2026-07-22T16:44:51Z",
+          "url": "https://github.com/itkla/connex/pull/799"
+        },
+        {
+          "number": 709,
+          "title": "feat(notes): slash commands in the lightweight composers (#418)",
+          "merged_at": "2026-07-20T00:51:32Z",
+          "url": "https://github.com/itkla/connex/pull/709"
+        },
+        {
+          "number": 510,
+          "title": "feat(notes): miniaturized rich block editor in quick-create note dialog",
+          "merged_at": "2026-07-13T04:02:42Z",
+          "url": "https://github.com/itkla/connex/pull/510"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 806,
+        "title": "feat: add file references to activity edits",
+        "merged_at": "2026-07-22T18:53:11Z",
+        "url": "https://github.com/itkla/connex/pull/806"
+      }
+    },
+    {
+      "issue": 416,
+      "title": "[Notifications][Frontend/Backend] Add snoozing, grouping, filters, and quiet hours",
+      "url": "https://github.com/itkla/connex/issues/416",
+      "updated_at": "2026-07-28T07:07:49Z",
+      "comments": 7,
+      "labels": [],
+      "is_parent": false,
+      "checked": 12,
+      "unchecked": 7,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 749,
+          "title": "fix(notifications): render expired snoozes as active",
+          "merged_at": "2026-07-22T01:23:53Z",
+          "url": "https://github.com/itkla/connex/pull/749"
+        },
+        {
+          "number": 726,
+          "title": "feat(notifications): add inbox filters",
+          "merged_at": "2026-07-21T17:50:06Z",
+          "url": "https://github.com/itkla/connex/pull/726"
+        },
+        {
+          "number": 707,
+          "title": "feat(notifications): snooze UI, Snoozed filter, and quiet hours (#416)",
+          "merged_at": "2026-07-19T23:29:06Z",
+          "url": "https://github.com/itkla/connex/pull/707"
+        },
+        {
+          "number": 704,
+          "title": "feat(notifications): snooze, filters, and quiet hours backend (#416)",
+          "merged_at": "2026-07-19T21:01:11Z",
+          "url": "https://github.com/itkla/connex/pull/704"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 749,
+        "title": "fix(notifications): render expired snoozes as active",
+        "merged_at": "2026-07-22T01:23:53Z",
+        "url": "https://github.com/itkla/connex/pull/749"
+      }
+    },
+    {
+      "issue": 414,
+      "title": "[Frontend] Add registry-backed record row and card context menus",
+      "url": "https://github.com/itkla/connex/issues/414",
+      "updated_at": "2026-07-22T08:47:42Z",
+      "comments": 8,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 10,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 697,
+          "title": "feat(records): keyboard invocation of the row context menu (#414)",
+          "merged_at": "2026-07-19T14:17:11Z",
+          "url": "https://github.com/itkla/connex/pull/697"
+        },
+        {
+          "number": 672,
+          "title": "fix(records): record menus must depend on the registry contents (#414 P1 follow-up)",
+          "merged_at": "2026-07-18T16:30:32Z",
+          "url": "https://github.com/itkla/connex/pull/672"
+        },
+        {
+          "number": 671,
+          "title": "feat(records): registry-backed row/card context menus for companies/contacts/deals (#414)",
+          "merged_at": "2026-07-18T16:12:45Z",
+          "url": "https://github.com/itkla/connex/pull/671"
+        },
+        {
+          "number": 443,
+          "title": "feat(actions): shared application action registry and global action context (#402)",
+          "merged_at": "2026-07-11T05:38:37Z",
+          "url": "https://github.com/itkla/connex/pull/443"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 697,
+        "title": "feat(records): keyboard invocation of the row context menu (#414)",
+        "merged_at": "2026-07-19T14:17:11Z",
+        "url": "https://github.com/itkla/connex/pull/697"
+      }
+    },
+    {
+      "issue": 118,
+      "title": "[Follow-on] Custom segments — persons/deals, more operators, builder polish",
+      "url": "https://github.com/itkla/connex/issues/118",
+      "updated_at": "2026-07-22T13:58:21Z",
+      "comments": 10,
+      "labels": [
+        "complexity:m",
+        "value:medium",
+        "severity:low",
+        "priority:p3"
+      ],
+      "is_parent": false,
+      "checked": 8,
+      "unchecked": 2,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 3,
+      "merged_mentions": [
+        {
+          "number": 785,
+          "title": "fix: scope segment relations by workspace",
+          "merged_at": "2026-07-22T12:16:59Z",
+          "url": "https://github.com/itkla/connex/pull/785"
+        },
+        {
+          "number": 337,
+          "title": "feat(rules): rule engine v2 backend — conditions, triggers, actions, preview, throttle",
+          "merged_at": "2026-07-05T10:11:56Z",
+          "url": "https://github.com/itkla/connex/pull/337"
+        },
+        {
+          "number": 119,
+          "title": "Rule engine — backend: data model, execution, triggers, scheduler (#54)",
+          "merged_at": "2026-06-28T22:06:44Z",
+          "url": "https://github.com/itkla/connex/pull/119"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 785,
+        "title": "fix: scope segment relations by workspace",
+        "merged_at": "2026-07-22T12:16:59Z",
+        "url": "https://github.com/itkla/connex/pull/785"
+      }
+    },
+    {
+      "issue": 733,
+      "title": "[Frontend] Persist task-composer drafts and offer resume",
+      "url": "https://github.com/itkla/connex/issues/733",
+      "updated_at": "2026-07-28T07:06:07Z",
+      "comments": 8,
+      "labels": [],
+      "is_parent": false,
+      "checked": 17,
+      "unchecked": 5,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 3,
+      "merged_mentions": [
+        {
+          "number": 777,
+          "title": "feat: restore standalone task and note drafts",
+          "merged_at": "2026-07-22T09:45:42Z",
+          "url": "https://github.com/itkla/connex/pull/777"
+        },
+        {
+          "number": 740,
+          "title": "feat(notes): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:30Z",
+          "url": "https://github.com/itkla/connex/pull/740"
+        },
+        {
+          "number": 738,
+          "title": "feat(tasks): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:25Z",
+          "url": "https://github.com/itkla/connex/pull/738"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 777,
+        "title": "feat: restore standalone task and note drafts",
+        "merged_at": "2026-07-22T09:45:42Z",
+        "url": "https://github.com/itkla/connex/pull/777"
+      }
+    },
+    {
+      "issue": 870,
+      "title": "[APPI] Canonical identity tables missing from DSR disclosure and erasure sweeps",
+      "url": "https://github.com/itkla/connex/issues/870",
+      "updated_at": "2026-07-26T15:10:22Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 874,
+          "title": "feat(identity): canonical person/company identity spine, MatchingService, and backfill",
+          "merged_at": "2026-07-27T02:14:41Z",
+          "url": "https://github.com/itkla/connex/pull/874"
+        },
+        {
+          "number": 873,
+          "title": "feat(tenancy): tenant export bundle, resumable teardown, and APPI compliance guard",
+          "merged_at": "2026-07-27T01:05:59Z",
+          "url": "https://github.com/itkla/connex/pull/873"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 874,
+        "title": "feat(identity): canonical person/company identity spine, MatchingService, and backfill",
+        "merged_at": "2026-07-27T02:14:41Z",
+        "url": "https://github.com/itkla/connex/pull/874"
+      }
+    },
+    {
+      "issue": 135,
+      "title": "CSV import/export — v1 follow-ups",
+      "url": "https://github.com/itkla/connex/issues/135",
+      "updated_at": "2026-07-22T18:20:40Z",
+      "comments": 9,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 804,
+          "title": "fix: reject shared CSV import links",
+          "merged_at": "2026-07-22T18:20:08Z",
+          "url": "https://github.com/itkla/connex/pull/804"
+        },
+        {
+          "number": 136,
+          "title": "feat: CSV import + export for contacts, companies & deals",
+          "merged_at": "2026-06-29T14:31:00Z",
+          "url": "https://github.com/itkla/connex/pull/136"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 804,
+        "title": "fix: reject shared CSV import links",
+        "merged_at": "2026-07-22T18:20:08Z",
+        "url": "https://github.com/itkla/connex/pull/804"
+      }
+    },
+    {
+      "issue": 193,
+      "title": "[Follow-on] Kanban board perf: memoize board derivation + batch position renumber",
+      "url": "https://github.com/itkla/connex/issues/193",
+      "updated_at": "2026-07-28T07:04:43Z",
+      "comments": 4,
+      "labels": [
+        "complexity:s",
+        "severity:low",
+        "value:low",
+        "priority:p3"
+      ],
+      "is_parent": false,
+      "checked": 4,
+      "unchecked": 1,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 754,
+          "title": "perf(kanban): batch position renumbering",
+          "merged_at": "2026-07-22T02:22:03Z",
+          "url": "https://github.com/itkla/connex/pull/754"
+        },
+        {
+          "number": 752,
+          "title": "perf(kanban): memoize drag state derivation",
+          "merged_at": "2026-07-22T02:21:25Z",
+          "url": "https://github.com/itkla/connex/pull/752"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 754,
+        "title": "perf(kanban): batch position renumbering",
+        "merged_at": "2026-07-22T02:22:03Z",
+        "url": "https://github.com/itkla/connex/pull/754"
+      }
+    },
+    {
+      "issue": 407,
+      "title": "[Frontend] Add a universal activity composer with optional follow-up creation",
+      "url": "https://github.com/itkla/connex/issues/407",
+      "updated_at": "2026-07-28T07:08:23Z",
+      "comments": 4,
+      "labels": [],
+      "is_parent": false,
+      "checked": 11,
+      "unchecked": 14,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 742,
+          "title": "feat(records): log activity from Record Peek",
+          "merged_at": "2026-07-22T01:23:36Z",
+          "url": "https://github.com/itkla/connex/pull/742"
+        },
+        {
+          "number": 678,
+          "title": "feat(activity): universal composer with optional follow-up task (#407)",
+          "merged_at": "2026-07-19T02:24:22Z",
+          "url": "https://github.com/itkla/connex/pull/678"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 742,
+        "title": "feat(records): log activity from Record Peek",
+        "merged_at": "2026-07-22T01:23:36Z",
+        "url": "https://github.com/itkla/connex/pull/742"
+      }
+    },
+    {
+      "issue": 417,
+      "title": "[Frontend] Expose record import and export through the global action system",
+      "url": "https://github.com/itkla/connex/issues/417",
+      "updated_at": "2026-07-28T07:22:21Z",
+      "comments": 5,
+      "labels": [],
+      "is_parent": false,
+      "checked": 12,
+      "unchecked": 9,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 728,
+          "title": "feat(actions): add current-view record exports",
+          "merged_at": "2026-07-21T18:40:39Z",
+          "url": "https://github.com/itkla/connex/pull/728"
+        },
+        {
+          "number": 646,
+          "title": "feat(actions): expose record import through the global action system (#417)",
+          "merged_at": "2026-07-18T02:05:46Z",
+          "url": "https://github.com/itkla/connex/pull/646"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 728,
+        "title": "feat(actions): add current-view record exports",
+        "merged_at": "2026-07-21T18:40:39Z",
+        "url": "https://github.com/itkla/connex/pull/728"
+      }
+    },
+    {
+      "issue": 144,
+      "title": "Burn down frontend eslint backlog, then make CI lint fully blocking",
+      "url": "https://github.com/itkla/connex/issues/144",
+      "updated_at": "2026-07-21T14:48:25Z",
+      "comments": 1,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 722,
+          "title": "fix(ci): restore baseline security checks",
+          "merged_at": "2026-07-21T15:06:07Z",
+          "url": "https://github.com/itkla/connex/pull/722"
+        },
+        {
+          "number": 192,
+          "title": "feat: @-mentions in notes + inbox notifications (#59, Phase A)",
+          "merged_at": "2026-07-01T12:18:08Z",
+          "url": "https://github.com/itkla/connex/pull/192"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 722,
+        "title": "fix(ci): restore baseline security checks",
+        "merged_at": "2026-07-21T15:06:07Z",
+        "url": "https://github.com/itkla/connex/pull/722"
+      }
+    },
+    {
+      "issue": 645,
+      "title": "[AI] Long AI requests are cut in transit — first attempt fails, retry hits cache instantly",
+      "url": "https://github.com/itkla/connex/issues/645",
+      "updated_at": "2026-07-25T09:50:45Z",
+      "comments": 1,
+      "labels": [
+        "bug"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 650,
+          "title": "fix(ai): auto-recover reports & deal-page AI cut in transit (#645 increment 1)",
+          "merged_at": "2026-07-18T01:59:01Z",
+          "url": "https://github.com/itkla/connex/pull/650"
+        },
+        {
+          "number": 648,
+          "title": "fix(ai): snapshot 409 from provider ISE + un-binary the resolver source",
+          "merged_at": "2026-07-17T14:42:55Z",
+          "url": "https://github.com/itkla/connex/pull/648"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 650,
+        "title": "fix(ai): auto-recover reports & deal-page AI cut in transit (#645 increment 1)",
+        "merged_at": "2026-07-18T01:59:01Z",
+        "url": "https://github.com/itkla/connex/pull/650"
+      }
+    },
+    {
+      "issue": 219,
+      "title": "[APPI] Public 保有個人データ disclosure + privacy policy pages + contact point (Art. 21/32)",
+      "url": "https://github.com/itkla/connex/issues/219",
+      "updated_at": "2026-07-28T07:14:07Z",
+      "comments": 2,
+      "labels": [
+        "Security",
+        "complexity:m",
+        "severity:high",
+        "value:high",
+        "priority:p1",
+        "APPI"
+      ],
+      "is_parent": false,
+      "checked": 4,
+      "unchecked": 5,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 571,
+          "title": "feat(legal): /legal terms + /tokushoho pages (en/ja) — #219 remainder",
+          "merged_at": "2026-07-16T06:39:36Z",
+          "url": "https://github.com/itkla/connex/pull/571"
+        },
+        {
+          "number": 226,
+          "title": "feat(legal): APPI privacy + disclosure pages (en/ja) + breach runbook",
+          "merged_at": "2026-07-02T06:28:02Z",
+          "url": "https://github.com/itkla/connex/pull/226"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 571,
+        "title": "feat(legal): /legal terms + /tokushoho pages (en/ja) — #219 remainder",
+        "merged_at": "2026-07-16T06:39:36Z",
+        "url": "https://github.com/itkla/connex/pull/571"
+      }
+    },
+    {
+      "issue": 122,
+      "title": "a11y: primary brand buttons fail WCAG AA contrast (white on --brand ≈1.9:1)",
+      "url": "https://github.com/itkla/connex/issues/122",
+      "updated_at": "2026-07-25T09:50:31Z",
+      "comments": 0,
+      "labels": [
+        "bug",
+        "severity:medium",
+        "complexity:m",
+        "value:medium",
+        "priority:p2"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 4,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 511,
+          "title": "feat(ui): flip Button primitive to pill (rounded-full)",
+          "merged_at": "2026-07-13T13:32:12Z",
+          "url": "https://github.com/itkla/connex/pull/511"
+        },
+        {
+          "number": 212,
+          "title": "feat(records): make \"+ New\" a split button with import/export dropdown",
+          "merged_at": "2026-07-01T22:04:00Z",
+          "url": "https://github.com/itkla/connex/pull/212"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 511,
+        "title": "feat(ui): flip Button primitive to pill (rounded-full)",
+        "merged_at": "2026-07-13T13:32:12Z",
+        "url": "https://github.com/itkla/connex/pull/511"
+      }
+    },
+    {
+      "issue": 102,
+      "title": "[Architecture] §9 — On-prem packaging, offline-verifiable license, and migration discipline",
+      "url": "https://github.com/itkla/connex/issues/102",
+      "updated_at": "2026-07-28T07:13:27Z",
+      "comments": 2,
+      "labels": [
+        "Security",
+        "severity:medium",
+        "value:medium",
+        "priority:p3",
+        "complexity:l"
+      ],
+      "is_parent": false,
+      "checked": 6,
+      "unchecked": 7,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 2,
+      "merged_mentions": [
+        {
+          "number": 518,
+          "title": "feat: finalize epic #502 — entitlement seam (#501) + migration forward-only guard & upgrade policy (#500)",
+          "merged_at": "2026-07-13T05:27:45Z",
+          "url": "https://github.com/itkla/connex/pull/518"
+        },
+        {
+          "number": 515,
+          "title": "feat(deploy): compose bundle + per-profile templates + 3-profile boot smoke",
+          "merged_at": "2026-07-13T05:01:13Z",
+          "url": "https://github.com/itkla/connex/pull/515"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 518,
+        "title": "feat: finalize epic #502 — entitlement seam (#501) + migration forward-only guard & upgrade policy (#500)",
+        "merged_at": "2026-07-13T05:27:45Z",
+        "url": "https://github.com/itkla/connex/pull/518"
+      }
+    },
+    {
+      "issue": 220,
+      "title": "[APPI] Purpose-of-use specification + acquisition provenance (Art. 17/18/21)",
+      "url": "https://github.com/itkla/connex/issues/220",
+      "updated_at": "2026-07-28T07:15:14Z",
+      "comments": 1,
+      "labels": [
+        "Security",
+        "severity:medium",
+        "complexity:m",
+        "value:medium",
+        "priority:p2",
+        "APPI"
+      ],
+      "is_parent": false,
+      "checked": 2,
+      "unchecked": 22,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 874,
+          "title": "feat(identity): canonical person/company identity spine, MatchingService, and backfill",
+          "merged_at": "2026-07-27T02:14:41Z",
+          "url": "https://github.com/itkla/connex/pull/874"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 874,
+        "title": "feat(identity): canonical person/company identity spine, MatchingService, and backfill",
+        "merged_at": "2026-07-27T02:14:41Z",
+        "url": "https://github.com/itkla/connex/pull/874"
+      }
+    },
+    {
+      "issue": 869,
+      "title": "APPI restriction-sweep gaps: DealMapper surface-only strategy, PersonEmploymentMapper.getRecentMoves projects restricted persons",
+      "url": "https://github.com/itkla/connex/issues/869",
+      "updated_at": "2026-07-26T05:05:26Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 873,
+          "title": "feat(tenancy): tenant export bundle, resumable teardown, and APPI compliance guard",
+          "merged_at": "2026-07-27T01:05:59Z",
+          "url": "https://github.com/itkla/connex/pull/873"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 873,
+        "title": "feat(tenancy): tenant export bundle, resumable teardown, and APPI compliance guard",
+        "merged_at": "2026-07-27T01:05:59Z",
+        "url": "https://github.com/itkla/connex/pull/873"
+      }
+    },
+    {
+      "issue": 836,
+      "title": "[Emails] Restore the standalone template preview command",
+      "url": "https://github.com/itkla/connex/issues/836",
+      "updated_at": "2026-07-23T05:31:22Z",
+      "comments": 0,
+      "labels": [
+        "enhancement"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 837,
+          "title": "feat(emails): localize known-recipient flows",
+          "merged_at": "2026-07-23T05:44:48Z",
+          "url": "https://github.com/itkla/connex/pull/837"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 837,
+        "title": "feat(emails): localize known-recipient flows",
+        "merged_at": "2026-07-23T05:44:48Z",
+        "url": "https://github.com/itkla/connex/pull/837"
+      }
+    },
+    {
+      "issue": 835,
+      "title": "[Security] Harden pnpm workspaces against fresh and downgraded packages",
+      "url": "https://github.com/itkla/connex/issues/835",
+      "updated_at": "2026-07-25T09:50:54Z",
+      "comments": 1,
+      "labels": [
+        "Security"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 837,
+          "title": "feat(emails): localize known-recipient flows",
+          "merged_at": "2026-07-23T05:44:48Z",
+          "url": "https://github.com/itkla/connex/pull/837"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 837,
+        "title": "feat(emails): localize known-recipient flows",
+        "merged_at": "2026-07-23T05:44:48Z",
+        "url": "https://github.com/itkla/connex/pull/837"
+      }
+    },
+    {
+      "issue": 803,
+      "title": "[Backend] Serialize CSV matched-record commits with concurrent deletion",
+      "url": "https://github.com/itkla/connex/issues/803",
+      "updated_at": "2026-07-28T07:14:37Z",
+      "comments": 3,
+      "labels": [
+        "bug",
+        "severity:medium",
+        "complexity:m",
+        "value:medium",
+        "priority:p2",
+        "backend"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 804,
+          "title": "fix: reject shared CSV import links",
+          "merged_at": "2026-07-22T18:20:08Z",
+          "url": "https://github.com/itkla/connex/pull/804"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 804,
+        "title": "fix: reject shared CSV import links",
+        "merged_at": "2026-07-22T18:20:08Z",
+        "url": "https://github.com/itkla/connex/pull/804"
+      }
+    },
+    {
+      "issue": 455,
+      "title": "[AI][Follow-on] Provider-native JSON mode (response_format / response_mime_type) for structured features",
+      "url": "https://github.com/itkla/connex/issues/455",
+      "updated_at": "2026-07-28T07:04:09Z",
+      "comments": 3,
+      "labels": [
+        "enhancement"
+      ],
+      "is_parent": false,
+      "checked": 5,
+      "unchecked": 1,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 768,
+          "title": "feat: add Vertex Gemini JSON mode",
+          "merged_at": "2026-07-22T05:48:49Z",
+          "url": "https://github.com/itkla/connex/pull/768"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 768,
+        "title": "feat: add Vertex Gemini JSON mode",
+        "merged_at": "2026-07-22T05:48:49Z",
+        "url": "https://github.com/itkla/connex/pull/768"
+      }
+    },
+    {
+      "issue": 408,
+      "title": "[Frontend/Backend] Add safe undo for common CRM mutations",
+      "url": "https://github.com/itkla/connex/issues/408",
+      "updated_at": "2026-07-10T07:09:59Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 11,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 671,
+          "title": "feat(records): registry-backed row/card context menus for companies/contacts/deals (#414)",
+          "merged_at": "2026-07-18T16:12:45Z",
+          "url": "https://github.com/itkla/connex/pull/671"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 671,
+        "title": "feat(records): registry-backed row/card context menus for companies/contacts/deals (#414)",
+        "merged_at": "2026-07-18T16:12:45Z",
+        "url": "https://github.com/itkla/connex/pull/671"
+      }
+    },
+    {
+      "issue": 655,
+      "title": "[#565][epic-child] Nurture journeys — durable multi-step orchestration",
+      "url": "https://github.com/itkla/connex/issues/655",
+      "updated_at": "2026-07-18T01:59:17Z",
+      "comments": 0,
+      "labels": [
+        "priority:p2",
+        "value:high",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 658,
+          "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+          "merged_at": "2026-07-18T02:32:58Z",
+          "url": "https://github.com/itkla/connex/pull/658"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 658,
+        "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+        "merged_at": "2026-07-18T02:32:58Z",
+        "url": "https://github.com/itkla/connex/pull/658"
+      }
+    },
+    {
+      "issue": 653,
+      "title": "[#565][follow-on] Opt-out semantics with cross-org shared persons + suppression scope='global' unimplemented",
+      "url": "https://github.com/itkla/connex/issues/653",
+      "updated_at": "2026-07-17T15:07:55Z",
+      "comments": 0,
+      "labels": [
+        "complexity:m",
+        "value:medium",
+        "priority:p3",
+        "APPI",
+        "Feature"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 658,
+          "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+          "merged_at": "2026-07-18T02:32:58Z",
+          "url": "https://github.com/itkla/connex/pull/658"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 658,
+        "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+        "merged_at": "2026-07-18T02:32:58Z",
+        "url": "https://github.com/itkla/connex/pull/658"
+      }
+    },
+    {
+      "issue": 652,
+      "title": "[#565][follow-on] Per-channel audience snapshot eligibility (SMS snapshot counts computed against email)",
+      "url": "https://github.com/itkla/connex/issues/652",
+      "updated_at": "2026-07-22T05:27:09Z",
+      "comments": 1,
+      "labels": [
+        "complexity:m",
+        "value:medium",
+        "priority:p2",
+        "Feature"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 658,
+          "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+          "merged_at": "2026-07-18T02:32:58Z",
+          "url": "https://github.com/itkla/connex/pull/658"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 658,
+        "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+        "merged_at": "2026-07-18T02:32:58Z",
+        "url": "https://github.com/itkla/connex/pull/658"
+      }
+    },
+    {
+      "issue": 577,
+      "title": "[Tenancy] Arch test: org/identity-anchor sweep over exempt control-plane mapper namespaces",
+      "url": "https://github.com/itkla/connex/issues/577",
+      "updated_at": "2026-07-25T09:50:42Z",
+      "comments": 2,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 578,
+          "title": "feat(appi): data-subject request tracking + subject-scoped disclosure export (#221 increment 1)",
+          "merged_at": "2026-07-16T08:44:02Z",
+          "url": "https://github.com/itkla/connex/pull/578"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 578,
+        "title": "feat(appi): data-subject request tracking + subject-scoped disclosure export (#221 increment 1)",
+        "merged_at": "2026-07-16T08:44:02Z",
+        "url": "https://github.com/itkla/connex/pull/578"
+      }
+    },
+    {
+      "issue": 460,
+      "title": "[AI][Follow-on] Bound and batch the enrichment query load on the deal-detail hot path",
+      "url": "https://github.com/itkla/connex/issues/460",
+      "updated_at": "2026-07-28T07:04:20Z",
+      "comments": 3,
+      "labels": [
+        "enhancement"
+      ],
+      "is_parent": false,
+      "checked": 2,
+      "unchecked": 1,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 461,
+          "title": "feat(ai): enrich brief & risk with relationship graph + history, sharpen prompts",
+          "merged_at": "2026-07-11T15:06:58Z",
+          "url": "https://github.com/itkla/connex/pull/461"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 461,
+        "title": "feat(ai): enrich brief & risk with relationship graph + history, sharpen prompts",
+        "merged_at": "2026-07-11T15:06:58Z",
+        "url": "https://github.com/itkla/connex/pull/461"
+      }
+    },
+    {
+      "issue": 103,
+      "title": "[Architecture] §10 — Frontend: move uploads to object storage; serverless shell + cross-origin auth",
+      "url": "https://github.com/itkla/connex/issues/103",
+      "updated_at": "2026-07-28T07:14:34Z",
+      "comments": 0,
+      "labels": [
+        "Security",
+        "priority:p2",
+        "severity:high",
+        "value:high",
+        "complexity:l"
+      ],
+      "is_parent": false,
+      "checked": 6,
+      "unchecked": 6,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 301,
+          "title": "Authorize blob upload/delete routes against the owning workspace (#237)",
+          "merged_at": "2026-07-03T11:21:26Z",
+          "url": "https://github.com/itkla/connex/pull/301"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 301,
+        "title": "Authorize blob upload/delete routes against the owning workspace (#237)",
+        "merged_at": "2026-07-03T11:21:26Z",
+        "url": "https://github.com/itkla/connex/pull/301"
+      }
+    },
+    {
+      "issue": 204,
+      "title": "[Follow-on] Deal-risk notifications: first-sweep backfill cap to avoid adoption flooding",
+      "url": "https://github.com/itkla/connex/issues/204",
+      "updated_at": "2026-07-21T16:13:21Z",
+      "comments": 1,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 207,
+          "title": "feat(deals): deal-risk flags — engine, UI, dashboard widget, notifications (#53 A–D)",
+          "merged_at": "2026-07-01T14:13:00Z",
+          "url": "https://github.com/itkla/connex/pull/207"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 207,
+        "title": "feat(deals): deal-risk flags — engine, UI, dashboard widget, notifications (#53 A–D)",
+        "merged_at": "2026-07-01T14:13:00Z",
+        "url": "https://github.com/itkla/connex/pull/207"
+      }
+    },
+    {
+      "issue": 173,
+      "title": "[Follow-on] Learn intro ranking from made/dismissed labels (GBDT + ONNX, not TensorFlow)",
+      "url": "https://github.com/itkla/connex/issues/173",
+      "updated_at": "2026-06-30T05:17:25Z",
+      "comments": 0,
+      "labels": [
+        "value:medium",
+        "severity:low",
+        "priority:p3",
+        "complexity:l"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 174,
+          "title": "fix: de-prioritize (not exclude) intros between current colleagues",
+          "merged_at": "2026-06-30T05:33:55Z",
+          "url": "https://github.com/itkla/connex/pull/174"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 174,
+        "title": "fix: de-prioritize (not exclude) intros between current colleagues",
+        "merged_at": "2026-06-30T05:33:55Z",
+        "url": "https://github.com/itkla/connex/pull/174"
+      }
+    },
+    {
+      "issue": 172,
+      "title": "[Follow-on] Introduction ranking: richer heuristic signals",
+      "url": "https://github.com/itkla/connex/issues/172",
+      "updated_at": "2026-06-30T05:17:23Z",
+      "comments": 0,
+      "labels": [
+        "complexity:m",
+        "value:medium",
+        "severity:low",
+        "priority:p3"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 3,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 174,
+          "title": "fix: de-prioritize (not exclude) intros between current colleagues",
+          "merged_at": "2026-06-30T05:33:55Z",
+          "url": "https://github.com/itkla/connex/pull/174"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 174,
+        "title": "fix: de-prioritize (not exclude) intros between current colleagues",
+        "merged_at": "2026-06-30T05:33:55Z",
+        "url": "https://github.com/itkla/connex/pull/174"
+      }
+    },
+    {
+      "issue": 44,
+      "title": "[Feature] Serendipity engine",
+      "url": "https://github.com/itkla/connex/issues/44",
+      "updated_at": "2026-06-29T07:08:24Z",
+      "comments": 0,
+      "labels": [
+        "value:high",
+        "severity:low",
+        "priority:p3",
+        "complexity:xl"
+      ],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 165,
+          "title": "feat: reverse introductions — suggested intros, lineage, notifications (#43)",
+          "merged_at": "2026-06-30T03:58:31Z",
+          "url": "https://github.com/itkla/connex/pull/165"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 165,
+        "title": "feat: reverse introductions — suggested intros, lineage, notifications (#43)",
+        "merged_at": "2026-06-30T03:58:31Z",
+        "url": "https://github.com/itkla/connex/pull/165"
+      }
+    },
+    {
+      "issue": 878,
+      "title": "MySQL CHECK-constraint violations return 500 instead of the integrity response",
+      "url": "https://github.com/itkla/connex/issues/878",
+      "updated_at": "2026-07-27T01:59:42Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 146,
+          "title": "chore(deps): bump gradle/actions from 4 to 6",
+          "merged_at": "2026-06-30T01:35:33Z",
+          "url": "https://github.com/itkla/connex/pull/146"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 146,
+        "title": "chore(deps): bump gradle/actions from 4 to 6",
+        "merged_at": "2026-06-30T01:35:33Z",
+        "url": "https://github.com/itkla/connex/pull/146"
+      }
+    },
+    {
+      "issue": 876,
+      "title": "[plane-split] Control-plane reads are not routed to the control catalog during a tenant-routed request",
+      "url": "https://github.com/itkla/connex/issues/876",
+      "updated_at": "2026-07-27T01:44:05Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 146,
+          "title": "chore(deps): bump gradle/actions from 4 to 6",
+          "merged_at": "2026-06-30T01:35:33Z",
+          "url": "https://github.com/itkla/connex/pull/146"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 146,
+        "title": "chore(deps): bump gradle/actions from 4 to 6",
+        "merged_at": "2026-06-30T01:35:33Z",
+        "url": "https://github.com/itkla/connex/pull/146"
+      }
+    },
+    {
+      "issue": 134,
+      "title": "[Feature] CSV import: drag-and-drop column mapping",
+      "url": "https://github.com/itkla/connex/issues/134",
+      "updated_at": "2026-06-29T11:16:06Z",
+      "comments": 0,
+      "labels": [],
+      "is_parent": false,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 136,
+          "title": "feat: CSV import + export for contacts, companies & deals",
+          "merged_at": "2026-06-29T14:31:00Z",
+          "url": "https://github.com/itkla/connex/pull/136"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 136,
+        "title": "feat: CSV import + export for contacts, companies & deals",
+        "merged_at": "2026-06-29T14:31:00Z",
+        "url": "https://github.com/itkla/connex/pull/136"
+      }
+    }
+  ],
+  "parent_work_candidates": [
+    {
+      "issue": 568,
+      "title": "[Tracking] CRM, automation, productivity, growth, channels, and AI roadmap",
+      "url": "https://github.com/itkla/connex/issues/568",
+      "updated_at": "2026-07-28T07:39:31Z",
+      "comments": 93,
+      "labels": [
+        "value:high",
+        "priority:p1",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 1,
+      "unchecked": 23,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 21,
+      "merged_mentions": [
+        {
+          "number": 833,
+          "title": "fix(deals): sync query URL state",
+          "merged_at": "2026-07-23T04:55:56Z",
+          "url": "https://github.com/itkla/connex/pull/833"
+        },
+        {
+          "number": 806,
+          "title": "feat: add file references to activity edits",
+          "merged_at": "2026-07-22T18:53:11Z",
+          "url": "https://github.com/itkla/connex/pull/806"
+        },
+        {
+          "number": 804,
+          "title": "fix: reject shared CSV import links",
+          "merged_at": "2026-07-22T18:20:08Z",
+          "url": "https://github.com/itkla/connex/pull/804"
+        },
+        {
+          "number": 799,
+          "title": "feat: add activity file references",
+          "merged_at": "2026-07-22T16:44:51Z",
+          "url": "https://github.com/itkla/connex/pull/799"
+        },
+        {
+          "number": 797,
+          "title": "feat: add employment move reports",
+          "merged_at": "2026-07-22T15:50:33Z",
+          "url": "https://github.com/itkla/connex/pull/797"
+        },
+        {
+          "number": 768,
+          "title": "feat: add Vertex Gemini JSON mode",
+          "merged_at": "2026-07-22T05:48:49Z",
+          "url": "https://github.com/itkla/connex/pull/768"
+        },
+        {
+          "number": 754,
+          "title": "perf(kanban): batch position renumbering",
+          "merged_at": "2026-07-22T02:22:03Z",
+          "url": "https://github.com/itkla/connex/pull/754"
+        },
+        {
+          "number": 752,
+          "title": "perf(kanban): memoize drag state derivation",
+          "merged_at": "2026-07-22T02:21:25Z",
+          "url": "https://github.com/itkla/connex/pull/752"
+        },
+        {
+          "number": 755,
+          "title": "fix(notifications): claim concurrent email delivery",
+          "merged_at": "2026-07-22T01:54:30Z",
+          "url": "https://github.com/itkla/connex/pull/755"
+        },
+        {
+          "number": 749,
+          "title": "fix(notifications): render expired snoozes as active",
+          "merged_at": "2026-07-22T01:23:53Z",
+          "url": "https://github.com/itkla/connex/pull/749"
+        },
+        {
+          "number": 747,
+          "title": "feat(sidebar): persist navigation group state",
+          "merged_at": "2026-07-22T01:23:47Z",
+          "url": "https://github.com/itkla/connex/pull/747"
+        },
+        {
+          "number": 744,
+          "title": "feat(actions): show platform-correct shortcut hints",
+          "merged_at": "2026-07-22T01:23:42Z",
+          "url": "https://github.com/itkla/connex/pull/744"
+        },
+        {
+          "number": 742,
+          "title": "feat(records): log activity from Record Peek",
+          "merged_at": "2026-07-22T01:23:36Z",
+          "url": "https://github.com/itkla/connex/pull/742"
+        },
+        {
+          "number": 740,
+          "title": "feat(notes): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:30Z",
+          "url": "https://github.com/itkla/connex/pull/740"
+        },
+        {
+          "number": 738,
+          "title": "feat(tasks): recover standalone composer drafts",
+          "merged_at": "2026-07-22T01:23:25Z",
+          "url": "https://github.com/itkla/connex/pull/738"
+        },
+        {
+          "number": 735,
+          "title": "fix(security): bind drafts and overlays to tenant",
+          "merged_at": "2026-07-22T01:23:09Z",
+          "url": "https://github.com/itkla/connex/pull/735"
+        },
+        {
+          "number": 732,
+          "title": "fix(mobile): keep task badge workspace-safe",
+          "merged_at": "2026-07-22T01:23:04Z",
+          "url": "https://github.com/itkla/connex/pull/732"
+        },
+        {
+          "number": 730,
+          "title": "feat(workflows): add safe duplication",
+          "merged_at": "2026-07-21T19:20:16Z",
+          "url": "https://github.com/itkla/connex/pull/730"
+        },
+        {
+          "number": 728,
+          "title": "feat(actions): add current-view record exports",
+          "merged_at": "2026-07-21T18:40:39Z",
+          "url": "https://github.com/itkla/connex/pull/728"
+        },
+        {
+          "number": 724,
+          "title": "feat(workflows): add authoritative DAG validation",
+          "merged_at": "2026-07-21T16:04:49Z",
+          "url": "https://github.com/itkla/connex/pull/724"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 833,
+        "title": "fix(deals): sync query URL state",
+        "merged_at": "2026-07-23T04:55:56Z",
+        "url": "https://github.com/itkla/connex/pull/833"
+      }
+    },
+    {
+      "issue": 401,
+      "title": "[Epic][Frontend] UI quality-of-life and speed-layer roadmap",
+      "url": "https://github.com/itkla/connex/issues/401",
+      "updated_at": "2026-07-28T07:21:59Z",
+      "comments": 7,
+      "labels": [],
+      "is_parent": true,
+      "checked": 7,
+      "unchecked": 26,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 16,
+      "merged_mentions": [
+        {
+          "number": 799,
+          "title": "feat: add activity file references",
+          "merged_at": "2026-07-22T16:44:51Z",
+          "url": "https://github.com/itkla/connex/pull/799"
+        },
+        {
+          "number": 747,
+          "title": "feat(sidebar): persist navigation group state",
+          "merged_at": "2026-07-22T01:23:47Z",
+          "url": "https://github.com/itkla/connex/pull/747"
+        },
+        {
+          "number": 732,
+          "title": "fix(mobile): keep task badge workspace-safe",
+          "merged_at": "2026-07-22T01:23:04Z",
+          "url": "https://github.com/itkla/connex/pull/732"
+        },
+        {
+          "number": 679,
+          "title": "feat(forms): accidental-discard guard + confirm dialog, wired to the activity composer (#409 slice 1)",
+          "merged_at": "2026-07-19T03:06:05Z",
+          "url": "https://github.com/itkla/connex/pull/679"
+        },
+        {
+          "number": 678,
+          "title": "feat(activity): universal composer with optional follow-up task (#407)",
+          "merged_at": "2026-07-19T02:24:22Z",
+          "url": "https://github.com/itkla/connex/pull/678"
+        },
+        {
+          "number": 677,
+          "title": "feat(mobile): bottom action bar — Home / Search / New / Tasks / More (#415)",
+          "merged_at": "2026-07-19T01:48:29Z",
+          "url": "https://github.com/itkla/connex/pull/677"
+        },
+        {
+          "number": 676,
+          "title": "feat(activity): in-context ?activity=/?task= deep-link sheets (#411 slice 4)",
+          "merged_at": "2026-07-19T00:54:49Z",
+          "url": "https://github.com/itkla/connex/pull/676"
+        },
+        {
+          "number": 675,
+          "title": "feat(records): shareable sort/page URL for the deals browser + shared list-state helper (#411 slice 3)",
+          "merged_at": "2026-07-18T18:01:56Z",
+          "url": "https://github.com/itkla/connex/pull/675"
+        },
+        {
+          "number": 674,
+          "title": "feat(records): shareable list-state URL (sort/query/page) for companies & contacts (#411 slice 2)",
+          "merged_at": "2026-07-18T17:38:28Z",
+          "url": "https://github.com/itkla/connex/pull/674"
+        },
+        {
+          "number": 673,
+          "title": "feat(search): open task/note/activity results at their exact detail page (#411 slice 1)",
+          "merged_at": "2026-07-18T17:03:01Z",
+          "url": "https://github.com/itkla/connex/pull/673"
+        },
+        {
+          "number": 671,
+          "title": "feat(records): registry-backed row/card context menus for companies/contacts/deals (#414)",
+          "merged_at": "2026-07-18T16:12:45Z",
+          "url": "https://github.com/itkla/connex/pull/671"
+        },
+        {
+          "number": 669,
+          "title": "feat(records): Record Peek drawer — click-to-peek with deep links and J/K navigation (#405)",
+          "merged_at": "2026-07-18T15:15:44Z",
+          "url": "https://github.com/itkla/connex/pull/669"
+        },
+        {
+          "number": 646,
+          "title": "feat(actions): expose record import through the global action system (#417)",
+          "merged_at": "2026-07-18T02:05:46Z",
+          "url": "https://github.com/itkla/connex/pull/646"
+        },
+        {
+          "number": 449,
+          "title": "feat: command-and-search palette (Cmd+K) — #404 Phase 1",
+          "merged_at": "2026-07-11T10:27:00Z",
+          "url": "https://github.com/itkla/connex/pull/449"
+        },
+        {
+          "number": 444,
+          "title": "feat: unified, context-aware Quick Create launcher (#403)",
+          "merged_at": "2026-07-11T10:23:33Z",
+          "url": "https://github.com/itkla/connex/pull/444"
+        },
+        {
+          "number": 443,
+          "title": "feat(actions): shared application action registry and global action context (#402)",
+          "merged_at": "2026-07-11T05:38:37Z",
+          "url": "https://github.com/itkla/connex/pull/443"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 799,
+        "title": "feat: add activity file references",
+        "merged_at": "2026-07-22T16:44:51Z",
+        "url": "https://github.com/itkla/connex/pull/799"
+      }
+    },
+    {
+      "issue": 87,
+      "title": "[Tracking] Security, tenancy, AI & compliance hardening before customer onboarding",
+      "url": "https://github.com/itkla/connex/issues/87",
+      "updated_at": "2026-07-28T07:18:47Z",
+      "comments": 6,
+      "labels": [
+        "Security",
+        "value:high",
+        "severity:critical",
+        "complexity:xl",
+        "priority:p0"
+      ],
+      "is_parent": true,
+      "checked": 13,
+      "unchecked": 9,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 11,
+      "merged_mentions": [
+        {
+          "number": 804,
+          "title": "fix: reject shared CSV import links",
+          "merged_at": "2026-07-22T18:20:08Z",
+          "url": "https://github.com/itkla/connex/pull/804"
+        },
+        {
+          "number": 518,
+          "title": "feat: finalize epic #502 — entitlement seam (#501) + migration forward-only guard & upgrade policy (#500)",
+          "merged_at": "2026-07-13T05:27:45Z",
+          "url": "https://github.com/itkla/connex/pull/518"
+        },
+        {
+          "number": 515,
+          "title": "feat(deploy): compose bundle + per-profile templates + 3-profile boot smoke",
+          "merged_at": "2026-07-13T05:01:13Z",
+          "url": "https://github.com/itkla/connex/pull/515"
+        },
+        {
+          "number": 325,
+          "title": "harden(tenancy): org-plane hardening — deletion guard, org audit trail, IDNA domains",
+          "merged_at": "2026-07-04T13:57:57Z",
+          "url": "https://github.com/itkla/connex/pull/325"
+        },
+        {
+          "number": 322,
+          "title": "feat(tenancy): org allowed-domains constrain workspace invites (Option B)",
+          "merged_at": "2026-07-04T10:30:18Z",
+          "url": "https://github.com/itkla/connex/pull/322"
+        },
+        {
+          "number": 321,
+          "title": "feat(tenancy): organization membership & roles — SSO config gated on org-admin",
+          "merged_at": "2026-07-04T09:53:00Z",
+          "url": "https://github.com/itkla/connex/pull/321"
+        },
+        {
+          "number": 318,
+          "title": "feat(tenancy): enforce the organization boundary — placement rule, SQL org ceiling, isolation suites",
+          "merged_at": "2026-07-04T06:04:25Z",
+          "url": "https://github.com/itkla/connex/pull/318"
+        },
+        {
+          "number": 240,
+          "title": "docs(appi): security posture, DPA template, data-subject-request procedure",
+          "merged_at": "2026-07-02T06:27:27Z",
+          "url": "https://github.com/itkla/connex/pull/240"
+        },
+        {
+          "number": 142,
+          "title": "Organization tenant layer — Phase 0: object, workspace.org_id, cross-org sharing guard (#97)",
+          "merged_at": "2026-06-30T00:17:31Z",
+          "url": "https://github.com/itkla/connex/pull/142"
+        },
+        {
+          "number": 140,
+          "title": "Tenant read-path scoping backstop: arch test, nested-tag fix, full-stack isolation (#89)",
+          "merged_at": "2026-06-29T23:08:35Z",
+          "url": "https://github.com/itkla/connex/pull/140"
+        },
+        {
+          "number": 139,
+          "title": "Security p1 sweep: path traversal, scheme-injection XSS, user-account IDOR",
+          "merged_at": "2026-06-29T21:59:47Z",
+          "url": "https://github.com/itkla/connex/pull/139"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 804,
+        "title": "fix: reject shared CSV import links",
+        "merged_at": "2026-07-22T18:20:08Z",
+        "url": "https://github.com/itkla/connex/pull/804"
+      }
+    },
+    {
+      "issue": 853,
+      "title": "[1.0][Wave 1] Operable, offboardable, one identity contract",
+      "url": "https://github.com/itkla/connex/issues/853",
+      "updated_at": "2026-07-28T07:03:20Z",
+      "comments": 8,
+      "labels": [],
+      "is_parent": true,
+      "checked": 8,
+      "unchecked": 10,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 9,
+      "merged_mentions": [
+        {
+          "number": 882,
+          "title": "fix(backup): repair the install path and close silent-success gaps from the #880 review",
+          "merged_at": "2026-07-27T09:22:56Z",
+          "url": "https://github.com/itkla/connex/pull/882"
+        },
+        {
+          "number": 881,
+          "title": "fix(seeder): generate valid E.164 phone numbers so identity matching sees them",
+          "merged_at": "2026-07-27T07:49:16Z",
+          "url": "https://github.com/itkla/connex/pull/881"
+        },
+        {
+          "number": 880,
+          "title": "feat(ops): 30-day rolling backup, PITR restore, and the measured RPO/RTO drill",
+          "merged_at": "2026-07-27T02:58:45Z",
+          "url": "https://github.com/itkla/connex/pull/880"
+        },
+        {
+          "number": 879,
+          "title": "chore(ci): mark the frontend unit+e2e job as a required check",
+          "merged_at": "2026-07-27T02:25:02Z",
+          "url": "https://github.com/itkla/connex/pull/879"
+        },
+        {
+          "number": 874,
+          "title": "feat(identity): canonical person/company identity spine, MatchingService, and backfill",
+          "merged_at": "2026-07-27T02:14:41Z",
+          "url": "https://github.com/itkla/connex/pull/874"
+        },
+        {
+          "number": 875,
+          "title": "feat(seeder): deterministic tenant-scoped volume seeder behind a fail-closed guard",
+          "merged_at": "2026-07-27T01:28:43Z",
+          "url": "https://github.com/itkla/connex/pull/875"
+        },
+        {
+          "number": 872,
+          "title": "feat(observability): health/readiness, correlation ids, metrics, and error sink",
+          "merged_at": "2026-07-27T01:24:50Z",
+          "url": "https://github.com/itkla/connex/pull/872"
+        },
+        {
+          "number": 873,
+          "title": "feat(tenancy): tenant export bundle, resumable teardown, and APPI compliance guard",
+          "merged_at": "2026-07-27T01:05:59Z",
+          "url": "https://github.com/itkla/connex/pull/873"
+        },
+        {
+          "number": 871,
+          "title": "test(frontend): vitest unit suite + Playwright e2e harness and CI job",
+          "merged_at": "2026-07-27T00:54:33Z",
+          "url": "https://github.com/itkla/connex/pull/871"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 882,
+        "title": "fix(backup): repair the install path and close silent-success gaps from the #880 review",
+        "merged_at": "2026-07-27T09:22:56Z",
+        "url": "https://github.com/itkla/connex/pull/882"
+      }
+    },
+    {
+      "issue": 505,
+      "title": "[Epic] Reports v2 — forecasting, goals, delivery, and relationship-intelligence reports",
+      "url": "https://github.com/itkla/connex/issues/505",
+      "updated_at": "2026-07-22T15:51:24Z",
+      "comments": 6,
+      "labels": [
+        "priority:p2",
+        "value:high",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 5,
+      "unchecked": 4,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 8,
+      "merged_mentions": [
+        {
+          "number": 797,
+          "title": "feat: add employment move reports",
+          "merged_at": "2026-07-22T15:50:33Z",
+          "url": "https://github.com/itkla/connex/pull/797"
+        },
+        {
+          "number": 716,
+          "title": "feat(reports): rework reports UX — grouped templates, instant create, live builder previews, calmer document toolbar",
+          "merged_at": "2026-07-20T08:06:24Z",
+          "url": "https://github.com/itkla/connex/pull/716"
+        },
+        {
+          "number": 640,
+          "title": "fix(reports): authoritative network widget totals beyond display caps (#555)",
+          "merged_at": "2026-07-17T13:20:27Z",
+          "url": "https://github.com/itkla/connex/pull/640"
+        },
+        {
+          "number": 635,
+          "title": "fix(reports): exclude closed-at-ingest deals from forecast conversion evidence (#556)",
+          "merged_at": "2026-07-17T10:49:31Z",
+          "url": "https://github.com/itkla/connex/pull/635"
+        },
+        {
+          "number": 533,
+          "title": "feat(reports): scheduled report delivery",
+          "merged_at": "2026-07-13T15:22:12Z",
+          "url": "https://github.com/itkla/connex/pull/533"
+        },
+        {
+          "number": 524,
+          "title": "feat(reports): goals / quota tracking with attainment",
+          "merged_at": "2026-07-13T07:09:15Z",
+          "url": "https://github.com/itkla/connex/pull/524"
+        },
+        {
+          "number": 516,
+          "title": "feat(reports): forecasting report template",
+          "merged_at": "2026-07-13T05:23:53Z",
+          "url": "https://github.com/itkla/connex/pull/516"
+        },
+        {
+          "number": 512,
+          "title": "feat(reports): relationship-health report template",
+          "merged_at": "2026-07-13T04:14:23Z",
+          "url": "https://github.com/itkla/connex/pull/512"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 797,
+        "title": "feat: add employment move reports",
+        "merged_at": "2026-07-22T15:50:33Z",
+        "url": "https://github.com/itkla/connex/pull/797"
+      }
+    },
+    {
+      "issue": 54,
+      "title": "[Epic] Workflows — visual automation builder and durable orchestration",
+      "url": "https://github.com/itkla/connex/issues/54",
+      "updated_at": "2026-07-28T07:22:08Z",
+      "comments": 12,
+      "labels": [],
+      "is_parent": true,
+      "checked": 15,
+      "unchecked": 24,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 8,
+      "merged_mentions": [
+        {
+          "number": 860,
+          "title": "fix(ui): Wave 0 truth pass — remove fabricated and misleading copy",
+          "merged_at": "2026-07-25T16:20:34Z",
+          "url": "https://github.com/itkla/connex/pull/860"
+        },
+        {
+          "number": 730,
+          "title": "feat(workflows): add safe duplication",
+          "merged_at": "2026-07-21T19:20:16Z",
+          "url": "https://github.com/itkla/connex/pull/730"
+        },
+        {
+          "number": 724,
+          "title": "feat(workflows): add authoritative DAG validation",
+          "merged_at": "2026-07-21T16:04:49Z",
+          "url": "https://github.com/itkla/connex/pull/724"
+        },
+        {
+          "number": 668,
+          "title": "feat(workflows): /settings/workflows shell + full-page linear editor over the rules engine (#54)",
+          "merged_at": "2026-07-18T09:36:27Z",
+          "url": "https://github.com/itkla/connex/pull/668"
+        },
+        {
+          "number": 337,
+          "title": "feat(rules): rule engine v2 backend — conditions, triggers, actions, preview, throttle",
+          "merged_at": "2026-07-05T10:11:56Z",
+          "url": "https://github.com/itkla/connex/pull/337"
+        },
+        {
+          "number": 121,
+          "title": "feat: rule builder UI (#54)",
+          "merged_at": "2026-06-28T23:04:38Z",
+          "url": "https://github.com/itkla/connex/pull/121"
+        },
+        {
+          "number": 119,
+          "title": "Rule engine — backend: data model, execution, triggers, scheduler (#54)",
+          "merged_at": "2026-06-28T22:06:44Z",
+          "url": "https://github.com/itkla/connex/pull/119"
+        },
+        {
+          "number": 117,
+          "title": "Custom smart segments — query builder on a shared condition model (#115)",
+          "merged_at": "2026-06-28T09:18:14Z",
+          "url": "https://github.com/itkla/connex/pull/117"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 860,
+        "title": "fix(ui): Wave 0 truth pass — remove fabricated and misleading copy",
+        "merged_at": "2026-07-25T16:20:34Z",
+        "url": "https://github.com/itkla/connex/pull/860"
+      }
+    },
+    {
+      "issue": 340,
+      "title": "[Epic] Rich Markdown notes — relational linking, backlinks, and server-side visibility",
+      "url": "https://github.com/itkla/connex/issues/340",
+      "updated_at": "2026-07-28T07:28:27Z",
+      "comments": 4,
+      "labels": [
+        "enhancement",
+        "Security",
+        "priority:p2",
+        "value:high",
+        "complexity:xl"
+      ],
+      "is_parent": true,
+      "checked": 20,
+      "unchecked": 14,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 6,
+      "merged_mentions": [
+        {
+          "number": 355,
+          "title": "feat(notes): Notion-style slash commands, callout/toggle blocks & drag handles",
+          "merged_at": "2026-07-06T03:28:38Z",
+          "url": "https://github.com/itkla/connex/pull/355"
+        },
+        {
+          "number": 354,
+          "title": "fix(notes): redact private-note references in task & activity content",
+          "merged_at": "2026-07-06T00:51:09Z",
+          "url": "https://github.com/itkla/connex/pull/354"
+        },
+        {
+          "number": 353,
+          "title": "feat(notes): link tasks & activities + detail routes (PR 3b)",
+          "merged_at": "2026-07-06T00:12:32Z",
+          "url": "https://github.com/itkla/connex/pull/353"
+        },
+        {
+          "number": 350,
+          "title": "feat(notes): note & file linking + backlinks, visibility-safe (PR 3)",
+          "merged_at": "2026-07-05T23:34:57Z",
+          "url": "https://github.com/itkla/connex/pull/350"
+        },
+        {
+          "number": 349,
+          "title": "feat(notes): server-side note visibility — close the intra-tenant privacy hole (PR 2/3)",
+          "merged_at": "2026-07-05T22:34:14Z",
+          "url": "https://github.com/itkla/connex/pull/349"
+        },
+        {
+          "number": 347,
+          "title": "feat(notes): rich Markdown notes — WYSIWYG editor + document-index list (PR 1/3)",
+          "merged_at": "2026-07-05T22:25:20Z",
+          "url": "https://github.com/itkla/connex/pull/347"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 355,
+        "title": "feat(notes): Notion-style slash commands, callout/toggle blocks & drag handles",
+        "merged_at": "2026-07-06T03:28:38Z",
+        "url": "https://github.com/itkla/connex/pull/355"
+      }
+    },
+    {
+      "issue": 224,
+      "title": "[Tracking] APPI compliance pathway — obligation coverage & sequencing",
+      "url": "https://github.com/itkla/connex/issues/224",
+      "updated_at": "2026-07-28T07:29:11Z",
+      "comments": 5,
+      "labels": [
+        "Security",
+        "severity:high",
+        "value:high",
+        "complexity:xl",
+        "priority:p0",
+        "APPI"
+      ],
+      "is_parent": true,
+      "checked": 14,
+      "unchecked": 10,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 6,
+      "merged_mentions": [
+        {
+          "number": 651,
+          "title": "feat(delivery): Slice 4 — SMS channel + opt-out consent + unified address normalization (#637)",
+          "merged_at": "2026-07-18T01:57:13Z",
+          "url": "https://github.com/itkla/connex/pull/651"
+        },
+        {
+          "number": 578,
+          "title": "feat(appi): data-subject request tracking + subject-scoped disclosure export (#221 increment 1)",
+          "merged_at": "2026-07-16T08:44:02Z",
+          "url": "https://github.com/itkla/connex/pull/578"
+        },
+        {
+          "number": 571,
+          "title": "feat(legal): /legal terms + /tokushoho pages (en/ja) — #219 remainder",
+          "merged_at": "2026-07-16T06:39:36Z",
+          "url": "https://github.com/itkla/connex/pull/571"
+        },
+        {
+          "number": 226,
+          "title": "feat(legal): APPI privacy + disclosure pages (en/ja) + breach runbook",
+          "merged_at": "2026-07-02T06:28:02Z",
+          "url": "https://github.com/itkla/connex/pull/226"
+        },
+        {
+          "number": 240,
+          "title": "docs(appi): security posture, DPA template, data-subject-request procedure",
+          "merged_at": "2026-07-02T06:27:27Z",
+          "url": "https://github.com/itkla/connex/pull/240"
+        },
+        {
+          "number": 246,
+          "title": "feat(custom-fields): data-classification (要配慮個人情報) on field definitions",
+          "merged_at": "2026-07-02T06:25:16Z",
+          "url": "https://github.com/itkla/connex/pull/246"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 651,
+        "title": "feat(delivery): Slice 4 — SMS channel + opt-out consent + unified address normalization (#637)",
+        "merged_at": "2026-07-18T01:57:13Z",
+        "url": "https://github.com/itkla/connex/pull/651"
+      }
+    },
+    {
+      "issue": 565,
+      "title": "[Epic] Marketing campaigns — audiences, omnichannel journeys, consent, and revenue attribution",
+      "url": "https://github.com/itkla/connex/issues/565",
+      "updated_at": "2026-07-28T07:48:23Z",
+      "comments": 9,
+      "labels": [
+        "priority:p2",
+        "value:high",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 17,
+      "unchecked": 23,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 658,
+          "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+          "merged_at": "2026-07-18T02:32:58Z",
+          "url": "https://github.com/itkla/connex/pull/658"
+        },
+        {
+          "number": 651,
+          "title": "feat(delivery): Slice 4 — SMS channel + opt-out consent + unified address normalization (#637)",
+          "merged_at": "2026-07-18T01:57:13Z",
+          "url": "https://github.com/itkla/connex/pull/651"
+        },
+        {
+          "number": 633,
+          "title": "feat(delivery): marketing delivery foundation — native email, ESP receipts, and connectors (Slices 1–3, #610/#618/#629)",
+          "merged_at": "2026-07-17T11:07:00Z",
+          "url": "https://github.com/itkla/connex/pull/633"
+        },
+        {
+          "number": 607,
+          "title": "feat(campaigns): Increment 1 — campaign records, audience snapshots, consent/suppression + Marketing UI (#599)",
+          "merged_at": "2026-07-17T03:21:33Z",
+          "url": "https://github.com/itkla/connex/pull/607"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 658,
+        "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+        "merged_at": "2026-07-18T02:32:58Z",
+        "url": "https://github.com/itkla/connex/pull/658"
+      }
+    },
+    {
+      "issue": 558,
+      "title": "[Epic] Revenue operations — products, line items, quotes, contracts, approvals, and e-signature",
+      "url": "https://github.com/itkla/connex/issues/558",
+      "updated_at": "2026-07-28T07:23:45Z",
+      "comments": 5,
+      "labels": [
+        "value:high",
+        "priority:p1",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 20,
+      "unchecked": 20,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 4,
+      "merged_mentions": [
+        {
+          "number": 664,
+          "title": "feat(deals): internal document approval workflow — policies + single approver (#558 WS4)",
+          "merged_at": "2026-07-18T07:34:04Z",
+          "url": "https://github.com/itkla/connex/pull/664"
+        },
+        {
+          "number": 654,
+          "title": "redesign(documents): full-page template builder with live preview + cohesive DocumentView",
+          "merged_at": "2026-07-18T02:06:22Z",
+          "url": "https://github.com/itkla/connex/pull/654"
+        },
+        {
+          "number": 649,
+          "title": "feat(deals): commercial documents — templates + immutable versioned generation + print-to-PDF (#558 Phase 2)",
+          "merged_at": "2026-07-17T14:59:59Z",
+          "url": "https://github.com/itkla/connex/pull/649"
+        },
+        {
+          "number": 642,
+          "title": "feat(revops): product catalog + deal line items with deterministic totals (#558 Phase 1)",
+          "merged_at": "2026-07-17T13:57:09Z",
+          "url": "https://github.com/itkla/connex/pull/642"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 664,
+        "title": "feat(deals): internal document approval workflow — policies + single approver (#558 WS4)",
+        "merged_at": "2026-07-18T07:34:04Z",
+        "url": "https://github.com/itkla/connex/pull/664"
+      }
+    },
+    {
+      "issue": 249,
+      "title": "[Tracking] First-client onboarding readiness — non-code blockers (counsel, ops, merge)",
+      "url": "https://github.com/itkla/connex/issues/249",
+      "updated_at": "2026-07-25T09:50:36Z",
+      "comments": 2,
+      "labels": [
+        "severity:high",
+        "value:high",
+        "priority:p0",
+        "APPI"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 22,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 3,
+      "merged_mentions": [
+        {
+          "number": 589,
+          "title": "chore(deps): bump pnpm/action-setup from 4.3.0 to 6.0.9",
+          "merged_at": "2026-07-22T03:26:49Z",
+          "url": "https://github.com/itkla/connex/pull/589"
+        },
+        {
+          "number": 578,
+          "title": "feat(appi): data-subject request tracking + subject-scoped disclosure export (#221 increment 1)",
+          "merged_at": "2026-07-16T08:44:02Z",
+          "url": "https://github.com/itkla/connex/pull/578"
+        },
+        {
+          "number": 145,
+          "title": "chore(deps): bump pnpm/action-setup from 4 to 6",
+          "merged_at": "2026-06-30T01:35:21Z",
+          "url": "https://github.com/itkla/connex/pull/145"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 589,
+        "title": "chore(deps): bump pnpm/action-setup from 4.3.0 to 6.0.9",
+        "merged_at": "2026-07-22T03:26:49Z",
+        "url": "https://github.com/itkla/connex/pull/589"
+      }
+    },
+    {
+      "issue": 850,
+      "title": "[Epic][Frontend] Connex 1.0 Home — layered personal briefing with curated customizable dashboards",
+      "url": "https://github.com/itkla/connex/issues/850",
+      "updated_at": "2026-07-25T09:51:04Z",
+      "comments": 0,
+      "labels": [
+        "value:high",
+        "priority:p1",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 12,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 737,
+          "title": "chore(deps): bump actions/setup-java from 4.8.0 to 5.6.0",
+          "merged_at": "2026-07-22T01:26:10Z",
+          "url": "https://github.com/itkla/connex/pull/737"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 737,
+        "title": "chore(deps): bump actions/setup-java from 4.8.0 to 5.6.0",
+        "merged_at": "2026-07-22T01:26:10Z",
+        "url": "https://github.com/itkla/connex/pull/737"
+      }
+    },
+    {
+      "issue": 560,
+      "title": "[Epic] CRM data quality — duplicate detection, review, and safe record merging",
+      "url": "https://github.com/itkla/connex/issues/560",
+      "updated_at": "2026-07-25T09:50:39Z",
+      "comments": 4,
+      "labels": [
+        "priority:p2",
+        "value:high",
+        "severity:low",
+        "complexity:l",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 9,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 804,
+          "title": "fix: reject shared CSV import links",
+          "merged_at": "2026-07-22T18:20:08Z",
+          "url": "https://github.com/itkla/connex/pull/804"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 804,
+        "title": "fix: reject shared CSV import links",
+        "merged_at": "2026-07-22T18:20:08Z",
+        "url": "https://github.com/itkla/connex/pull/804"
+      }
+    },
+    {
+      "issue": 559,
+      "title": "[Epic] Lead lifecycle — intake, qualification, routing, conversion, and attribution",
+      "url": "https://github.com/itkla/connex/issues/559",
+      "updated_at": "2026-07-15T11:09:39Z",
+      "comments": 0,
+      "labels": [
+        "priority:p2",
+        "value:high",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 9,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 658,
+          "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+          "merged_at": "2026-07-18T02:32:58Z",
+          "url": "https://github.com/itkla/connex/pull/658"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 658,
+        "title": "feat(campaigns): Slice 5 — campaign engagement & attribution reporting (#656)",
+        "merged_at": "2026-07-18T02:32:58Z",
+        "url": "https://github.com/itkla/connex/pull/658"
+      }
+    },
+    {
+      "issue": 509,
+      "title": "[Epic][Frontend] Pill-first button & control shape standardization",
+      "url": "https://github.com/itkla/connex/issues/509",
+      "updated_at": "2026-07-13T03:43:41Z",
+      "comments": 0,
+      "labels": [
+        "enhancement",
+        "value:medium",
+        "priority:p2",
+        "complexity:l",
+        "frontend"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 0,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 511,
+          "title": "feat(ui): flip Button primitive to pill (rounded-full)",
+          "merged_at": "2026-07-13T13:32:12Z",
+          "url": "https://github.com/itkla/connex/pull/511"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 511,
+        "title": "feat(ui): flip Button primitive to pill (rounded-full)",
+        "merged_at": "2026-07-13T13:32:12Z",
+        "url": "https://github.com/itkla/connex/pull/511"
+      }
+    },
+    {
+      "issue": 400,
+      "title": "[Frontend] Epic: Base UI convergence and eventual Radix UI replacement",
+      "url": "https://github.com/itkla/connex/issues/400",
+      "updated_at": "2026-07-10T06:51:10Z",
+      "comments": 0,
+      "labels": [
+        "enhancement",
+        "priority:p2",
+        "value:high",
+        "complexity:xl"
+      ],
+      "is_parent": true,
+      "checked": 0,
+      "unchecked": 84,
+      "stale_status_language": true,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 480,
+          "title": "feat(ui): Base UI drawer + responsive dialogs, retire Sheet",
+          "merged_at": "2026-07-12T06:57:15Z",
+          "url": "https://github.com/itkla/connex/pull/480"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 480,
+        "title": "feat(ui): Base UI drawer + responsive dialogs, retire Sheet",
+        "merged_at": "2026-07-12T06:57:15Z",
+        "url": "https://github.com/itkla/connex/pull/480"
+      }
+    },
+    {
+      "issue": 60,
+      "title": "[Epic] Connected email and calendar — Google/Microsoft sync and automatic CRM capture",
+      "url": "https://github.com/itkla/connex/issues/60",
+      "updated_at": "2026-07-25T09:50:24Z",
+      "comments": 2,
+      "labels": [
+        "value:high",
+        "priority:p1",
+        "severity:low",
+        "complexity:xl",
+        "Feature"
+      ],
+      "is_parent": true,
+      "checked": 1,
+      "unchecked": 8,
+      "stale_status_language": false,
+      "merged_closers": [],
+      "merged_mentions_count": 1,
+      "merged_mentions": [
+        {
+          "number": 666,
+          "title": "feat(account): per-user provider connections — OAuth foundation for connected email & calendar (#60 WS1)",
+          "merged_at": "2026-07-18T08:51:46Z",
+          "url": "https://github.com/itkla/connex/pull/666"
+        }
+      ],
+      "latest_merged_mention": {
+        "number": 666,
+        "title": "feat(account): per-user provider connections — OAuth foundation for connected email & calendar (#60 WS1)",
+        "merged_at": "2026-07-18T08:51:46Z",
+        "url": "https://github.com/itkla/connex/pull/666"
+      }
+    }
+  ]
+}
