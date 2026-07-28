@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
@@ -145,6 +147,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("This deployment cannot serve the request");
     }
 
+    @ExceptionHandler(IdentityCollisionReportTimeoutException.class)
+    public ResponseEntity<Map<String, String>> identityCollisionReportTimeout(
+            IdentityCollisionReportTimeoutException ex) {
+        log.warn("Identity collision report deadline exceeded: exception={} detail={}",
+                ex.getClass().getName(), stackDetail(ex));
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("code", IdentityCollisionReportTimeoutException.CODE);
+        body.put("message", IdentityCollisionReportTimeoutException.MESSAGE);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
@@ -172,11 +185,22 @@ public class GlobalExceptionHandler {
                 .body("Missing required multipart part: " + ex.getRequestPartName());
     }
 
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<String> mediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body("Unsupported media type");
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(ex.getStatusCode())
                 .headers(ex.getHeaders())
                 .body("Request method is not supported");
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<String> resourceNotFound(NoResourceFoundException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body("Resource not found");
     }
 
     @ExceptionHandler(RequestBodyTooLargeException.class)

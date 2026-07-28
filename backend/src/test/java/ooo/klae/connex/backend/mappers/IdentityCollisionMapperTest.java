@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +19,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.IdentityCollisionGroupKey;
-import ooo.klae.connex.backend.dto.IdentityCollisionGroupRow;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberRow;
 
 /**
@@ -65,8 +66,8 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
                 "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
                 Integer.class,
                 workspace.getId()));
-        List<IdentityCollisionGroupRow> groups =
-            collisionMapper.findVisibleGroups(workspace.getId(), null, null, 100, 0);
+        List<IdentityCollisionGroupPageRow> groups =
+            visibleGroups(workspace.getId(), null, null, 100, 0);
         assertEquals(
             List.of(
                 "company:phone:+819099999999:2",
@@ -93,7 +94,8 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         assertEquals(0, rebuild(workspace.getId()));
         assertEquals(
             0L,
-            collisionMapper.countVisibleGroups(workspace.getId(), null, null));
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), null, null, 100, 0)));
     }
 
     @Test
@@ -109,10 +111,11 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
 
         assertEquals(
             0L,
-            collisionMapper.countVisibleGroups(workspace.getId(), "person", "email"));
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "person", "email", 100, 0)));
         assertEquals(
             List.of(),
-            collisionMapper.findVisibleGroups(workspace.getId(), "person", "email", 100, 0));
+            visibleGroups(workspace.getId(), "person", "email", 100, 0));
         assertEquals(
             2,
             jdbcTemplate.queryForObject(
@@ -125,7 +128,8 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
 
         assertEquals(
             0L,
-            collisionMapper.countVisibleGroups(workspace.getId(), "person", "email"));
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "person", "email", 100, 0)));
     }
 
     @Test
@@ -193,19 +197,32 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void maxExecutionTimeHintRaisesMySqlErrorCode3024() {
+        DataAccessException thrown = assertThrows(
+            DataAccessException.class,
+            () -> jdbcTemplate.queryForList("""
+                WITH timeout_probe AS (SELECT SLEEP(0.25) AS marker)
+                SELECT /*+ MAX_EXECUTION_TIME(25) */ marker
+                FROM timeout_probe
+                """));
+
+        assertEquals(3024, nestedSqlException(thrown).getErrorCode());
+    }
+
+    @Test
     void groupPaginationIsDeterministicAndMembersAreNotSplit() {
         createCompanyDomainGroup("alpha.example", 2);
         createCompanyDomainGroup("beta.example", 3);
         createCompanyDomainGroup("gamma.example", 2);
         rebuild(workspace.getId());
 
-        List<IdentityCollisionGroupRow> page =
-            collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 1, 1);
+        List<IdentityCollisionGroupPageRow> page =
+            visibleGroups(workspace.getId(), "company", "domain", 1, 1);
         List<IdentityCollisionMemberRow> members =
             collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 10);
 
-        assertEquals(3L, collisionMapper.countVisibleGroups(
-            workspace.getId(), "company", "domain"));
+        assertEquals(3L, page.getFirst().getTotal());
+        assertEquals(2L, page.getFirst().getPageOrdinal());
         assertEquals(1, page.size());
         assertEquals("beta.example", page.getFirst().getNormalizedValue());
         assertEquals(3, page.getFirst().getCollisionSize());
@@ -223,8 +240,8 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         createCompanyDomainGroup("bounded.example", 5);
         assertEquals(5, rebuild(workspace.getId()));
 
-        List<IdentityCollisionGroupRow> page =
-            collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 10, 0);
+        List<IdentityCollisionGroupPageRow> page =
+            visibleGroups(workspace.getId(), "company", "domain", 10, 0);
         List<IdentityCollisionMemberRow> members =
             collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 2);
 
@@ -240,8 +257,8 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         createCompanyDomainGroup("second-bounded.example", 5);
         rebuild(workspace.getId());
 
-        List<IdentityCollisionGroupRow> page =
-            collisionMapper.findVisibleGroups(workspace.getId(), "company", "domain", 10, 0);
+        List<IdentityCollisionGroupPageRow> page =
+            visibleGroups(workspace.getId(), "company", "domain", 10, 0);
         List<IdentityCollisionMemberRow> members =
             collisionMapper.findVisibleMembers(workspace.getId(), keysOf(page), 0, 2);
 
@@ -308,40 +325,37 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
 
         List<IdentityCollisionMemberRow> members =
             collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), 0, 2);
+        List<IdentityCollisionMemberRow> allVisible =
+            collisionMapper.findVisibleMembers(workspace.getId(), List.of(key), 0, 10);
 
-        assertEquals(
-            3L,
-            collisionMapper.countVisibleGroupMembers(
-                workspace.getId(), "person", "email", "slot@example.com"));
+        assertEquals(3, allVisible.size());
         assertEquals(
             List.of(people.get(1).getId(), people.get(2).getId()),
             members.stream().map(member -> member.getRecordId()).toList());
     }
 
     @Test
-    void groupMemberCountsAreWorkspaceScopedAndRestrictionAware() {
+    void boundedMemberProbesAreWorkspaceScopedAndGroupSpecific() {
         createCompanyDomainGroup("counted.example", 3);
         rebuild(workspace.getId());
         Workspace other = newWorkspace("collision-count");
         createCompanyDomainGroup(other, "counted.example", 4);
         rebuild(other.getId());
+        IdentityCollisionGroupKey companyGroup =
+            new IdentityCollisionGroupKey("company", "domain", "counted.example");
+        IdentityCollisionGroupKey absentGroup =
+            new IdentityCollisionGroupKey("company", "domain", "absent.example");
+        IdentityCollisionGroupKey wrongRecordType =
+            new IdentityCollisionGroupKey("person", "email", "counted.example");
 
-        assertEquals(
-            3L,
-            collisionMapper.countVisibleGroupMembers(
-                workspace.getId(), "company", "domain", "counted.example"));
-        assertEquals(
-            4L,
-            collisionMapper.countVisibleGroupMembers(
-                other.getId(), "company", "domain", "counted.example"));
-        assertEquals(
-            0L,
-            collisionMapper.countVisibleGroupMembers(
-                workspace.getId(), "company", "domain", "absent.example"));
-        assertEquals(
-            0L,
-            collisionMapper.countVisibleGroupMembers(
-                workspace.getId(), "person", "email", "counted.example"));
+        assertEquals(2, collisionMapper.findVisibleMembers(
+            workspace.getId(), List.of(companyGroup), 0, 2).size());
+        assertEquals(2, collisionMapper.findVisibleMembers(
+            other.getId(), List.of(companyGroup), 0, 2).size());
+        assertEquals(List.of(), collisionMapper.findVisibleMembers(
+            workspace.getId(), List.of(absentGroup), 0, 2));
+        assertEquals(List.of(), collisionMapper.findVisibleMembers(
+            workspace.getId(), List.of(wrongRecordType), 0, 2));
     }
 
     @Test
@@ -382,15 +396,45 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         createCompanyDomainGroup(other, "foreign.example", 2);
         rebuild(other.getId());
 
-        List<IdentityCollisionGroupRow> local =
-            collisionMapper.findVisibleGroups(workspace.getId(), null, null, 100, 0);
+        List<IdentityCollisionGroupPageRow> local =
+            visibleGroups(workspace.getId(), null, null, 100, 0);
 
-        assertEquals(1L, collisionMapper.countVisibleGroups(workspace.getId(), null, null));
+        assertEquals(1L, local.getFirst().getTotal());
         assertEquals(List.of("local.example"),
             local.stream().map(group -> group.getNormalizedValue()).toList());
     }
 
-    private static List<IdentityCollisionGroupKey> keysOf(List<IdentityCollisionGroupRow> groups) {
+    private List<IdentityCollisionGroupPageRow> visibleGroups(
+            int workspaceId,
+            String recordType,
+            String kind,
+            int limit,
+            long offset) {
+        return collisionMapper.findVisibleGroupPage(
+                workspaceId, recordType, kind, limit, offset)
+            .stream()
+            .filter(row -> row.getRecordType() != null)
+            .toList();
+    }
+
+    private static long totalOf(List<IdentityCollisionGroupPageRow> rows) {
+        assertEquals(1, rows.size());
+        return rows.getFirst().getTotal();
+    }
+
+    private static SQLException nestedSqlException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof SQLException sqlException) {
+                return sqlException;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        throw new AssertionError("Expected a nested SQLException");
+    }
+
+    private static List<IdentityCollisionGroupKey> keysOf(
+            List<IdentityCollisionGroupPageRow> groups) {
         return groups.stream()
             .map(group -> new IdentityCollisionGroupKey(
                 group.getRecordType(), group.getKind(), group.getNormalizedValue()))

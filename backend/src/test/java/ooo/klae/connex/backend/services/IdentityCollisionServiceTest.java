@@ -2,41 +2,52 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.dto.IdentityCollisionDto;
 import ooo.klae.connex.backend.dto.IdentityCollisionGroupKey;
-import ooo.klae.connex.backend.dto.IdentityCollisionGroupRow;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberDto;
+import ooo.klae.connex.backend.dto.IdentityCollisionMemberPageDto;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberQuery;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionQuery;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.IdentityCollisionReportTimeoutException;
 import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -57,6 +68,15 @@ class IdentityCollisionServiceTest {
     @BeforeEach
     void setUp() {
         service = new IdentityCollisionService(identityCollisionMapper, workspaceService);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+            Connection.TRANSACTION_REPEATABLE_READ);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TransactionSynchronizationManager.clear();
     }
 
     @Test
@@ -79,7 +99,7 @@ class IdentityCollisionServiceTest {
     }
 
     @Test
-    void bothReadsPinRepeatableReadSoGroupSizesAndMembersShareOneSnapshot() throws Exception {
+    void bothReadsUseReadOnlyRepeatableReadTransactions() throws Exception {
         Transactional groupRead = IdentityCollisionService.class
             .getMethod("list", IdentityCollisionQuery.class)
             .getAnnotation(Transactional.class);
@@ -89,23 +109,44 @@ class IdentityCollisionServiceTest {
 
         assertEquals(Isolation.REPEATABLE_READ, groupRead.isolation());
         assertTrue(groupRead.readOnly());
+        assertEquals(4, groupRead.timeout());
         assertEquals(Isolation.REPEATABLE_READ, memberRead.isolation());
         assertTrue(memberRead.readOnly());
+        assertEquals(-1, memberRead.timeout());
     }
 
     @Test
     void usesCurrentWorkspaceAndLongPaginationOffset() {
         IdentityCollisionQuery query = query(null, null, 1_000_000, 100);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(73);
-        when(identityCollisionMapper.findVisibleGroups(73, null, null, 100, 99_999_900L))
-            .thenReturn(List.of());
-        when(identityCollisionMapper.countVisibleGroups(73, null, null)).thenReturn(0L);
+        when(identityCollisionMapper.findVisibleGroupPage(
+                73, null, null, 100, 99_999_900L))
+            .thenReturn(List.of(sentinel(0L, 1L)));
 
         PageResponse<IdentityCollisionDto> result = service.list(query);
 
         assertEquals(List.of(), result.items());
         assertEquals(0L, result.total());
-        verify(identityCollisionMapper).findVisibleGroups(73, null, null, 100, 99_999_900L);
+        verify(identityCollisionMapper).findVisibleGroupPage(
+            73, null, null, 100, 99_999_900L);
+        verify(identityCollisionMapper, never()).findVisibleMembers(
+            anyInt(), anyList(), anyInt(), anyInt());
+    }
+
+    @Test
+    void outOfRangePageReturnsTheExactVisibleTotalWithoutMemberHydration() {
+        IdentityCollisionQuery query = query("company", "domain", 4, 2);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(74);
+        when(identityCollisionMapper.findVisibleGroupPage(
+                74, "company", "domain", 2, 6L))
+            .thenReturn(List.of(sentinel(5L, 6L)));
+
+        PageResponse<IdentityCollisionDto> result = service.list(query);
+
+        assertEquals(List.of(), result.items());
+        assertEquals(5L, result.total());
+        verify(identityCollisionMapper).findVisibleGroupPage(
+            74, "company", "domain", 2, 6L);
         verify(identityCollisionMapper, never()).findVisibleMembers(
             anyInt(), anyList(), anyInt(), anyInt());
     }
@@ -164,17 +205,31 @@ class IdentityCollisionServiceTest {
     }
 
     @Test
+    void listRejectsMissingTransactionBeforePersistence() {
+        TransactionSynchronizationManager.clear();
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> service.list(query(null, null, 1, 50)));
+
+        assertEquals(
+            "Identity collision reads require an active REPEATABLE_READ transaction",
+            exception.getMessage());
+        verifyNoInteractions(workspaceService, identityCollisionMapper);
+    }
+
+    @Test
     void groupsStableMemberRowsWithoutSurfacingPersistenceMetadata() {
         LocalDateTime rebuiltAt = LocalDateTime.of(2026, 7, 25, 12, 30);
         IdentityCollisionQuery query = query("person", "email", 2, 2);
-        IdentityCollisionGroupRow first = group(
-            "person", "email", "a@example.com", 2, rebuiltAt);
-        IdentityCollisionGroupRow second = group(
-            "person", "email", "b@example.com", 3, rebuiltAt);
+        IdentityCollisionGroupPageRow first = group(
+            "person", "email", "a@example.com", 2, rebuiltAt, 7L, 3L);
+        IdentityCollisionGroupPageRow second = group(
+            "person", "email", "b@example.com", 3, rebuiltAt, 7L, 4L);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(41);
-        when(identityCollisionMapper.findVisibleGroups(41, "person", "email", 2, 2L))
+        when(identityCollisionMapper.findVisibleGroupPage(
+                41, "person", "email", 2, 2L))
             .thenReturn(List.of(first, second));
-        when(identityCollisionMapper.countVisibleGroups(41, "person", "email")).thenReturn(7L);
         when(identityCollisionMapper.findVisibleMembers(
                 eq(41),
                 eq(List.of(key("person", "email", "a@example.com"),
@@ -203,18 +258,26 @@ class IdentityCollisionServiceTest {
         assertFalse(firstDto.membersTruncated());
         assertEquals(3, result.items().get(1).members().size());
         assertFalse(result.items().get(1).membersTruncated());
+        verify(identityCollisionMapper).findVisibleGroupPage(
+            41, "person", "email", 2, 2L);
     }
 
     @Test
     void boundsMembersPerGroupWithoutHidingTheVisibleCollisionSize() {
         IdentityCollisionQuery query = query("company", "domain", 1, 50);
-        IdentityCollisionGroupRow group = group(
-            "company", "domain", "crowded.example.com", 5_000, LocalDateTime.of(2026, 7, 25, 9, 0));
+        IdentityCollisionGroupPageRow group = group(
+            "company",
+            "domain",
+            "crowded.example.com",
+            5_000,
+            LocalDateTime.of(2026, 7, 25, 9, 0),
+            1L,
+            1L);
         IdentityCollisionGroupKey key = key("company", "domain", "crowded.example.com");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(identityCollisionMapper.findVisibleGroups(5, "company", "domain", 50, 0L))
+        when(identityCollisionMapper.findVisibleGroupPage(
+                5, "company", "domain", 50, 0L))
             .thenReturn(List.of(group));
-        when(identityCollisionMapper.countVisibleGroups(5, "company", "domain")).thenReturn(1L);
         when(identityCollisionMapper.findVisibleMembers(
                 eq(5), eq(List.of(key)), eq(0), eq(MEMBER_BOUND)))
             .thenReturn(IntStream.rangeClosed(1, MEMBER_BOUND)
@@ -238,12 +301,17 @@ class IdentityCollisionServiceTest {
     @Test
     void rejectsUnderCountWhenGroupAndMemberSnapshotsDisagree() {
         IdentityCollisionQuery query = query(null, null, 1, 50);
-        IdentityCollisionGroupRow group = group(
-            "company", "domain", "example.com", 2, LocalDateTime.of(2026, 7, 25, 9, 0));
+        IdentityCollisionGroupPageRow group = group(
+            "company",
+            "domain",
+            "example.com",
+            2,
+            LocalDateTime.of(2026, 7, 25, 9, 0),
+            1L,
+            1L);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
-        when(identityCollisionMapper.findVisibleGroups(9, null, null, 50, 0L))
+        when(identityCollisionMapper.findVisibleGroupPage(9, null, null, 50, 0L))
             .thenReturn(List.of(group));
-        when(identityCollisionMapper.countVisibleGroups(9, null, null)).thenReturn(1L);
         when(identityCollisionMapper.findVisibleMembers(
                 eq(9),
                 eq(List.of(key("company", "domain", "example.com"))),
@@ -262,12 +330,17 @@ class IdentityCollisionServiceTest {
     @Test
     void rejectsOverCountInsteadOfSilentlyCappingMapperResults() {
         IdentityCollisionQuery query = query(null, null, 1, 50);
-        IdentityCollisionGroupRow group = group(
-            "company", "domain", "example.com", 5_000, LocalDateTime.of(2026, 7, 25, 9, 0));
+        IdentityCollisionGroupPageRow group = group(
+            "company",
+            "domain",
+            "example.com",
+            5_000,
+            LocalDateTime.of(2026, 7, 25, 9, 0),
+            1L,
+            1L);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
-        when(identityCollisionMapper.findVisibleGroups(9, null, null, 50, 0L))
+        when(identityCollisionMapper.findVisibleGroupPage(9, null, null, 50, 0L))
             .thenReturn(List.of(group));
-        when(identityCollisionMapper.countVisibleGroups(9, null, null)).thenReturn(1L);
         when(identityCollisionMapper.findVisibleMembers(
                 eq(9),
                 eq(List.of(key("company", "domain", "example.com"))),
@@ -287,42 +360,272 @@ class IdentityCollisionServiceTest {
     }
 
     @Test
-    void memberPageForwardsTheKeysetCursorAndReportsTheVisibleGroupSize() {
+    void malformedSentinelAndGroupPageMetadataFailClosed() {
+        IdentityCollisionQuery query = query(null, null, 1, 2);
+        LocalDateTime rebuiltAt = LocalDateTime.of(2026, 7, 25, 9, 0);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(10);
+
+        when(identityCollisionMapper.findVisibleGroupPage(10, null, null, 2, 0L))
+            .thenReturn(List.of(sentinel(0L, 1L), sentinel(0L, 1L)));
+        assertThrows(IllegalStateException.class, () -> service.list(query));
+
+        IdentityCollisionGroupPageRow malformedSentinel = sentinel(0L, 1L);
+        malformedSentinel.setKind("domain");
+        when(identityCollisionMapper.findVisibleGroupPage(10, null, null, 2, 0L))
+            .thenReturn(List.of(malformedSentinel));
+        assertThrows(IllegalStateException.class, () -> service.list(query));
+
+        when(identityCollisionMapper.findVisibleGroupPage(10, null, null, 2, 0L))
+            .thenReturn(List.of(
+                group("company", "domain", "a.example", 2, rebuiltAt, 2L, 1L),
+                group("company", "domain", "b.example", 2, rebuiltAt, 3L, 2L)));
+        assertThrows(IllegalStateException.class, () -> service.list(query));
+
+        when(identityCollisionMapper.findVisibleGroupPage(10, null, null, 2, 0L))
+            .thenReturn(List.of(
+                group("company", "domain", "a.example", 2, rebuiltAt, 2L, 1L)));
+        assertThrows(IllegalStateException.class, () -> service.list(query));
+
+        when(identityCollisionMapper.findVisibleGroupPage(10, null, null, 2, 0L))
+            .thenReturn(List.of());
+        assertThrows(IllegalStateException.class, () -> service.list(query));
+
+        verify(identityCollisionMapper, never()).findVisibleMembers(
+            anyInt(), anyList(), anyInt(), anyInt());
+    }
+
+    @Test
+    void groupQueryDeadlineFailuresAreTranslatedButUnrelatedDatabaseFailuresPropagate() {
+        IdentityCollisionQuery query = query(null, null, 1, 50);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(11);
+
+        QueryTimeoutException queryTimeout = new QueryTimeoutException("canonical@example.com");
+        doThrow(queryTimeout).when(identityCollisionMapper)
+            .findVisibleGroupPage(11, null, null, 50, 0L);
+        IdentityCollisionReportTimeoutException translatedQuery = assertThrows(
+            IdentityCollisionReportTimeoutException.class,
+            () -> service.list(query));
+        assertSame(queryTimeout, translatedQuery.getCause());
+
+        TransactionTimedOutException transactionTimeout =
+            new TransactionTimedOutException("canonical@example.com");
+        doThrow(transactionTimeout).when(identityCollisionMapper)
+            .findVisibleGroupPage(11, null, null, 50, 0L);
+        IdentityCollisionReportTimeoutException translatedTransaction = assertThrows(
+            IdentityCollisionReportTimeoutException.class,
+            () -> service.list(query));
+        assertSame(transactionTimeout, translatedTransaction.getCause());
+
+        DataAccessResourceFailureException sqlTimeout =
+            new DataAccessResourceFailureException(
+                "canonical@example.com",
+                new SQLTimeoutException("canonical@example.com"));
+        doThrow(sqlTimeout).when(identityCollisionMapper)
+            .findVisibleGroupPage(11, null, null, 50, 0L);
+        IdentityCollisionReportTimeoutException translatedSqlTimeout = assertThrows(
+            IdentityCollisionReportTimeoutException.class,
+            () -> service.list(query));
+        assertSame(sqlTimeout, translatedSqlTimeout.getCause());
+
+        DataAccessResourceFailureException mysqlDeadline =
+            new DataAccessResourceFailureException(
+                "canonical@example.com",
+                new SQLException("canonical@example.com", "HY000", 3024));
+        doThrow(mysqlDeadline).when(identityCollisionMapper)
+            .findVisibleGroupPage(11, null, null, 50, 0L);
+        IdentityCollisionReportTimeoutException translatedMysqlDeadline = assertThrows(
+            IdentityCollisionReportTimeoutException.class,
+            () -> service.list(query));
+        assertSame(mysqlDeadline, translatedMysqlDeadline.getCause());
+
+        DataAccessResourceFailureException unrelated =
+            new DataAccessResourceFailureException(
+                "canonical@example.com",
+                new SQLException("canonical@example.com", "HY000", 1205));
+        doThrow(unrelated).when(identityCollisionMapper)
+            .findVisibleGroupPage(11, null, null, 50, 0L);
+        assertSame(
+            unrelated,
+            assertThrows(DataAccessResourceFailureException.class, () -> service.list(query)));
+    }
+
+    @Test
+    void overallGroupListDeadlineAlsoTranslatesMemberPreviewTimeouts() {
+        IdentityCollisionQuery query = query("company", "domain", 1, 50);
+        LocalDateTime rebuiltAt = LocalDateTime.of(2026, 7, 25, 9, 0);
+        IdentityCollisionGroupPageRow group = group(
+            "company",
+            "domain",
+            "deadline.example",
+            2,
+            rebuiltAt,
+            1L,
+            1L);
+        IdentityCollisionGroupKey key =
+            key("company", "domain", "deadline.example");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(12);
+        when(identityCollisionMapper.findVisibleGroupPage(
+                12, "company", "domain", 50, 0L))
+            .thenReturn(List.of(group));
+        QueryTimeoutException memberTimeout =
+            new QueryTimeoutException("canonical@example.com");
+        doThrow(memberTimeout).when(identityCollisionMapper)
+            .findVisibleMembers(12, List.of(key), 0, MEMBER_BOUND);
+
+        IdentityCollisionReportTimeoutException translated = assertThrows(
+            IdentityCollisionReportTimeoutException.class,
+            () -> service.list(query));
+
+        assertSame(memberTimeout, translated.getCause());
+    }
+
+    @Test
+    void firstMemberPageUsesSizePlusOneToDeriveHasMoreAndNextCursor() {
         IdentityCollisionMemberQuery query =
-            memberQuery("company", "domain", "crowded.example.com", 120, 25);
+            memberQuery("company", "domain", "crowded.example.com", 0, 2);
         IdentityCollisionGroupKey key = key("company", "domain", "crowded.example.com");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(17);
-        when(identityCollisionMapper.countVisibleGroupMembers(
-            17, "company", "domain", "crowded.example.com")).thenReturn(5_000L);
-        when(identityCollisionMapper.findVisibleMembers(17, List.of(key), 120, 25))
+        when(identityCollisionMapper.findVisibleMembers(17, List.of(key), 0, 3))
             .thenReturn(List.of(
                 member("company", "domain", "crowded.example.com", 121, "Company 121"),
-                member("company", "domain", "crowded.example.com", 122, "Company 122")));
+                member("company", "domain", "crowded.example.com", 122, "Company 122"),
+                member("company", "domain", "crowded.example.com", 123, "Company 123")));
 
-        PageResponse<IdentityCollisionMemberDto> result = service.listMembers(query);
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
 
-        verify(identityCollisionMapper).findVisibleMembers(17, List.of(key), 120, 25);
-        assertEquals(5_000L, result.total());
+        verify(identityCollisionMapper).findVisibleMembers(17, List.of(key), 0, 3);
+        verify(identityCollisionMapper, never()).findVisibleMembers(17, List.of(key), 0, 2);
         assertEquals(List.of(121, 122),
             result.items().stream().map(member -> member.recordId()).toList());
         assertEquals(List.of("Company 121", "Company 122"),
             result.items().stream().map(member -> member.recordName()).toList());
+        assertTrue(result.hasMore());
+        assertEquals(122, result.nextAfterRecordId());
     }
 
     @Test
-    void memberPageHidesGroupsRestrictionsHaveDroppedBelowACollision() {
+    void memberPageResponseRejectsNullItemsAndInconsistentCursorState() {
+        IdentityCollisionMemberPageDto terminal = new IdentityCollisionMemberPageDto(
+            List.of(new IdentityCollisionMemberDto(1, "One")),
+            false,
+            null);
+
+        assertThrows(UnsupportedOperationException.class, () -> terminal.items().clear());
+        assertThrows(NullPointerException.class,
+            () -> new IdentityCollisionMemberPageDto(null, false, null));
+        assertThrows(IllegalArgumentException.class,
+            () -> new IdentityCollisionMemberPageDto(List.of(), true, null));
+        assertThrows(IllegalArgumentException.class,
+            () -> new IdentityCollisionMemberPageDto(List.of(), false, 1));
+    }
+
+    @Test
+    void terminalMemberPageHasNoNextCursor() {
+        IdentityCollisionMemberQuery query =
+            memberQuery("company", "domain", "crowded.example.com", 122, 25);
+        IdentityCollisionGroupKey key = key("company", "domain", "crowded.example.com");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(17);
+        when(identityCollisionMapper.findVisibleMembers(17, List.of(key), 0, 2))
+            .thenReturn(List.of(
+                member("company", "domain", "crowded.example.com", 121, "Company 121"),
+                member("company", "domain", "crowded.example.com", 122, "Company 122")));
+        when(identityCollisionMapper.findVisibleMembers(17, List.of(key), 122, 26))
+            .thenReturn(List.of(
+                member("company", "domain", "crowded.example.com", 123, "Company 123")));
+
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
+
+        assertEquals(List.of(123),
+            result.items().stream().map(member -> member.recordId()).toList());
+        assertFalse(result.hasMore());
+        assertNull(result.nextAfterRecordId());
+    }
+
+    @Test
+    void firstMemberPageHidesGroupsRestrictionsHaveDroppedBelowACollision() {
         IdentityCollisionMemberQuery query =
             memberQuery("person", "email", "restricted@example.com", 0, 50);
+        IdentityCollisionGroupKey key = key("person", "email", "restricted@example.com");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(23);
-        when(identityCollisionMapper.countVisibleGroupMembers(
-            23, "person", "email", "restricted@example.com")).thenReturn(1L);
+        when(identityCollisionMapper.findVisibleMembers(23, List.of(key), 0, 51))
+            .thenReturn(List.of(
+                member("person", "email", "restricted@example.com", 7, "Only visible")));
 
-        PageResponse<IdentityCollisionMemberDto> result = service.listMembers(query);
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
 
         assertEquals(List.of(), result.items());
-        assertEquals(0L, result.total());
+        assertFalse(result.hasMore());
+        assertNull(result.nextAfterRecordId());
+        verify(identityCollisionMapper).findVisibleMembers(23, List.of(key), 0, 51);
+    }
+
+    @Test
+    void continuationPageHidesGroupWhenTheBoundedProbeFindsFewerThanTwoVisibleMembers() {
+        IdentityCollisionMemberQuery query =
+            memberQuery("person", "email", "restricted@example.com", 100, 50);
+        IdentityCollisionGroupKey key = key("person", "email", "restricted@example.com");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(23);
+        when(identityCollisionMapper.findVisibleMembers(23, List.of(key), 0, 2))
+            .thenReturn(List.of(
+                member("person", "email", "restricted@example.com", 7, "Only visible")));
+
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
+
+        assertEquals(List.of(), result.items());
+        assertFalse(result.hasMore());
+        assertNull(result.nextAfterRecordId());
         verify(identityCollisionMapper, never()).findVisibleMembers(
-            anyInt(), anyList(), anyInt(), anyInt());
+            23, List.of(key), 100, 51);
+    }
+
+    @Test
+    void continuationReturnsOneRowSuffixWhenTheGroupProbeStillFindsACollision() {
+        IdentityCollisionMemberQuery query =
+            memberQuery("company", "domain", "terminal.example.com", 20, 50);
+        IdentityCollisionGroupKey key = key("company", "domain", "terminal.example.com");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(29);
+        when(identityCollisionMapper.findVisibleMembers(29, List.of(key), 0, 2))
+            .thenReturn(List.of(
+                member("company", "domain", "terminal.example.com", 10, "First"),
+                member("company", "domain", "terminal.example.com", 20, "Second")));
+        when(identityCollisionMapper.findVisibleMembers(29, List.of(key), 20, 51))
+            .thenReturn(List.of(
+                member("company", "domain", "terminal.example.com", 30, "Last")));
+
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
+
+        assertEquals(List.of(30),
+            result.items().stream().map(member -> member.recordId()).toList());
+        assertFalse(result.hasMore());
+        assertNull(result.nextAfterRecordId());
+    }
+
+    @Test
+    void veryLargeLogicalGroupTraversalOnlyRequestsPageSizePlusOneAndABoundedProbe() {
+        IdentityCollisionMemberQuery query =
+            memberQuery("company", "domain", "million.example.com", 500_000, 100);
+        IdentityCollisionGroupKey key = key("company", "domain", "million.example.com");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(31);
+        when(identityCollisionMapper.findVisibleMembers(31, List.of(key), 0, 2))
+            .thenReturn(List.of(
+                member("company", "domain", "million.example.com", 1, "First"),
+                member("company", "domain", "million.example.com", 2, "Second")));
+        when(identityCollisionMapper.findVisibleMembers(31, List.of(key), 500_000, 101))
+            .thenReturn(IntStream.rangeClosed(500_001, 500_101)
+                .mapToObj(recordId ->
+                    member("company", "domain", "million.example.com", recordId,
+                        "Company " + recordId))
+                .toList());
+
+        IdentityCollisionMemberPageDto result = service.listMembers(query);
+
+        verify(identityCollisionMapper).findVisibleMembers(31, List.of(key), 0, 2);
+        verify(identityCollisionMapper).findVisibleMembers(
+            31, List.of(key), 500_000, 101);
+        verifyNoMoreInteractions(identityCollisionMapper);
+        assertEquals(100, result.items().size());
+        assertTrue(result.hasMore());
+        assertEquals(500_100, result.nextAfterRecordId());
     }
 
     @Test
@@ -337,8 +640,7 @@ class IdentityCollisionServiceTest {
             memberQuery("company", "email", "a@example.com", 0, 50)));
 
         verify(workspaceService, never()).getCurrentWorkspaceId();
-        verify(identityCollisionMapper, never()).countVisibleGroupMembers(
-            anyInt(), anyString(), anyString(), anyString());
+        verifyNoInteractions(identityCollisionMapper);
     }
 
     private static IdentityCollisionQuery query(
@@ -367,18 +669,29 @@ class IdentityCollisionServiceTest {
         return new IdentityCollisionGroupKey(recordType, kind, normalizedValue);
     }
 
-    private static IdentityCollisionGroupRow group(
+    private static IdentityCollisionGroupPageRow group(
             String recordType,
             String kind,
             String normalizedValue,
             int collisionSize,
-            LocalDateTime rebuiltAt) {
-        IdentityCollisionGroupRow row = new IdentityCollisionGroupRow();
+            LocalDateTime rebuiltAt,
+            long total,
+            long rowNumber) {
+        IdentityCollisionGroupPageRow row = new IdentityCollisionGroupPageRow();
         row.setRecordType(recordType);
         row.setKind(kind);
         row.setNormalizedValue(normalizedValue);
         row.setCollisionSize(collisionSize);
         row.setRebuiltAt(rebuiltAt);
+        row.setTotal(total);
+        row.setPageOrdinal(rowNumber);
+        return row;
+    }
+
+    private static IdentityCollisionGroupPageRow sentinel(long total, long rowNumber) {
+        IdentityCollisionGroupPageRow row = new IdentityCollisionGroupPageRow();
+        row.setTotal(total);
+        row.setPageOrdinal(rowNumber);
         return row;
     }
 

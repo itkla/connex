@@ -9,7 +9,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Validated identity and keyset cursor for one collision group's member page.
+ * Validated identity and keyset cursor for one collision group's member page. A cursor starts a
+ * fresh current-visibility snapshot and does not preserve database state across requests.
  */
 @Data
 @NoArgsConstructor
