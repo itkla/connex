@@ -19,12 +19,16 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
+    /** Selects the archived contacts instead of the active ones (issue #854). */
+    archived?: boolean;
 };
 
 export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
     noIndustry?: boolean;
     ids?: number[];
+    /** Selects the archived companies instead of the active ones (issue #854). */
+    archived?: boolean;
 };
 
 export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
@@ -159,12 +163,16 @@ export type PersonFacets = {
     titles: string[];
     hasNoCompany: boolean;
     owners: FacetCount[];
+    /** How many contacts the workspace currently holds archived (issue #854). */
+    archivedCount: number;
 };
 
 export type CompanyFacets = {
     industries: string[];
     hasNoIndustry: boolean;
     owners: FacetCount[];
+    /** How many companies the workspace currently holds archived (issue #854). */
+    archivedCount: number;
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -798,6 +806,8 @@ export type Company = {
     tags?: Tag[];
     createdAt: string;
     updatedAt: string;
+    /** Set while the company is archived (issue #854); read-only, cleared by restore. */
+    archivedAt?: string | null;
 };
 
 // metrics for a company, filled via relationship traversal
@@ -870,6 +880,8 @@ export type Contact = {
     /** APPI processing restrictions (issue #221); read-only, set via the restrictions endpoint. */
     suspendedAt?: string | null;
     provisionCeasedAt?: string | null;
+    /** Set while the contact is archived (issue #854); read-only, cleared by restore. */
+    archivedAt?: string | null;
 };
 
 export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';

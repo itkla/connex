@@ -10,7 +10,8 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { ArchiveBoxIcon, ArchiveBoxArrowDownIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
     TableCellsIcon,
@@ -33,10 +34,10 @@ import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/c
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
-import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
-import { type ColumnDef, type ColumnFilterFacet, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
@@ -49,7 +50,7 @@ import {
     removeSegmentCondition,
     segmentConditionEntries,
 } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkArchiveCompanies, bulkRestoreCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -98,6 +99,15 @@ function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): Co
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
 const NO_ITEMS: Company[] = [];
+const ARCHIVED_FILTER_KEY = 'archived';
+const ARCHIVED_FILTER_VALUE = '1';
+
+/** The facet filters only, with the archived-scope key the browser owns separately removed. */
+function withoutArchived(state: FilterState): FilterState {
+    return Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== ARCHIVED_FILTER_KEY),
+    );
+}
 /** Impossible company id (ids are positive) used to force an empty scoped export when a segment matches nothing. */
 const NO_MATCH_COMPANY_ID = 0;
 const EMPTY_COMPANY_DRAFT: CreateCompanyPayload = {
@@ -148,17 +158,26 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
+    const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
+    const setShowArchived = useCallback((next: boolean) => {
+        setFilterState((current) => {
+            const rest = withoutArchived(current);
+            return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
+        });
+    }, [setFilterState]);
+
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
-    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] }>(() => {
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean }>(() => {
         const industryFilter = filterState.industry ?? [];
         const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
-        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
+        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean } = {};
         if (industries.length) params.industry = industries;
         if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
         if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
+        if (showArchived) params.archived = true;
         return params;
-    }, [filterState, ownerScope]);
+    }, [filterState, ownerScope, showArchived]);
 
     const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
         if (!hasSegments) {
@@ -538,21 +557,25 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
-    const deleteOne = useCallback((company: Company) => {
+    const archiveOne = useCallback((company: Company) => {
         setMatchedSignature(null);
         setSelectedIds(new Set([company.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
 
-    const confirmDelete = async () => {
+    const confirmArchive = async () => {
         if (selectedCompanyIds.length === 0) return;
         setIsDeleting(true);
         try {
-            const result = await bulkDeleteCompanies(selectedCompanyIds);
+            const result = showArchived
+                ? await bulkRestoreCompanies(selectedCompanyIds)
+                : await bulkArchiveCompanies(selectedCompanyIds);
             const anySucceeded = notifyBulkResult(result, {
-                success: (count) => count === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count }),
-                partial: (succeeded, total) => t('toastCompaniesDeletedPartial', { succeeded, total }),
-                failure: (failed) => t('toastCompaniesDeleteFailed', { failed }),
+                success: (count) => count === 1
+                    ? t(showArchived ? 'toastCompanyRestored' : 'toastCompanyArchived')
+                    : t(showArchived ? 'toastCompaniesRestored' : 'toastCompaniesArchived', { count }),
+                partial: (succeeded, total) => t(showArchived ? 'toastCompaniesRestoredPartial' : 'toastCompaniesArchivedPartial', { succeeded, total }),
+                failure: (failed) => t(showArchived ? 'toastCompaniesRestoreFailed' : 'toastCompaniesArchiveFailed', { failed }),
             });
             setDeleteDialogOpen(false);
             if (anySucceeded) {
@@ -560,7 +583,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                 refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
+            toastError(err instanceof Error ? err.message : t(showArchived ? 'toastRestoreFailed' : 'toastArchiveFailed'));
         } finally {
             setIsDeleting(false);
         }
@@ -675,8 +698,13 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
         return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
     }, [companyFacets, t]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || hasSegments;
-    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
+    const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || hasSegments;
+    const clearAll = useCallback(() => {
+        setQuery('');
+        setFilterState(showArchived ? { [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : {});
+        setDefinition(EMPTY_DEFINITION);
+    }, [setQuery, setFilterState, showArchived]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
@@ -747,9 +775,9 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         {t('assignOwner')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
-                        <TrashIcon />
-                        {t('delete')}
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
+                        {showArchived ? <ArchiveBoxIcon /> : <ArchiveBoxArrowDownIcon />}
+                        {t(showArchived ? 'restore' : 'archive')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -867,6 +895,17 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                             </div>
                         }
                     >
+                        {(showArchived || (companyFacets?.archivedCount ?? 0) > 0) && (
+                            <SegmentedToggle
+                                ariaLabel={t('archivedScopeAria')}
+                                value={showArchived ? 'archived' : 'active'}
+                                onChange={(next) => setShowArchived(next === 'archived')}
+                                options={[
+                                    { value: 'active', label: t('scopeActive'), icon: <BuildingOffice2Icon className="size-4" /> },
+                                    { value: 'archived', label: t('scopeArchived', { count: companyFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                ]}
+                            />
+                        )}
                         <MemberScopeFilter
                             values={filterState.owner}
                             onChange={changeOwnerScope}
@@ -939,7 +978,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}
-                        onDelete={deleteOne}
+                        onDelete={archiveOne}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
@@ -978,15 +1017,17 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                     removePendingContact={removePendingContact}
                 />
 
-                <DeleteRecordDialog
+                <ArchiveRecordDialog
                     open={deleteDialogOpen}
                     onOpenChange={setDeleteDialogOpen}
+                    mode={showArchived ? 'restore' : 'archive'}
                     selectedIds={selectedIds}
                     selectedItems={selectedCompanies}
                     entityLabel={t('entityLabel')}
+                    entityLabelPlural={t('entityLabelPlural')}
                     getDisplayName={(c) => c.name}
-                    isDeleting={isDeleting}
-                    confirmDelete={confirmDelete}
+                    isPending={isDeleting}
+                    onConfirm={confirmArchive}
                 />
 
                 <BulkTagDialog

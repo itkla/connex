@@ -1438,7 +1438,7 @@ export function getCompanyFacets(init: RequestInit = {}) {
 export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
-        scope: params.scope, memberIds: params.memberIds,
+        scope: params.scope, memberIds: params.memberIds, archived: params.archived,
     });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
@@ -1482,8 +1482,14 @@ export async function uploadCompanyLogo(companyId: number, file: File, init: Req
     return company.logoUrl;
 }
 
-export function deleteCompany(id: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/companies/${id}`, init);
+/** Archives a company: reversible, and the only way to remove one from the workspace (issue #854). */
+export function archiveCompany(id: number, init: RequestInit = {}) {
+    return postJson<Types.Company>(`/api/companies/${id}/archive`, {}, init);
+}
+
+/** Returns an archived company to the active working set. */
+export function restoreCompany(id: number, init: RequestInit = {}) {
+    return postJson<Types.Company>(`/api/companies/${id}/restore`, {}, init);
 }
 
 export function getCompanyPeople(id: number, init: RequestInit = {}) {
@@ -1671,8 +1677,12 @@ export function bulkRemoveTagFromContacts(ids: number[], tagId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/remove`, { ids: chunk, tagId }));
 }
 
-export function bulkDeleteContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/delete`, { ids: chunk }));
+export function bulkArchiveContacts(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/archive`, { ids: chunk }));
+}
+
+export function bulkRestoreContacts(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/restore`, { ids: chunk }));
 }
 
 export function bulkAddTagToCompanies(ids: number[], tagId: number) {
@@ -1683,8 +1693,12 @@ export function bulkRemoveTagFromCompanies(ids: number[], tagId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/remove`, { ids: chunk, tagId }));
 }
 
-export function bulkDeleteCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/delete`, { ids: chunk }));
+export function bulkArchiveCompanies(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/archive`, { ids: chunk }));
+}
+
+export function bulkRestoreCompanies(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/restore`, { ids: chunk }));
 }
 
 export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
@@ -1727,7 +1741,7 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
-        scope: params.scope, memberIds: params.memberIds,
+        scope: params.scope, memberIds: params.memberIds, archived: params.archived,
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
@@ -2014,8 +2028,14 @@ export function getBusinessCardImportStatus(
     );
 }
 
-export function deleteContact(id: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/persons/${id}`, init);
+/** Archives a contact: reversible, and the only way to remove one from the workspace (issue #854). */
+export function archiveContact(id: number, init: RequestInit = {}) {
+    return postJson<Types.Contact>(`/api/persons/${id}/archive`, {}, init);
+}
+
+/** Returns an archived contact to the active working set. */
+export function restoreContact(id: number, init: RequestInit = {}) {
+    return postJson<Types.Contact>(`/api/persons/${id}/restore`, {}, init);
 }
 
 export function updateContact(id: number, payload: Types.UpdateContactPayload) {
@@ -2031,10 +2051,6 @@ export async function uploadContactPicture(contactId: number, file: File, init: 
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
-}
-
-export function deleteContactFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<void>((init) => deleteContact(id, init), cookie);
 }
 
 export function getContactTags(id: number, init: RequestInit = {}) {

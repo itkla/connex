@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
+import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -20,14 +21,21 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
     const openTasks = tasks.filter((task) => !task.completed);
     const [editTaskOpen, setEditTaskOpen] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+    const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const router = useRouter();
-    const deleteThisTask = async (taskId: number) => {
+    const deleteThisTask = async () => {
+        if (!taskPendingDelete) return;
+        setIsDeleting(true);
         try {
-            await deleteTask(taskId);
+            await deleteTask(taskPendingDelete.id);
             toastSuccess(t('taskDeleted'));
+            setTaskPendingDelete(null);
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToDeleteTask'));
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -118,7 +126,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                             </DropdownMenuItem>
                                             <DropdownMenuSeparator />
                                             <DropdownMenuItem variant="destructive" onClick={() => {
-                                                deleteThisTask(task.id);
+                                                setTaskPendingDelete(task);
                                             }}>
                                                 <TrashIcon className="size-4" />
                                                 {t('delete')}
@@ -134,6 +142,17 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                     </div>
                 </>
             ) : null}
+            <DeleteRecordDialog
+                open={taskPendingDelete !== null}
+                onOpenChange={(next) => { if (!next) setTaskPendingDelete(null); }}
+                selectedIds={new Set(taskPendingDelete ? [taskPendingDelete.id] : [])}
+                selectedItems={taskPendingDelete ? [taskPendingDelete] : []}
+                entityLabel={t('taskEntityLabel')}
+                getDisplayName={(item) => item.description}
+                isDeleting={isDeleting}
+                confirmDelete={deleteThisTask}
+            />
+
             {selectedTask && (
                 <EditTaskSheet
                     key={selectedTask.id}

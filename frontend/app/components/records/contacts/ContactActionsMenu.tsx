@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
-import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -21,14 +21,14 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
-import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { deleteContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
+import { archiveContact, restoreContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type WorkspaceMember } from '@/app/lib/types';
 import { type Contact, type Deal } from '@/app/lib/types';
@@ -50,8 +50,8 @@ export default function ContactActionsMenu({
     const t = useTranslations('ContactsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('person', contact.id);
     const [changeOpen, setChangeOpen] = useState(false);
-    const [deleteOpen, setDeleteOpen] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
+    const [archiveOpen, setArchiveOpen] = useState(false);
+    const [isArchiving, setIsArchiving] = useState(false);
     const [removingCompany, setRemovingCompany] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
@@ -87,16 +87,26 @@ export default function ContactActionsMenu({
         }
     };
 
-    const confirmDelete = async () => {
-        setIsDeleting(true);
+    const archived = contact.archivedAt != null;
+
+    const confirmArchive = async () => {
+        setIsArchiving(true);
         try {
-            await deleteContact(contact.id);
-            toastSuccess(t('toastContactDeleted'));
-            router.push('/records/contacts');
-            router.refresh();
+            if (archived) {
+                await restoreContact(contact.id);
+                toastSuccess(t('toastContactRestored'));
+                setArchiveOpen(false);
+                router.refresh();
+            } else {
+                await archiveContact(contact.id);
+                toastSuccess(t('toastContactArchived'));
+                router.push('/records/contacts');
+                router.refresh();
+            }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
-            setIsDeleting(false);
+            toastError(err instanceof Error ? err.message : t(archived ? 'toastFailedRestore' : 'toastFailedArchive'));
+        } finally {
+            setIsArchiving(false);
         }
     };
 
@@ -233,14 +243,15 @@ export default function ContactActionsMenu({
                             )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                                variant="destructive"
                                 onSelect={(e) => {
                                     e.preventDefault();
-                                    setDeleteOpen(true);
+                                    setArchiveOpen(true);
                                 }}
                             >
-                                <TrashIcon className="size-4" />
-                                <span>{t('delete')}</span>
+                                {archived
+                                    ? <ArchiveBoxIcon className="size-4" />
+                                    : <ArchiveBoxArrowDownIcon className="size-4" />}
+                                <span>{t(archived ? 'restore' : 'archive')}</span>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -291,15 +302,17 @@ export default function ContactActionsMenu({
                     onOpenChange={setChangeOpen}
                     contacts={[contact]}
                 />
-                <DeleteRecordDialog
-                    open={deleteOpen}
-                    onOpenChange={setDeleteOpen}
+                <ArchiveRecordDialog
+                    open={archiveOpen}
+                    onOpenChange={setArchiveOpen}
+                    mode={archived ? 'restore' : 'archive'}
                     selectedIds={new Set([contact.id])}
                     selectedItems={[contact]}
-                    entityLabel="contact"
+                    entityLabel={t('entityLabel')}
+                    entityLabelPlural={t('entityLabelPlural')}
                     getDisplayName={(c) => c.name}
-                    isDeleting={isDeleting}
-                    confirmDelete={confirmDelete}
+                    isPending={isArchiving}
+                    onConfirm={confirmArchive}
                 />
 
                 <ShareDialog

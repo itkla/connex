@@ -420,5 +420,20 @@
     "peek": "Peek",
     "quickEdit": "Quick edit",
     "delete": "Delete"
+  },
+  "RecordsArchiveDialog": {
+    "archiveTitleSingle": "Archive {entityLabel}",
+    "archiveTitleMultiple": "Archive {count} {entityLabel}",
+    "archiveDescriptionNamed": "Archive \"{name}\"? It leaves your lists but nothing is deleted — you can restore it at any time.",
+    "archiveDescriptionSingle": "Archive this {entityLabel}? It leaves your lists but nothing is deleted — you can restore it at any time.",
+    "archiveDescriptionMultiple": "Archive these {count} {entityLabel}? They leave your lists but nothing is deleted — you can restore them at any time.",
+    "restoreTitleSingle": "Restore {entityLabel}",
+    "restoreTitleMultiple": "Restore {count} {entityLabel}",
+    "restoreDescriptionNamed": "Restore \"{name}\" to your active records, with everything it had when it was archived.",
+    "restoreDescriptionSingle": "Restore this {entityLabel} to your active records, with everything it had when it was archived.",
+    "restoreDescriptionMultiple": "Restore these {count} {entityLabel} to your active records, with everything they had when they were archived.",
+    "cancel": "Cancel",
+    "archive": "Archive",
+    "restore": "Restore"
   }
 }
