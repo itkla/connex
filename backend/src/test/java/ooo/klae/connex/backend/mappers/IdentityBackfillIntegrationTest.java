@@ -65,7 +65,10 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(4, collisionMemberships);
         assertEquals(
             2L,
-            collisionMapper.countVisibleGroups(workspace.getId(), null, null));
+            collisionMapper.findVisibleGroupPage(
+                workspace.getId(), null, null, 100, 0)
+                .getFirst()
+                .getTotal());
         assertEquals(
             0,
             jdbcTemplate.queryForObject(

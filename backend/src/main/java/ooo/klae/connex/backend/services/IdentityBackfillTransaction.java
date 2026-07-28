@@ -180,16 +180,16 @@ public class IdentityBackfillTransaction {
      * Atomically replaces one workspace's collision membership artifact.
      * @param catalog pinned catalog used for failure context
      * @param workspaceId workspace whose report is rebuilt
-     * @return inserted collision membership count
+     * @return collision membership count held by the workspace after the rebuild
      */
     @Transactional
     public int rebuildCollisionReport(String catalog, int workspaceId) {
         requireWorkspace(catalog, workspaceId);
         LocalDateTime rebuiltAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
         identityCollisionMapper.deleteForWorkspace(workspaceId);
-        int people = identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);
-        int companies = identityCollisionMapper.insertCompanyCollisionMembers(workspaceId, rebuiltAt);
-        return Math.addExact(people, companies);
+        identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);
+        identityCollisionMapper.insertCompanyCollisionMembers(workspaceId, rebuiltAt);
+        return Math.toIntExact(identityCollisionMapper.countForWorkspace(workspaceId));
     }
 
     private Set<IdentityKey> identityKeys(List<IdentityKeyRow> rows) {

@@ -6,14 +6,16 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Restriction-filtered collision group projection returned by MyBatis.
+ * Nullable collision-group page projection carrying window metadata or an empty-page sentinel.
  */
 @Data
 @NoArgsConstructor
-public class IdentityCollisionGroupRow {
+public class IdentityCollisionGroupPageRow {
     private String recordType;
     private String kind;
     private String normalizedValue;
-    private int collisionSize;
+    private Integer collisionSize;
     private LocalDateTime rebuiltAt;
+    private Long total;
+    private Long pageOrdinal;
 }
