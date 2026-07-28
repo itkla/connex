@@ -166,6 +166,27 @@ class IdentityBackfillRunnerTest {
     }
 
     @Test
+    void failedWorkspaceSweepIsLoggedWithoutStoppingStartupOrLaterWork(CapturedOutput output) {
+        stubEnumeration(Arrays.asList((String) null), List.of(3, 7));
+        serveWorkspace(3, null);
+        serveWorkspace(7, null);
+        when(backfillTransaction.backfillPersonPage(null, 3, 0, 500))
+            .thenThrow(new NullPointerException("instant"));
+        when(backfillTransaction.backfillPersonPage(null, 7, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.backfillCompanyPage(null, 7, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.rebuildCollisionReport(null, 7)).thenReturn(0);
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, never()).rebuildCollisionReport(isNull(), eq(3));
+        verify(backfillTransaction).backfillPersonPage(null, 7, 0, 500);
+        assertTrue(output.getOut().contains(
+            "Canonical identity backfill failed for workspace 3"));
+    }
+
+    @Test
     void pageCursorAdvancesWhenEveryValueIsInvalid() {
         stubEnumeration(Arrays.asList((String) null), List.of(7));
         serveWorkspace(7, null);
