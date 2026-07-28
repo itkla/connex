@@ -366,10 +366,9 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void companyImportPreviewKeepsExactNameOnlyMatchesAsWeakSuggestions() {
-        Company existing = new Company();
-        existing.setWorkspaceId(workspace.getId());
-        existing.setName("Weak Name Candidate " + unique());
-        companyMapper.insert(existing);
+        Company draft = new Company();
+        draft.setName("Weak Name Candidate " + unique());
+        Company existing = companyService.createCompany(draft);
 
         ImportPreviewResult preview = importService.previewCompanies(req(
             List.of(map("Name", "name")),
