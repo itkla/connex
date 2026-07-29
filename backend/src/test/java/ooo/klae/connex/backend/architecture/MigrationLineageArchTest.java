@@ -37,6 +37,8 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  */
 class MigrationLineageArchTest {
 
+    private static final Pattern MIGRATION_FILE_NAME =
+        Pattern.compile("V\\d+__[a-z0-9_]+\\.sql");
     private static final List<Pattern> TABLE_REFERENCES = List.of(
         Pattern.compile(
             "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
@@ -70,6 +72,24 @@ class MigrationLineageArchTest {
         assertLineagePurity("control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
     }
 
+    @Test
+    void migrationNamesUseThePortableVersionedConvention() throws IOException {
+        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
+        List<String> invalidNames;
+        try (Stream<Path> files = Files.walk(root)) {
+            invalidNames = files
+                .filter(Files::isRegularFile)
+                .map(path -> path.getFileName().toString())
+                .filter(name -> name.endsWith(".sql"))
+                .filter(name -> !MIGRATION_FILE_NAME.matcher(name).matches())
+                .map(MigrationLineageArchTest::displayName)
+                .sorted()
+                .toList();
+        }
+        assertTrue(invalidNames.isEmpty(),
+            "Flyway SQL migrations must use V{integer}__{snake_case}.sql names: " + invalidNames);
+    }
+
     /**
      * The interleaved root lineage is frozen at V65 (the FK-drop migration):
      * every migration after the split must land in one of the pure lineage
@@ -80,7 +100,9 @@ class MigrationLineageArchTest {
         Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
         List<String> escapees = new ArrayList<>();
         try (Stream<Path> files = Files.list(root)) {
-            for (Path file : files.filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql")).toList()) {
+            for (Path file : files
+                    .filter(path -> MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches())
+                    .toList()) {
                 int version = Integer.parseInt(file.getFileName().toString().substring(1).split("__")[0]);
                 if (version > 65) {
                     escapees.add(file.getFileName().toString());
@@ -125,6 +147,14 @@ class MigrationLineageArchTest {
 
     private static String stripComments(String sql) {
         return sql.replaceAll("--[^\\n]*", "").replaceAll("(?s)/\\*.*?\\*/", "");
+    }
+
+    private static String displayName(String name) {
+        return name
+            .replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
     }
 
     private Path repoRoot() {

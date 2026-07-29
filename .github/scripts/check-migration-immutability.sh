@@ -33,6 +33,49 @@ tree_entry() {
   git ls-tree "$1" -- "$2"
 }
 
+normalize_version() {
+  local version="$1"
+
+  while [ "${#version}" -gt 1 ] && [ "${version:0:1}" = "0" ]; do
+    version="${version:1}"
+  done
+  printf '%s\n' "$version"
+}
+
+version_is_greater() {
+  local candidate="$1"
+  local reference="$2"
+  local index
+  local candidate_digit
+  local reference_digit
+
+  if [ "${#candidate}" -gt "${#reference}" ]; then
+    return 0
+  fi
+  if [ "${#candidate}" -lt "${#reference}" ]; then
+    return 1
+  fi
+  for ((index = 0; index < ${#candidate}; index++)); do
+    candidate_digit="${candidate:index:1}"
+    reference_digit="${reference:index:1}"
+    if [ "$candidate_digit" -gt "$reference_digit" ]; then
+      return 0
+    fi
+    if [ "$candidate_digit" -lt "$reference_digit" ]; then
+      return 1
+    fi
+  done
+  return 1
+}
+
+print_paths() {
+  local path_name
+
+  for path_name in "$@"; do
+    printf '  %q\n' "$path_name"
+  done
+}
+
 identity_relocation_is_exact() {
   local index
   local old_path
@@ -81,39 +124,39 @@ is_identity_relocation_source() {
 }
 
 changed=()
-while IFS= read -r path_name; do
+while IFS= read -r -d '' path_name; do
   base_entry="$(tree_entry "$BASE_SHA" "$path_name")"
   head_entry="$(tree_entry "$HEAD_SHA" "$path_name")"
   if [ "$base_entry" != "$head_entry" ] \
       && ! is_identity_relocation_source "$path_name"; then
     changed+=("$path_name")
   fi
-done < <(git ls-tree -r --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
+done < <(git ls-tree -r -z --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#changed[@]}" -gt 0 ]; then
   echo "Shipped Flyway migrations are immutable. Modified, deleted, renamed, or type-changed:" >&2
-  printf '%s\n' "${changed[@]}" >&2
+  print_paths "${changed[@]}" >&2
   echo "Forward-only: add a new migration instead of editing an applied one." >&2
   exit 1
 fi
 
-base_max=-1
+base_max="0"
 invalid_base_names=()
-while IFS= read -r path_name; do
+while IFS= read -r -d '' path_name; do
   file_name="${path_name##*/}"
   if [[ "$file_name" =~ ^V([0-9]+)__[a-z0-9_]+\.sql$ ]]; then
-    version=$((10#${BASH_REMATCH[1]}))
-    if [ "$version" -gt "$base_max" ]; then
+    version="$(normalize_version "${BASH_REMATCH[1]}")"
+    if version_is_greater "$version" "$base_max"; then
       base_max="$version"
     fi
   elif [[ "$file_name" = *.sql ]]; then
     invalid_base_names+=("$path_name")
   fi
-done < <(git ls-tree -r --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
+done < <(git ls-tree -r -z --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_base_names[@]}" -gt 0 ]; then
   echo "Base revision contains SQL migrations outside the required V{integer}__{snake_case}.sql convention:" >&2
-  printf '%s\n' "${invalid_base_names[@]}" >&2
+  print_paths "${invalid_base_names[@]}" >&2
   exit 1
 fi
 
@@ -121,39 +164,39 @@ invalid_added_names=()
 non_monotonic_additions=()
 duplicate_versions=()
 declare -A head_version_paths=()
-while IFS= read -r path_name; do
+while IFS= read -r -d '' path_name; do
   file_name="${path_name##*/}"
   if [[ "$file_name" =~ ^V([0-9]+)__[a-z0-9_]+\.sql$ ]]; then
-    version=$((10#${BASH_REMATCH[1]}))
+    version="$(normalize_version "${BASH_REMATCH[1]}")"
     if [ -n "${head_version_paths[$version]:-}" ]; then
       duplicate_versions+=("${head_version_paths[$version]}" "$path_name")
     else
       head_version_paths[$version]="$path_name"
     fi
     if [ -z "$(tree_entry "$BASE_SHA" "$path_name")" ] \
-        && [ "$version" -le "$base_max" ]; then
+        && ! version_is_greater "$version" "$base_max"; then
       non_monotonic_additions+=("$path_name")
     fi
   elif [[ "$file_name" = *.sql ]]; then
     invalid_added_names+=("$path_name")
   fi
-done < <(git ls-tree -r --name-only "$HEAD_SHA" -- "$MIGRATION_ROOT")
+done < <(git ls-tree -r -z --name-only "$HEAD_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_added_names[@]}" -gt 0 ]; then
   echo "SQL migrations must use V{integer}__{snake_case}.sql names:" >&2
-  printf '%s\n' "${invalid_added_names[@]}" >&2
+  print_paths "${invalid_added_names[@]}" >&2
   exit 1
 fi
 
 if [ "${#duplicate_versions[@]}" -gt 0 ]; then
   echo "Flyway migration versions must be unique across every migration folder:" >&2
-  printf '%s\n' "${duplicate_versions[@]}" | sort -u >&2
+  print_paths "${duplicate_versions[@]}" | sort -u >&2
   exit 1
 fi
 
 if [ "${#non_monotonic_additions[@]}" -gt 0 ]; then
   echo "New Flyway migrations must be greater than base revision maximum V${base_max}:" >&2
-  printf '%s\n' "${non_monotonic_additions[@]}" >&2
+  print_paths "${non_monotonic_additions[@]}" >&2
   exit 1
 fi
 

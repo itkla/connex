@@ -163,6 +163,43 @@ git -C "$repository" add backend/src/main/resources/db/migration/tenant/V127.1__
 git -C "$repository" commit -qm invalid-version-name
 expect_failure "$repository" "$base"
 
+repository="$(new_repository control-character-name control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+relative_path=$'backend/src/main/resources/db/migration/tenant/V100__evil\n.sql'
+printf 'SELECT 100;\n' > "$repository/$relative_path"
+git -C "$repository" add -- "$relative_path"
+git -C "$repository" commit -qm control-character-name
+expect_failure "$repository" "$base"
+
+repository="$(new_repository non-ascii-name control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+relative_path=$'backend/src/main/resources/db/migration/tenant/V100__caf\xc3\xa9.sql'
+printf 'SELECT 100;\n' > "$repository/$relative_path"
+git -C "$repository" add -- "$relative_path"
+git -C "$repository" commit -qm non-ascii-name
+expect_failure "$repository" "$base"
+
+repository="$(new_repository leading-zero-duplicate control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/control/V127__first.sql"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V0127__second.sql"
+git -C "$repository" add \
+  backend/src/main/resources/db/migration/control/V127__first.sql \
+  backend/src/main/resources/db/migration/tenant/V0127__second.sql
+git -C "$repository" commit -qm leading-zero-duplicate
+expect_failure "$repository" "$base"
+
+repository="$(new_repository large-version control 128)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 18446744073709551743;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V18446744073709551743__future.sql"
+git -C "$repository" add \
+  backend/src/main/resources/db/migration/tenant/V18446744073709551743__future.sql
+git -C "$repository" commit -qm large-version
+(cd "$repository" && bash "$CHECKER" "$base" HEAD >/dev/null)
+
 repository="$(new_repository modification)"
 base="$(git -C "$repository" rev-parse HEAD)"
 printf 'SELECT 9;\n' > "$repository/backend/src/main/resources/db/migration/tenant/V1__base.sql"

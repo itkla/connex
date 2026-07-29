@@ -76,6 +76,7 @@ class CanonicalIdentityMigrationIntegrationTest {
             .locations("classpath:db/migration")
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"))
+            .outOfOrder(false)
             .target(MigrationVersion.fromVersion("122"))
             .load();
         throughV122.migrate();
@@ -83,6 +84,7 @@ class CanonicalIdentityMigrationIntegrationTest {
         Flyway deployedV126 = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration/control")
+            .outOfOrder(false)
             .validateOnMigrate(false)
             .target(MigrationVersion.fromVersion("126"))
             .load();
@@ -98,6 +100,7 @@ class CanonicalIdentityMigrationIntegrationTest {
             .locations("classpath:db/migration")
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"))
+            .outOfOrder(false)
             .target(MigrationVersion.fromVersion("128"))
             .load();
         flyway.migrate();
