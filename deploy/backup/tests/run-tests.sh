@@ -290,6 +290,34 @@ case_pitr_coverage_gap_guard() {
     status=$?
     assert_status unreadable_record 74 "$status" || return 1
     assert_contains unreadable_reason 'reason=unreadable_coverage_gap_record' "$log" || return 1
+
+    printf 'unknown\tbinlog.000004\t2500\t2600\t2026-01-02T00:00:00Z\n' > "$marker"
+    : > "$log"
+    pitr_verify_no_coverage_gap >> "$log" 2>&1
+    status=$?
+    assert_status unknown_record 74 "$status" || return 1
+    assert_contains unknown_reason 'reason=unreadable_coverage_gap_record' "$log" || return 1
+
+    printf 'gap\tbinlog.000005\t2500' > "$marker"
+    : > "$log"
+    pitr_verify_no_coverage_gap >> "$log" 2>&1
+    status=$?
+    assert_status truncated_record 74 "$status" || return 1
+    assert_contains truncated_reason 'reason=unreadable_coverage_gap_record' "$log" || return 1
+
+    printf 'gap\tbinlog.000006\t2500\t2600\t2026-01-02T00:00:00Z\textra\n' > "$marker"
+    : > "$log"
+    pitr_verify_no_coverage_gap >> "$log" 2>&1
+    status=$?
+    assert_status extra_field_record 74 "$status" || return 1
+    assert_contains extra_field_reason 'reason=unreadable_coverage_gap_record' "$log" || return 1
+
+    printf 'gap\tbinlog.000007\t2600\t2500\t2026-01-02T00:00:00Z\n' > "$marker"
+    : > "$log"
+    pitr_verify_no_coverage_gap >> "$log" 2>&1
+    status=$?
+    assert_status inverted_interval 74 "$status" || return 1
+    assert_contains inverted_interval_reason 'reason=unreadable_coverage_gap_record' "$log" || return 1
 }
 
 case_archive_rebases_missing_cursor() {

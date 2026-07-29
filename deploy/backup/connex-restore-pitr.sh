@@ -198,7 +198,8 @@ pitr_validate_sequence() {
 # recorded hole overlaps the window between the selected dump and the target.
 pitr_verify_no_coverage_gap() {
     local marker="$CONNEX_BACKUP_ROOT/binlog/coverage-gap"
-    local record file from_epoch through_epoch detected_utc
+    local pattern line file from_epoch through_epoch detected_utc line_number=0
+    pattern=$'^gap\t([A-Za-z0-9._-]+[.][0-9]+)\t([0-9]+)\t([0-9]+)\t([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$'
     if [ -L "$marker" ]; then
         backup_log error restore_refused reason coverage_gap_marker_not_regular path "$marker"
         return "$EXIT_RESTORE_GUARD"
@@ -206,12 +207,20 @@ pitr_verify_no_coverage_gap() {
     if [ ! -f "$marker" ]; then
         return 0
     fi
-    while IFS=$'\t' read -r record file from_epoch through_epoch detected_utc; do
-        if [ "$record" != gap ]; then
-            continue
+    while IFS= read -r line || [ -n "$line" ]; do
+        line_number=$((line_number + 1))
+        if [[ ! "$line" =~ $pattern ]]; then
+            backup_log error restore_refused reason unreadable_coverage_gap_record line "$line_number"
+            return "$EXIT_RESTORE_GUARD"
         fi
-        if [[ ! "$from_epoch" =~ ^[0-9]+$ || ! "$through_epoch" =~ ^[0-9]+$ ]]; then
-            backup_log error restore_refused reason unreadable_coverage_gap_record file "$file"
+        file="${BASH_REMATCH[1]}"
+        from_epoch="${BASH_REMATCH[2]}"
+        through_epoch="${BASH_REMATCH[3]}"
+        detected_utc="${BASH_REMATCH[4]}"
+        if [ "$from_epoch" -gt "$through_epoch" ] ||
+                ! backup_parse_utc_target "$detected_utc" >/dev/null 2>&1; then
+            backup_log error restore_refused reason unreadable_coverage_gap_record \
+                file "$file" line "$line_number"
             return "$EXIT_RESTORE_GUARD"
         fi
         if [ "$through_epoch" -lt "$PITR_DUMP_CAPTURE_EPOCH" ] || [ "$from_epoch" -gt "$PITR_TARGET_EPOCH" ]; then
