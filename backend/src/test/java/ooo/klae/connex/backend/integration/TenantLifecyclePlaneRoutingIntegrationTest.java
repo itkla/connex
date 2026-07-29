@@ -252,6 +252,7 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
                 new JdbcTransactionFactory(),
                 routing));
         configuration.setMapUnderscoreToCamelCase(true);
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of(
                 "mappers/TenantLifecycleMapper.xml",
                 "mappers/TenantLifecycleControlMapper.xml")) {

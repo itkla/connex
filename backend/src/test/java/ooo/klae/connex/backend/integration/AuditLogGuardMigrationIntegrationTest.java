@@ -75,10 +75,10 @@ class AuditLogGuardMigrationIntegrationTest {
     }
 
     @Test
-    void v124UpgradeRepairsMissingLegacyGuardAndProtectsEveryV126Boundary()
+    void v122UpgradeRepairsMissingLegacyGuardAndProtectsEveryV126Boundary()
             throws SQLException {
         try (ScratchCatalog catalog = ScratchCatalog.create()) {
-            flyway(catalog.url(), "124").migrate();
+            flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update");
             BoundaryProbe probe = new BoundaryProbe(catalog.url());
@@ -123,7 +123,7 @@ class AuditLogGuardMigrationIntegrationTest {
     @Test
     void malformedLegacyDefinitionStopsBeforeV126() throws SQLException {
         try (ScratchCatalog catalog = ScratchCatalog.create()) {
-            flyway(catalog.url(), "124").migrate();
+            flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update");
             execute(catalog.url(), """
@@ -153,7 +153,7 @@ class AuditLogGuardMigrationIntegrationTest {
     void malformedDeleteDefinitionInstallsAStrictRepairBeforeV126Stops()
             throws SQLException {
         try (ScratchCatalog catalog = ScratchCatalog.create()) {
-            flyway(catalog.url(), "124").migrate();
+            flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_delete");
             execute(catalog.url(), """
@@ -190,7 +190,7 @@ class AuditLogGuardMigrationIntegrationTest {
     void failedV126ClearsTrustedStateAndLeavesTheTemporaryGuardEffective()
             throws SQLException {
         try (ScratchCatalog catalog = ScratchCatalog.create()) {
-            flyway(catalog.url(), "124").migrate();
+            flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), """
                 CREATE TRIGGER trg_audit_log_integrity_snapshot BEFORE INSERT ON audit_log
