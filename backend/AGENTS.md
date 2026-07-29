@@ -1,6 +1,6 @@
 # Backend — Agent Guide
 
-The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds backend-specific rules. The Golden Rules — Explore→Plan→Question→Act, match existing patterns, docs-only comments, strict null/type safety, layered architecture, mandatory review — are not optional here.
+The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds backend-specific rules. The Golden Rules — Explore→Plan→Question→Act, match existing patterns, docs-only comments, strict null/type safety, layered architecture, and independent risk-tiered review — are not optional here.
 
 ## Stack
 
@@ -115,9 +115,17 @@ Rules for any new AI-powered feature:
 - **Degrade gracefully.** Features return an explicit unavailable result (`available=false`, e.g. `DealBriefDto.unavailable`) when the gate or provider fails — deterministic features (deal risk, warmth) keep working without AI.
 - The masking map is request-scoped and never persisted; masking reduces provider exposure but does not change Connex's APPI handler status (Connex can re-identify). Keep it that way — no token vault.
 
-## Delegated work is plan-first
+## Delegated backend work
 
-Any agent dispatched to implement backend work (including codex) must first return a short plan — scope/approach, the exact REST contract (paths, DTOs, error cases, RBAC + tenant scoping), migration DDL with the orchestrator-assigned Flyway version, files per layer (controller/service/mapper/XML/tests), and a test plan — and get it reviewed before editing code (see the root `AGENTS.md` → *Plan-first dispatch*). For codex, run the planning pass with `--sandbox read-only`, then implement with the approved plan embedded. Discovery, review, and verification agents are exempt.
+Follow the root risk tiers and dispatch budgets. Backend depth must come from exact contracts, tests, and targeted independent review rather than a fleet of agents repeating the same mapper/service search.
+
+Any implementation agent, including Codex, receives an approved plan before editing: scope/approach, exact REST contract (paths, DTOs, error cases, RBAC + tenant scoping), migration DDL with the orchestrator-assigned Flyway version, files per layer (controller/service/mapper/XML/tests), and a test plan.
+
+- The orchestrator writes the plan for Tier 1 and most Tier 2 work. Do not run a separate read-only planning agent merely to echo it.
+- Use a separate read-only planning pass for Tier 3 work, unresolved transaction/locking design, cross-plane data movement, destructive migrations, or a genuinely unsettled cross-layer contract.
+- Keep one backend implementation owner. Split another mutating lane only when migration numbers, contracts, and file ownership are fixed and non-overlapping.
+- Standard backend work receives one independent read-only review. Tier 3 work receives the root two-reviewer split: security/tenant concerns and correctness/concurrency/migration safety.
+- Discovery, review, and verification agents are exempt from producing an implementation plan, but they still receive a narrow unique charter.
 
 ## Definition of Done (backend) — the verify loop is required
 
@@ -125,15 +133,15 @@ Any agent dispatched to implement backend work (including codex) must first retu
 2. **Curl every changed `*Controller` endpoint** at `http://localhost:8080/api/...`. Confirm status, body, and — critically — auth, tenant isolation, and RBAC behavior with real requests. Protected endpoints need a session: `POST /api/auth/login` to obtain the `JSESSIONID` cookie, `GET /api/auth/csrf` for a CSRF token, then send both on mutating calls. Exercise an unauthorized and an other-tenant caller too — prove the request is *rejected*, not just that the happy path works.
 3. **Write automated tests and make them pass:** `./gradlew test`. Cover services and mappers for new behavior; keep arch tests green.
 4. **Scrutinize intensely** for bugs and future failure modes: tenant leakage, RBAC gaps, null/edge cases, N+1 queries, transaction boundaries, migration safety and reversibility.
-5. **Independent codex review (required).** Use the **codex** CLI to spawn a **gpt-5.6** agent at **xhigh** reasoning effort to independently check the work for security bugs, logic flaws, and anything that could compromise the app. Run from `backend/`:
+5. **Independent backend review (required).** For standard work, use one fresh **gpt-5.6** Codex context at **high** reasoning effort from `backend/`:
 
    ```bash
-   codex exec -m gpt-5.6 -c model_reasoning_effort=xhigh --sandbox read-only \
-     "Independently review the backend changes on this branch (git diff against main). Hunt for security vulnerabilities, logic flaws, tenant-isolation and RBAC gaps, injection, auth/WebAuthn weaknesses, and anything that could compromise the app. Report findings with file:line and severity. Do not edit files."
+   codex exec -m gpt-5.6 -c model_reasoning_effort=high --sandbox read-only \
+     "Independently review the backend changes on this branch (git diff against main). Try to refute the implementation against its acceptance criteria. Hunt for logic flaws, tenant-isolation and RBAC gaps, null/edge cases, transaction mistakes, injection, N+1 queries, and unsafe migrations. Report actionable findings with file:line and severity. Do not edit files."
    ```
 
-   Treat its findings as review input — triage and address them before handing back.
-6. **`/code-review` + adversarial multi-agent review.** Auth / WebAuthn / tenant / RBAC / sharing changes also get **`/security-review`**.
+   This is the standard independent adversarial review; do not automatically add a second generic `/code-review` run. Triage every finding rather than accepting it blindly.
+6. **Tier 3 escalation only.** For auth/WebAuthn, tenant routing, RBAC/sharing, secrets/crypto, provider egress/sync, destructive data movement, money/approvals, concurrency/locking, or release-critical work, use `/security-review` for the security/tenant slot and one fresh **gpt-5.6/xhigh** Codex review focused on correctness/concurrency/migration safety. Do not add further reviewers unless the two disagree or a concrete high-risk question remains unresolved.
 
 ## Commands
 
