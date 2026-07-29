@@ -19,8 +19,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Applies the full lineage through V124 to a legacy-collation catalog and verifies
- * the canonical identity schema at the real MySQL boundary.
+ * Reconstructs the deployed V122-to-V126 lineage, upgrades through V128, and
+ * verifies the canonical identity schema at the real MySQL boundary.
  */
 class CanonicalIdentityMigrationIntegrationTest {
 
@@ -70,15 +70,36 @@ class CanonicalIdentityMigrationIntegrationTest {
     }
 
     @Test
-    void v123AndV124LandCompleteRerunnableIdentitySchema() throws SQLException {
+    void v127AndV128UpgradeAnExistingV126Catalog() throws SQLException {
+        Flyway throughV122 = Flyway.configure()
+            .dataSource(scratchUrl, username, password)
+            .locations("classpath:db/migration")
+            .baselineOnMigrate(true)
+            .baselineVersion(MigrationVersion.fromVersion("0"))
+            .target(MigrationVersion.fromVersion("122"))
+            .load();
+        throughV122.migrate();
+
+        Flyway deployedV126 = Flyway.configure()
+            .dataSource(scratchUrl, username, password)
+            .locations("classpath:db/migration/control")
+            .validateOnMigrate(false)
+            .target(MigrationVersion.fromVersion("126"))
+            .load();
+        deployedV126.migrate();
+
+        try (Connection connection = DriverManager.getConnection(scratchUrl, username, password)) {
+            assertEquals(1L, migrationVersionCount(connection, "126"));
+            assertEquals(0L, identityTableCount(connection));
+        }
+
         Flyway flyway = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"))
-            .target(MigrationVersion.fromVersion("124"))
+            .target(MigrationVersion.fromVersion("128"))
             .load();
-
         flyway.migrate();
 
         try (Connection connection = DriverManager.getConnection(scratchUrl, username, password)) {
@@ -114,6 +135,36 @@ class CanonicalIdentityMigrationIntegrationTest {
 
         assertEquals(0, flyway.info().pending().length);
         flyway.validate();
+    }
+
+    private static long migrationVersionCount(Connection connection, String version)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM flyway_schema_history
+                WHERE version = ? AND success = TRUE
+                """)) {
+            statement.setString(1, version);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static long identityTableCount(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                  AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
+                """)) {
+            statement.setString(1, SCRATCH_CATALOG);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
+        }
     }
 
     private static String databaseCollation(Connection connection) throws SQLException {

@@ -3,18 +3,46 @@
 set -euo pipefail
 
 CHECKER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-migration-immutability.sh"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 new_repository() {
   local name="$1"
+  local plane="${2:-tenant}"
+  local version="${3:-1}"
   local repository="$ROOT/$name"
-  mkdir -p "$repository/backend/src/main/resources/db/migration/tenant"
+  local migration_root="$repository/backend/src/main/resources/db/migration"
+  mkdir -p "$migration_root/control" "$migration_root/tenant"
   git -C "$repository" init -q
   git -C "$repository" config user.name test
   git -C "$repository" config user.email test@example.test
-  printf 'SELECT 1;\n' > "$repository/backend/src/main/resources/db/migration/tenant/V1__base.sql"
-  git -C "$repository" add backend/src/main/resources/db/migration/tenant/V1__base.sql
+  printf 'SELECT 1;\n' > "$migration_root/$plane/V${version}__base.sql"
+  git -C "$repository" add \
+    "backend/src/main/resources/db/migration/$plane/V${version}__base.sql"
+  git -C "$repository" commit -qm base
+  printf '%s\n' "$repository"
+}
+
+new_identity_relocation_repository() {
+  local name="$1"
+  local repository="$ROOT/$name"
+  local migration_root="$repository/backend/src/main/resources/db/migration/tenant"
+  local control_root="$repository/backend/src/main/resources/db/migration/control"
+  mkdir -p "$migration_root" "$control_root"
+  git -C "$repository" init -q
+  git -C "$repository" config user.name test
+  git -C "$repository" config user.email test@example.test
+  cp \
+    "$SOURCE_ROOT/backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql" \
+    "$migration_root/V123__canonical_identity.sql"
+  cp \
+    "$SOURCE_ROOT/backend/src/main/resources/db/migration/tenant/V128__identity_collision_report.sql" \
+    "$migration_root/V124__identity_collision_report.sql"
+  cp \
+    "$SOURCE_ROOT/backend/src/main/resources/db/migration/control/V126__tenant_teardown_control_guards.sql" \
+    "$control_root/V126__tenant_teardown_control_guards.sql"
+  git -C "$repository" add backend/src/main/resources/db/migration
   git -C "$repository" commit -qm base
   printf '%s\n' "$repository"
 }
@@ -79,6 +107,62 @@ git -C "$repository" add backend/src/main/resources/db/migration/tenant
 git -C "$repository" commit -qm cross-lineage-backdating
 expect_failure "$repository" "$base"
 
+repository="$(new_repository lower-cross-plane control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 123;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V123__late.sql"
+git -C "$repository" add backend/src/main/resources/db/migration/tenant/V123__late.sql
+git -C "$repository" commit -qm lower-cross-plane
+expect_failure "$repository" "$base"
+
+repository="$(new_repository equal-version control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 126;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V126__duplicate.sql"
+git -C "$repository" add backend/src/main/resources/db/migration/tenant/V126__duplicate.sql
+git -C "$repository" commit -qm equal-version
+expect_failure "$repository" "$base"
+
+repository="$(new_repository sequential-higher control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V127__first.sql"
+printf 'SELECT 128;\n' \
+  > "$repository/backend/src/main/resources/db/migration/control/V128__second.sql"
+git -C "$repository" add \
+  backend/src/main/resources/db/migration/tenant/V127__first.sql \
+  backend/src/main/resources/db/migration/control/V128__second.sql
+git -C "$repository" commit -qm sequential-higher
+(cd "$repository" && bash "$CHECKER" "$base" HEAD >/dev/null)
+
+repository="$(new_repository lower-reverse-plane tenant 200)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 199;\n' \
+  > "$repository/backend/src/main/resources/db/migration/control/V199__late.sql"
+git -C "$repository" add backend/src/main/resources/db/migration/control/V199__late.sql
+git -C "$repository" commit -qm lower-reverse-plane
+expect_failure "$repository" "$base"
+
+repository="$(new_repository duplicate-additions control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/control/V127__first.sql"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V127__second.sql"
+git -C "$repository" add \
+  backend/src/main/resources/db/migration/control/V127__first.sql \
+  backend/src/main/resources/db/migration/tenant/V127__second.sql
+git -C "$repository" commit -qm duplicate-additions
+expect_failure "$repository" "$base"
+
+repository="$(new_repository invalid-version-name control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V127.1__invalid.sql"
+git -C "$repository" add backend/src/main/resources/db/migration/tenant/V127.1__invalid.sql
+git -C "$repository" commit -qm invalid-version-name
+expect_failure "$repository" "$base"
+
 repository="$(new_repository modification)"
 base="$(git -C "$repository" rev-parse HEAD)"
 printf 'SELECT 9;\n' > "$repository/backend/src/main/resources/db/migration/tenant/V1__base.sql"
@@ -106,4 +190,37 @@ rm "$repository/backend/src/main/resources/db/migration/tenant/V1__base.sql"
 ln -s /dev/null "$repository/backend/src/main/resources/db/migration/tenant/V1__base.sql"
 git -C "$repository" add backend/src/main/resources/db/migration/tenant/V1__base.sql
 git -C "$repository" commit -qm type-change
+expect_failure "$repository" "$base"
+
+repository="$(new_identity_relocation_repository exact-identity-relocation)"
+base="$(git -C "$repository" rev-parse HEAD)"
+git -C "$repository" mv \
+  backend/src/main/resources/db/migration/tenant/V123__canonical_identity.sql \
+  backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql
+git -C "$repository" mv \
+  backend/src/main/resources/db/migration/tenant/V124__identity_collision_report.sql \
+  backend/src/main/resources/db/migration/tenant/V128__identity_collision_report.sql
+git -C "$repository" commit -qm exact-identity-relocation
+(cd "$repository" && bash "$CHECKER" "$base" HEAD >/dev/null)
+
+repository="$(new_identity_relocation_repository partial-identity-relocation)"
+base="$(git -C "$repository" rev-parse HEAD)"
+git -C "$repository" mv \
+  backend/src/main/resources/db/migration/tenant/V123__canonical_identity.sql \
+  backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql
+git -C "$repository" commit -qm partial-identity-relocation
+expect_failure "$repository" "$base"
+
+repository="$(new_identity_relocation_repository modified-identity-relocation)"
+base="$(git -C "$repository" rev-parse HEAD)"
+git -C "$repository" mv \
+  backend/src/main/resources/db/migration/tenant/V123__canonical_identity.sql \
+  backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql
+git -C "$repository" mv \
+  backend/src/main/resources/db/migration/tenant/V124__identity_collision_report.sql \
+  backend/src/main/resources/db/migration/tenant/V128__identity_collision_report.sql
+printf '\nSELECT 127;\n' \
+  >> "$repository/backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql"
+git -C "$repository" add backend/src/main/resources/db/migration/tenant
+git -C "$repository" commit -qm modified-identity-relocation
 expect_failure "$repository" "$base"
