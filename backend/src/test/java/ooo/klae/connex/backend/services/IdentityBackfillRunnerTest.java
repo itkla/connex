@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,7 +34,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.ConcurrencyFailureException;
-import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
@@ -249,7 +247,8 @@ class IdentityBackfillRunnerTest {
     }
 
     @Test
-    void exhaustedCollisionRebuildRetriesRethrowTheLastFailureWithEarlierOnesSuppressed() {
+    void exhaustedCollisionRebuildRetriesAreLoggedWithoutAbortingStartup(
+            CapturedOutput output) {
         stubEnumeration(Arrays.asList((String) null), List.of(7));
         serveWorkspace(7, null);
         stubEmptyBackfillPages(7);
@@ -258,12 +257,12 @@ class IdentityBackfillRunnerTest {
         DuplicateKeyException last = new DuplicateKeyException("last");
         when(backfillTransaction.rebuildCollisionReport(null, 7)).thenThrow(first, second, last);
 
-        DataAccessException thrown =
-            assertThrows(DataAccessException.class, () -> runner.run(arguments));
+        runner.run(arguments);
 
-        assertSame(last, thrown);
-        assertArrayEquals(new Throwable[] {first, second}, thrown.getSuppressed());
+        assertArrayEquals(new Throwable[] {first, second}, last.getSuppressed());
         verify(backfillTransaction, times(3)).rebuildCollisionReport(null, 7);
+        assertTrue(output.getOut().contains(
+            "Canonical identity backfill failed for workspace 7"));
     }
 
     private void stubEmptyBackfillPages(int workspaceId) {
