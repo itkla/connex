@@ -2,7 +2,13 @@ package ooo.klae.connex.backend.seeder;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.Objects;
 
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.MigrationInfoService;
+import org.flywaydb.core.api.MigrationVersion;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,8 +27,8 @@ import lombok.extern.slf4j.Slf4j;
  * -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=1
  * -PseederAnchorDate=2026-01-15}.
  *
- * <p>CI uses the backend job's existing {@code CONNEX_DB_URL},
- * {@code CONNEX_DB_USERNAME}, and {@code CONNEX_DB_PASSWORD} variables:
+ * <p>CI supplies a dedicated disposable {@code CONNEX_DB_URL} plus its
+ * {@code CONNEX_DB_USERNAME} and {@code CONNEX_DB_PASSWORD} variables:
  * {@code bash gradlew seedData -PseederProfile=small -PseederSeed=853
  * -PseederWorkspaces=1 -PseederAnchorDate=2026-01-15 --no-daemon}.
  *
@@ -41,10 +47,12 @@ public class SeedDataRunner implements ApplicationRunner {
     private final SeederGuard guard;
     private final SeederService seederService;
     private final Clock clock;
+    private final Flyway flyway;
 
     @Override
     public void run(ApplicationArguments args) {
         guard.verify();
+        verifyCurrentMigrationState();
         LocalDate anchorDate = properties.getAnchorDate() == null
             ? LocalDate.now(clock)
             : properties.getAnchorDate();
@@ -76,5 +84,33 @@ public class SeedDataRunner implements ApplicationRunner {
             summary.workspaces().size(),
             summary.anchorDate()
         );
+    }
+
+    private void verifyCurrentMigrationState() {
+        try {
+            MigrationInfoService migrationInfo = flyway.info();
+            MigrationInfo currentMigration = migrationInfo.current();
+            MigrationVersion currentVersion = currentMigration == null
+                ? null
+                : currentMigration.getVersion();
+            MigrationVersion latestVersion = Arrays.stream(migrationInfo.all())
+                .map(MigrationInfo::getVersion)
+                .filter(Objects::nonNull)
+                .max(MigrationVersion::compareTo)
+                .orElse(null);
+            if (migrationInfo.pending().length != 0
+                    || currentVersion == null
+                    || latestVersion == null
+                    || !currentVersion.equals(latestVersion)) {
+                throw SeederStartupConfigurationValidator.refused(
+                    "Flyway has not applied the complete current migration set"
+                );
+            }
+        } catch (RuntimeException exception) {
+            throw SeederStartupConfigurationValidator.cleanRefusal(
+                exception,
+                "could not verify current Flyway migration state"
+            );
+        }
     }
 }
