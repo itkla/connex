@@ -11,6 +11,13 @@
     )
   </select>
 
+  <select id="lockSubjectPersonForShare" resultType="int">
+    SELECT id
+    FROM person
+    WHERE workspace_id = #{workspaceId} AND id = #{personId}
+    FOR SHARE
+  </select>
+
   <select id="findPerson"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$PersonDto">
     SELECT p.id, p.workspace_id, p.name, p.email, p.phone, p.title,

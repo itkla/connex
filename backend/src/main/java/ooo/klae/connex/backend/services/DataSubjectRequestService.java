@@ -5,6 +5,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -52,10 +54,16 @@ public class DataSubjectRequestService {
         });
         DataSubjectRequest subjectRequest = new DataSubjectRequest();
         apply(subjectRequest, orgId, actorId, request, true);
-        validateSubjectLink(orgId, actorId,
+        validateSubjectLink(orgId,
             subjectRequest.getSubjectWorkspaceId(), subjectRequest.getSubjectPersonId());
-        return tenantWorkScope.unrouted(
-            () -> controlOperations.create(orgId, actorId, subjectRequest));
+        return withLockedSubjectPerson(
+            orgId,
+            actorId,
+            subjectWorkspaceIds(null, subjectRequest.getSubjectWorkspaceId()),
+            subjectRequest.getSubjectWorkspaceId(),
+            subjectRequest.getSubjectPersonId(),
+            () -> tenantWorkScope.unrouted(
+                () -> controlOperations.create(orgId, actorId, subjectRequest)));
     }
 
     /**
@@ -71,10 +79,23 @@ public class DataSubjectRequestService {
             () -> controlOperations.loadForMutation(orgId, requestId, actorId));
         DataSubjectRequest before = auditSnapshot(subjectRequest);
         apply(subjectRequest, orgId, actorId, request, false);
-        validateSubjectLink(orgId, actorId,
+        validateSubjectLink(orgId,
             subjectRequest.getSubjectWorkspaceId(), subjectRequest.getSubjectPersonId());
-        return tenantWorkScope.unrouted(
-            () -> controlOperations.update(orgId, requestId, actorId, before, subjectRequest));
+        return withLockedSubjectPerson(
+            orgId,
+            actorId,
+            subjectWorkspaceIds(
+                before.getSubjectWorkspaceId(),
+                subjectRequest.getSubjectWorkspaceId()),
+            subjectRequest.getSubjectWorkspaceId(),
+            subjectRequest.getSubjectPersonId(),
+            () -> tenantWorkScope.unrouted(
+                () -> controlOperations.update(
+                    orgId,
+                    requestId,
+                    actorId,
+                    before,
+                    subjectRequest)));
     }
 
     /**
@@ -183,7 +204,7 @@ public class DataSubjectRequestService {
         }
     }
 
-    private void validateSubjectLink(int orgId, int actorId, Integer workspaceId, Integer personId) {
+    private void validateSubjectLink(int orgId, Integer workspaceId, Integer personId) {
         if (workspaceId == null && personId == null) {
             return;
         }
@@ -192,10 +213,44 @@ public class DataSubjectRequestService {
         }
         boolean workspaceBelongsToOrg = tenantWorkScope.unrouted(
             () -> controlOperations.workspaceBelongsToOrg(orgId, workspaceId));
-        if (!workspaceBelongsToOrg
-                || !disclosureAccess.subjectPersonExists(orgId, actorId, workspaceId, personId)) {
+        if (!workspaceBelongsToOrg) {
             throw new BadRequestException("Subject person must exist in a workspace belonging to the organization");
         }
+    }
+
+    private <T> T withLockedSubjectPerson(
+            int orgId,
+            int actorId,
+            Set<Integer> controlWorkspaceIds,
+            Integer workspaceId,
+            Integer personId,
+            Supplier<T> work) {
+        if (workspaceId == null || personId == null) {
+            return work.get();
+        }
+        return disclosureAccess.withLockedSubjectPerson(
+            orgId,
+            actorId,
+            workspaceId,
+            personId,
+            lockedPersonWork -> tenantWorkScope.unrouted(() ->
+                controlOperations.withLockedSubjectRoots(
+                    orgId,
+                    actorId,
+                    controlWorkspaceIds,
+                    lockedPersonWork)),
+            work);
+    }
+
+    private static Set<Integer> subjectWorkspaceIds(Integer previous, Integer requested) {
+        Set<Integer> workspaceIds = new TreeSet<>();
+        if (previous != null) {
+            workspaceIds.add(previous);
+        }
+        if (requested != null) {
+            workspaceIds.add(requested);
+        }
+        return Set.copyOf(workspaceIds);
     }
 
     private String normalize(String value, String fallback, Set<String> allowed, String field) {

@@ -18,6 +18,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -32,7 +34,10 @@ class DataSubjectDisclosureAccessTest {
 
     @BeforeEach
     void setUp() {
-        access = new DataSubjectDisclosureAccess(tenantWorkScope, tenantContext, readTransaction);
+        access = new DataSubjectDisclosureAccess(
+            tenantWorkScope,
+            tenantContext,
+            readTransaction);
     }
 
     @Test
@@ -75,6 +80,70 @@ class DataSubjectDisclosureAccessTest {
         assertThrows(IllegalArgumentException.class,
             () -> access.assemble(7, 9, 4, 5, List.of(4)));
         assertTrue(!tenantContext.isResolved());
+    }
+
+    @Test
+    void initiallyMissingPersonIsABadRequest() {
+        routeWorkspace(4, 7, "cnx_subject");
+        when(readTransaction.withLockedSubjectPerson(
+                org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5),
+                any(),
+                any()))
+            .thenThrow(new BadRequestException("Subject person is missing"));
+
+        assertThrows(
+            BadRequestException.class,
+            () -> access.withLockedSubjectPerson(
+                7,
+                9,
+                4,
+                5,
+                work -> work.get(),
+                () -> "unused"));
+    }
+
+    @Test
+    void routeLossAfterPreliminaryProofIsAConflict() {
+        when(tenantWorkScope.withWorkspacePlacement(
+                org.mockito.ArgumentMatchers.eq(4),
+                any()))
+            .thenThrow(new IllegalStateException("Workspace 4 does not exist"));
+
+        assertThrows(
+            ConflictException.class,
+            () -> access.withLockedSubjectPerson(
+                7,
+                9,
+                4,
+                5,
+                work -> work.get(),
+                () -> "unused"));
+        verify(readTransaction, never()).withLockedSubjectPerson(
+            any(Integer.class),
+            any(Integer.class),
+            any(),
+            any());
+    }
+
+    @Test
+    void routeOrganizationChangeAfterPreliminaryProofIsAConflict() {
+        routeWorkspace(4, 8, "cnx_foreign");
+
+        assertThrows(
+            ConflictException.class,
+            () -> access.withLockedSubjectPerson(
+                7,
+                9,
+                4,
+                5,
+                work -> work.get(),
+                () -> "unused"));
+        verify(readTransaction, never()).withLockedSubjectPerson(
+            any(Integer.class),
+            any(Integer.class),
+            any(),
+            any());
     }
 
     private void routeWorkspace(int workspaceId, int orgId, String catalog) {

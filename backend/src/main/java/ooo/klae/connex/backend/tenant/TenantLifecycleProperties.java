@@ -28,9 +28,6 @@ public class TenantLifecycleProperties {
     @NotNull
     private Duration teardownSettleDelay = Duration.ofSeconds(30);
 
-    @NotNull
-    private Duration exportLeaseWaitTimeout = Duration.ofSeconds(30);
-
     @Min(1)
     @Max(10_000)
     private int tableBatchSize = 500;
@@ -48,8 +45,7 @@ public class TenantLifecycleProperties {
     public boolean durationsValid() {
         return positive(exportTimeout)
             && positive(exportObjectReadTimeout)
-            && nonNegative(teardownSettleDelay)
-            && nonNegative(exportLeaseWaitTimeout);
+            && nonNegative(teardownSettleDelay);
     }
 
     private static boolean positive(Duration duration) {

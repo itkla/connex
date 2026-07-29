@@ -337,8 +337,14 @@ public class ManagedObjectService implements ApplicationRunner {
             throw new IllegalStateException("Active managed object is missing its usage ledger");
         }
         String expectedKey = switch (reference.kind()) {
-            case "attachment" -> managedAttachmentKey(workspaceId, reference.persistedUrl())
-                .orElseThrow(() -> new IllegalStateException("Attachment object reference is invalid"));
+            case "attachment" -> {
+                if (reference.ownerId() != 0) {
+                    throw new IllegalStateException("Attachment object owner is invalid");
+                }
+                yield managedAttachmentKey(workspaceId, reference.persistedUrl())
+                    .orElseThrow(() ->
+                        new IllegalStateException("Attachment object reference is invalid"));
+            }
             case "person_image" -> managedPersonImageKey(
                     workspaceId,
                     positive(reference.ownerId()),
@@ -526,14 +532,19 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private StoredObject get(String key) {
+        StoredObject stored;
         try {
-            return objectStorage.get(key);
+            stored = objectStorage.get(key);
         } catch (ObjectStorageNotFoundException exception) {
             throw new ResourceNotFoundException("Stored file was not found");
         } catch (ObjectStorageException exception) {
             markUnavailable();
             throw new ServiceUnavailableException("Private object storage is unavailable");
         }
+        if (stored == null) {
+            throw new ResourceNotFoundException("Stored file was not found");
+        }
+        return stored;
     }
 
     private StoredObject getForResponse(String key) {

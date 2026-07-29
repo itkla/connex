@@ -10,6 +10,7 @@ import org.apache.ibatis.annotations.Param;
  */
 public interface OrgAllowedDomainMapper {
     List<String> findByOrg(@Param("orgId") int orgId);
+    List<String> findByOrgForShare(@Param("orgId") int orgId);
     int add(@Param("orgId") int orgId, @Param("domain") String domain);
     int remove(@Param("orgId") int orgId, @Param("domain") String domain);
     boolean isAllowed(@Param("orgId") int orgId, @Param("domain") String domain);

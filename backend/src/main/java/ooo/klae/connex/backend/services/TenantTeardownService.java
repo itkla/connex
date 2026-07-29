@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,9 +41,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * writer-drain protocol is explicitly deferred under issue #853.
  *
  * <p>Retries safely repeat registry preparations, object enqueue operations,
- * and bounded deletes while the control root survives. Export and teardown
- * leases have no automatic expiry, so a process crash can leave a stale lease
- * that fails closed pending privileged operator clearance outside this wave.
+ * and bounded deletes while the control root survives. A crashed export or
+ * teardown leaves a lease that fails closed pending explicit release or
+ * privileged operator clearance.
  * Before deleting a workspace root, teardown persists a root-independent
  * cleanup tombstone. The tombstone retains its organization placement route
  * until the post-root scan is clean, makes handled failures HTTP-resumable, and
@@ -57,6 +56,15 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * references while immutable integrity reference snapshots and chain-scope
  * identifiers preserve the verifiable accountability record. The audit trail
  * is outside tenant data return under the DPA.
+ *
+ * <p>Retained APPI data-subject requests are handled at both ends: an open
+ * request linked to the target refuses teardown at the entry point, before any
+ * data is destroyed and while the organization is still resolvable, the
+ * authoritative refusal repeats inside the lifecycle fence transaction that
+ * holds the workspace or organization lock so a concurrently created request
+ * cannot slip past it, and the terminal root deletion clears the subject
+ * workspace and person link of the records that remain, so no retained
+ * compliance record is left pointing at a deleted workspace.
  */
 @Service
 @RequiredArgsConstructor
@@ -103,6 +111,7 @@ public class TenantTeardownService {
             throw new ResourceNotFoundException("Workspace not found");
         }
         requireConfirmation(target.slug(), confirmation);
+        controlOperations.requireNoOpenSubjectRequestsForWorkspace(orgId, workspaceId);
         auditService.recordStrictIndependentScoped(
             WORKSPACE_ACTION,
             "workspace",
@@ -142,6 +151,7 @@ public class TenantTeardownService {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireConfirmation(organization.slug(), confirmation);
+        controlOperations.requireNoOpenSubjectRequestsForOrganization(orgId);
         int workspaceCount = controlMapper.countWorkspaces(orgId);
         auditService.recordStrictIndependentScoped(
             ORGANIZATION_ACTION,
@@ -175,6 +185,7 @@ public class TenantTeardownService {
             }
             while (controlOperations.deleteFederatedIdentityBatch(
                     orgId,
+                    actorId,
                     properties.getTableBatchSize()) > 0) {
             }
             controlOperations.deleteOrganizationRoot(orgId, actorId);
@@ -218,7 +229,6 @@ public class TenantTeardownService {
         boolean rootDeleted = false;
         boolean completed = false;
         try {
-            waitForExportDrain(workspace.id());
             waitFor(properties.getTeardownSettleDelay());
             lifecycleAccess.withRoute(route, actorId, () -> {
                 sweepTenant(workspace.id());
@@ -367,28 +377,17 @@ public class TenantTeardownService {
             tenantTransaction.storageResidual(workspaceId));
     }
 
-    private void waitForExportDrain(int workspaceId) {
-        Instant deadline = clock.instant().plus(properties.getExportLeaseWaitTimeout());
-        while (controlOperations.countExportLeases(workspaceId) != 0) {
-            if (!clock.instant().isBefore(deadline)) {
-                throw new ServiceUnavailableException(
-                    "Tenant export is still active; retry teardown later");
-            }
-            parkUntil(deadline);
-        }
-    }
-
     private void waitFor(Duration duration) {
         if (duration.isZero()) {
             return;
         }
-        Instant deadline = clock.instant().plus(duration);
+        java.time.Instant deadline = clock.instant().plus(duration);
         while (clock.instant().isBefore(deadline)) {
             parkUntil(deadline);
         }
     }
 
-    private void parkUntil(Instant deadline) {
+    private void parkUntil(java.time.Instant deadline) {
         long remaining = Duration.between(clock.instant(), deadline).toNanos();
         LockSupport.parkNanos(Math.min(Math.max(remaining, 1), WAIT_CHUNK_NANOS));
         if (Thread.interrupted()) {

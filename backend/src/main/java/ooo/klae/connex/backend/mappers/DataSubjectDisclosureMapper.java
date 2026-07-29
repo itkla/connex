@@ -21,6 +21,9 @@ public interface DataSubjectDisclosureMapper {
     boolean subjectPersonExists(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId);
 
+    Integer lockSubjectPersonForShare(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId);
+
     PersonDto findPerson(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);

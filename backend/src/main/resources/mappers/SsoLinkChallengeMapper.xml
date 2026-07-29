@@ -19,6 +19,14 @@
     WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </select>
 
+  <select id="lockByTokenHash" resultType="SsoLinkChallenge">
+    SELECT id, token_hash, user_id, provider, issuer, external_subject, org_id,
+           expires_at, consumed_at, created_at
+    FROM sso_link_challenge
+    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    FOR UPDATE
+  </select>
+
   <update id="markConsumed">
     UPDATE sso_link_challenge
     SET consumed_at = UTC_TIMESTAMP()

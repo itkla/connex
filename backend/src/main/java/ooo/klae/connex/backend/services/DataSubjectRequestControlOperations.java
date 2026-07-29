@@ -5,8 +5,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -14,12 +17,29 @@ import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
+import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
-/** Executes data-subject request lifecycle work against the control catalog. */
+/**
+ * Executes data-subject request lifecycle work against the control catalog.
+ *
+ * <p>Every mutation locks the actor, linked workspace roots in ascending order,
+ * the organization, current administrator membership, and request row. This
+ * serializes with organization and workspace teardown in the global control
+ * order: a request cannot enter a lifecycle fence window, and a linked request
+ * committed just before the fence is still caught by teardown's link clearing.
+ * After preliminary tenant-person proof, the caller retains the actor user,
+ * linked workspace, and organization roots while locking that person across
+ * this control transaction, so concurrent account offboarding cannot invert
+ * the order and person deletion cannot leave a dangling subject link.
+ */
 @Component
 @RequiredArgsConstructor
 public class DataSubjectRequestControlOperations {
@@ -33,6 +53,8 @@ public class DataSubjectRequestControlOperations {
 
     private final DataSubjectRequestMapper dataSubjectRequestMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final TenantLifecycleControlMapper tenantLifecycleControlMapper;
+    private final UserMapper userMapper;
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
@@ -57,7 +79,9 @@ public class DataSubjectRequestControlOperations {
 
     @Transactional(readOnly = true)
     public void requireMutationAccess(int orgId, int actorId) {
-        orgMemberService.requireOrgAdmin(orgId, actorId);
+        if (!tenantLifecycleControlMapper.isOrgAdminForLifecycle(orgId, actorId)) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
         sessionSecurityService.requireRecentAuthentication(actorId);
     }
 
@@ -73,9 +97,24 @@ public class DataSubjectRequestControlOperations {
             .anyMatch(workspace -> workspace.getId() == workspaceId);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public <T> T withLockedSubjectRoots(
+            int orgId,
+            int actorId,
+            Set<Integer> workspaceIds,
+            Supplier<T> work) {
+        lockMutationRoots(orgId, actorId, new TreeSet<>(workspaceIds));
+        return work.get();
+    }
+
     @Transactional
     public DataSubjectRequestDto create(int orgId, int actorId, DataSubjectRequest request) {
-        requireMutationAccess(orgId, actorId);
+        Integer workspaceId = request.getSubjectWorkspaceId();
+        lockMutationRoots(
+            orgId,
+            actorId,
+            workspaceId == null ? Set.of() : Set.of(workspaceId));
+        requireCurrentMutationAccess(orgId, actorId);
         dataSubjectRequestMapper.insert(request);
         auditService.record("appi.subject_request.create", "organization", orgId,
             requestLabel(request.getId()), "APPI data-subject request created", auditChanges(request));
@@ -85,12 +124,27 @@ public class DataSubjectRequestControlOperations {
     @Transactional
     public DataSubjectRequestDto update(int orgId, long requestId, int actorId,
             DataSubjectRequest before, DataSubjectRequest request) {
-        requireMutationAccess(orgId, actorId);
+        Set<Integer> workspaceIds = new TreeSet<>();
+        if (before.getSubjectWorkspaceId() != null) {
+            workspaceIds.add(before.getSubjectWorkspaceId());
+        }
+        if (request.getSubjectWorkspaceId() != null) {
+            workspaceIds.add(request.getSubjectWorkspaceId());
+        }
+        lockMutationRoots(orgId, actorId, workspaceIds);
+        requireCurrentMutationAccess(orgId, actorId);
+        DataSubjectRequest locked = dataSubjectRequestMapper.findByIdForUpdate(orgId, requestId);
+        if (locked == null) {
+            throw new ResourceNotFoundException("Data-subject request not found: " + requestId);
+        }
+        if (!locked.equals(before)) {
+            throw new ConflictException("Data-subject request changed; retry the update");
+        }
         if (dataSubjectRequestMapper.update(request) != 1) {
             throw new ResourceNotFoundException("Data-subject request not found: " + requestId);
         }
         Map<String, Object> changes = new LinkedHashMap<>(auditChanges(request));
-        Map<String, Object> diff = auditService.diff(before, request, AUDIT_DIFF_FIELDS);
+        Map<String, Object> diff = auditService.diff(locked, request, AUDIT_DIFF_FIELDS);
         if (diff != null && !diff.isEmpty()) {
             changes.put("fields", diff);
         }
@@ -132,6 +186,33 @@ public class DataSubjectRequestControlOperations {
             requestLabel(requestId), "Subject-scoped disclosure export assembled",
             Map.of("requestId", requestId, "subjectPersonId", personId,
                 "subjectWorkspaceId", workspaceId));
+    }
+
+    private void lockMutationRoots(int orgId, int actorId, Set<Integer> workspaceIds) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Authenticated user is unavailable");
+        }
+        for (int workspaceId : workspaceIds) {
+            WorkspaceLifecycleRef workspace =
+                tenantLifecycleControlMapper.lockWorkspaceForShare(workspaceId);
+            if (workspace == null
+                    || workspace.orgId() != orgId
+                    || !"active".equals(workspace.lifecycleState())) {
+                throw new ConflictException(
+                    "The subject person's workspace is being removed and cannot be linked");
+            }
+        }
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(orgId) == null) {
+            throw new ConflictException(
+                "The organization is being removed and cannot record data-subject requests");
+        }
+    }
+
+    private void requireCurrentMutationAccess(int orgId, int actorId) {
+        if (tenantLifecycleControlMapper.lockOrgAdminMembershipForUpdate(orgId, actorId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        sessionSecurityService.requireRecentAuthentication(actorId);
     }
 
     private WorkspaceSnapshot workspaceSnapshot(int orgId) {

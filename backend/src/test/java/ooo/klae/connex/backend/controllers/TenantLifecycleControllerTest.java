@@ -1,9 +1,13 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -11,11 +15,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.ByteArrayOutputStream;
-import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
@@ -37,7 +43,6 @@ import ooo.klae.connex.backend.services.TenantExportService;
 import ooo.klae.connex.backend.services.TenantExportService.TenantExportDownload;
 import ooo.klae.connex.backend.services.TenantTeardownService;
 import ooo.klae.connex.backend.tenant.TenantContext;
-import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 
 @ExtendWith(MockitoExtension.class)
 class TenantLifecycleControllerTest {
@@ -48,19 +53,15 @@ class TenantLifecycleControllerTest {
     @Mock private AsyncWebRequest asyncWebRequest;
     @Mock private ErrorReporter errorReporter;
 
-    private TenantLifecycleProperties properties;
     private TenantLifecycleController exportController;
     private TenantTeardownController teardownController;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        properties = new TenantLifecycleProperties();
-        properties.setExportTimeout(Duration.ofMinutes(17));
         exportController = new TenantLifecycleController(
             tenantExportService,
-            authService,
-            properties);
+            authService);
         teardownController = new TenantTeardownController(
             tenantTeardownService,
             authService);
@@ -76,6 +77,7 @@ class TenantLifecycleControllerTest {
     void exportUsesARequestScopedTimeoutAndStreamsThePreparedDownload() throws Exception {
         when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
         when(download.filename()).thenReturn("tenant.zip");
+        when(download.remainingTimeoutMillis()).thenReturn(1_020_000L);
         MockHttpServletRequest request = new MockHttpServletRequest();
         WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
         clearInvocations(asyncWebRequest);
@@ -86,11 +88,55 @@ class TenantLifecycleControllerTest {
 
         assertEquals(200, response.getStatusCode().value());
         assertEquals("application/zip", response.getHeaders().getContentType().toString());
-        verify(asyncWebRequest).setTimeout(Duration.ofMinutes(17).toMillis());
+        verify(asyncWebRequest).setTimeout(1_020_000L);
         verify(asyncWebRequest).addTimeoutHandler(any(Runnable.class));
         verify(asyncWebRequest).addErrorHandler(any());
         verify(asyncWebRequest).addCompletionHandler(any(Runnable.class));
         verify(download).writeTo(output);
+    }
+
+    @Test
+    void exportLifecycleHandlersIdempotentlySignalCancellation() {
+        when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
+        when(download.filename()).thenReturn("tenant.zip");
+        when(download.remainingTimeoutMillis()).thenReturn(1_000L);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
+        clearInvocations(asyncWebRequest);
+        ArgumentCaptor<Runnable> timeoutHandler = ArgumentCaptor.forClass(Runnable.class);
+        ArgumentCaptor<Runnable> completionHandler = ArgumentCaptor.forClass(Runnable.class);
+        AtomicReference<Consumer<Throwable>> errorHandler = new AtomicReference<>();
+        doAnswer(invocation -> {
+            errorHandler.set(invocation.getArgument(0));
+            return null;
+        }).when(asyncWebRequest).addErrorHandler(any());
+
+        exportController.export(3, 5, request);
+
+        verify(asyncWebRequest).addTimeoutHandler(timeoutHandler.capture());
+        verify(asyncWebRequest).addCompletionHandler(completionHandler.capture());
+        timeoutHandler.getValue().run();
+        errorHandler.get().accept(new IllegalStateException("response failed"));
+        completionHandler.getValue().run();
+        verify(download, times(3)).cancel();
+    }
+
+    @Test
+    void exportResponseConstructionFailureSignalsNonblockingCancellation() {
+        IllegalStateException primary = new IllegalStateException("filename failed");
+        when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
+        when(download.filename()).thenThrow(primary);
+        when(download.remainingTimeoutMillis()).thenReturn(1_000L);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
+
+        IllegalStateException thrown = assertThrows(
+            IllegalStateException.class,
+            () -> exportController.export(3, 5, request));
+
+        assertSame(primary, thrown);
+        assertEquals(0, thrown.getSuppressed().length);
+        verify(download).cancel();
     }
 
     @Test

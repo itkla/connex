@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 /**
  * Reconstructs the deployed V122-to-V126 lineage, upgrades through V128, and
  * verifies the canonical identity schema at the real MySQL boundary.
@@ -98,6 +99,7 @@ class CanonicalIdentityMigrationIntegrationTest {
         Flyway flyway = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
+            .callbacks(new AuditLogV126MigrationCallback())
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"))
             .outOfOrder(false)

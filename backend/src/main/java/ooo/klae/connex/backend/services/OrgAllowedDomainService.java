@@ -3,9 +3,13 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.util.DomainUtil;
 
 /**
@@ -23,26 +27,32 @@ public class OrgAllowedDomainService {
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final UserMapper userMapper;
+    private final OrganizationMapper organizationMapper;
 
     public List<String> listDomains(int orgId, int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         return orgAllowedDomainMapper.findByOrg(orgId);
     }
 
+    @Transactional
     public List<String> addDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
+        lockMutationRoots(orgId, actorId);
         orgAllowedDomainMapper.add(orgId, domain);
         auditService.record("org.allowed_domain.add", "organization", orgId, domain,
                 "Allowed domain " + domain, null);
         return orgAllowedDomainMapper.findByOrg(orgId);
     }
 
+    @Transactional
     public void removeDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
+        lockMutationRoots(orgId, actorId);
         orgAllowedDomainMapper.remove(orgId, domain);
         auditService.record("org.allowed_domain.remove", "organization", orgId, domain,
                 "Removed allowed domain " + domain, null);
@@ -64,6 +74,11 @@ public class OrgAllowedDomainService {
         return orgAllowedDomainMapper.isAllowed(orgId, DomainUtil.of(email));
     }
 
+    boolean isJoinAllowedForShare(int orgId, String email) {
+        List<String> domains = orgAllowedDomainMapper.findByOrgForShare(orgId);
+        return domains.isEmpty() || domains.contains(DomainUtil.of(email));
+    }
+
     /**
      * Whether the organization constrains invites to an email-domain allowlist. When it does, the
      * domain gate is only meaningful for a verified email, so self-serve callers pair this with an
@@ -73,5 +88,13 @@ public class OrgAllowedDomainService {
      */
     public boolean hasRestrictions(int orgId) {
         return orgAllowedDomainMapper.countByOrg(orgId) > 0;
+    }
+
+    private void lockMutationRoots(int orgId, int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null
+                || organizationMapper.lockById(orgId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
     }
 }

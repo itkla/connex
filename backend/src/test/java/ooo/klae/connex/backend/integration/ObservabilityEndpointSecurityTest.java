@@ -51,7 +51,8 @@ class ObservabilityEndpointSecurityTest {
 
     @BeforeEach
     void setUp() {
-        when(healthService.readiness()).thenReturn(new Readiness(Status.UP, Status.UP, Status.UP));
+        when(healthService.readiness())
+                .thenReturn(new Readiness(Status.UP, Status.UP, Status.UP, Status.UP));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -71,7 +72,8 @@ class ObservabilityEndpointSecurityTest {
                 .andExpect(jsonPath("$.status").value("UP"))
                 .andExpect(jsonPath("$.checks.db").value("UP"))
                 .andExpect(jsonPath("$.checks.migrations").value("UP"))
-                .andExpect(jsonPath("$.checks.startup").value("UP"));
+                .andExpect(jsonPath("$.checks.startup").value("UP"))
+                .andExpect(jsonPath("$.checks.auditGuard").value("UP"));
         mockMvc.perform(post("/api/health").with(csrf().asHeader()))
                 .andExpect(status().isUnauthorized());
     }

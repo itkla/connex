@@ -17,6 +17,8 @@ public interface SsoLinkChallengeMapper {
 
     SsoLinkChallenge findByTokenHash(String tokenHash);
 
+    SsoLinkChallenge lockByTokenHash(String tokenHash);
+
     int markConsumed(int id);
 
     int invalidateForUser(int userId);

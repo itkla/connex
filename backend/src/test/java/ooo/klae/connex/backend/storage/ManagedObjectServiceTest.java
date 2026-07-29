@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +40,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -67,19 +69,25 @@ class ManagedObjectServiceTest {
             .when(deletionRetryQueue.prepareUserWrite(anyString()))
             .thenAnswer(invocation -> new ObjectDeletionTombstone(
                 tombstoneIds.getAndIncrement(), invocation.getArgument(0)));
-        UploadPolicy uploadPolicy = new UploadPolicy(properties);
+        service = service(properties);
+    }
+
+    private ManagedObjectService service(ObjectStorageProperties configuredProperties) {
+        UploadPolicy uploadPolicy = new UploadPolicy(configuredProperties);
         ImageUploadValidator imageValidator = new ImageUploadValidator(
-            properties, uploadPolicy, new ImageDecodeAdmissionService(properties));
-        service = new ManagedObjectService(
+            configuredProperties,
+            uploadPolicy,
+            new ImageDecodeAdmissionService(configuredProperties));
+        return new ManagedObjectService(
             objectStorage,
             deletionRetryQueue,
             uploadPolicy,
             imageValidator,
-            properties,
+            configuredProperties,
             quotaService,
             userImageAdmissionService,
-            new ManagedObjectWriteAdmissionService(properties),
-            new ManagedObjectReadAdmissionService(properties, () -> 9));
+            new ManagedObjectWriteAdmissionService(configuredProperties),
+            new ManagedObjectReadAdmissionService(configuredProperties, () -> 9));
     }
 
     @Test
@@ -274,6 +282,65 @@ class ManagedObjectServiceTest {
 
         attachment.setUrl("/api/attachments/content/" + objectName + "/extra");
         assertThrows(ResourceNotFoundException.class, () -> service.openAttachment(9, attachment));
+    }
+
+    @Test
+    void tenantExportRefusesAnAttachmentOwnerMismatchBeforeProviderAccess() {
+        String token = "550e8400-e29b-41d4-a716-446655440000.pdf";
+        ActiveObjectReference reference = new ActiveObjectReference(
+            "workspaces/9/attachments/" + token,
+            "attachment",
+            41,
+            "/api/attachments/content/" + token,
+            3L);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> service.openTenantExportObject(9, 7, reference, Duration.ofSeconds(1)));
+
+        verify(objectStorage, never()).get(anyString());
+    }
+
+    @Test
+    void nullProviderResultReleasesManagedReadAdmissionAtLimitOne() throws Exception {
+        ObjectStorageProperties limited = new ObjectStorageProperties();
+        limited.setMaxConcurrentReads(1);
+        limited.setMaxConcurrentReadsPerUser(1);
+        ManagedObjectService limitedService = service(limited);
+        String objectName = "550e8400-e29b-41d4-a716-446655440001.pdf";
+        Attachment attachment = attachment("/api/attachments/content/" + objectName);
+        byte[] bytes = {4};
+        when(objectStorage.get("workspaces/9/attachments/" + objectName))
+            .thenReturn(null)
+            .thenReturn(new StoredObject(new ByteArrayInputStream(bytes), bytes.length));
+
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> limitedService.openAttachment(9, attachment));
+        try (ManagedContent content = limitedService.openAttachment(9, attachment)) {
+            assertEquals(4, content.inputStream().read());
+        }
+    }
+
+    @Test
+    void providerOpenFailureReleasesManagedReadAdmissionAtLimitOne() throws Exception {
+        ObjectStorageProperties limited = new ObjectStorageProperties();
+        limited.setMaxConcurrentReads(1);
+        limited.setMaxConcurrentReadsPerUser(1);
+        ManagedObjectService limitedService = service(limited);
+        String objectName = "550e8400-e29b-41d4-a716-446655440002.pdf";
+        Attachment attachment = attachment("/api/attachments/content/" + objectName);
+        byte[] bytes = {5};
+        when(objectStorage.get("workspaces/9/attachments/" + objectName))
+            .thenThrow(new ObjectStorageException("unavailable"))
+            .thenReturn(new StoredObject(new ByteArrayInputStream(bytes), bytes.length));
+
+        assertThrows(
+            ServiceUnavailableException.class,
+            () -> limitedService.openAttachment(9, attachment));
+        try (ManagedContent content = limitedService.openAttachment(9, attachment)) {
+            assertEquals(5, content.inputStream().read());
+        }
     }
 
     @Test
@@ -554,6 +621,14 @@ class ManagedObjectServiceTest {
 
     private static ObjectDeletionTombstone withObjectKey(String key) {
         return argThat(tombstone -> tombstone != null && key.equals(tombstone.objectKey()));
+    }
+
+    private static Attachment attachment(String url) {
+        Attachment attachment = new Attachment();
+        attachment.setUrl(url);
+        attachment.setFileName("report.pdf");
+        attachment.setContentType("application/pdf");
+        return attachment;
     }
 
     private static byte[] png(int width, int height) throws Exception {
