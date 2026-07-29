@@ -108,7 +108,6 @@ class ControlCatalogRoutingInterceptorTest {
         ControlCatalogRoutingInterceptor interceptor =
             new ControlCatalogRoutingInterceptor(tenantContext, false);
         Object parameter = new Object();
-        when(statement.getId()).thenReturn(CONTROL_STATEMENT);
         when(executor.update(statement, parameter)).thenReturn(5);
 
         Object result = interceptor.intercept(

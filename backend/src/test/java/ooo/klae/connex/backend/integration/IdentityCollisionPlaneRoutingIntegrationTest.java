@@ -203,15 +203,18 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(fixture.workspace().getId());
         role.setName("Identity report reader " + compactUuid().substring(0, 8));
-        roleMapper.insertRole(role);
-        roleMapper.insertPermissions(
-            fixture.workspace().getId(),
-            role.getId(),
-            List.of("REPORT_READ"));
-        workspaceMapper.setMemberCustomRole(
-            fixture.workspace().getId(),
-            fixture.user().getId(),
-            role.getId());
+        tenantWorkScope.withCatalog(null, () -> {
+            roleMapper.insertRole(role);
+            roleMapper.insertPermissions(
+                fixture.workspace().getId(),
+                role.getId(),
+                List.of("REPORT_READ"));
+            workspaceMapper.setMemberCustomRole(
+                fixture.workspace().getId(),
+                fixture.user().getId(),
+                role.getId());
+            return null;
+        });
         String scratchCatalog = "cnx_identity_role_" + compactUuid();
         prepareDedicatedCollision(fixture, scratchCatalog);
 
