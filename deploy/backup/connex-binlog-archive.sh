@@ -219,6 +219,12 @@ archive_recoverable_raw() {
         { [ -e "$destination.pending" ] || [ -L "$destination.pending" ]; }; then
         return 1
     fi
+    if [ -e "$destination.meta" ] || [ -L "$destination.meta" ] ||
+        [ -e "$destination.sha256" ] || [ -L "$destination.sha256" ] ||
+        [ -e "$destination.meta.pending" ] || [ -L "$destination.meta.pending" ] ||
+        [ -e "$destination.sha256.pending" ] || [ -L "$destination.sha256.pending" ]; then
+        return 1
+    fi
     if [ -f "$destination" ] && [ ! -L "$destination" ]; then
         candidate="$destination"
     elif [ -f "$destination.pending" ] && [ ! -L "$destination.pending" ]; then

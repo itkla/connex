@@ -579,6 +579,50 @@ case_archive_retention_gap() {
     assert_contains retention_warning 'reason=server_purge_lagging' "$log" || return 1
 }
 
+case_archive_corrupt_triplet_refetched() {
+    set +e
+    # shellcheck source=deploy/backup/connex-binlog-archive.sh
+    source "$SANDBOX/archive-lib.sh"
+    local root="$SANDBOX/archive-corrupt-triplet"
+    local log="$SANDBOX/archive-corrupt-triplet.log"
+    local file=binlog.000030
+    local destination source_file server_size fixture_created_epoch
+    mkdir -p "$root/binlog" "$root/source"
+    CONNEX_BACKUP_ROOT="$root"
+    CONNEX_BACKUP_RETENTION_DAYS=30
+    CONNEX_BACKUP_BINLOG_FETCH_MODE=stream
+    CONNEX_BACKUP_BINLOG_DIR="$root/source"
+    destination="$root/binlog/$file"
+    source_file="$root/source/$file"
+    fixture_created_epoch=$(( $(date +%s) - 3600 ))
+
+    write_fake_binlog "$source_file"
+    cp "$source_file" "$destination"
+    write_binlog_sidecars \
+        "$destination" "$destination.meta" "$destination.sha256" \
+        "$destination" "$fixture_created_epoch"
+    printf 'X' | dd of="$destination" bs=1 seek=4 conv=notrunc status=none || return 1
+    server_size="$(stat -c '%s' "$source_file")"
+
+    BINLOG_STREAM_COMMAND=(cat)
+    BINLOG_STAT_COMMAND=(
+        awk -v "range=$fixture_created_epoch:$((fixture_created_epoch + 600))"
+        'BEGIN { print range; exit }'
+    )
+
+    ARCHIVE_SERVER_UUID=test-uuid
+    : > "$log"
+    archive_fetch_file "$file" "$server_size" >> "$log" 2>&1
+    assert_status corrupt_triplet_refetch_status 0 "$?" || return 1
+    cmp -s "$source_file" "$destination" || {
+        printf 'corrupt triplet raw was not replaced from the source\n'
+        return 1
+    }
+    backup_validate_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID" || return 1
+    assert_contains corrupt_triplet_refetch_started 'binlog_fetch_started' "$log" || return 1
+    assert_absent corrupt_triplet_not_resumed 'binlog_publication_resumed' "$log" || return 1
+}
+
 case_prune_orphan_binlogs() {
     set +e
     # shellcheck source=deploy/backup/connex-backup-prune.sh
@@ -653,6 +697,7 @@ case_prune_orphan_binlogs() {
 
 case_interrupted_publication_recovery() {
     set +e
+    # shellcheck source=deploy/backup/connex-backup-prune.sh
     source "$SANDBOX/prune-lib.sh"
     local root="$SANDBOX/publication-recovery"
     local binlog_dir="$root/binlog"
@@ -739,6 +784,7 @@ run_case case_pitr_filtered_statements
 run_case case_pitr_coverage_gap_guard
 run_case case_archive_rebases_missing_cursor
 run_case case_archive_retention_gap
+run_case case_archive_corrupt_triplet_refetched
 run_case case_prune_orphan_binlogs
 run_case case_interrupted_publication_recovery
 
