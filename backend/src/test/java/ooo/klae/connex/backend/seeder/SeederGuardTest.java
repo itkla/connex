@@ -13,13 +13,15 @@ import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.List;
-import java.util.Map;
 
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -55,6 +57,8 @@ class SeederGuardTest {
         "authenticationOpenidConnectCallbackHandler",
         "authenticationPlugins",
         "authentication_web_authn_callback_handler",
+        "clientCertificateKeyStoreUrl",
+        "ConnectionAttributes",
         "connectionLifecycleInterceptors",
         "default-authentication-plugin",
         "exception_interceptors",
@@ -68,20 +72,44 @@ class SeederGuardTest {
         "query_interceptors",
         "serverConfigCacheFactory",
         "session-variables",
-        "socketFactory"
+        "socketFactory",
+        "TRUSTCERTIFICATEKEYSTOREURL"
     };
 
-    @Test
-    void refusesProtectedProductionDatabaseCaseInsensitively() {
+    @ParameterizedTest
+    @ValueSource(strings = {"CoNnEx_PuB", "CoNnExDb"})
+    void refusesProtectedDatabaseCaseInsensitively(String database) {
         IllegalStateException exception = assertThrows(
             IllegalStateException.class,
             () -> SeederGuard.verifyJdbcUrl(
-                "jdbc:mysql://127.0.0.1:3313/CoNnEx_PuB?sslMode=DISABLED",
+                "jdbc:mysql://127.0.0.1:3313/" + database + "?sslMode=DISABLED",
                 false
             )
         );
 
-        assertTrue(exception.getMessage().contains("connex_pub"));
+        assertTrue(exception.getMessage().contains("protected Connex"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CoNnEx_PuB", "CoNnExDb"})
+    void refusesProtectedConfiguredDatabaseBeforeOpeningAConnection(String database) {
+        MockEnvironment environment = seederEnvironment().withProperty(
+            "spring.datasource.url",
+            "jdbc:mysql://127.0.0.1:3313/" + database + "?sslMode=DISABLED"
+        );
+        DataSource dataSource = mock(DataSource.class);
+        SeederGuard guard = new SeederGuard(
+            environment,
+            new DeploymentProperties(),
+            new SeederProperties(),
+            dataSource
+        );
+
+        IllegalStateException exception =
+            assertThrows(IllegalStateException.class, guard::verify);
+
+        assertTrue(exception.getMessage().contains("protected Connex"));
+        verifyNoInteractions(dataSource);
     }
 
     @Test
@@ -111,6 +139,35 @@ class SeederGuardTest {
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED",
             false
         ));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"prod", "customer_acme", "connex_dev"})
+    void refusesNonSeederCatalogs(String database) {
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederGuard.verifyJdbcUrl(
+                "jdbc:mysql://127.0.0.1:3313/" + database + "?sslMode=DISABLED",
+                false
+            )
+        );
+
+        assertTrue(exception.getMessage().contains("dedicated seeder catalog"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void refusesTextualLocalhostRegardlessOfRemoteHostConfirmation(
+            boolean allowRemoteHost) {
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederGuard.verifyJdbcUrl(
+                "jdbc:mysql://localhost:3313/connex_seeder?sslMode=DISABLED",
+                allowRemoteHost
+            )
+        );
+
+        assertTrue(exception.getMessage().contains("numeric loopback"));
     }
 
     @Test
@@ -202,7 +259,7 @@ class SeederGuardTest {
             IllegalStateException exception =
                 assertThrows(IllegalStateException.class, guard::verify);
 
-            assertTrue(exception.getMessage().contains("connex_pub"));
+            assertTrue(exception.getMessage().contains("protected Connex"));
             verifyNoInteractions(dataSource);
         }
     }
@@ -513,19 +570,20 @@ class SeederGuardTest {
         }
     }
 
-    @Test
-    void refusesEffectiveProductionCatalogEvenWithLoopbackUrl() throws SQLException {
+    @ParameterizedTest
+    @ValueSource(strings = {"CoNnEx_PuB", "CoNnExDb"})
+    void refusesEffectiveProtectedCatalogEvenWithLoopbackUrl(
+            String effectiveCatalog) throws SQLException {
         MockEnvironment environment = seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
-        DataSource dataSource = mock(DataSource.class);
-        Connection connection = mock(Connection.class);
-        DatabaseMetaData metaData = mock(DatabaseMetaData.class);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.getMetaData()).thenReturn(metaData);
-        when(metaData.getURL()).thenReturn("jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED");
-        when(connection.getCatalog()).thenReturn("CoNnEx_PuB");
+        DataSource dataSource = dataSourceAt(
+            "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED",
+            "connex_seeder",
+            null,
+            effectiveCatalog
+        );
         SeederGuard guard = new SeederGuard(
             environment,
             new DeploymentProperties(),
@@ -536,7 +594,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, guard::verify);
 
-        assertTrue(exception.getMessage().contains("protected connex_pub"));
+        assertTrue(exception.getMessage().contains("protected Connex"));
     }
 
     @Test
@@ -728,7 +786,7 @@ class SeederGuardTest {
     }
 
     @Test
-    void refusesConfiguredUrlsThatSpellTheLoopbackHostDifferently() {
+    void refusesTextualLocalhostBeforeComparingConfiguredTargets() {
         MockEnvironment environment = seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
@@ -748,7 +806,7 @@ class SeederGuardTest {
         IllegalStateException exception =
             assertThrows(IllegalStateException.class, guard::verify);
 
-        assertTrue(exception.getMessage().contains("disagree"));
+        assertTrue(exception.getMessage().contains("numeric loopback"));
     }
 
     @Test
@@ -777,11 +835,11 @@ class SeederGuardTest {
         MockEnvironment environment = seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
-                "jdbc:mysql://localhost:3306/Connex_Seeder?sslMode=DISABLED"
+                "jdbc:mysql://127.0.0.1:3306/Connex_Seeder?sslMode=DISABLED"
             )
             .withProperty(
                 "spring.flyway.url",
-                "jdbc:mysql://LOCALHOST:3306/connex_seeder?sslMode=DISABLED"
+                "jdbc:mysql://127.0.0.1:3306/connex_seeder?sslMode=DISABLED"
             );
         SeederGuard guard = new SeederGuard(
             environment,
@@ -928,12 +986,13 @@ class SeederGuardTest {
         MockEnvironment environment = seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
-                "jdbc:mysql://LOCALHOST:3306/Connex_Seeder?sslMode=DISABLED"
+                "jdbc:mysql://DB.EXAMPLE.TEST:3306/Connex_Seeder?sslMode=VERIFY_IDENTITY"
             )
             .withProperty(
                 "spring.flyway.url",
-                "jdbc:mysql://localhost/Connex_Seeder?sslMode=DISABLED"
+                "jdbc:mysql://db.example.test/Connex_Seeder?sslMode=VERIFY_IDENTITY"
             )
+            .withProperty("connex.seeder.allow-remote-host", "true")
             .withProperty("spring.flyway.schemas", "Connex_Seeder")
             .withProperty("spring.flyway.default-schema", "Connex_Seeder");
         SeederGuard guard = new SeederGuard(
@@ -941,7 +1000,7 @@ class SeederGuardTest {
             new DeploymentProperties(),
             new SeederProperties(),
             dataSourceAt(
-                "jdbc:mysql://localhost:3306/Connex_Seeder?sslMode=DISABLED",
+                "jdbc:mysql://db.example.test:3306/Connex_Seeder?sslMode=VERIFY_IDENTITY",
                 "Connex_Seeder",
                 null
             )
@@ -1142,7 +1201,7 @@ class SeederGuardTest {
     }
 
     @Test
-    void permitsEffectiveDatabaseReportedOnlyAsASchema() throws SQLException {
+    void permitsMatchingServerDatabaseWhenCachedCatalogIsAbsent() throws SQLException {
         MockEnvironment environment = seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -1187,26 +1246,10 @@ class SeederGuardTest {
             .withProperty("connex.maintenance.mode", "seeder")
             .withProperty("spring.main.web-application-type", "none")
             .withProperty("connex.tenancy.routing.mode", "single-database")
-            .withProperty("connex.object-storage.legacy-migration.mode", "off")
-            .withProperty("spring.flyway.placeholder-replacement", "false");
+            .withProperty("connex.object-storage.legacy-migration.mode", "off");
         environment.getPropertySources().addLast(new MapPropertySource(
             "Config resource 'class path resource [application-seeder.yml]'",
-            Map.of(
-                "spring.flyway.locations",
-                "classpath:db/migration",
-                "spring.flyway.callback-locations",
-                List.of(),
-                "spring.sql.init.mode",
-                "never",
-                "spring.sql.init.data-locations",
-                SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION,
-                "mybatis.mapper-locations",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS,
-                "mybatis.type-aliases-package",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE,
-                "mybatis.configuration.map-underscore-to-camel-case",
-                true
-            )
+            SeederStartupConfigurationValidatorTest.safeRepositoryProperties()
         ));
         environment.setActiveProfiles("seeder");
         return environment;
@@ -1218,14 +1261,29 @@ class SeederGuardTest {
 
     private static DataSource dataSourceAt(String url, String catalog, String schema)
             throws SQLException {
+        String serverDatabase = catalog == null ? schema : catalog;
+        return dataSourceAt(url, catalog, schema, serverDatabase);
+    }
+
+    private static DataSource dataSourceAt(
+            String url,
+            String catalog,
+            String schema,
+            String serverDatabase) throws SQLException {
         DataSource dataSource = mock(DataSource.class);
         Connection connection = mock(Connection.class);
         DatabaseMetaData metaData = mock(DatabaseMetaData.class);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        ResultSet result = mock(ResultSet.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.getMetaData()).thenReturn(metaData);
         when(metaData.getURL()).thenReturn(url);
         when(connection.getCatalog()).thenReturn(catalog);
         when(connection.getSchema()).thenReturn(schema);
+        when(connection.prepareStatement("SELECT DATABASE()")).thenReturn(statement);
+        when(statement.executeQuery()).thenReturn(result);
+        when(result.next()).thenReturn(true);
+        when(result.getString(1)).thenReturn(serverDatabase);
         return dataSource;
     }
 

@@ -5,20 +5,25 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 class SeederStartupConfigurationValidatorTest {
 
-    private static final String CERTIFICATE_PASSWORD_SENTINEL =
-        "certificate-password-sentinel-7429";
+    private static final String SENSITIVE_CONNECTOR_VALUE_SENTINEL =
+        "sensitive-connector-value-sentinel-7429";
 
     @Test
     void validatesThePinnedSafeSeederConfiguration() {
@@ -113,15 +118,27 @@ class SeederStartupConfigurationValidatorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
+        "clientCertificateKeyStoreUrl",
         "clientCertificateKeyStorePassword",
+        "connectionAttributes",
+        "CLIENTCERTIFICATEKEYSTOREURL",
+        "CONNECTIONATTRIBUTES",
+        "TRUSTCERTIFICATEKEYSTOREURL",
+        "client-certificate-key-store-url",
+        "client_certificate_key_store_url",
+        "connection-attributes",
+        "connection_attributes",
+        "trustCertificateKeyStoreUrl",
+        "trust-certificate-key-store-url",
+        "trust_certificate_key_store_url",
         "trustCertificateKeyStorePassword"
     })
-    void refusesCertificateStorePasswordsInJdbcQueryParameters(String propertyName) {
+    void refusesSensitiveConnectorPropertiesInJdbcQueryParameters(String propertyName) {
         MockEnvironment environment = safeEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1/Connex_Seeder?sslMode=DISABLED&"
-                    + propertyName + "=" + CERTIFICATE_PASSWORD_SENTINEL
+                    + propertyName + "=" + SENSITIVE_CONNECTOR_VALUE_SENTINEL
             );
 
         assertSanitizedConnectorRefusal(
@@ -131,7 +148,29 @@ class SeederStartupConfigurationValidatorTest {
     }
 
     @Test
-    void refusesCertificateStorePasswordsAcrossRelaxedDriverMapForms() {
+    void refusesEncodedSensitiveConnectorQueryProperties() {
+        for (String encodedProperty : new String[] {
+            "connection%41ttributes",
+            "clientCertificateKeyStore%55rl",
+            "trustCertificateKeyStore%55rl"
+        }) {
+            MockEnvironment environment = safeEnvironment()
+                .withProperty(
+                    "spring.datasource.url",
+                    "jdbc:mysql://127.0.0.1/Connex_Seeder?sslMode=DISABLED&"
+                        + encodedProperty + "=https%3A%2F%2F127.0.0.1%2F"
+                        + SENSITIVE_CONNECTOR_VALUE_SENTINEL
+                );
+
+            assertSanitizedConnectorRefusal(
+                environment,
+                "Connector/J query property"
+            );
+        }
+    }
+
+    @Test
+    void refusesSensitiveConnectorPropertiesAcrossRelaxedDriverMapForms() {
         for (String propertyPrefix : new String[] {
             "spring.datasource.hikari.data-source-properties",
             "spring.datasource.hikari.dataSourceProperties",
@@ -141,7 +180,19 @@ class SeederStartupConfigurationValidatorTest {
             "spring.flyway.jdbc_properties"
         }) {
             for (String propertyName : new String[] {
+                "clientCertificateKeyStoreUrl",
                 "clientCertificateKeyStorePassword",
+                "connectionAttributes",
+                "CLIENTCERTIFICATEKEYSTOREURL",
+                "CONNECTIONATTRIBUTES",
+                "TRUSTCERTIFICATEKEYSTOREURL",
+                "client-certificate-key-store-url",
+                "client_certificate_key_store_url",
+                "connection-attributes",
+                "connection_attributes",
+                "trustCertificateKeyStoreUrl",
+                "trust-certificate-key-store-url",
+                "trust_certificate_key_store_url",
                 "trustCertificateKeyStorePassword"
             }) {
                 for (String configuredProperty : new String[] {
@@ -151,7 +202,7 @@ class SeederStartupConfigurationValidatorTest {
                     MockEnvironment environment = safeEnvironment()
                         .withProperty(
                             configuredProperty,
-                            CERTIFICATE_PASSWORD_SENTINEL
+                            SENSITIVE_CONNECTOR_VALUE_SENTINEL
                         );
 
                     assertSanitizedConnectorRefusal(
@@ -273,12 +324,13 @@ class SeederStartupConfigurationValidatorTest {
         MockEnvironment matching = safeEnvironment()
             .withProperty(
                 "spring.flyway.url",
-                "jdbc:mysql://LOCALHOST:3306/Connex_Seeder?sslMode=DISABLED"
+                "jdbc:mysql://db.example.test:3306/Connex_Seeder?sslMode=VERIFY_IDENTITY"
             )
             .withProperty(
                 "spring.datasource.url",
-                "jdbc:mysql://localhost/Connex_Seeder?sslMode=DISABLED"
-            );
+                "jdbc:mysql://DB.EXAMPLE.TEST/Connex_Seeder?sslMode=VERIFY_IDENTITY"
+            )
+            .withProperty("connex.seeder.allow-remote-host", "true");
         MockEnvironment mismatching = safeEnvironment()
             .withProperty(
                 "spring.flyway.url",
@@ -332,6 +384,123 @@ class SeederStartupConfigurationValidatorTest {
             );
 
         SeederStartupConfigurationValidator.validate(environment);
+    }
+
+    @Test
+    void acceptsOnlyTheValidatedDynamicFlywayChannels() {
+        MockEnvironment environment = safeEnvironment()
+            .withProperty(
+                "spring.flyway.url",
+                "jdbc:mysql://127.0.0.1:3306/Connex_Seeder?sslMode=DISABLED"
+            )
+            .withProperty(
+                "spring.flyway.driver_class_name",
+                SeederStartupConfigurationValidator.PROJECT_DRIVER
+            )
+            .withProperty(
+                "spring.flyway.jdbcProperties[connectTimeout]",
+                "5000"
+            )
+            .withProperty("spring.flyway.default_schema", "Connex_Seeder")
+            .withProperty("spring.flyway.schemas[0]", "Connex_Seeder");
+
+        SeederStartupConfigurationValidator.validate(environment);
+    }
+
+    @ParameterizedTest
+    @MethodSource("pinnedFlywayProperties")
+    void requiresEveryPinnedFlywayPropertyFromTheSeederRepositorySource(
+            String propertyName,
+            Object expectedValue) {
+        Map<String, Object> missingPin = new LinkedHashMap<>(safeRepositoryProperties());
+        missingPin.remove(propertyName);
+        Map<String, Object> wrongPin = new LinkedHashMap<>(safeRepositoryProperties());
+        wrongPin.put(propertyName, wrongRepositoryValue(expectedValue));
+
+        for (MockEnvironment environment : new MockEnvironment[] {
+            safeEnvironment(missingPin),
+            safeEnvironment(wrongPin)
+        }) {
+            IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> SeederStartupConfigurationValidator.validate(environment),
+                propertyName
+            );
+
+            assertTrue(exception.getMessage().contains(propertyName), propertyName);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("pinnedFlywayProperties")
+    void refusesEverySameValueOperatorOverrideOfPinnedFlywaySemantics(
+            String propertyName,
+            Object expectedValue) {
+        MockEnvironment environment = safeEnvironment()
+            .withProperty(propertyName, operatorValue(expectedValue));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederStartupConfigurationValidator.validate(environment),
+            propertyName
+        );
+
+        assertTrue(exception.getMessage().contains("operator configuration"), propertyName);
+    }
+
+    @Test
+    void refusesExternalSourcesWhoseNamesEmbedRepositoryResourceText() {
+        MockEnvironment environment = safeEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource(
+            "Config resource 'file [/tmp/class path resource "
+                + "[application-seeder.yml]/application.yml]'",
+            Map.of("spring.flyway.enabled", true)
+        ));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederStartupConfigurationValidator.validate(environment)
+        );
+
+        assertTrue(exception.getMessage().contains("operator configuration"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("pinnedFlywayAliasAndDescendantProperties")
+    void refusesAliasesIndexesAndDescendantsForEveryPinnedFlywaySemantic(
+            String propertyName,
+            String configuredValue) {
+        MockEnvironment environment = safeEnvironment()
+            .withProperty(propertyName, configuredValue);
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederStartupConfigurationValidator.validate(environment)
+        );
+
+        assertTrue(exception.getMessage().contains("spring.flyway"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "spring.flyway.user",
+        "spring.flyway.password",
+        "spring.flyway.clean-on-validation-error",
+        "spring.flyway.baseline-migration-prefix",
+        "spring.flyway.undo-sql-migration-prefix",
+        "spring.flyway.unknown-future-option"
+    })
+    void refusesFlywayCredentialsRemovedDeprecatedAndUnknownSemanticKeys(
+            String propertyName) {
+        MockEnvironment environment = safeEnvironment()
+            .withProperty(propertyName, "unsafe");
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederStartupConfigurationValidator.validate(environment)
+        );
+
+        assertTrue(exception.getMessage().contains("spring.flyway"));
     }
 
     @ParameterizedTest
@@ -625,6 +794,26 @@ class SeederStartupConfigurationValidatorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
+        "spring.autoconfigure.exclude",
+        "spring.autoconfigure.exclude[0]",
+        "SPRING_AUTOCONFIGURE_EXCLUDE"
+    })
+    void refusesAutoConfigurationExclusions(String propertyName) {
+        MockEnvironment environment = safeEnvironment().withProperty(
+            propertyName,
+            "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
+        );
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> SeederStartupConfigurationValidator.validate(environment)
+        );
+
+        assertTrue(exception.getMessage().contains("spring.autoconfigure.exclude"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
         "spring.datasource.type",
         "spring.datasource.jndi_name",
         "spring.datasource.hikari.dataSourceClassName",
@@ -735,12 +924,19 @@ class SeederStartupConfigurationValidatorTest {
 
         assertTrue(exception.getMessage().startsWith("Seeder refused:"));
         assertTrue(exception.getMessage().contains(expectedReason));
-        assertFalse(exception.getMessage().contains(CERTIFICATE_PASSWORD_SENTINEL));
+        assertFalse(
+            exception.getMessage().contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL)
+        );
         assertEquals(null, exception.getCause());
         assertEquals(0, exception.getSuppressed().length);
     }
 
     private static MockEnvironment safeEnvironment() {
+        return safeEnvironment(safeRepositoryProperties());
+    }
+
+    private static MockEnvironment safeEnvironment(
+            Map<String, Object> repositoryProperties) {
         MockEnvironment environment = new MockEnvironment()
             .withProperty("connex.seeder.enabled", "true")
             .withProperty("connex.maintenance.mode", "seeder")
@@ -762,28 +958,82 @@ class SeederStartupConfigurationValidatorTest {
             .withProperty(
                 "spring.flyway.driver-class-name",
                 SeederStartupConfigurationValidator.PROJECT_DRIVER
-            )
-            .withProperty("spring.flyway.placeholder-replacement", "false");
+            );
         environment.getPropertySources().addLast(new MapPropertySource(
             "Config resource 'class path resource [application-seeder.yml]'",
-            Map.of(
-                "spring.flyway.locations",
-                SeederStartupConfigurationValidator.PROJECT_MIGRATION_LOCATION,
-                "spring.flyway.callback-locations",
-                List.of(),
-                "spring.sql.init.mode",
-                "never",
-                "spring.sql.init.data-locations",
-                SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION,
-                "mybatis.mapper-locations",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS,
-                "mybatis.type-aliases-package",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE,
-                "mybatis.configuration.map-underscore-to-camel-case",
-                true
-            )
+            repositoryProperties
         ));
         environment.setActiveProfiles("seeder");
         return environment;
+    }
+
+    static Map<String, Object> safeRepositoryProperties() {
+        Map<String, Object> properties = new LinkedHashMap<>(
+            SeederStartupConfigurationValidator.REPOSITORY_FLYWAY_PROPERTIES
+        );
+        properties.put("spring.sql.init.mode", "never");
+        properties.put(
+            "spring.sql.init.data-locations",
+            SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION
+        );
+        properties.put(
+            "mybatis.mapper-locations",
+            SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS
+        );
+        properties.put(
+            "mybatis.type-aliases-package",
+            SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE
+        );
+        properties.put("mybatis.configuration.map-underscore-to-camel-case", true);
+        return Map.copyOf(properties);
+    }
+
+    private static Stream<Arguments> pinnedFlywayProperties() {
+        return SeederStartupConfigurationValidator.REPOSITORY_FLYWAY_PROPERTIES.entrySet()
+            .stream()
+            .map(entry -> Arguments.of(entry.getKey(), entry.getValue()));
+    }
+
+    private static Stream<Arguments> pinnedFlywayAliasAndDescendantProperties() {
+        return SeederStartupConfigurationValidator.REPOSITORY_FLYWAY_PROPERTIES.entrySet()
+            .stream()
+            .flatMap(entry -> {
+                String configuredValue = operatorValue(entry.getValue());
+                String environmentAlias = entry.getKey()
+                    .toUpperCase(Locale.ROOT)
+                    .replace('.', '_')
+                    .replace('-', '_');
+                return Stream.of(
+                    Arguments.of(environmentAlias, configuredValue),
+                    Arguments.of(entry.getKey() + "[0]", configuredValue),
+                    Arguments.of(entry.getKey() + ".unexpected", configuredValue)
+                );
+            });
+    }
+
+    private static Object wrongRepositoryValue(Object expectedValue) {
+        if (expectedValue instanceof Boolean booleanValue) {
+            return !booleanValue;
+        }
+        if (expectedValue instanceof Number) {
+            return 1;
+        }
+        if (expectedValue instanceof List<?>) {
+            return List.of("unsafe");
+        }
+        if (expectedValue instanceof Map<?, ?>) {
+            return Map.of("unsafe", "unsafe");
+        }
+        return "unsafe";
+    }
+
+    private static String operatorValue(Object expectedValue) {
+        if (expectedValue instanceof List<?> values) {
+            return values.isEmpty() ? "" : values.getFirst().toString();
+        }
+        if (expectedValue instanceof Map<?, ?>) {
+            return "";
+        }
+        return expectedValue.toString();
     }
 }

@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.seeder;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -25,7 +27,6 @@ import ooo.klae.connex.backend.seeder.SeederStartupConfigurationValidator.Valida
 @RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class SeederGuard {
 
-    private static final String PRODUCTION_DATABASE = "connex_pub";
     private static final String JDBC_TARGET_VERIFICATION_FAILURE =
         "could not verify effective JDBC target";
 
@@ -106,12 +107,15 @@ public class SeederGuard {
     }
 
     private static String effectiveDatabase(Connection connection) throws SQLException {
-        String catalog = connection.getCatalog();
-        if (StringUtils.hasText(catalog)) {
-            return catalog.strip();
+        try (PreparedStatement statement =
+                connection.prepareStatement("SELECT DATABASE()");
+                ResultSet result = statement.executeQuery()) {
+            if (!result.next()) {
+                return "";
+            }
+            String database = result.getString(1);
+            return database == null ? "" : database.strip();
         }
-        String schema = connection.getSchema();
-        return schema == null ? "" : schema.strip();
     }
 
     private static void verifyEffectiveDatabase(
@@ -122,9 +126,9 @@ public class SeederGuard {
                 "the effective connection reports no current database"
             );
         }
-        if (PRODUCTION_DATABASE.equalsIgnoreCase(effectiveDatabase)) {
+        if (SeederStartupConfigurationValidator.isProtectedDatabase(effectiveDatabase)) {
             throw SeederStartupConfigurationValidator.refused(
-                "effective catalog is the protected connex_pub target"
+                "effective catalog is a protected Connex target"
             );
         }
         if (!effectiveDatabase.equals(targetDatabase)) {

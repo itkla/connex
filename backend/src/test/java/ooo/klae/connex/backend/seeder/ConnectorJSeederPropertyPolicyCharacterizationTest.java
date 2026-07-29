@@ -49,13 +49,16 @@ class ConnectorJSeederPropertyPolicyCharacterizationTest {
         assertEquals("enabledTLSProtocols", aliasesByCanonicalName.get("tlsVersions"));
 
         for (String deniedName : new String[] {
+            "clientCertificateKeyStoreUrl",
             "clientCertificateKeyStorePassword",
+            "connectionAttributes",
             "path",
             "namedPipePath",
             "queryInfoCacheFactory",
             "parseInfoCacheFactory",
             "ha.loadBalanceStrategy",
             "haLoadBalanceStrategy",
+            "trustCertificateKeyStoreUrl",
             "trustCertificateKeyStorePassword",
             "xdevapi.ssl-mode",
             "xdevapiSslMode"

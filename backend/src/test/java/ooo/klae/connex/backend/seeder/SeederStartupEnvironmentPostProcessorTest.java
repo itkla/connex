@@ -8,6 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.PrintWriter;
 import java.lang.reflect.Proxy;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URLEncoder;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -17,6 +22,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
@@ -40,11 +46,14 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
+import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 import com.zaxxer.hikari.HikariCredentialsProvider;
@@ -70,8 +79,8 @@ class SeederStartupEnvironmentPostProcessorTest {
         "ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessorTest$CanaryExceptionOverride";
     private static final String CANARY_INITIAL_CONTEXT_FACTORY =
         "ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessorTest$CanaryInitialContextFactory";
-    private static final String CERTIFICATE_PASSWORD_SENTINEL =
-        "certificate-password-sentinel-7429";
+    private static final String SENSITIVE_CONNECTOR_VALUE_SENTINEL =
+        "sensitive-connector-value-sentinel-7429";
 
     @BeforeEach
     void resetCanaries() {
@@ -140,7 +149,6 @@ class SeederStartupEnvironmentPostProcessorTest {
                 password: seeder
               flyway:
                 locations: "{vendor}"
-                placeholder-replacement: false
             connex:
               seeder:
                 enabled: true
@@ -247,6 +255,8 @@ class SeederStartupEnvironmentPostProcessorTest {
             + "ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessorTest$CanaryDriver",
         "--spring.main.sources="
             + "ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessorTest$CanaryDataSource",
+        "--spring.autoconfigure.exclude="
+            + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
         "--context.initializer.classes="
             + "ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessorTest$CanaryDataSource",
         "--context.listener.classes="
@@ -344,8 +354,8 @@ class SeederStartupEnvironmentPostProcessorTest {
     }
 
     @ParameterizedTest
-    @MethodSource("certificatePasswordCommandLineCases")
-    void refusesCertificateStorePasswordCommandLineChannelsBeforeInfrastructure(
+    @MethodSource("sensitiveConnectorCommandLineCases")
+    void refusesSensitiveConnectorCommandLineChannelsBeforeInfrastructure(
             String channel,
             String propertyName,
             CapturedOutput output) {
@@ -353,15 +363,16 @@ class SeederStartupEnvironmentPostProcessorTest {
             "jdbc:mysql://127.0.0.1/connex_seed?sslMode=DISABLED";
         String unsafeArgument = switch (channel) {
             case "jdbc-query" -> {
-                jdbcUrl += "&" + propertyName + "=" + CERTIFICATE_PASSWORD_SENTINEL;
+                jdbcUrl += "&" + propertyName + "="
+                    + SENSITIVE_CONNECTOR_VALUE_SENTINEL;
                 yield null;
             }
             case "hikari-map" ->
                 "--spring.datasource.hikari.data-source-properties."
-                    + propertyName + "=" + CERTIFICATE_PASSWORD_SENTINEL;
+                    + propertyName + "=" + SENSITIVE_CONNECTOR_VALUE_SENTINEL;
             case "flyway-map" ->
                 "--spring.flyway.jdbc-properties."
-                    + propertyName + "=" + CERTIFICATE_PASSWORD_SENTINEL;
+                    + propertyName + "=" + SENSITIVE_CONNECTOR_VALUE_SENTINEL;
             default -> throw new IllegalStateException("Unexpected test channel");
         };
         String hikariDebug = "--logging.level.com.zaxxer.hikari=DEBUG";
@@ -376,18 +387,91 @@ class SeederStartupEnvironmentPostProcessorTest {
 
         String message = refusalMessage(exception);
         assertTrue(message.startsWith("Seeder refused:"));
-        assertFalse(message.contains(CERTIFICATE_PASSWORD_SENTINEL));
+        assertFalse(message.contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
         assertEquals(null, exception.getCause());
         assertEquals(0, exception.getSuppressed().length);
         assertNoCanaryActivity();
-        assertFalse(output.getOut().contains(CERTIFICATE_PASSWORD_SENTINEL));
-        assertFalse(output.getErr().contains(CERTIFICATE_PASSWORD_SENTINEL));
+        assertFalse(output.getOut().contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
+        assertFalse(output.getErr().contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
     }
 
-    private static Stream<Arguments> certificatePasswordCommandLineCases() {
+    private static Stream<Arguments> sensitiveConnectorCommandLineCases() {
         return Stream.of(
             "clientCertificateKeyStorePassword",
+            "connectionAttributes",
             "trustCertificateKeyStorePassword"
+        ).flatMap(propertyName -> Stream.of(
+            Arguments.of("jdbc-query", propertyName),
+            Arguments.of("hikari-map", propertyName),
+            Arguments.of("flyway-map", propertyName)
+        ));
+    }
+
+    @ParameterizedTest
+    @MethodSource("certificateKeyStoreUrlCommandLineCases")
+    void refusesCertificateKeyStoreUrlsWithoutLoopbackOrInfrastructureActivity(
+            String channel,
+            String propertyName,
+            CapturedOutput output) throws Exception {
+        try (ServerSocketChannel loopbackCanary = ServerSocketChannel.open()) {
+            loopbackCanary.bind(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)
+            );
+            loopbackCanary.configureBlocking(false);
+            InetSocketAddress canaryAddress =
+                (InetSocketAddress) loopbackCanary.getLocalAddress();
+            String canaryHost = canaryAddress.getAddress().getHostAddress();
+            if (canaryHost.contains(":")) {
+                canaryHost = "[" + canaryHost + "]";
+            }
+            String keyStoreUrl = "https://" + canaryHost + ":"
+                + canaryAddress.getPort() + "/" + SENSITIVE_CONNECTOR_VALUE_SENTINEL;
+            String jdbcUrl =
+                "jdbc:mysql://127.0.0.1/connex_seed?sslMode=DISABLED";
+            String unsafeArgument = switch (channel) {
+                case "jdbc-query" -> {
+                    jdbcUrl += "&" + propertyName + "=" + URLEncoder.encode(
+                        keyStoreUrl,
+                        StandardCharsets.UTF_8
+                    );
+                    yield null;
+                }
+                case "hikari-map" ->
+                    "--spring.datasource.hikari.data-source-properties["
+                        + propertyName + "]=" + keyStoreUrl;
+                case "flyway-map" ->
+                    "--spring.flyway.jdbc_properties["
+                        + propertyName + "]=" + keyStoreUrl;
+                default -> throw new IllegalStateException("Unexpected test channel");
+            };
+            String[] arguments = unsafeArgument == null
+                ? safeArguments(jdbcUrl)
+                : safeArguments(jdbcUrl, unsafeArgument);
+
+            RuntimeException exception = assertThrows(
+                RuntimeException.class,
+                () -> runApplication(BeanCanaryApplication.class, arguments)
+            );
+
+            String message = refusalMessage(exception);
+            assertTrue(message.startsWith("Seeder refused:"));
+            assertFalse(message.contains(keyStoreUrl));
+            assertFalse(message.contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
+            assertEquals(null, exception.getCause());
+            assertEquals(0, exception.getSuppressed().length);
+            assertEquals(null, loopbackCanary.accept());
+            assertNoCanaryActivity();
+            assertFalse(output.getOut().contains(keyStoreUrl));
+            assertFalse(output.getErr().contains(keyStoreUrl));
+            assertFalse(output.getOut().contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
+            assertFalse(output.getErr().contains(SENSITIVE_CONNECTOR_VALUE_SENTINEL));
+        }
+    }
+
+    private static Stream<Arguments> certificateKeyStoreUrlCommandLineCases() {
+        return Stream.of(
+            "clientCertificateKeyStoreUrl",
+            "trustCertificateKeyStoreUrl"
         ).flatMap(propertyName -> Stream.of(
             Arguments.of("jdbc-query", propertyName),
             Arguments.of("hikari-map", propertyName),
@@ -453,6 +537,40 @@ class SeederStartupEnvironmentPostProcessorTest {
         } finally {
             restoreSystemProperty("hikaricp.configurationFile", previousValue);
         }
+    }
+
+    @Test
+    void finalInitializerRefusesConfigurationAddedAfterEnvironmentPostProcessors() {
+        SpringApplication application =
+            SeederApplication.createSpringApplication(MinimalApplication.class);
+        application.setBannerMode(Banner.Mode.OFF);
+        application.setLogStartupInfo(false);
+        application.setRegisterShutdownHook(false);
+        application.addListeners(
+            (ApplicationListener<ApplicationEnvironmentPreparedEvent>) event ->
+                event.getEnvironment().getPropertySources().addFirst(
+                    new MapPropertySource(
+                        "lateUnsafeConfiguration",
+                        Map.of(
+                            "context.initializer.classes",
+                            "ooo.klae.connex.backend.seeder."
+                                + "SeederStartupEnvironmentPostProcessorTest$CanaryDataSource"
+                        )
+                    )
+                )
+        );
+
+        RuntimeException exception = assertThrows(
+            RuntimeException.class,
+            () -> application.run(
+                safeArguments(
+                    "jdbc:mysql://127.0.0.1/connex_seed?sslMode=DISABLED"
+                )
+            )
+        );
+
+        assertTrue(refusalMessage(exception).contains("context.initializer.classes"));
+        assertNoCanaryActivity();
     }
 
     private static ConfigurableApplicationContext runApplication(

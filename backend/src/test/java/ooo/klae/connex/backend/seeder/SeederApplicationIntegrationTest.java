@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -14,6 +15,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -104,7 +107,7 @@ class SeederApplicationIntegrationTest {
                 + "skipping seeder application integration test"
         );
         SeederStartupConfigurationValidator.JdbcTarget configuredTarget =
-            verifiedConfiguredTarget(configuredUrl);
+            localScratchTarget(configuredUrl);
         SeederStartupConfigurationValidator.JdbcTarget bootstrapTarget =
             targetWithCatalog(configuredTarget, "mysql");
         try (Connection connection = DriverManager.getConnection(
@@ -118,8 +121,10 @@ class SeederApplicationIntegrationTest {
                     + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
             );
         } catch (SQLException exception) {
-            throw sanitizedTestFailure(
-                "Cannot create seeder application scratch catalog"
+            assumeTrue(
+                false,
+                "Cannot create the seeder application scratch catalog; "
+                    + "grant CREATE/DROP for dedicated integration catalogs"
             );
         }
         return new DatabaseFixture(configuredTarget, username, password);
@@ -176,6 +181,7 @@ class SeederApplicationIntegrationTest {
             assertEquals(SCRATCH_CATALOG, proof.connectionCatalog());
             assertEquals(0, proof.pendingMigrations());
             assertEquals(proof.latestMigrationVersion(), proof.currentMigrationVersion());
+            assertEquals(expectedFlywayConfiguration(), proof.flywayConfiguration());
             assertFalse(proof.canaryTablePresent());
             assertTrue(proof.userMapperStatementPresent());
             assertEquals(User.class, proof.userAlias());
@@ -203,7 +209,10 @@ class SeederApplicationIntegrationTest {
                     "integration Hikari JDBC URL",
                     false
                 );
-        Flyway flyway = context.getBean(Flyway.class);
+        Map<String, Flyway> flywayBeans = context.getBeansOfType(Flyway.class);
+        Flyway flyway = flywayBeans.values().stream().findFirst().orElseThrow();
+        org.flywaydb.core.api.configuration.Configuration flywayConfiguration =
+            flyway.getConfiguration();
         MigrationInfoService migrationInfo = flyway.info();
         MigrationInfo currentMigration = Objects.requireNonNull(migrationInfo.current());
         MigrationVersion currentVersion = Objects.requireNonNull(currentMigration.getVersion());
@@ -236,6 +245,37 @@ class SeederApplicationIntegrationTest {
                 migrationInfo.pending().length,
                 currentVersion.toString(),
                 latestVersion.toString(),
+                new FlywayConfigurationProof(
+                    flywayBeans.size() == 1,
+                    flywayConfiguration.isBaselineOnMigrate(),
+                    flywayConfiguration.getBaselineVersion().toString(),
+                    flywayConfiguration.isCleanDisabled(),
+                    flywayConfiguration.isSkipExecutingMigrations(),
+                    flywayConfiguration.getTarget().toString(),
+                    flywayConfiguration.getTable(),
+                    flywayConfiguration.isSkipDefaultResolvers(),
+                    flywayConfiguration.isSkipDefaultCallbacks(),
+                    Arrays.stream(flywayConfiguration.getLocations())
+                        .map(location -> location.getDescriptor())
+                        .toList(),
+                    Arrays.stream(flywayConfiguration.getCallbackLocations())
+                        .map(location -> location.getDescriptor())
+                        .toList(),
+                    flywayConfiguration.getInitSql(),
+                    Map.copyOf(flywayConfiguration.getPlaceholders()),
+                    flywayConfiguration.isPlaceholderReplacement(),
+                    flywayConfiguration.getSqlMigrationPrefix(),
+                    flywayConfiguration.getRepeatableSqlMigrationPrefix(),
+                    flywayConfiguration.getSqlMigrationSeparator(),
+                    List.of(flywayConfiguration.getSqlMigrationSuffixes()),
+                    flywayConfiguration.isValidateOnMigrate(),
+                    flywayConfiguration.isValidateMigrationNaming(),
+                    Arrays.stream(flywayConfiguration.getIgnoreMigrationPatterns())
+                        .map(Object::toString)
+                        .toList(),
+                    flywayConfiguration.isOutOfOrder(),
+                    flywayConfiguration.isFailOnMissingLocations()
+                ),
                 tableExists(connection, SCRATCH_CATALOG, CANARY_TABLE),
                 mybatis.hasStatement(userStatementName),
                 mybatis.getTypeAliasRegistry().resolveAlias("User"),
@@ -265,6 +305,34 @@ class SeederApplicationIntegrationTest {
         }
     }
 
+    private static FlywayConfigurationProof expectedFlywayConfiguration() {
+        return new FlywayConfigurationProof(
+            true,
+            true,
+            "0",
+            true,
+            false,
+            MigrationVersion.LATEST.toString(),
+            "flyway_schema_history",
+            false,
+            false,
+            List.of("classpath:db/migration"),
+            List.of(),
+            null,
+            Map.of(),
+            false,
+            "V",
+            "R",
+            "__",
+            List.of(".sql"),
+            true,
+            true,
+            List.of(),
+            false,
+            true
+        );
+    }
+
     private static String validatedCatalog(String catalog) {
         if (!GENERATED_CATALOG.matcher(catalog).matches()) {
             throw new IllegalArgumentException("Invalid generated seeder catalog");
@@ -283,6 +351,35 @@ class SeederApplicationIntegrationTest {
             "CONNEX_DB_URL",
             false
         );
+    }
+
+    private static SeederStartupConfigurationValidator.JdbcTarget localScratchTarget(
+            String configuredUrl) {
+        try {
+            if (!configuredUrl.startsWith("jdbc:mysql://")) {
+                throw sanitizedTestFailure("Seeder integration database URL is unsupported");
+            }
+            URI uri = URI.create(configuredUrl.substring("jdbc:".length()));
+            String host = uri.getHost();
+            if (host == null) {
+                throw sanitizedTestFailure("Seeder integration database host is missing");
+            }
+            if ("localhost".equalsIgnoreCase(host)) {
+                host = "127.0.0.1";
+            }
+            int port = uri.getPort() == -1 ? 3306 : uri.getPort();
+            SeederStartupConfigurationValidator.JdbcTarget scratchTarget =
+                new SeederStartupConfigurationValidator.JdbcTarget(
+                    host,
+                    port,
+                    SCRATCH_CATALOG
+                );
+            return verifiedConfiguredTarget(connectionUrl(scratchTarget));
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw sanitizedTestFailure("Seeder integration database URL is malformed");
+        }
     }
 
     private static SeederStartupConfigurationValidator.JdbcTarget targetWithCatalog(
@@ -334,12 +431,40 @@ class SeederApplicationIntegrationTest {
         int pendingMigrations,
         String currentMigrationVersion,
         String latestMigrationVersion,
+        FlywayConfigurationProof flywayConfiguration,
         boolean canaryTablePresent,
         boolean userMapperStatementPresent,
         Class<?> userAlias,
         Class<?> userStatementResultType,
         boolean mapUnderscoreToCamelCase,
         String ownerDisplayName
+    ) {
+    }
+
+    private record FlywayConfigurationProof(
+        boolean enabled,
+        boolean baselineOnMigrate,
+        String baselineVersion,
+        boolean cleanDisabled,
+        boolean skipExecutingMigrations,
+        String target,
+        String table,
+        boolean skipDefaultResolvers,
+        boolean skipDefaultCallbacks,
+        List<String> locations,
+        List<String> callbackLocations,
+        String initSql,
+        Map<String, String> placeholders,
+        boolean placeholderReplacement,
+        String sqlMigrationPrefix,
+        String repeatableSqlMigrationPrefix,
+        String sqlMigrationSeparator,
+        List<String> sqlMigrationSuffixes,
+        boolean validateOnMigrate,
+        boolean validateMigrationNaming,
+        List<String> ignoreMigrationPatterns,
+        boolean outOfOrder,
+        boolean failOnMissingLocations
     ) {
     }
 

@@ -5,14 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -32,10 +31,12 @@ import ooo.klae.connex.backend.config.DeploymentProperties;
 class SeederGuardDatabaseRoutingIntegrationTest {
 
     private static final String RUN_ID = UUID.randomUUID().toString().replace("-", "");
+    private static final String BASELINE_CATALOG = "cnx_seeder_guard_" + RUN_ID;
     private static final String CONTROL_CATALOG = "cnx_guard_control_" + RUN_ID;
     private static final String BLOCKED_CATALOG = "cnx_guard_blocked_" + RUN_ID;
 
     private static String bootstrapUrl;
+    private static String seederUrl;
     private static String username;
     private static String password;
     private static boolean databaseAccessible;
@@ -47,11 +48,7 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             "jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED"
         );
         SeederStartupConfigurationValidator.JdbcTarget configuredTarget =
-            SeederStartupConfigurationValidator.verifiedTarget(
-                configuredUrl,
-                "CONNEX_DB_URL",
-                false
-            );
+            localDatabaseTarget(configuredUrl);
         username = System.getenv("CONNEX_DB_USERNAME");
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(
@@ -59,19 +56,26 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping seeder routing test"
         );
         bootstrapUrl = mysqlBootstrapUrl(configuredTarget);
+        seederUrl = databaseUrl(configuredTarget, BASELINE_CATALOG);
         try (Connection connection = DriverManager.getConnection(
                 bootstrapUrl,
                 username,
                 password
             );
                 Statement statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS `" + BASELINE_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + CONTROL_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + BLOCKED_CATALOG + "`");
+            statement.execute(
+                "CREATE DATABASE `" + BASELINE_CATALOG
+                    + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+            );
             databaseAccessible = true;
         } catch (SQLException ignored) {
-            throw new IllegalStateException(
-                "Cannot prepare seeder guard scratch catalogs",
-                (Throwable) null
+            assumeTrue(
+                false,
+                "Cannot prepare seeder guard scratch catalogs; "
+                    + "grant CREATE/DROP for dedicated integration catalogs"
             );
         }
     }
@@ -87,6 +91,7 @@ class SeederGuardDatabaseRoutingIntegrationTest {
                 password
             );
                 Statement statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS `" + BASELINE_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + CONTROL_CATALOG + "`");
             statement.execute("DROP DATABASE IF EXISTS `" + BLOCKED_CATALOG + "`");
         } catch (SQLException ignored) {
@@ -109,13 +114,13 @@ class SeederGuardDatabaseRoutingIntegrationTest {
         }
 
         try (HikariDataSource guardedDataSource = new HikariDataSource()) {
-            guardedDataSource.setJdbcUrl(bootstrapUrl);
+            guardedDataSource.setJdbcUrl(seederUrl);
             guardedDataSource.setUsername(username);
             guardedDataSource.setPassword(password);
             guardedDataSource.addDataSourceProperty("dbname", BLOCKED_CATALOG);
             guardedDataSource.addDataSourceProperty("createDatabaseIfNotExist", "true");
             MockEnvironment environment = seederEnvironment()
-                .withProperty("spring.datasource.url", bootstrapUrl)
+                .withProperty("spring.datasource.url", seederUrl)
                 .withProperty(
                     "spring.datasource.hikari.data-source-properties.dbname",
                     BLOCKED_CATALOG
@@ -168,26 +173,10 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             .withProperty("connex.maintenance.mode", "seeder")
             .withProperty("spring.main.web-application-type", "none")
             .withProperty("connex.tenancy.routing.mode", "single-database")
-            .withProperty("connex.object-storage.legacy-migration.mode", "off")
-            .withProperty("spring.flyway.placeholder-replacement", "false");
+            .withProperty("connex.object-storage.legacy-migration.mode", "off");
         environment.getPropertySources().addLast(new MapPropertySource(
             "Config resource 'class path resource [application-seeder.yml]'",
-            Map.of(
-                "spring.flyway.locations",
-                "classpath:db/migration",
-                "spring.flyway.callback-locations",
-                List.of(),
-                "spring.sql.init.mode",
-                "never",
-                "spring.sql.init.data-locations",
-                SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION,
-                "mybatis.mapper-locations",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS,
-                "mybatis.type-aliases-package",
-                SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE,
-                "mybatis.configuration.map-underscore-to-camel-case",
-                true
-            )
+            SeederStartupConfigurationValidatorTest.safeRepositoryProperties()
         ));
         environment.setActiveProfiles("seeder");
         return environment;
@@ -195,10 +184,46 @@ class SeederGuardDatabaseRoutingIntegrationTest {
 
     private static String mysqlBootstrapUrl(
             SeederStartupConfigurationValidator.JdbcTarget configuredTarget) {
+        return databaseUrl(configuredTarget, "mysql");
+    }
+
+    private static String databaseUrl(
+            SeederStartupConfigurationValidator.JdbcTarget configuredTarget,
+            String database) {
         String authorityHost = configuredTarget.host().contains(":")
             ? "[" + configuredTarget.host() + "]"
             : configuredTarget.host();
         return "jdbc:mysql://" + authorityHost + ":" + configuredTarget.port()
-            + "/mysql?allowPublicKeyRetrieval=true&sslMode=DISABLED";
+            + "/" + database + "?allowPublicKeyRetrieval=true&sslMode=DISABLED";
+    }
+
+    private static SeederStartupConfigurationValidator.JdbcTarget localDatabaseTarget(
+            String configuredUrl) {
+        try {
+            if (!configuredUrl.startsWith("jdbc:mysql://")) {
+                throw new IllegalArgumentException();
+            }
+            URI uri = URI.create(configuredUrl.substring("jdbc:".length()));
+            String host = uri.getHost();
+            if ("localhost".equalsIgnoreCase(host)) {
+                host = "127.0.0.1";
+            }
+            if (!"127.0.0.1".equals(host)
+                    && !"::1".equals(host)
+                    && !"0:0:0:0:0:0:0:1".equals(host)) {
+                throw new IllegalArgumentException();
+            }
+            int port = uri.getPort() == -1 ? 3306 : uri.getPort();
+            return new SeederStartupConfigurationValidator.JdbcTarget(
+                host,
+                port,
+                BASELINE_CATALOG
+            );
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(
+                "Cannot parse the seeder routing integration database target",
+                (Throwable) null
+            );
+        }
     }
 }

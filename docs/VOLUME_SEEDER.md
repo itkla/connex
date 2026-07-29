@@ -68,8 +68,9 @@ row-count summaries, and closes the application context.
 
 ## CI invocation
 
-The backend CI job already exports `CONNEX_DB_URL`, `CONNEX_DB_USERNAME`, and
-`CONNEX_DB_PASSWORD` for its MySQL service. Against a freshly created CI schema, run:
+Create a fresh CI catalog whose name starts with `connex_seed`, export a
+`CONNEX_DB_URL` that names that disposable catalog together with
+`CONNEX_DB_USERNAME` and `CONNEX_DB_PASSWORD`, then run:
 
 ```bash
 bash gradlew seedData \
@@ -80,14 +81,16 @@ bash gradlew seedData \
   --no-daemon
 ```
 
-No alternate test-database configuration is required.
+Do not reuse the backend test job's normal `connexdb` catalog.
 
 ## Production guard
 
 Connex disables Spring JNDI property-source discovery through its classpath startup policy before
 packaged or external-WAR startup creates an environment. The `seedData` task launches
-`SeederApplication`, which sets the application type to non-web before Spring creates an
-environment. The first guard is a ConfigData-aware environment post-processor. It runs after Spring
+`SeederApplication` on the production runtime classpath, excluding Spring DevTools and its late
+home-directory property overrides. The launcher sets the application type to non-web before Spring
+creates an environment. The first guard is a ConfigData-aware environment post-processor. It runs
+after Spring
 Boot loads `application.yml` and `application-seeder.yml`, immediately before the
 database-transport post-processor, and before any datasource, Hikari pool, Flyway or MyBatis object,
 JDBC driver, JNDI lookup, or operator-named class can be initialized. Any active `seeder` profile,
@@ -109,9 +112,11 @@ activated it refuses unless **all** of the following hold:
 The early boundary applies one closed configuration policy:
 
 - `hikaricp.configurationFile` must be absent as a raw JVM system property, including a blank value;
-- `connex_pub` is protected case-insensitively, remote hosts require
-  `-PseederAllowRemoteHost=true`, host comparison is case-insensitive, only a missing authority port
-  normalizes to `3306`, and database/catalog comparison is case-sensitive;
+- `connexdb` and `connex_pub` are protected case-insensitively, remote hosts require
+  `-PseederAllowRemoteHost=true`, implicit local admission requires a numeric IPv4 or IPv6 loopback
+  address, textual `localhost` is refused, host comparison is case-insensitive, only a missing
+  authority port normalizes to `3306`, and database/catalog comparison is case-sensitive;
+- the target catalog must use the dedicated `connex_seed` or `cnx_seeder_` prefix;
 - alternate Connector/J URL forms and every query/map routing selector are refused, including
   `address`, `databaseName`, `dbname`, `dnsSrv`, host, port, protocol, named-pipe path,
   `serverName`, `type`, `url`/`jdbcUrl`, and `useConfigs`;
@@ -119,12 +124,25 @@ The early boundary applies one closed configuration policy:
   reviewed allowlist. Unknown properties and executable SQL, transform, interceptor, class, plugin,
   provider, authentication callback, socket-factory, logger/profiler, cache-factory,
   high-availability/load-balance, session-variable, and X DevAPI hooks fail closed. Compatibility
-  aliases such as `parseInfoCacheFactory` and `namedPipePath` are covered;
+  aliases such as `parseInfoCacheFactory` and `namedPipePath` are covered. `connectionAttributes`,
+  `clientCertificateKeyStoreUrl`, and `trustCertificateKeyStoreUrl` are explicitly refused,
+  together with certificate-store passwords, in JDBC query, Hikari map, and Flyway map forms,
+  including case, encoded, bracketed, and relaxed spellings. Remote TLS may use only JVM/system
+  trust material, never per-connection keystore URL hooks;
 - every relaxed Hikari JDBC URL alias, including `jdbc_url` and environment-style spellings, must
-  agree with the baseline target. A Flyway URL, when present, must agree as well;
+  agree with the baseline target. The whole relaxed `spring.flyway` namespace is closed: operator
+  input is accepted only for the already-validated dynamic `url`, `driver-class-name`,
+  `jdbc-properties`, `default-schema`, and `schemas` channels. A Flyway URL must agree with the
+  baseline target, a driver override must be exactly `com.mysql.cj.jdbc.Driver`, Connector/J map
+  entries must pass the closed allowlist, the default schema must remain scalar, and every schema
+  must name the exact target catalog. Separate Flyway credentials and every other operator Flyway
+  property are refused, including same-value overrides, relaxed aliases, indexed or descendant
+  forms, removed or deprecated names, and unknown future names;
 - datasource type, JNDI, XA, data-source-class, credentials-provider, exception-override,
   registry/object-hook, catalog/schema, and connection-test-query channels are refused. Driver
   overrides are absent or exactly `com.mysql.cj.jdbc.Driver`;
+- `spring.autoconfigure.exclude`, including relaxed and indexed forms, must be absent so Flyway
+  auto-configuration cannot be removed from the seeder lifecycle;
 - Hikari connection initialization is absent or exactly `SET time_zone = '+00:00'` after outer
   whitespace is removed;
 - the whole relaxed `spring.sql.init` namespace contains only the repository-owned effective
@@ -136,26 +154,37 @@ The early boundary applies one closed configuration policy:
   underscore-to-camel-case mapping. External, wildcard, comma-separated, indexed, configuration
   file/property/variable/database-id, type-handler/alias/scripting class, operator override, alias,
   and unknown descendant channels are refused;
-- Flyway default schema remains a scalar, every configured schema names the exact target catalog,
-  init SQL and operator placeholders are empty, and placeholder replacement is disabled; and
-- migration discovery is fixed to exactly `classpath:db/migration`; callback locations are empty.
-  `{vendor}`, filesystem, URL, wildcard, unprefixed, and indexed location additions are refused
-  before Flyway can inspect datasource metadata.
+- `application-seeder.yml` is the required effective source for the current Spring Boot 4.1 and
+  Flyway 12 migration semantics: `enabled=true`, `baseline-on-migrate=true`, `baseline-version=0`,
+  `clean-disabled=true`, `skip-executing-migrations=false`, `target=latest`,
+  `table=flyway_schema_history`, `skip-default-resolvers=false`,
+  `skip-default-callbacks=false`, exactly `classpath:db/migration`, empty callback locations, empty
+  init SQL, an absent closed placeholder namespace whose bound default is empty,
+  `placeholder-replacement=false`, `sql-migration-prefix=V`,
+  `repeatable-sql-migration-prefix=R`, `sql-migration-separator=__`, exactly `.sql` migration
+  suffixes, `validate-on-migrate=true`, `validate-migration-naming=true`, empty ignored migration
+  patterns, `out-of-order=false`, and `fail-on-missing-locations=true`. The boundary refuses an
+  operator occurrence of any of these properties before datasource, metadata, or migration
+  activity.
 
 The existing database-transport post-processor remains the transport authority: exact loopback
 seeder plaintext with `sslMode=DISABLED` is allowed, while remote seeding still requires
 `sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`.
 
-The runtime `SeederGuard` then checks the application and actual Flyway datasource metadata URL and
-effective current catalog against the same validated host, port, and exact catalog. A shared
+The dedicated launcher installs a highest-precedence context initializer that repeats the complete
+configuration policy after every environment post-processor and before any bean or
+operator-configured initializer can be constructed. The runtime `SeederGuard` then checks the
+application and actual Flyway datasource metadata URL and the server result of `SELECT DATABASE()`
+against the same validated host, port, and exact catalog. A shared
 datasource is opened only once during one guard pass. `SeederFlywayMigrationStrategy` runs this
-check before migration, and the startup singleton and seed runner retain their later checks.
+check before migration, and the startup singleton and seed runner retain their later checks. The
+runner also requires a Flyway bean and refuses fixture writes unless Flyway reports no pending
+migrations and its current version is the latest resolved version.
 
 ### What the guard does not protect against
 
-The guard stops accidental and operator-configured target changes, but it cannot distinguish a
-disposable loopback schema from a *local* database that matters. Always pass an explicitly named
-throwaway schema.
+The dedicated catalog prefix is an admission marker, not proof that a local schema is disposable.
+Always pass a newly named throwaway schema.
 
 Repository-controlled Java `Callback`, `JavaMigration`, and Flyway customizer beans remain trusted
 code. The effective-catalog check is not authoritative for a later session change performed inside

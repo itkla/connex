@@ -39,14 +39,43 @@ final class SeederStartupConfigurationValidator {
         "ooo.klae.connex.backend.beans";
     static final String PROJECT_SQL_INIT_DATA_LOCATION =
         "optional:classpath:seeder-sql-init-canary.sql";
+    static final Map<String, Object> REPOSITORY_FLYWAY_PROPERTIES = Map.ofEntries(
+        Map.entry("spring.flyway.enabled", true),
+        Map.entry("spring.flyway.baseline-on-migrate", true),
+        Map.entry("spring.flyway.baseline-version", 0),
+        Map.entry("spring.flyway.clean-disabled", true),
+        Map.entry("spring.flyway.skip-executing-migrations", false),
+        Map.entry("spring.flyway.target", "latest"),
+        Map.entry("spring.flyway.table", "flyway_schema_history"),
+        Map.entry("spring.flyway.skip-default-resolvers", false),
+        Map.entry("spring.flyway.skip-default-callbacks", false),
+        Map.entry("spring.flyway.locations", PROJECT_MIGRATION_LOCATION),
+        Map.entry("spring.flyway.callback-locations", List.of()),
+        Map.entry("spring.flyway.init-sqls", List.of()),
+        Map.entry("spring.flyway.placeholder-replacement", false),
+        Map.entry("spring.flyway.sql-migration-prefix", "V"),
+        Map.entry("spring.flyway.repeatable-sql-migration-prefix", "R"),
+        Map.entry("spring.flyway.sql-migration-separator", "__"),
+        Map.entry("spring.flyway.sql-migration-suffixes", ".sql"),
+        Map.entry("spring.flyway.validate-on-migrate", true),
+        Map.entry("spring.flyway.validate-migration-naming", true),
+        Map.entry("spring.flyway.ignore-migration-patterns", List.of()),
+        Map.entry("spring.flyway.out-of-order", false),
+        Map.entry("spring.flyway.fail-on-missing-locations", true)
+    );
 
     private static final String REFUSAL_PREFIX = "Seeder refused: ";
     private static final String SEEDER = "seeder";
-    private static final String PRODUCTION_DATABASE = "connex_pub";
+    private static final Set<String> PROTECTED_DATABASES = Set.of(
+        "connex_pub",
+        "connexdb"
+    );
     private static final int DEFAULT_MYSQL_PORT = 3306;
     private static final String DATASOURCE_URL_PROPERTY = "spring.datasource.url";
     private static final String HIKARI_JDBC_URL_PROPERTY = "spring.datasource.hikari.jdbc-url";
     private static final String FLYWAY_URL_PROPERTY = "spring.flyway.url";
+    private static final String FLYWAY_DRIVER_PROPERTY =
+        "spring.flyway.driver-class-name";
     private static final String HIKARI_CONFIGURATION_FILE_PROPERTY = "hikaricp.configurationFile";
     private static final String HIKARI_DATA_SOURCE_PROPERTIES_PROPERTY =
         "spring.datasource.hikari.data-source-properties";
@@ -59,11 +88,19 @@ final class SeederStartupConfigurationValidator {
     private static final String FLYWAY_LOCATIONS_PROPERTY = "spring.flyway.locations";
     private static final String FLYWAY_CALLBACK_LOCATIONS_PROPERTY =
         "spring.flyway.callback-locations";
-    private static final String FLYWAY_PLACEHOLDERS_PROPERTY = "spring.flyway.placeholders";
+    private static final Set<String> FLYWAY_SCALAR_DYNAMIC_PROPERTIES = Set.of(
+        FLYWAY_URL_PROPERTY,
+        FLYWAY_DRIVER_PROPERTY,
+        FLYWAY_DEFAULT_SCHEMA_PROPERTY
+    );
+    private static final Set<String> FLYWAY_STRUCTURED_DYNAMIC_PROPERTIES = Set.of(
+        FLYWAY_JDBC_PROPERTIES_PROPERTY,
+        FLYWAY_SCHEMAS_PROPERTY
+    );
     private static final String REPOSITORY_SEEDER_PROPERTY_SOURCE =
-        "class path resource [application-seeder.yml]";
+        "Config resource 'class path resource [application-seeder.yml]'";
     private static final String REPOSITORY_APPLICATION_PROPERTY_SOURCE =
-        "class path resource [application.yml]";
+        "Config resource 'class path resource [application.yml]'";
     private static final Map<String, String> REPOSITORY_SQL_INIT_PROPERTIES = Map.of(
         "spring.sql.init.mode",
         "never",
@@ -79,10 +116,13 @@ final class SeederStartupConfigurationValidator {
         "true"
     );
     private static final Set<String> LOOPBACK_HOSTS = Set.of(
-        "localhost",
         "127.0.0.1",
         "::1",
         "0:0:0:0:0:0:0:1"
+    );
+    private static final Set<String> SEEDER_DATABASE_PREFIXES = Set.of(
+        "connex_seed",
+        "cnx_seeder_"
     );
     private static final Set<String> SAFE_CONNECTOR_PROPERTY_KEYS = Set.of(
         "allowpublickeyretrieval",
@@ -93,8 +133,6 @@ final class SeederStartupConfigurationValidator {
         "characterencoding",
         "charactersetresults",
         "clientcertificatekeystoretype",
-        "clientcertificatekeystoreurl",
-        "connectionattributes",
         "connectioncollation",
         "connectiontimezone",
         "connecttimeout",
@@ -127,7 +165,6 @@ final class SeederStartupConfigurationValidator {
         "tlsciphersuites",
         "tlsversions",
         "trustcertificatekeystoretype",
-        "trustcertificatekeystoreurl",
         "useaffectedrows",
         "usecompression",
         "usecursorfetch",
@@ -149,8 +186,10 @@ final class SeederStartupConfigurationValidator {
         "authenticationplugins",
         "authenticationwebauthncallbackhandler",
         "autogeneratetestcasescript",
+        "clientcertificatekeystoreurl",
         "clientcertificatekeystorepassword",
         "clientinfoprovider",
+        "connectionattributes",
         "connectionlifecycleinterceptors",
         "database",
         "databasename",
@@ -204,6 +243,7 @@ final class SeederStartupConfigurationValidator {
         "socksproxyport",
         "socksproxyremotedns",
         "sslcontextprovider",
+        "trustcertificatekeystoreurl",
         "trustcertificatekeystorepassword",
         "trustmanagerfactoryprovider",
         "type",
@@ -396,8 +436,12 @@ final class SeederStartupConfigurationValidator {
             "mybatis",
             REPOSITORY_MYBATIS_PROPERTIES
         );
+        properties.requireClosedFlywayNamespace();
         if (properties.hasCanonicalPrefix("spring.main.sources")) {
             throw refused("spring.main.sources must be unset");
+        }
+        if (properties.hasCanonicalPrefix("spring.autoconfigure.exclude")) {
+            throw refused("spring.autoconfigure.exclude must be unset");
         }
         for (String propertyName : REFUSED_OPERATOR_CLASS_PROPERTIES) {
             if (properties.hasRelaxedProperty(propertyName)) {
@@ -501,7 +545,39 @@ final class SeederStartupConfigurationValidator {
     private static void verifyFlywayConfiguration(
             PropertyAccess properties,
             JdbcTarget baseline) {
-        verifyOptionalDriver(properties, "spring.flyway.driver-class-name");
+        properties.requireExactValue("spring.flyway.enabled", "true");
+        properties.requireExactValue("spring.flyway.baseline-on-migrate", "true");
+        properties.requireExactValue("spring.flyway.baseline-version", "0");
+        properties.requireExactValue("spring.flyway.clean-disabled", "true");
+        properties.requireExactValue("spring.flyway.skip-executing-migrations", "false");
+        properties.requireExactValue("spring.flyway.target", "latest");
+        properties.requireExactValue("spring.flyway.table", "flyway_schema_history");
+        properties.requireExactValue("spring.flyway.skip-default-resolvers", "false");
+        properties.requireExactValue("spring.flyway.skip-default-callbacks", "false");
+        properties.requireExactList(
+            FLYWAY_LOCATIONS_PROPERTY,
+            List.of(PROJECT_MIGRATION_LOCATION)
+        );
+        properties.requireExactList(FLYWAY_CALLBACK_LOCATIONS_PROPERTY, List.of());
+        properties.requireExactList(FLYWAY_INIT_SQLS_PROPERTY, List.of());
+        properties.requireExactValue("spring.flyway.placeholder-replacement", "false");
+        properties.requireExactValue("spring.flyway.sql-migration-prefix", "V");
+        properties.requireExactValue(
+            "spring.flyway.repeatable-sql-migration-prefix",
+            "R"
+        );
+        properties.requireExactValue("spring.flyway.sql-migration-separator", "__");
+        properties.requireExactList(
+            "spring.flyway.sql-migration-suffixes",
+            List.of(".sql")
+        );
+        properties.requireExactValue("spring.flyway.validate-on-migrate", "true");
+        properties.requireExactValue("spring.flyway.validate-migration-naming", "true");
+        properties.requireExactList("spring.flyway.ignore-migration-patterns", List.of());
+        properties.requireExactValue("spring.flyway.out-of-order", "false");
+        properties.requireExactValue("spring.flyway.fail-on-missing-locations", "true");
+
+        verifyOptionalDriver(properties, FLYWAY_DRIVER_PROPERTY);
         verifyConnectorProperties(
             properties.stringMap(FLYWAY_JDBC_PROPERTIES_PROPERTY),
             FLYWAY_JDBC_PROPERTIES_PROPERTY
@@ -515,39 +591,6 @@ final class SeederStartupConfigurationValidator {
         );
         for (String schema : properties.stringList(FLYWAY_SCHEMAS_PROPERTY)) {
             verifySchema(schema, FLYWAY_SCHEMAS_PROPERTY, baseline.database());
-        }
-
-        if (!properties.stringList(FLYWAY_INIT_SQLS_PROPERTY).isEmpty()) {
-            throw refused(FLYWAY_INIT_SQLS_PROPERTY + " must be empty");
-        }
-        if (!properties.stringMap(FLYWAY_PLACEHOLDERS_PROPERTY).isEmpty()
-                || properties.hasRelaxedProperty(FLYWAY_PLACEHOLDERS_PROPERTY)) {
-            throw refused(FLYWAY_PLACEHOLDERS_PROPERTY + " must be empty");
-        }
-        if (properties.optionalBoolean("spring.flyway.placeholder-replacement", true)) {
-            throw refused("spring.flyway.placeholder-replacement must be false");
-        }
-
-        if (properties.hasCanonicalDescendant(FLYWAY_LOCATIONS_PROPERTY)) {
-            throw refused(FLYWAY_LOCATIONS_PROPERTY + " cannot contain indexed additions");
-        }
-        properties.requireRepositoryControl(FLYWAY_LOCATIONS_PROPERTY);
-        if (!PROJECT_MIGRATION_LOCATION.equals(
-                properties.requiredString(FLYWAY_LOCATIONS_PROPERTY))) {
-            throw refused(
-                FLYWAY_LOCATIONS_PROPERTY + " must be exactly the repository migration location"
-            );
-        }
-        if (properties.hasCanonicalDescendant(FLYWAY_CALLBACK_LOCATIONS_PROPERTY)) {
-            throw refused(
-                FLYWAY_CALLBACK_LOCATIONS_PROPERTY + " cannot contain indexed additions"
-            );
-        }
-        properties.requireRepositoryControl(FLYWAY_CALLBACK_LOCATIONS_PROPERTY);
-        if (!properties.stringList(FLYWAY_CALLBACK_LOCATIONS_PROPERTY).isEmpty()) {
-            throw refused(
-                FLYWAY_CALLBACK_LOCATIONS_PROPERTY + " must be empty"
-            );
         }
     }
 
@@ -590,8 +633,14 @@ final class SeederStartupConfigurationValidator {
             String propertyName,
             boolean allowRemoteHost) {
         JdbcTarget target = parse(url, propertyName);
-        if (PRODUCTION_DATABASE.equalsIgnoreCase(target.database())) {
-            throw refused(propertyName + " names the protected connex_pub catalog");
+        if (isProtectedDatabase(target.database())) {
+            throw refused(propertyName + " names a protected Connex catalog");
+        }
+        if (!isDedicatedSeederDatabase(target.database())) {
+            throw refused(propertyName + " must name a dedicated seeder catalog");
+        }
+        if ("localhost".equalsIgnoreCase(target.host())) {
+            throw refused(propertyName + " must use a numeric loopback address");
         }
         if (!LOOPBACK_HOSTS.contains(target.host().toLowerCase(Locale.ROOT))
                 && !allowRemoteHost) {
@@ -600,6 +649,19 @@ final class SeederStartupConfigurationValidator {
             );
         }
         return target;
+    }
+
+    static boolean isProtectedDatabase(String database) {
+        return PROTECTED_DATABASES.stream().anyMatch(
+            protectedDatabase -> protectedDatabase.equalsIgnoreCase(database)
+        );
+    }
+
+    private static boolean isDedicatedSeederDatabase(String database) {
+        String normalizedDatabase = database.toLowerCase(Locale.ROOT);
+        return SEEDER_DATABASE_PREFIXES.stream().anyMatch(
+            normalizedDatabase::startsWith
+        );
     }
 
     private static JdbcTarget parse(String url, String propertyName) {
@@ -917,21 +979,125 @@ final class SeederStartupConfigurationValidator {
             }
         }
 
-        private void requireRepositoryControl(String propertyName) {
-            String canonicalName = canonicalPropertyName(propertyName);
+        private void requireExactList(
+                String propertyName,
+                List<String> requiredValues) {
+            if (!requiredValues.equals(stringList(propertyName))) {
+                throw refused(propertyName + " must use the repository value");
+            }
+        }
+
+        private void requireClosedFlywayNamespace() {
+            String canonicalNamespace = canonicalPropertyName("spring.flyway");
+            Map<String, String> requiredProperties = new LinkedHashMap<>();
+            for (String propertyName : REPOSITORY_FLYWAY_PROPERTIES.keySet()) {
+                requiredProperties.put(canonicalPropertyName(propertyName), propertyName);
+            }
+            Set<String> scalarDynamicProperties = FLYWAY_SCALAR_DYNAMIC_PROPERTIES.stream()
+                .map(SeederStartupConfigurationValidator::canonicalPropertyName)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            Map<String, String> effectiveSources = new LinkedHashMap<>();
+            Set<String> sourceProperties = new LinkedHashSet<>();
             for (EnumerablePropertySource<?> propertySource : propertySources) {
-                boolean sourceContainsProperty = Arrays.stream(propertySource.getPropertyNames())
-                    .map(SeederStartupConfigurationValidator::canonicalPropertyName)
-                    .anyMatch(canonicalName::equals);
-                if (!sourceContainsProperty) {
+                String sourceName = propertySource.getName();
+                for (String candidateName : propertySource.getPropertyNames()) {
+                    String canonicalCandidate = canonicalPropertyName(candidateName);
+                    if (!canonicalCandidate.equals(canonicalNamespace)
+                            && !isRelaxedDescendant(candidateName, "spring.flyway")) {
+                        continue;
+                    }
+                    if (isScalarFlywayDynamicProperty(
+                            candidateName,
+                            canonicalCandidate,
+                            scalarDynamicProperties
+                        )
+                            || isStructuredFlywayDynamicProperty(candidateName)) {
+                        continue;
+                    }
+                    String requiredProperty = requiredProperties.get(canonicalCandidate);
+                    if (requiredProperty == null) {
+                        String pinnedAncestor = requiredProperties.entrySet().stream()
+                            .filter(entry -> isRelaxedDescendant(
+                                candidateName,
+                                entry.getValue()
+                            ))
+                            .map(Map.Entry::getValue)
+                            .findFirst()
+                            .orElse(null);
+                        if (pinnedAncestor != null) {
+                            throw refused(
+                                pinnedAncestor + " cannot contain descendants"
+                            );
+                        }
+                        throw refused("spring.flyway contains an unsupported property");
+                    }
+                    if (!isRepositoryApplicationPropertySource(sourceName)) {
+                        throw refused(
+                            requiredProperty
+                                + " cannot be overridden by operator configuration"
+                        );
+                    }
+                    String sourceProperty = sourceName + '\0' + canonicalCandidate;
+                    if (!sourceProperties.add(sourceProperty)) {
+                        throw refused("spring.flyway contains ambiguous relaxed aliases");
+                    }
+                    effectiveSources.putIfAbsent(canonicalCandidate, sourceName);
+                }
+            }
+            for (String requiredProperty : REPOSITORY_FLYWAY_PROPERTIES.keySet()) {
+                String effectiveSource = effectiveSources.get(
+                    canonicalPropertyName(requiredProperty)
+                );
+                if (effectiveSource == null) {
+                    throw refused(requiredProperty + " must be repository-controlled");
+                }
+                if (!isSeederRepositoryPropertySource(effectiveSource)) {
+                    throw refused(
+                        requiredProperty + " must be pinned by application-seeder.yml"
+                    );
+                }
+            }
+        }
+
+        private static boolean isScalarFlywayDynamicProperty(
+                String candidateName,
+                String canonicalCandidate,
+                Set<String> scalarDynamicProperties) {
+            if (scalarDynamicProperties.contains(canonicalCandidate)) {
+                return true;
+            }
+            return FLYWAY_SCALAR_DYNAMIC_PROPERTIES.stream().anyMatch(propertyName ->
+                isRelaxedDescendant(candidateName, propertyName)
+            );
+        }
+
+        private static boolean isStructuredFlywayDynamicProperty(
+                String candidateName) {
+            return FLYWAY_STRUCTURED_DYNAMIC_PROPERTIES.stream().anyMatch(propertyName ->
+                canonicalPropertyName(propertyName).equals(
+                    canonicalPropertyName(candidateName)
+                ) || isRelaxedDescendant(candidateName, propertyName)
+            );
+        }
+
+        private static boolean isRelaxedDescendant(
+                String candidateName,
+                String propertyName) {
+            String canonicalName = canonicalPropertyName(propertyName);
+            StringBuilder candidatePrefix = new StringBuilder(candidateName.length());
+            for (int index = 0; index < candidateName.length(); index++) {
+                char candidate = candidateName.charAt(index);
+                if (Character.isLetterOrDigit(candidate)) {
+                    candidatePrefix.append(Character.toLowerCase(candidate));
+                }
+                if (!canonicalName.contentEquals(candidatePrefix)
+                        || index + 1 >= candidateName.length()) {
                     continue;
                 }
-                if (!propertySource.getName().contains(REPOSITORY_SEEDER_PROPERTY_SOURCE)) {
-                    throw refused(propertyName + " cannot be overridden by operator configuration");
-                }
-                return;
+                char separator = candidateName.charAt(index + 1);
+                return separator == '.' || separator == '[' || separator == '_';
             }
-            throw refused(propertyName + " must be repository-controlled");
+            return false;
         }
 
         private void requireClosedRepositoryNamespace(
@@ -987,7 +1153,7 @@ final class SeederStartupConfigurationValidator {
                 if (effectiveSource == null) {
                     throw refused(requiredProperty + " must be repository-controlled");
                 }
-                if (!effectiveSource.contains(REPOSITORY_SEEDER_PROPERTY_SOURCE)) {
+                if (!isSeederRepositoryPropertySource(effectiveSource)) {
                     throw refused(
                         requiredProperty + " must be pinned by application-seeder.yml"
                     );
@@ -996,8 +1162,12 @@ final class SeederStartupConfigurationValidator {
         }
 
         private static boolean isRepositoryApplicationPropertySource(String sourceName) {
-            return sourceName.contains(REPOSITORY_SEEDER_PROPERTY_SOURCE)
-                || sourceName.contains(REPOSITORY_APPLICATION_PROPERTY_SOURCE);
+            return isSeederRepositoryPropertySource(sourceName)
+                || sourceName.startsWith(REPOSITORY_APPLICATION_PROPERTY_SOURCE);
+        }
+
+        private static boolean isSeederRepositoryPropertySource(String sourceName) {
+            return sourceName.startsWith(REPOSITORY_SEEDER_PROPERTY_SOURCE);
         }
 
         private boolean hasRelaxedProperty(String propertyName) {
