@@ -39,6 +39,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -47,11 +49,13 @@ import ooo.klae.connex.backend.beans.OrgPlacement;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.IdentityBackfillRunner;
@@ -76,12 +80,14 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private PersonMapper personMapper;
+    @Autowired private RoleMapper roleMapper;
     @Autowired private IdentityBackfillTransaction backfillTransaction;
     @Autowired private TenantWorkScope tenantWorkScope;
     @Autowired private TenantContext tenantContext;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @MockitoBean private IdentityBackfillRunner identityBackfillRunner;
     @MockitoBean private LegacyWorkflowBackfillRunner legacyWorkflowBackfillRunner;
@@ -159,9 +165,124 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
     }
 
     @Test
-    void dedicatedPlacementRoutesBackfillAndRebuildToTenantCatalog() throws Exception {
+    void dedicatedPlacementRoutesBuiltInRoleReadAcrossBothCatalogs() throws Exception {
         ControlFixture fixture = newControlFixture("dedicated");
         String scratchCatalog = "cnx_identity_route_" + compactUuid();
+        prepareDedicatedCollision(fixture, scratchCatalog);
+
+        mockMvc.perform(get("/api/identity-collisions")
+                .queryParam("recordType", "person")
+                .queryParam("kind", "email")
+                .header("X-Workspace-Id", fixture.workspace().getId())
+                .session(login(fixture.user().getUsername())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].normalizedValue")
+                .value("routed@example.com"))
+            .andExpect(jsonPath("$.items[0].collisionSize").value(2))
+            .andExpect(content().string(
+                Matchers.not(Matchers.containsString("Default Decoy"))));
+
+        tenantWorkScope.withCatalog(null, () -> {
+            assertEquals(
+                0,
+                jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM person_identity WHERE workspace_id = ?",
+                    Integer.class,
+                    fixture.workspace().getId()));
+            return null;
+        });
+        assertFalse(tableExists(scratchCatalog, "workspace"));
+        assertFalse(tableExists(scratchCatalog, "app_user"));
+        assertEquals(defaultCatalog(), currentCatalog());
+    }
+
+    @Test
+    void dedicatedPlacementRoutesCustomRolePermissionReadToControlCatalog() throws Exception {
+        ControlFixture fixture = newControlFixture("custom-role");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(fixture.workspace().getId());
+        role.setName("Identity report reader " + compactUuid().substring(0, 8));
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(
+            fixture.workspace().getId(),
+            role.getId(),
+            List.of("REPORT_READ"));
+        workspaceMapper.setMemberCustomRole(
+            fixture.workspace().getId(),
+            fixture.user().getId(),
+            role.getId());
+        String scratchCatalog = "cnx_identity_role_" + compactUuid();
+        prepareDedicatedCollision(fixture, scratchCatalog);
+
+        mockMvc.perform(get("/api/identity-collisions")
+                .queryParam("recordType", "person")
+                .queryParam("kind", "email")
+                .header("X-Workspace-Id", fixture.workspace().getId())
+                .session(login(fixture.user().getUsername())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].normalizedValue")
+                .value("routed@example.com"));
+        assertEquals(defaultCatalog(), currentCatalog());
+    }
+
+    @Test
+    void dedicatedTransactionRollsBackTenantAndControlWritesTogether() throws SQLException {
+        ControlFixture fixture = newControlFixture("rollback");
+        String scratchCatalog = "cnx_identity_rollback_" + compactUuid();
+        scratchCatalogs.add(scratchCatalog);
+        createScratchCatalog(scratchCatalog);
+        insertPlacement(fixture.organization().getId(), "dedicated_database", scratchCatalog);
+        String marker = "Rollback Probe " + compactUuid().substring(0, 8);
+
+        tenantWorkScope.withWorkspacePlacement(
+            fixture.workspace().getId(),
+            (orgId, catalog) -> {
+                TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                assertThrows(
+                    RollbackProbe.class,
+                    () -> transaction.executeWithoutResult(status -> {
+                        Person person = new Person();
+                        person.setWorkspaceId(fixture.workspace().getId());
+                        person.setName(marker);
+                        person.setEmail("rollback@example.com");
+                        personMapper.insert(person);
+                        assertEquals(
+                            1,
+                            workspaceMapper.updateMemberRole(
+                                fixture.workspace().getId(),
+                                fixture.user().getId(),
+                                "admin"));
+                        throw new RollbackProbe();
+                    }));
+                return null;
+            });
+
+        tenantWorkScope.withCatalog(scratchCatalog, () -> {
+            assertEquals(
+                0,
+                jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM person WHERE workspace_id = ? AND name = ?",
+                    Integer.class,
+                    fixture.workspace().getId(),
+                    marker));
+            return null;
+        });
+        tenantWorkScope.withCatalog(null, () -> {
+            assertEquals(
+                "member",
+                workspaceMapper.getRole(
+                    fixture.workspace().getId(),
+                    fixture.user().getId()));
+            return null;
+        });
+        assertEquals(defaultCatalog(), currentCatalog());
+    }
+
+    private void prepareDedicatedCollision(
+            ControlFixture fixture,
+            String scratchCatalog) {
         scratchCatalogs.add(scratchCatalog);
         createScratchCatalog(scratchCatalog);
         List<Person> decoys = tenantWorkScope.withCatalog(
@@ -207,19 +328,6 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
                         catalog, fixture.workspace().getId()));
                 return null;
             });
-
-        tenantWorkScope.withCatalog(null, () -> {
-            assertEquals(
-                0,
-                jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM person_identity WHERE workspace_id = ?",
-                    Integer.class,
-                    fixture.workspace().getId()));
-            return null;
-        });
-        assertFalse(tableExists(scratchCatalog, "workspace"));
-        assertFalse(tableExists(scratchCatalog, "app_user"));
-        assertEquals(defaultCatalog(), currentCatalog());
     }
 
     @Test
@@ -441,5 +549,9 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
             Organization organization,
             Workspace workspace,
             User user) {
+    }
+
+    private static final class RollbackProbe extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 }

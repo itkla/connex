@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,9 +13,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.tenant.ControlCatalogRoutingInterceptor;
 import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 
@@ -82,6 +86,28 @@ class MapperPlaneArchTest {
             "New cross-plane table references in mapper SQL. Each one is a query that breaks when the "
                 + "planes split into separate catalogs (Phase 4, #313) — hydrate in the service layer "
                 + "instead, or add to the baseline with a reviewed rationale: " + newCrossings);
+    }
+
+    @Test
+    void controlCatalogRoutingRegistryIsExactAndPhysicallyControlOnly() throws IOException {
+        Set<String> expected = Stream.concat(
+            TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.stream(),
+            Stream.of(
+                "ooo.klae.connex.backend.mappers.AuditLogMapper",
+                "ooo.klae.connex.backend.mappers.RoleMapper"))
+            .collect(Collectors.toUnmodifiableSet());
+        assertEquals(expected, ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES);
+
+        List<String> tenantReferences = new ArrayList<>();
+        for (String namespace : ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES) {
+            String mapper = namespace.substring(namespace.lastIndexOf('.') + 1);
+            for (String table : crossPlaneReferences(mapper, TablePlaneRegistry.ORG_DATA_TABLES)) {
+                tenantReferences.add(mapper + " -> " + table);
+            }
+        }
+        assertTrue(tenantReferences.isEmpty(),
+            "Control-catalog routing may contain only physically control-plane mappers: "
+                + tenantReferences);
     }
 
     private void recordNew(String mapper, Set<String> crossings, List<String> newCrossings) {
