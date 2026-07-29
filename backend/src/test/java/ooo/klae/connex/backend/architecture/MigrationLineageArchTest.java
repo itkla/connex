@@ -43,6 +43,9 @@ class MigrationLineageArchTest {
         Pattern.compile("V(\\d+)__[a-z0-9_]+\\.sql");
     private static final Pattern SQL_MIGRATION_FILE_NAME =
         Pattern.compile("(?:V\\d+|R)__[a-z0-9_]+\\.sql");
+    private static final Set<Path> MIGRATION_METADATA_PATHS = Set.of(
+        Path.of("control/.gitkeep"),
+        Path.of("tenant/.gitkeep"));
     private static final List<Pattern> TABLE_REFERENCES = List.of(
         Pattern.compile(
             "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
@@ -83,8 +86,7 @@ class MigrationLineageArchTest {
         try (Stream<Path> files = Files.walk(root)) {
             invalidNames = files
                 .filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-                .filter(path -> !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
-                    || !SQL_MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches())
+                .filter(path -> !migrationResourceIsValid(root, path))
                 .map(path -> path.getFileName().toString())
                 .map(MigrationLineageArchTest::displayName)
                 .sorted()
@@ -92,7 +94,8 @@ class MigrationLineageArchTest {
         }
         assertTrue(invalidNames.isEmpty(),
             "Flyway migrations must be regular files named V{integer}__{snake_case}.sql "
-                + "or R__{snake_case}.sql: " + invalidNames);
+                + "or R__{snake_case}.sql, apart from the two lineage .gitkeep files: "
+                + invalidNames);
     }
 
     /**
@@ -156,6 +159,21 @@ class MigrationLineageArchTest {
 
     private static String stripComments(String sql) {
         return sql.replaceAll("--[^\\n]*", "").replaceAll("(?s)/\\*.*?\\*/", "");
+    }
+
+    private static boolean migrationResourceIsValid(Path root, Path path) {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        if (SQL_MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches()) {
+            return true;
+        }
+        try {
+            return MIGRATION_METADATA_PATHS.contains(root.relativize(path))
+                && Files.size(path) == 0;
+        } catch (IOException exception) {
+            return false;
+        }
     }
 
     private static String displayName(String name) {

@@ -20,6 +20,11 @@ IDENTITY_BLOBS=(
 )
 LINEAGE_ANCHOR_PATH="$MIGRATION_ROOT/control/V126__tenant_teardown_control_guards.sql"
 LINEAGE_ANCHOR_BLOB="7339e596e4adadf910541f0d5a3e76fb166bdad9"
+MIGRATION_METADATA_PATHS=(
+  "$MIGRATION_ROOT/control/.gitkeep"
+  "$MIGRATION_ROOT/tenant/.gitkeep"
+)
+EMPTY_BLOB="e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
 
 if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] \
     || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
@@ -59,6 +64,21 @@ tree_entry_is_regular_file() {
   local path_name="$2"
 
   [[ "$(tree_entry "$revision" "$path_name")" = "100644 blob "* ]]
+}
+
+migration_metadata_entry_is_exact() {
+  local revision="$1"
+  local path_name="$2"
+  local metadata_path
+
+  for metadata_path in "${MIGRATION_METADATA_PATHS[@]}"; do
+    if [ "$path_name" = "$metadata_path" ]; then
+      [[ "$(tree_entry "$revision" "$path_name")" \
+          = "100644 blob $EMPTY_BLOB	$path_name" ]]
+      return
+    fi
+  done
+  return 1
 }
 
 normalize_version() {
@@ -177,7 +197,8 @@ while IFS= read -r -d '' path_name; do
     if version_is_greater "$version" "$base_max"; then
       base_max="$version"
     fi
-  elif ! repeatable_migration_name_is_valid "$file_name"; then
+  elif ! repeatable_migration_name_is_valid "$file_name" \
+      && ! migration_metadata_entry_is_exact "$BASE_SHA" "$path_name"; then
     invalid_base_names+=("$path_name")
   fi
   if ! tree_entry_is_regular_file "$BASE_SHA" "$path_name"; then
@@ -186,7 +207,7 @@ while IFS= read -r -d '' path_name; do
 done < <(git ls-tree -r -z --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_base_names[@]}" -gt 0 ]; then
-  echo "Base revision migration files must be regular files named V{integer}__{snake_case}.sql or R__{snake_case}.sql:" >&2
+  echo "Base revision migration resources must be valid V/R SQL files or the two empty lineage .gitkeep files:" >&2
   print_paths "${invalid_base_names[@]}" | sort -u >&2
   exit 1
 fi
@@ -208,7 +229,8 @@ while IFS= read -r -d '' path_name; do
         && ! version_is_greater "$version" "$base_max"; then
       non_monotonic_additions+=("$path_name")
     fi
-  elif ! repeatable_migration_name_is_valid "$file_name"; then
+  elif ! repeatable_migration_name_is_valid "$file_name" \
+      && ! migration_metadata_entry_is_exact "$HEAD_SHA" "$path_name"; then
     invalid_added_names+=("$path_name")
   fi
   if ! tree_entry_is_regular_file "$HEAD_SHA" "$path_name"; then
@@ -217,7 +239,7 @@ while IFS= read -r -d '' path_name; do
 done < <(git ls-tree -r -z --name-only "$HEAD_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_added_names[@]}" -gt 0 ]; then
-  echo "Migration files must be regular files named V{integer}__{snake_case}.sql or R__{snake_case}.sql:" >&2
+  echo "Migration resources must be valid V/R SQL files or the two empty lineage .gitkeep files:" >&2
   print_paths "${invalid_added_names[@]}" | sort -u >&2
   exit 1
 fi

@@ -17,9 +17,10 @@ new_repository() {
   git -C "$repository" init -q
   git -C "$repository" config user.name test
   git -C "$repository" config user.email test@example.test
+  : > "$migration_root/control/.gitkeep"
+  : > "$migration_root/tenant/.gitkeep"
   printf 'SELECT 1;\n' > "$migration_root/$plane/V${version}__base.sql"
-  git -C "$repository" add \
-    "backend/src/main/resources/db/migration/$plane/V${version}__base.sql"
+  git -C "$repository" add backend/src/main/resources/db/migration
   git -C "$repository" commit -qm base
   printf '%s\n' "$repository"
 }
@@ -33,6 +34,8 @@ new_identity_relocation_repository() {
   git -C "$repository" init -q
   git -C "$repository" config user.name test
   git -C "$repository" config user.email test@example.test
+  : > "$control_root/.gitkeep"
+  : > "$migration_root/.gitkeep"
   cp \
     "$SOURCE_ROOT/backend/src/main/resources/db/migration/tenant/V127__canonical_identity.sql" \
     "$migration_root/V123__canonical_identity.sql"
@@ -188,6 +191,22 @@ ln -s /dev/null \
 git -C "$repository" add \
   backend/src/main/resources/db/migration/tenant/V127__symbolic_link.sql
 git -C "$repository" commit -qm symbolic-link-migration
+expect_failure "$repository" "$base"
+
+repository="$(new_repository unauthorized-metadata control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+mkdir -p "$repository/backend/src/main/resources/db/migration/extra"
+: > "$repository/backend/src/main/resources/db/migration/extra/.gitkeep"
+git -C "$repository" add backend/src/main/resources/db/migration/extra/.gitkeep
+git -C "$repository" commit -qm unauthorized-metadata
+expect_failure "$repository" "$base"
+
+repository="$(new_repository modified-metadata control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'not empty\n' \
+  > "$repository/backend/src/main/resources/db/migration/control/.gitkeep"
+git -C "$repository" add backend/src/main/resources/db/migration/control/.gitkeep
+git -C "$repository" commit -qm modified-metadata
 expect_failure "$repository" "$base"
 
 repository="$(new_repository control-character-name control 126)"
