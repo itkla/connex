@@ -38,14 +38,8 @@ public interface TenantLifecycleMapper {
         @Param("declaration") TableLifecycle declaration,
         @Param("limit") int limit);
 
-    List<ActiveObjectReference> findActiveObjectReferencesAfter(
-        @Param("workspaceId") int workspaceId,
-        @Param("afterKey") String afterKey,
-        @Param("limit") int limit);
-
-    ActiveObjectReference findActiveObjectReference(
-        @Param("workspaceId") int workspaceId,
-        @Param("objectKey") String objectKey);
+    Cursor<ActiveObjectReference> streamActiveObjectReferences(
+        @Param("workspaceId") int workspaceId);
 
     List<String> findLifecycleObjectKeysAfter(
         @Param("workspaceId") int workspaceId,

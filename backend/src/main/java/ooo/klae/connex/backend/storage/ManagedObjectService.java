@@ -337,8 +337,14 @@ public class ManagedObjectService implements ApplicationRunner {
             throw new IllegalStateException("Active managed object is missing its usage ledger");
         }
         String expectedKey = switch (reference.kind()) {
-            case "attachment" -> managedAttachmentKey(workspaceId, reference.persistedUrl())
-                .orElseThrow(() -> new IllegalStateException("Attachment object reference is invalid"));
+            case "attachment" -> {
+                if (reference.ownerId() != 0) {
+                    throw new IllegalStateException("Attachment object owner is invalid");
+                }
+                yield managedAttachmentKey(workspaceId, reference.persistedUrl())
+                    .orElseThrow(() ->
+                        new IllegalStateException("Attachment object reference is invalid"));
+            }
             case "person_image" -> managedPersonImageKey(
                     workspaceId,
                     positive(reference.ownerId()),

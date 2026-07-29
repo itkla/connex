@@ -1,20 +1,26 @@
 package ooo.klae.connex.backend.services;
 
+import java.sql.SQLException;
+import java.util.List;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.FederatedIdentity;
+import ooo.klae.connex.backend.dto.OrganizationLifecycleRef;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
-import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
+import ooo.klae.connex.backend.mappers.UserMapper;
 
 /** Short control-plane transactions for lifecycle roots and operation leases. */
 @Service
@@ -22,26 +28,41 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 public class TenantLifecycleControlOperations {
     private static final String EXPORT = "export";
     private static final String TEARDOWN = "teardown";
+    static final String EXPORT_BUSY_MESSAGE =
+        "Too many tenant exports are already streaming; retry shortly";
+    private static final int MYSQL_NOWAIT_ERROR = 3572;
+    private static final String MYSQL_GENERAL_ERROR_STATE = "HY000";
 
     private final TenantLifecycleControlMapper mapper;
-    private final TenantLifecycleProperties properties;
+    private final UserMapper userMapper;
 
     /** Atomically validates an active workspace and acquires an export lease. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
     public AcquiredWorkspace acquireExport(
             int orgId,
             int workspaceId,
             int actorId) {
-        WorkspaceLifecycleRef workspace = mapper.lockActiveWorkspaceForExport(orgId, workspaceId);
-        if (workspace == null) {
-            WorkspaceLifecycleRef existing = mapper.findWorkspaceInOrg(orgId, workspaceId);
-            if (existing == null) {
-                throw new ResourceNotFoundException("Workspace not found");
-            }
+        lockActor(actorId);
+        WorkspaceLifecycleRef workspace =
+            mapper.lockWorkspaceForShare(workspaceId);
+        requireWorkspaceInOrg(workspace, orgId, "Workspace not found");
+        if (!"active".equals(workspace.lifecycleState())) {
             throw new ConflictException("Workspace teardown is in progress");
         }
-        if (!mapper.isOrgAdminForLifecycle(orgId, actorId)) {
+        if (mapper.lockActiveOrganizationForShare(orgId) == null) {
+            if (mapper.findOrganization(orgId) == null) {
+                throw new ResourceNotFoundException("Organization not found");
+            }
+            throw new ConflictException("Organization teardown is in progress");
+        }
+        if (mapper.lockOrgAdminMembershipForUpdate(orgId, actorId) == null) {
             throw new ForbiddenException("Organization administrator access required");
+        }
+        int capacity = lockExportAdmissionCapacity();
+        if (mapper.countGlobalExportLeases() >= capacity) {
+            throw new TooManyRequestsException(EXPORT_BUSY_MESSAGE);
         }
         OperationLease lease = insertLease(orgId, workspaceId, EXPORT);
         return new AcquiredWorkspace(workspace, lease);
@@ -72,20 +93,6 @@ public class TenantLifecycleControlOperations {
     }
 
     /**
-     * Clears export leases older than the export request timeout so a killed or
-     * crashed streaming request cannot permanently consume its organization's
-     * concurrent-export budget. Teardown leases keep failing closed for
-     * privileged operator clearance.
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public int reapStaleExportLeases() {
-        return mapper.deleteStaleOperationLeases(
-            EXPORT,
-            exportLeaseMaxAgeSeconds(),
-            properties.getTableBatchSize());
-    }
-
-    /**
      * Refuses workspace teardown while an open APPI data-subject request still
      * points at that workspace, before the strict start audit and while the
      * organization is still resolvable, so an administrator can finish the
@@ -111,12 +118,6 @@ public class TenantLifecycleControlOperations {
         requireNoOpenOrganizationSubjectRequests(orgId);
     }
 
-    /** Counts export leases that a fenced workspace must drain before sweeping. */
-    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
-    public int countExportLeases(int workspaceId) {
-        return mapper.countOperationLeases(workspaceId, EXPORT);
-    }
-
     /**
      * Marks an exact workspace as tearing down and acquires its exclusive
      * teardown lease. The open data-subject request refusal runs here, under the
@@ -128,16 +129,19 @@ public class TenantLifecycleControlOperations {
             int orgId,
             int workspaceId,
             int actorId) {
-        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(orgId, workspaceId);
+        lockActor(actorId);
+        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(workspaceId);
         boolean rootExists = workspace != null;
         if (workspace == null) {
-            workspace = mapper.lockCleanupTombstoneInOrg(orgId, workspaceId);
+            workspace = mapper.lockCleanupTombstoneInOrg(workspaceId);
         }
-        if (workspace == null) {
-            throw new ResourceNotFoundException("Workspace not found");
+        requireWorkspaceInOrg(workspace, orgId, "Workspace not found");
+        if (mapper.lockOrganization(orgId) == null) {
+            throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
         requireNoOpenWorkspaceSubjectRequests(orgId, workspaceId);
+        requireNoOperationLeasesForWorkspace(workspaceId);
         OperationLease lease = insertLease(orgId, workspaceId, TEARDOWN);
         if (rootExists) {
             mapper.markWorkspaceTearingDown(orgId, workspaceId);
@@ -164,11 +168,15 @@ public class TenantLifecycleControlOperations {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markOrganizationTearingDown(int orgId, int actorId) {
+        lockActor(actorId);
         if (mapper.lockOrganization(orgId) == null) {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
         requireNoOpenOrganizationSubjectRequests(orgId);
+        if (mapper.countOperationLeasesInOrg(orgId) != 0) {
+            throw new ConflictException("A tenant operation lease still blocks teardown");
+        }
         mapper.markOrganizationTearingDown(orgId);
     }
 
@@ -179,12 +187,17 @@ public class TenantLifecycleControlOperations {
             int workspaceId,
             int actorId,
             OperationLease teardownLease) {
-        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(orgId, workspaceId);
+        lockActor(actorId);
+        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(workspaceId);
         WorkspaceLifecycleRef tombstone = workspace == null
-            ? mapper.lockCleanupTombstoneInOrg(orgId, workspaceId)
+            ? mapper.lockCleanupTombstoneInOrg(workspaceId)
             : null;
-        if (workspace == null && tombstone == null) {
-            throw new ResourceNotFoundException("Workspace not found");
+        requireWorkspaceInOrg(
+            workspace == null ? tombstone : workspace,
+            orgId,
+            "Workspace not found");
+        if (mapper.lockOrganization(orgId) == null) {
+            throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
         if (!mapper.ownsOperationLease(
@@ -193,9 +206,9 @@ public class TenantLifecycleControlOperations {
                 teardownLease.token())) {
             throw new IllegalStateException("Workspace teardown lease was not owned at terminal deletion");
         }
+        mapper.clearSubjectRequestWorkspaceLinks(orgId, workspaceId);
         if (workspace != null) {
             mapper.clearSsoJitWorkspace(orgId, workspaceId);
-            mapper.clearSubjectRequestWorkspaceLinks(orgId, workspaceId);
             mapper.insertCleanupTombstone(
                 workspace.id(),
                 workspace.orgId(),
@@ -214,8 +227,11 @@ public class TenantLifecycleControlOperations {
             int workspaceId,
             int actorId,
             OperationLease teardownLease) {
-        if (mapper.lockCleanupTombstoneInOrg(orgId, workspaceId) == null) {
-            throw new ResourceNotFoundException("Workspace cleanup marker not found");
+        lockActor(actorId);
+        WorkspaceLifecycleRef tombstone = mapper.lockCleanupTombstoneInOrg(workspaceId);
+        requireWorkspaceInOrg(tombstone, orgId, "Workspace cleanup marker not found");
+        if (mapper.lockOrganization(orgId) == null) {
+            throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
         if (!mapper.ownsOperationLease(
@@ -236,20 +252,65 @@ public class TenantLifecycleControlOperations {
     }
 
     /** Removes one bounded page of restrictive org-scoped identity rows. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public int deleteFederatedIdentityBatch(int orgId, int limit) {
-        return mapper.deleteFederatedIdentityBatch(orgId, limit);
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
+    public int deleteFederatedIdentityBatch(int orgId, int actorId, int limit) {
+        List<FederatedIdentity> discovered =
+            mapper.findFederatedIdentityBatch(orgId, limit);
+        TreeSet<Integer> userIds = new TreeSet<>();
+        for (FederatedIdentity identity : discovered) {
+            userIds.add(identity.getUserId());
+        }
+        userIds.add(actorId);
+        for (int userId : userIds) {
+            if (userMapper.lockByIdForShare(userId) == null) {
+                if (userId == actorId) {
+                    throw new ForbiddenException("Authenticated user is unavailable");
+                }
+                throw new ConflictException(
+                    "Federated identity cleanup changed; retry organization teardown");
+            }
+        }
+        OrganizationLifecycleRef organization = mapper.lockOrganization(orgId);
+        if (organization == null) {
+            throw new ResourceNotFoundException("Organization not found");
+        }
+        if (!"tearing_down".equals(organization.lifecycleState())) {
+            throw new ConflictException("Organization teardown is not in progress");
+        }
+        requireOwner(orgId, actorId);
+        List<FederatedIdentity> current =
+            mapper.findFederatedIdentityBatch(orgId, limit);
+        if (!discovered.equals(current)) {
+            throw new ConflictException(
+                "Federated identity cleanup changed; retry organization teardown");
+        }
+        if (current.isEmpty()) {
+            return 0;
+        }
+        List<Integer> identityIds = current.stream()
+            .map(FederatedIdentity::getId)
+            .toList();
+        int deleted = mapper.deleteFederatedIdentityBatch(orgId, identityIds);
+        if (deleted != identityIds.size()) {
+            throw new ConflictException(
+                "Federated identity cleanup changed; retry organization teardown");
+        }
+        return deleted;
     }
 
     /** Deletes a verified empty organization root and its cascading control rows. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void deleteOrganizationRoot(int orgId, int actorId) {
+        lockActor(actorId);
         if (mapper.lockOrganization(orgId) == null) {
             throw new ResourceNotFoundException("Organization not found");
         }
         requireOwner(orgId, actorId);
         if (mapper.countWorkspaces(orgId) != 0
-                || mapper.countCleanupTombstones(orgId) != 0) {
+                || mapper.countCleanupTombstones(orgId) != 0
+                || mapper.countOperationLeasesInOrg(orgId) != 0) {
             throw new IllegalStateException("Organization still has workspace roots");
         }
         if (mapper.deleteOrganization(orgId) != 1) {
@@ -258,12 +319,6 @@ public class TenantLifecycleControlOperations {
     }
 
     private OperationLease insertLease(int orgId, int workspaceId, String kind) {
-        if (EXPORT.equals(kind)
-                && mapper.countRecentOperationLeasesInOrg(orgId, EXPORT, exportLeaseMaxAgeSeconds())
-                    >= properties.getMaxConcurrentExports()) {
-            throw new TooManyRequestsException(
-                "Too many tenant exports are already streaming; retry shortly");
-        }
         OperationLease lease = new OperationLease(
             orgId,
             workspaceId,
@@ -272,9 +327,43 @@ public class TenantLifecycleControlOperations {
         try {
             mapper.insertOperationLease(orgId, workspaceId, kind, lease.token());
         } catch (DuplicateKeyException exception) {
-            throw new ConflictException("Tenant teardown is already in progress");
+            throw new ConflictException("A tenant operation is already in progress");
         }
         return lease;
+    }
+
+    private int lockExportAdmissionCapacity() {
+        try {
+            int capacity = mapper.lockExportAdmissionCapacityNowait();
+            if (capacity < 1 || capacity > TenantExportService.MAX_CONCURRENT_EXPORTS) {
+                throw new IllegalStateException("Tenant export admission capacity is invalid");
+            }
+            return capacity;
+        } catch (RuntimeException exception) {
+            if (isMySqlNowaitContention(exception)) {
+                throw new TooManyRequestsException(EXPORT_BUSY_MESSAGE);
+            }
+            throw exception;
+        }
+    }
+
+    private static boolean isMySqlNowaitContention(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof SQLException sqlException
+                    && sqlException.getErrorCode() == MYSQL_NOWAIT_ERROR
+                    && MYSQL_GENERAL_ERROR_STATE.equals(sqlException.getSQLState())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void requireNoOperationLeasesForWorkspace(int workspaceId) {
+        if (mapper.countAllOperationLeases(workspaceId) != 0) {
+            throw new ConflictException("A tenant operation lease still blocks teardown");
+        }
     }
 
     private void requireNoOpenWorkspaceSubjectRequests(int orgId, int workspaceId) {
@@ -291,13 +380,24 @@ public class TenantLifecycleControlOperations {
         }
     }
 
-    private long exportLeaseMaxAgeSeconds() {
-        return Math.max(1, properties.getExportTimeout().toSeconds());
-    }
-
     private void requireOwner(int orgId, int actorId) {
         if (!mapper.isOrgOwnerForLifecycle(orgId, actorId)) {
             throw new ForbiddenException("Organization owner access required");
+        }
+    }
+
+    private void lockActor(int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Authenticated user is unavailable");
+        }
+    }
+
+    private static void requireWorkspaceInOrg(
+            WorkspaceLifecycleRef workspace,
+            int orgId,
+            String message) {
+        if (workspace == null || workspace.orgId() != orgId) {
+            throw new ResourceNotFoundException(message);
         }
     }
 

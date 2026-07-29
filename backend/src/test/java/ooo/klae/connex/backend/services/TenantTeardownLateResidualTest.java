@@ -56,7 +56,6 @@ class TenantTeardownLateResidualTest {
     @BeforeEach
     void setUp() {
         properties.setTeardownSettleDelay(Duration.ZERO);
-        properties.setExportLeaseWaitTimeout(Duration.ZERO);
         service = new TenantTeardownService(
             sessionSecurityService,
             tenantWorkScope,
@@ -76,7 +75,6 @@ class TenantTeardownLateResidualTest {
             .thenReturn(List.of());
         when(tenantTransaction.storageResidual(anyInt()))
             .thenReturn(new TenantStorageResidual(0, 0, 0, 0, 0, 0, 0));
-        when(controlOperations.countExportLeases(WORKSPACE_ID)).thenReturn(0);
     }
 
     @Test

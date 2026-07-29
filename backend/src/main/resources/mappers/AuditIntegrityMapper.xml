@@ -24,13 +24,36 @@
   </select>
 
   <select id="appendOnlyGuardInstalled" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1
+    SELECT COUNT(*) = 3
+    FROM (
+      SELECT TRIGGER_NAME
       FROM information_schema.TRIGGERS
       WHERE TRIGGER_SCHEMA = DATABASE()
+        AND EVENT_OBJECT_SCHEMA = DATABASE()
         AND EVENT_OBJECT_TABLE = 'audit_log'
-        AND TRIGGER_NAME = 'trg_audit_log_no_update'
-    )
+        AND TRIGGER_NAME IN (
+          'trg_audit_log_no_update',
+          'trg_audit_log_no_update_v127',
+          'trg_audit_log_no_delete')
+        AND ACTION_TIMING = 'BEFORE'
+        AND (
+          (
+            TRIGGER_NAME IN (
+              'trg_audit_log_no_update',
+              'trg_audit_log_no_update_v127')
+            AND EVENT_MANIPULATION = 'UPDATE'
+          )
+          OR (
+            TRIGGER_NAME = 'trg_audit_log_no_delete'
+            AND EVENT_MANIPULATION = 'DELETE'
+          )
+        )
+        AND ACTION_ORIENTATION = 'ROW'
+        AND ACTION_CONDITION IS NULL
+        AND ACTION_STATEMENT =
+          'SIGNAL SQLSTATE ''45000'' SET MESSAGE_TEXT = ''audit_log is append-only'''
+      GROUP BY TRIGGER_NAME
+    ) exact_guards
   </select>
 
   <update id="advanceHead">

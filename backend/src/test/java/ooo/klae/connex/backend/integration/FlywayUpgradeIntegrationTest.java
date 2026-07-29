@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -98,6 +99,21 @@ class FlywayUpgradeIntegrationTest {
         assertNotNull(latest.info().current());
         assertTrue(latest.info().current().getVersion().compareTo(MigrationVersion.fromVersion("116")) >= 0);
         try (Connection connection = connection()) {
+            assertEquals(4, scalar(connection, """
+                SELECT capacity
+                FROM tenant_export_admission_control
+                WHERE id = 1
+                """));
+            assertThrows(
+                SQLException.class,
+                () -> execute(
+                    connection,
+                    "UPDATE tenant_export_admission_control SET capacity = 0 WHERE id = 1"));
+            assertThrows(
+                SQLException.class,
+                () -> execute(
+                    connection,
+                    "UPDATE tenant_export_admission_control SET capacity = 5 WHERE id = 1"));
             JsonNode migratedConfig = JsonMapper.builder().build().readTree(
                 stringScalar(connection, "SELECT config_json FROM saved_view WHERE id = 9101"));
             JsonNode expectedConfig = JsonMapper.builder().build().readTree("""
@@ -371,6 +387,7 @@ class FlywayUpgradeIntegrationTest {
         var configuration = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
+            .callbacks(new AuditLogV126MigrationCallback())
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"));
         if (target != null) {

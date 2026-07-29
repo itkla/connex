@@ -163,9 +163,60 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class,
             () -> dataSubjectRequestService.create(mine.getId(), currentUser.getId(), foreign));
 
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            mineWorkspace.getId());
+        assertThrows(
+            BadRequestException.class,
+            () -> dataSubjectRequestService.create(
+                mine.getId(),
+                currentUser.getId(),
+                linkedRequest(mineWorkspace.getId(), minePerson.getId())));
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM data_subject_request WHERE org_id = ?",
+                Integer.class,
+                mine.getId()));
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'active' WHERE id = ?",
+            mineWorkspace.getId());
+
         DataSubjectRequestDto linked = dataSubjectRequestService.create(
             mine.getId(), currentUser.getId(), linkedRequest(mineWorkspace.getId(), minePerson.getId()));
         assertEquals(minePerson.getId(), linked.getSubjectPersonId());
+    }
+
+    @Test
+    void updateRejectsAnInitiallyInactiveLinkedWorkspaceWithoutWriting() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        DataSubjectRequestDto created = dataSubjectRequestService.create(
+            org.getId(),
+            currentUser.getId(),
+            linkedRequest(subjectWorkspace.getId(), subject.getId()));
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            subjectWorkspace.getId());
+        DataSubjectRequestUpsertRequest update = request("disclosure");
+        update.setStatus("closed");
+
+        assertThrows(
+            BadRequestException.class,
+            () -> dataSubjectRequestService.update(
+                org.getId(),
+                created.getId(),
+                currentUser.getId(),
+                update));
+
+        assertEquals(
+            "received",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM data_subject_request WHERE org_id = ? AND id = ?",
+                String.class,
+                org.getId(),
+                created.getId()));
     }
 
     @Test

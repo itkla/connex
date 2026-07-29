@@ -145,6 +145,37 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void existingIdentityIsNotTouchedWhileTheOrganizationIsTearingDown() {
+        User linked = newUser();
+        FederatedIdentity seed = new FederatedIdentity();
+        seed.setUserId(linked.getId());
+        seed.setOrgId(orgId);
+        seed.setProvider(PROVIDER);
+        seed.setIssuer(ISSUER);
+        seed.setExternalSubject("sub-existing-fenced");
+        federatedIdentityMapper.insert(seed);
+        jdbcTemplate.update(
+            "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            orgId);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> ssoLoginService.resolve(
+                PROVIDER,
+                ISSUER,
+                "sub-existing-fenced",
+                linked.getEmail(),
+                true,
+                orgId,
+                "Existing Fenced"));
+
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT last_login_at FROM federated_identity WHERE id = ?",
+            java.time.LocalDateTime.class,
+            seed.getId()));
+    }
+
+    @Test
     void existingIdentity_signsInAndTouchesLastLogin() {
         User linked = newUser();
         FederatedIdentity seed = new FederatedIdentity();

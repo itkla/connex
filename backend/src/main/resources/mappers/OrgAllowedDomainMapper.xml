@@ -9,6 +9,13 @@
     ORDER BY domain
   </select>
 
+  <select id="findByOrgForShare" resultType="string">
+    SELECT domain FROM org_allowed_domain
+    WHERE org_id = #{orgId}
+    ORDER BY domain
+    FOR SHARE
+  </select>
+
   <insert id="add">
     INSERT IGNORE INTO org_allowed_domain (org_id, domain)
     VALUES (#{orgId}, #{domain})

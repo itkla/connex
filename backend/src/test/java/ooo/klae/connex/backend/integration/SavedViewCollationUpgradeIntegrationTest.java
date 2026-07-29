@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 /**
  * Reproduces the collation footgun that wedged staging on V111: a long-lived
  * catalog whose default collation was {@code utf8mb4_unicode_ci} when
@@ -79,6 +80,7 @@ class SavedViewCollationUpgradeIntegrationTest {
         Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
+            .callbacks(new AuditLogV126MigrationCallback())
             .baselineOnMigrate(true)
             .baselineVersion(MigrationVersion.fromVersion("0"))
             .load()

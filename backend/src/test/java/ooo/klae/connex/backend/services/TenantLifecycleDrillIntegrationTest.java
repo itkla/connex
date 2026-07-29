@@ -62,8 +62,6 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = {
         "connex.tenant-lifecycle.teardown-settle-delay=0s",
-        "connex.tenant-lifecycle.export-lease-wait-timeout=1s",
-        "connex.tenant-lifecycle.lease-reaper-initial-delay-ms=600000"
     })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
@@ -332,7 +330,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
-    void theExportCapSeesOnlyItsOwnRecentLeasesAndStaleExportLeasesAreReaped() {
+    void persistedExportLeasesNeverAgeOutAndRemainFailClosed() {
         createDedicatedDrillRoots();
         int orgId = drillOrganization.getId();
         int workspaceId = drillWorkspace.getId();
@@ -349,16 +347,12 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             "export",
             0);
 
-        assertEquals(1, controlMapper.countRecentOperationLeasesInOrg(orgId, "export", 1800));
-        assertEquals(1, controlMapper.countRecentOperationLeasesInOrg(
-            otherOrganization.getId(),
-            "export",
-            1800));
-
-        assertTrue(controlOperations.reapStaleExportLeases() > 0);
+        assertEquals(2, controlMapper.countOperationLeases(workspaceId, "export"));
+        assertEquals(3, controlMapper.countOperationLeasesInOrg(orgId));
+        assertEquals(1, controlMapper.countOperationLeasesInOrg(otherOrganization.getId()));
 
         assertTrue(leaseExists(fresh));
-        assertFalse(leaseExists(stale));
+        assertTrue(leaseExists(stale));
         assertTrue(leaseExists(teardown));
         assertTrue(leaseExists(neighbour));
     }

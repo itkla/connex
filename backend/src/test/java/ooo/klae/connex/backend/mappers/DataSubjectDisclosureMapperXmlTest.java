@@ -39,9 +39,9 @@ class DataSubjectDisclosureMapperXmlTest {
         parameters.put("personId", 5);
         parameters.put("workspaceIds", List.of(4, 6));
         Set<String> expectedStatements = Set.of(
-            "subjectPersonExists", "findPerson", "findTags", "findCustomFields", "findActivities",
-            "findNotes", "findTasks", "findAttachments", "findEmployment", "findEdges", "findDeals",
-            "findIntroductions", "findProvisions");
+            "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findTags",
+            "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
+            "findEmployment", "findEdges", "findDeals", "findIntroductions", "findProvisions");
         String namespacePrefix = DataSubjectDisclosureMapper.class.getName() + ".";
         Set<String> found = new HashSet<>();
         for (MappedStatement statement : new HashSet<>(configuration.getMappedStatements())) {
@@ -53,8 +53,12 @@ class DataSubjectDisclosureMapperXmlTest {
             String sql = statement.getBoundSql(parameters).getSql();
             assertTrue(sql.contains("workspace_id = ?"), statementName);
             assertTrue(sql.contains("id = ?"), statementName);
-            if (!"subjectPersonExists".equals(statementName)) {
+            if (!Set.of("subjectPersonExists", "lockSubjectPersonForShare")
+                    .contains(statementName)) {
                 assertTrue(sql.contains(" IN"), statementName);
+            }
+            if ("lockSubjectPersonForShare".equals(statementName)) {
+                assertTrue(sql.contains("FOR SHARE"), statementName);
             }
         }
         assertTrue(found.equals(expectedStatements), found.toString());

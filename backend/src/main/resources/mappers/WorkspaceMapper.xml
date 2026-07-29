@@ -169,17 +169,6 @@
     SELECT id FROM workspace WHERE id = #{workspaceId} FOR SHARE
   </select>
 
-  <select id="lockActiveWorkspaceInOrgForShare" resultType="java.lang.Integer">
-    SELECT w.id
-    FROM organization o
-    JOIN workspace w ON w.org_id = o.id
-    WHERE o.id = #{orgId}
-      AND w.id = #{workspaceId}
-      AND o.lifecycle_state = 'active'
-      AND w.lifecycle_state = 'active'
-    FOR SHARE
-  </select>
-
   <select id="lockOwnerIds" resultType="int">
     SELECT user_id FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'

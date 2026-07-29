@@ -48,7 +48,6 @@ public interface WorkspaceMapper {
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
     Integer lockWorkspace(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
-    Integer lockActiveWorkspaceInOrgForShare(@Param("orgId") int orgId, @Param("workspaceId") int workspaceId);
     java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);

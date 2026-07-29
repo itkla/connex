@@ -72,6 +72,13 @@
     WHERE org_id = #{orgId} AND id = #{requestId}
   </select>
 
+  <select id="findByIdForUpdate" resultMap="DataSubjectRequestResult">
+    SELECT <include refid="requestColumns"/>
+    FROM data_subject_request
+    WHERE org_id = #{orgId} AND id = #{requestId}
+    FOR UPDATE
+  </select>
+
   <select id="findByOrg" resultMap="DataSubjectRequestResult">
     SELECT <include refid="requestColumns"/>
     FROM data_subject_request

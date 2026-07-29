@@ -1,12 +1,15 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -25,6 +28,41 @@ public class DataSubjectDisclosureAccess {
                 () -> readTransaction.subjectPersonExists(workspaceId, personId));
         } catch (ResourceNotFoundException exception) {
             return false;
+        }
+    }
+
+    public <T> T withLockedSubjectPerson(
+            int orgId,
+            int actorId,
+            int workspaceId,
+            int personId,
+            Function<Supplier<T>, T> controlTransaction,
+            Supplier<T> work) {
+        AtomicBoolean routeResolved = new AtomicBoolean();
+        try {
+            return tenantWorkScope.withWorkspacePlacement(
+                workspaceId,
+                (resolvedOrgId, catalog) -> {
+                    routeResolved.set(true);
+                    if (resolvedOrgId != orgId) {
+                        throw changedSubjectLink();
+                    }
+                    return withTenantContext(
+                        workspaceId,
+                        resolvedOrgId,
+                        actorId,
+                        catalog,
+                        () -> readTransaction.withLockedSubjectPerson(
+                            workspaceId,
+                            personId,
+                            controlTransaction,
+                            work));
+                });
+        } catch (IllegalStateException exception) {
+            if (!routeResolved.get()) {
+                throw changedSubjectLink();
+            }
+            throw exception;
         }
     }
 
@@ -60,5 +98,10 @@ public class DataSubjectDisclosureAccess {
                 tenantContext.clear();
             }
         }
+    }
+
+    private static ConflictException changedSubjectLink() {
+        return new ConflictException(
+            "The subject workspace changed before the data-subject request could be recorded");
     }
 }

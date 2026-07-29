@@ -167,10 +167,10 @@ public class HealthService {
             return current;
         }
         if (current == Status.DOWN) {
-            log.error("Append-only audit_log guard trg_audit_log_no_update is not visible on this "
-                    + "catalog; the immutability control is degraded until it is restored");
+            log.error("The three exact append-only audit_log guards are not visible on this catalog; "
+                    + "the immutability control is degraded until all three are restored");
         } else if (previous != null) {
-            log.info("Append-only audit_log guard trg_audit_log_no_update is installed again");
+            log.info("All three exact append-only audit_log guards are installed again");
         }
         return current;
     }

@@ -4,7 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,6 +16,8 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +35,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ThirdPartyProvisionD
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.DisclosureControlData;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.WorkspaceSnapshot;
@@ -48,6 +55,28 @@ class DataSubjectRequestServiceUnitTest {
             Supplier<?> work = invocation.getArgument(0);
             return work.get();
         });
+        lenient().when(disclosureAccess.withLockedSubjectPerson(
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                any(),
+                any()))
+            .thenAnswer(invocation -> {
+                Function<Supplier<Object>, Object> controlTransaction =
+                    invocation.getArgument(4);
+                Supplier<Object> work = invocation.getArgument(5);
+                return controlTransaction.apply(work);
+            });
+        lenient().when(controlOperations.withLockedSubjectRoots(
+                anyInt(),
+                anyInt(),
+                any(),
+                any()))
+            .thenAnswer(invocation -> {
+                Supplier<?> work = invocation.getArgument(3);
+                return work.get();
+            });
         service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope);
     }
 
@@ -67,12 +96,12 @@ class DataSubjectRequestServiceUnitTest {
         InOrder order = inOrder(controlOperations);
         order.verify(controlOperations).requireMutationAccess(3, 7);
         order.verify(controlOperations).create(any(Integer.class), any(Integer.class), any(DataSubjectRequest.class));
-        verify(disclosureAccess, never()).subjectPersonExists(any(Integer.class), any(Integer.class),
-            any(Integer.class), any(Integer.class));
+        verify(disclosureAccess, never()).withLockedSubjectPerson(
+            anyInt(), anyInt(), anyInt(), anyInt(), any(), any());
     }
 
     @Test
-    void subjectLinkValidationRequiresBothControlAndTenantProof() {
+    void subjectLinkValidationRejectsInvalidInitialTargetsBeforeTheControlWrite() {
         DataSubjectRequestUpsertRequest oneSided = request("disclosure");
         oneSided.setSubjectWorkspaceId(4);
         assertThrows(BadRequestException.class, () -> service.create(3, 7, oneSided));
@@ -82,15 +111,61 @@ class DataSubjectRequestServiceUnitTest {
         linked.setSubjectPersonId(5);
         when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(false, true, true);
         assertThrows(BadRequestException.class, () -> service.create(3, 7, linked));
-        verify(disclosureAccess, never()).subjectPersonExists(3, 7, 4, 5);
+        verify(disclosureAccess, never()).withLockedSubjectPerson(
+            anyInt(), anyInt(), anyInt(), anyInt(), any(), any());
+        verify(controlOperations, never()).create(
+            any(Integer.class),
+            any(Integer.class),
+            any(DataSubjectRequest.class));
 
-        when(disclosureAccess.subjectPersonExists(3, 7, 4, 5)).thenReturn(false, true);
+        doThrow(new BadRequestException("Subject person is missing"))
+            .doAnswer(invocation -> {
+                Function<Supplier<Object>, Object> controlTransaction =
+                    invocation.getArgument(4);
+                Supplier<Object> work = invocation.getArgument(5);
+                return controlTransaction.apply(work);
+            })
+            .when(disclosureAccess).withLockedSubjectPerson(
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                any(),
+                any());
         assertThrows(BadRequestException.class, () -> service.create(3, 7, linked));
 
         when(controlOperations.create(any(Integer.class), any(Integer.class), any(DataSubjectRequest.class)))
             .thenAnswer(invocation -> DataSubjectRequestDto.from(invocation.getArgument(2)));
         service.create(3, 7, linked);
-        verify(disclosureAccess, org.mockito.Mockito.times(2)).subjectPersonExists(3, 7, 4, 5);
+        verify(disclosureAccess, org.mockito.Mockito.times(2)).withLockedSubjectPerson(
+            org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7),
+            org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(5),
+            any(),
+            any());
+    }
+
+    @Test
+    void subjectTargetLostAfterInitialValidationRemainsAConflict() {
+        DataSubjectRequestUpsertRequest linked = request("disclosure");
+        linked.setSubjectWorkspaceId(4);
+        linked.setSubjectPersonId(5);
+        when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(true);
+        doThrow(new ConflictException("Subject person was removed"))
+            .when(disclosureAccess).withLockedSubjectPerson(
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                any(),
+                any());
+
+        assertThrows(ConflictException.class, () -> service.create(3, 7, linked));
+        verify(controlOperations, never()).create(
+            any(Integer.class),
+            any(Integer.class),
+            any(DataSubjectRequest.class));
     }
 
     @Test
@@ -101,7 +176,6 @@ class DataSubjectRequestServiceUnitTest {
         stored.setSummary("Original summary");
         when(controlOperations.loadForMutation(3, 9, 7)).thenReturn(stored);
         when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(true);
-        when(disclosureAccess.subjectPersonExists(3, 7, 4, 5)).thenReturn(true);
         when(controlOperations.update(any(Integer.class), any(Long.class), any(Integer.class),
                 any(DataSubjectRequest.class), any(DataSubjectRequest.class)))
             .thenAnswer(invocation -> DataSubjectRequestDto.from(invocation.getArgument(4)));
@@ -120,6 +194,61 @@ class DataSubjectRequestServiceUnitTest {
             org.mockito.ArgumentMatchers.eq(7), before.capture(), after.capture());
         assertEquals("Original summary", before.getValue().getSummary());
         assertEquals(4, after.getValue().getSubjectWorkspaceId());
+    }
+
+    @Test
+    void updateTargetLostAfterInitialValidationRemainsAConflict() {
+        DataSubjectRequest stored = storedVerifiedRequest();
+        stored.setSubjectWorkspaceId(4);
+        stored.setSubjectPersonId(5);
+        when(controlOperations.loadForMutation(3, 9, 7)).thenReturn(stored);
+        when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(true);
+        doThrow(new ConflictException("Subject person was removed"))
+            .when(disclosureAccess).withLockedSubjectPerson(
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                anyInt(),
+                any(),
+                any());
+        DataSubjectRequestUpsertRequest update = request("disclosure");
+        update.setStatus("closed");
+
+        assertThrows(ConflictException.class, () -> service.update(3, 9, 7, update));
+
+        verify(controlOperations, never()).update(
+            any(Integer.class),
+            any(Long.class),
+            any(Integer.class),
+            any(DataSubjectRequest.class),
+            any(DataSubjectRequest.class));
+    }
+
+    @Test
+    void updateRetainsPreviousAndRequestedWorkspaceRootsBeforePersonValidation() {
+        DataSubjectRequest stored = storedVerifiedRequest();
+        stored.setSubjectWorkspaceId(11);
+        stored.setSubjectPersonId(12);
+        when(controlOperations.loadForMutation(3, 9, 7)).thenReturn(stored);
+        when(controlOperations.workspaceBelongsToOrg(3, 4)).thenReturn(true);
+        when(controlOperations.update(
+                any(Integer.class),
+                any(Long.class),
+                any(Integer.class),
+                any(DataSubjectRequest.class),
+                any(DataSubjectRequest.class)))
+            .thenAnswer(invocation -> DataSubjectRequestDto.from(invocation.getArgument(4)));
+        DataSubjectRequestUpsertRequest update = request("disclosure");
+        update.setSubjectWorkspaceId(4);
+        update.setSubjectPersonId(5);
+
+        service.update(3, 9, 7, update);
+
+        verify(controlOperations).withLockedSubjectRoots(
+            org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7),
+            org.mockito.ArgumentMatchers.eq(Set.of(4, 11)),
+            any());
     }
 
     @Test

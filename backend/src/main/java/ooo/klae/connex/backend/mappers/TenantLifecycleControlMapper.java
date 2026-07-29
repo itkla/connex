@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.dto.OrganizationLifecycleRef;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 
@@ -20,16 +21,13 @@ public interface TenantLifecycleControlMapper {
 
     Integer findWorkspaceOrgIdForLifecycle(@Param("workspaceId") int workspaceId);
 
-    WorkspaceLifecycleRef lockActiveWorkspaceForExport(
-        @Param("orgId") int orgId,
+    WorkspaceLifecycleRef lockWorkspaceForShare(
         @Param("workspaceId") int workspaceId);
 
     WorkspaceLifecycleRef lockWorkspaceInOrg(
-        @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
     WorkspaceLifecycleRef lockCleanupTombstoneInOrg(
-        @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId);
 
     OrganizationLifecycleRef findOrganization(@Param("orgId") int orgId);
@@ -51,6 +49,14 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("userId") int userId);
 
+    Integer lockOrgAdminMembershipForUpdate(
+        @Param("orgId") int orgId,
+        @Param("userId") int userId);
+
+    int lockExportAdmissionCapacityNowait();
+
+    int countGlobalExportLeases();
+
     int insertOperationLease(
         @Param("orgId") int orgId,
         @Param("workspaceId") int workspaceId,
@@ -71,15 +77,9 @@ public interface TenantLifecycleControlMapper {
         @Param("workspaceId") int workspaceId,
         @Param("leaseKind") String leaseKind);
 
-    int countRecentOperationLeasesInOrg(
-        @Param("orgId") int orgId,
-        @Param("leaseKind") String leaseKind,
-        @Param("maxAgeSeconds") long maxAgeSeconds);
+    int countAllOperationLeases(@Param("workspaceId") int workspaceId);
 
-    int deleteStaleOperationLeases(
-        @Param("leaseKind") String leaseKind,
-        @Param("maxAgeSeconds") long maxAgeSeconds,
-        @Param("limit") int limit);
+    int countOperationLeasesInOrg(@Param("orgId") int orgId);
 
     int markWorkspaceTearingDown(
         @Param("orgId") int orgId,
@@ -102,6 +102,10 @@ public interface TenantLifecycleControlMapper {
         @Param("workspaceId") int workspaceId);
 
     int deleteFederatedIdentityBatch(
+        @Param("orgId") int orgId,
+        @Param("identityIds") List<Integer> identityIds);
+
+    List<FederatedIdentity> findFederatedIdentityBatch(
         @Param("orgId") int orgId,
         @Param("limit") int limit);
 

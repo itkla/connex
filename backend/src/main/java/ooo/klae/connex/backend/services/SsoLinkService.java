@@ -67,6 +67,20 @@ public class SsoLinkService {
      * @return the raw, unhashed token to place in the linking redirect
      */
     public String createChallenge(SsoLoginResult.LinkRequired request) {
+        User user = userMapper.getUserByIdForShare(request.existingUserId());
+        if (user == null) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
+        requireActiveOrganization(request.orgId());
+        if (user.getPassword() == null) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
+        requireCompatibleIdentity(
+            request.provider(),
+            request.issuer(),
+            request.subject(),
+            request.existingUserId(),
+            request.orgId());
         ssoLinkChallengeMapper.invalidateForUser(request.existingUserId());
 
         String rawToken = generateToken();
@@ -112,11 +126,16 @@ public class SsoLinkService {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
 
-        User user = userMapper.getUserById(challenge.getUserId());
+        User user = userMapper.getUserByIdForShare(challenge.getUserId());
         if (user == null) {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
         requireActiveOrganization(challenge.getOrgId());
+        SsoLinkChallenge current = ssoLinkChallengeMapper.lockByTokenHash(
+            challenge.getTokenHash());
+        if (!challenge.equals(current)) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
         String username = user.getUsername();
         if (loginRateLimiter.isBlocked(clientIp, username, now)) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
@@ -152,6 +171,10 @@ public class SsoLinkService {
         FederatedIdentity existing = federatedIdentityMapper.findByProviderIssuerSubject(
                 challenge.getProvider(), challenge.getIssuer(), challenge.getExternalSubject());
         if (existing != null) {
+            if (existing.getUserId() != userId
+                    || !java.util.Objects.equals(existing.getOrgId(), challenge.getOrgId())) {
+                throw new ForbiddenException("This federated identity is already linked");
+            }
             return false;
         }
         FederatedIdentity link = new FederatedIdentity();
@@ -162,6 +185,23 @@ public class SsoLinkService {
         link.setExternalSubject(challenge.getExternalSubject());
         federatedIdentityMapper.insert(link);
         return true;
+    }
+
+    private void requireCompatibleIdentity(
+            String provider,
+            String issuer,
+            String subject,
+            int userId,
+            Integer orgId) {
+        FederatedIdentity existing = federatedIdentityMapper.findByProviderIssuerSubject(
+            provider,
+            issuer,
+            subject);
+        if (existing != null
+                && (existing.getUserId() != userId
+                    || !java.util.Objects.equals(existing.getOrgId(), orgId))) {
+            throw new ForbiddenException("This federated identity is already linked");
+        }
     }
 
     private static Map<String, Object> federationContext(SsoLinkChallenge challenge) {

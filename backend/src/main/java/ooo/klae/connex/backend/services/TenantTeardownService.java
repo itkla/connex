@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,10 +41,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * writer-drain protocol is explicitly deferred under issue #853.
  *
  * <p>Retries safely repeat registry preparations, object enqueue operations,
- * and bounded deletes while the control root survives. A crashed export leaves
- * a lease that keeps failing closed until {@link TenantOperationLeaseReaper}
- * clears it past the export timeout; a crashed teardown leaves a lease that
- * fails closed pending privileged operator clearance outside this wave.
+ * and bounded deletes while the control root survives. A crashed export or
+ * teardown leaves a lease that fails closed pending explicit release or
+ * privileged operator clearance.
  * Before deleting a workspace root, teardown persists a root-independent
  * cleanup tombstone. The tombstone retains its organization placement route
  * until the post-root scan is clean, makes handled failures HTTP-resumable, and
@@ -187,6 +185,7 @@ public class TenantTeardownService {
             }
             while (controlOperations.deleteFederatedIdentityBatch(
                     orgId,
+                    actorId,
                     properties.getTableBatchSize()) > 0) {
             }
             controlOperations.deleteOrganizationRoot(orgId, actorId);
@@ -230,7 +229,6 @@ public class TenantTeardownService {
         boolean rootDeleted = false;
         boolean completed = false;
         try {
-            waitForExportDrain(workspace.id());
             waitFor(properties.getTeardownSettleDelay());
             lifecycleAccess.withRoute(route, actorId, () -> {
                 sweepTenant(workspace.id());
@@ -379,28 +377,17 @@ public class TenantTeardownService {
             tenantTransaction.storageResidual(workspaceId));
     }
 
-    private void waitForExportDrain(int workspaceId) {
-        Instant deadline = clock.instant().plus(properties.getExportLeaseWaitTimeout());
-        while (controlOperations.countExportLeases(workspaceId) != 0) {
-            if (!clock.instant().isBefore(deadline)) {
-                throw new ServiceUnavailableException(
-                    "Tenant export is still active; retry teardown later");
-            }
-            parkUntil(deadline);
-        }
-    }
-
     private void waitFor(Duration duration) {
         if (duration.isZero()) {
             return;
         }
-        Instant deadline = clock.instant().plus(duration);
+        java.time.Instant deadline = clock.instant().plus(duration);
         while (clock.instant().isBefore(deadline)) {
             parkUntil(deadline);
         }
     }
 
-    private void parkUntil(Instant deadline) {
+    private void parkUntil(java.time.Instant deadline) {
         long remaining = Duration.between(clock.instant(), deadline).toNanos();
         LockSupport.parkNanos(Math.min(Math.max(remaining, 1), WAIT_CHUNK_NANOS));
         if (Thread.interrupted()) {
