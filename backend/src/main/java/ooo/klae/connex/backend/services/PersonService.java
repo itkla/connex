@@ -215,7 +215,7 @@ public class PersonService {
         person.setCreatedAt(null);
         personMapper.insert(person);
         identityIntakeService.recordPerson(
-            workspaceId, person.getId(), person.getName(), person.getEmail(), person.getPhone(),
+            workspaceId, person.getId(), person.getEmail(), person.getPhone(),
             source, sourceRowRef);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
         auditService.record("person.create", "person", person.getId(), person.getName(),
@@ -246,7 +246,7 @@ public class PersonService {
         }
         Person after = requireOwnedPerson(workspaceId, id);
         identityIntakeService.recordPerson(
-            workspaceId, id, after.getName(), after.getEmail(), after.getPhone(),
+            workspaceId, id, after.getEmail(), after.getPhone(),
             IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
         auditService.record("person.update", "person", id, after.getName(),
             "Updated person " + after.getName(),
@@ -345,7 +345,7 @@ public class PersonService {
         Person after = requireOwnedPerson(workspaceId, id);
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
             identityIntakeService.recordPerson(
-                workspaceId, id, after.getName(), after.getEmail(), after.getPhone(),
+                workspaceId, id, after.getEmail(), after.getPhone(),
                 IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);

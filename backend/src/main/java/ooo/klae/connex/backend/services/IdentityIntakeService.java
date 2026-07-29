@@ -16,8 +16,7 @@ import ooo.klae.connex.backend.mappers.IdentityMapper;
 /**
  * Persists canonical identities with acquisition provenance inside the parent-record transaction.
  *
- * <p>The same transaction also persists an indexed canonical name on the parent record. Identity
- * rows are retained as history when a scalar changes. The old row receives
+ * <p>Identity rows are retained as history when a scalar changes. The old row receives
  * {@code superseded_at}, and only unsuperseded rows are eligible for matching. Repeated intake of
  * the same canonical key is idempotent; if a historical key becomes current again, its first raw
  * value, acquisition time, and provenance remain authoritative. A blank or invalid replacement
@@ -41,7 +40,6 @@ public class IdentityIntakeService {
      *
      * @param workspaceId owning workspace derived from tenant context
      * @param personId persisted person id
-     * @param name current authored name
      * @param email current raw email value
      * @param phone current raw phone value
      * @param source acquisition source
@@ -51,13 +49,12 @@ public class IdentityIntakeService {
     public void recordPerson(
             int workspaceId,
             int personId,
-            String name,
             String email,
             String phone,
             IdentityAcquisitionSource source,
             String sourceRowRef) {
         recordPerson(
-            workspaceId, personId, name, email, phone, source, sourceRowRef, true, true);
+            workspaceId, personId, email, phone, source, sourceRowRef, true, true);
     }
 
     /**
@@ -65,7 +62,6 @@ public class IdentityIntakeService {
      *
      * @param workspaceId owning workspace derived from tenant context
      * @param personId persisted person id
-     * @param name current authored name
      * @param email current raw email value
      * @param phone current raw phone value
      * @param source acquisition source
@@ -77,7 +73,6 @@ public class IdentityIntakeService {
     public void recordPerson(
             int workspaceId,
             int personId,
-            String name,
             String email,
             String phone,
             IdentityAcquisitionSource source,
@@ -85,11 +80,6 @@ public class IdentityIntakeService {
             boolean emailAcquired,
             boolean phoneAcquired) {
         requireRecord(workspaceId, personId, source);
-        identityMapper.updatePersonNormalizedName(
-            workspaceId,
-            personId,
-            name,
-            matchingService.normalizeName(name).orElse(null));
         LocalDateTime acquiredAt = now();
         if (emailAcquired) {
             reconcilePersonEmail(
@@ -108,7 +98,6 @@ public class IdentityIntakeService {
      *
      * @param workspaceId owning workspace derived from tenant context
      * @param companyId persisted company id
-     * @param name current authored name
      * @param website current raw website or domain value
      * @param phone current raw phone value
      * @param source acquisition source
@@ -118,13 +107,12 @@ public class IdentityIntakeService {
     public void recordCompany(
             int workspaceId,
             int companyId,
-            String name,
             String website,
             String phone,
             IdentityAcquisitionSource source,
             String sourceRowRef) {
         recordCompany(
-            workspaceId, companyId, name, website, phone, source, sourceRowRef, true, true);
+            workspaceId, companyId, website, phone, source, sourceRowRef, true, true);
     }
 
     /**
@@ -132,7 +120,6 @@ public class IdentityIntakeService {
      *
      * @param workspaceId owning workspace derived from tenant context
      * @param companyId persisted company id
-     * @param name current authored name
      * @param website current raw website or domain value
      * @param phone current raw phone value
      * @param source acquisition source
@@ -144,7 +131,6 @@ public class IdentityIntakeService {
     public void recordCompany(
             int workspaceId,
             int companyId,
-            String name,
             String website,
             String phone,
             IdentityAcquisitionSource source,
@@ -152,11 +138,6 @@ public class IdentityIntakeService {
             boolean websiteAcquired,
             boolean phoneAcquired) {
         requireRecord(workspaceId, companyId, source);
-        identityMapper.updateCompanyNormalizedName(
-            workspaceId,
-            companyId,
-            name,
-            matchingService.normalizeName(name).orElse(null));
         LocalDateTime acquiredAt = now();
         if (websiteAcquired) {
             reconcileCompanyDomain(

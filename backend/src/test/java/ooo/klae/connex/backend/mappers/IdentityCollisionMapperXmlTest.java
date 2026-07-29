@@ -98,12 +98,14 @@ class IdentityCollisionMapperXmlTest {
         assertTrue(personSql.contains("JOIN person p"));
         assertTrue(personSql.contains("p.suspended_at IS NULL"));
         assertTrue(personSql.contains("p.provision_ceased_at IS NULL"));
+        assertTrue(personSql.contains("pi.superseded_at IS NULL"));
         assertTrue(personSql.contains("pi.kind = ?"));
         assertFalse(personSql.contains("company_identity"));
         assertFalse(emailSql.contains("company_identity"));
 
         assertTrue(companySql.contains("FROM company_identity ci"));
         assertTrue(companySql.contains("JOIN identity_collision ic"));
+        assertTrue(companySql.contains("ci.superseded_at IS NULL"));
         assertTrue(companySql.contains("ci.kind = ?"));
         assertFalse(companySql.contains("person_identity"));
         assertFalse(domainSql.contains("person_identity"));
@@ -186,6 +188,8 @@ class IdentityCollisionMapperXmlTest {
             COMPANY_BRANCH,
             statement,
             "findVisibleMembers company otherwise-branch");
+        assertTrue(personBranch.contains("pi.superseded_at IS NULL"));
+        assertTrue(companyBranch.contains("ci.superseded_at IS NULL"));
         assertTrue(
             PERSON_INDEXED_KEYSET.matcher(personBranch).find(),
             "person members must retain the composite-index keyset predicate and order");

@@ -53,6 +53,8 @@ class ImportServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired PersonService personService;
+    @Autowired CompanyService companyService;
     @MockitoSpyBean PersonMapper personMapperSpy;
     @MockitoSpyBean CompanyMapper companyMapperSpy;
 
@@ -91,6 +93,149 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getCreated());
         assertEquals(0, result.getUpdated());
         assertEquals(2, result.getFailed().size());
+    }
+
+    @Test
+    void recordImportsWriteTraceableIdentityProvenanceForCreatesAndUpdates() {
+        String companyDomain = "identity-import-" + unique() + ".co.jp";
+        ImportRequest personCreate = req(
+            List.of(map("Name", "name"), map("Email", "email"), map("Phone", "phone")),
+            List.of(Map.of(
+                "Name", "Identity import",
+                "Email", "identity-import@example.com",
+                "Phone", "090-1234-5678")),
+            "fill_empty");
+        ImportRequest companyCreate = req(
+            List.of(map("Name", "name"), map("Website", "website"), map("Phone", "phone")),
+            List.of(Map.of(
+                "Name", "Identity import company",
+                "Website", "https://" + companyDomain,
+                "Phone", "090-2345-6789")),
+            "fill_empty");
+
+        importService.commitPersons(personCreate);
+        importService.commitCompanies(companyCreate);
+
+        Person imported = personMapper.findByEmails(
+            workspace.getId(), List.of("identity-import@example.com")).getFirst();
+        Company importedCompany = companyMapper.getAllCompanies(workspace.getId()).stream()
+            .filter(candidate -> "Identity import company".equals(candidate.getName()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(
+            2,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND source_system = 'csv_import'
+                  AND source_row_ref = 'csv-row:1'
+                  AND acquired_at IS NOT NULL
+                  AND purpose_of_use_code IS NULL
+                """,
+                workspace.getId(),
+                imported.getId()));
+        assertEquals(
+            2,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                  AND source_system = 'csv_import'
+                  AND source_row_ref = 'csv-row:1'
+                  AND acquired_at IS NOT NULL
+                  AND purpose_of_use_code IS NULL
+                """,
+                workspace.getId(),
+                importedCompany.getId()));
+
+        importService.commitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email"), map("Phone", "phone")),
+            List.of(
+                Map.of(
+                    "Name", "Other identity import",
+                    "Email", unique() + "@example.com",
+                    "Phone", "090-3456-7890"),
+                Map.of(
+                    "Name", "Identity import",
+                    "Email", "IDENTITY-IMPORT@EXAMPLE.COM",
+                    "Phone", "090-4567-8901")),
+            "overwrite"));
+
+        assertEquals(
+            "csv-row:2",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT source_row_ref
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND kind = 'phone' AND superseded_at IS NULL
+                """,
+                String.class,
+                workspace.getId(),
+                imported.getId()));
+        assertEquals(
+            1,
+            rowCount(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND kind = 'phone' AND superseded_at IS NOT NULL
+                """,
+                workspace.getId(),
+                imported.getId()));
+    }
+
+    @Test
+    void previewsConsumeCurrentCanonicalIdentitiesAndRejectAmbiguity() {
+        Person first = new Person();
+        first.setName("Canonical person");
+        first.setEmail("Case@Example.com");
+        Person firstCreated = personService.create(first);
+
+        ImportPreviewResult personMatch = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Canonical person", "Email", "case@example.com")),
+            "fill_empty"));
+
+        assertEquals(1, personMatch.getToUpdate());
+        assertEquals(firstCreated.getId(), personMatch.getRows().getFirst().getMatchedId());
+
+        Person second = new Person();
+        second.setName("Canonical collision");
+        second.setEmail("CASE@example.com");
+        personService.create(second);
+
+        ImportPreviewResult ambiguous = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Ambiguous person", "Email", "case@example.com")),
+            "fill_empty"));
+
+        assertEquals(1, ambiguous.getInvalid());
+        assertTrue(ambiguous.getRows().getFirst().getErrors().getFirst()
+            .contains("Multiple contacts"));
+    }
+
+    @Test
+    void companyPreviewMatchesTheRegistrableCurrentDomain() {
+        String domain = "canonical-" + unique() + ".co.jp";
+        Company draft = new Company();
+        draft.setName("Canonical company");
+        draft.setWebsite("https://www." + domain + "/about");
+        Company existing = companyService.createCompany(draft);
+
+        ImportPreviewResult preview = importService.previewCompanies(req(
+            List.of(map("Name", "name"), map("Website", "website")),
+            List.of(Map.of(
+                "Name", "Canonical company import",
+                "Website", "http://sales." + domain + "/contact")),
+            "fill_empty"));
+
+        assertEquals(1, preview.getToUpdate());
+        assertEquals(existing.getId(), preview.getRows().getFirst().getMatchedId());
     }
 
     @Test
@@ -158,8 +303,8 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportPreviewResult preview = importService.previewCompanies(req(
             List.of(map("Company", "name"), map("Web", "website")),
             List.of(
-                Map.of("Company", "Acme One", "Web", "https://acme-dedupe.test"),
-                Map.of("Company", "Acme Two", "Web", "http://www.acme-dedupe.test/")),
+                Map.of("Company", "Acme One", "Web", "https://acme-dedupe.co.jp"),
+                Map.of("Company", "Acme Two", "Web", "http://www.acme-dedupe.co.jp/")),
             "fill_empty"));
 
         assertEquals(1, preview.getToCreate());

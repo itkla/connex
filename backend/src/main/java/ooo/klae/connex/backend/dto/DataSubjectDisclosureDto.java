@@ -14,6 +14,7 @@ public class DataSubjectDisclosureDto {
     private int subjectPersonId;
     private LocalDateTime generatedAt;
     private PersonDto person;
+    private List<PersonIdentityDto> identities;
     private List<TagDto> tags;
     private List<CustomFieldValueDto> customFieldValues;
     private List<ActivityDto> activities;
@@ -45,6 +46,22 @@ public class DataSubjectDisclosureDto {
         private LocalDateTime provisionCeasedAt;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
+    }
+
+    @Data
+    public static class PersonIdentityDto {
+        private long id;
+        private int workspaceId;
+        private String kind;
+        private String value;
+        private String sourceSystem;
+        private String sourceChannel;
+        private String sourceExternalId;
+        private String sourceRowRef;
+        private LocalDateTime acquiredAt;
+        private String purposeOfUseCode;
+        private LocalDateTime supersededAt;
+        private LocalDateTime createdAt;
     }
 
     @Data

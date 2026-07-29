@@ -16,10 +16,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.anyString;
 
+import org.apache.hc.client5.http.psl.PublicSuffixMatcherLoader;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import com.google.i18n.phonenumbers.PhoneNumberUtil;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Activity;
@@ -53,6 +56,93 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
+
+    @Test
+    void createAndUpdateReconcileCurrentIdentityHistory() {
+        Company draft = new Company();
+        draft.setName("Identity company");
+        draft.setWebsite("https://www.identity-" + unique() + ".co.jp/about");
+        draft.setPhone("090-1234-5678");
+
+        Company created = companyService.createCompany(draft);
+
+        assertEquals(
+            List.of("domain", "phone"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT kind
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                ORDER BY kind
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ?
+                  AND source_system = 'interactive_create'
+                  AND purpose_of_use_code IS NULL
+                  AND superseded_at IS NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+
+        Company update = new Company();
+        update.setName(created.getName());
+        String updatedDomain = "updated-" + unique() + ".co.jp";
+        update.setWebsite("https://" + updatedDomain);
+        update.setPhone("invalid phone");
+        companyService.updateCompany(created.getId(), update);
+        companyService.updateCompany(created.getId(), update);
+
+        assertEquals(
+            3,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM company_identity WHERE workspace_id = ? AND company_id = ?",
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            List.of(updatedDomain),
+            jdbcTemplate.queryForList(
+                """
+                SELECT normalized_value
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND superseded_at IS NULL
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND superseded_at IS NOT NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            "interactive_update",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT source_system
+                FROM company_identity
+                WHERE workspace_id = ? AND company_id = ? AND normalized_value = ?
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId(),
+                updatedDomain));
+    }
 
     @Test
     void createRejectsClientSuppliedLogoUrl() {
@@ -289,7 +379,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), mock(ReferenceService.class),
             Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class),
+            mock(MatchingService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -328,7 +420,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), referenceService, Clock.systemUTC(),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class),
+            mock(MatchingService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -359,8 +453,16 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(SegmentService.class),
             mock(ReferenceService.class),
             Clock.systemUTC(),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class),
+            matchingService()
         );
+    }
+
+    private static MatchingService matchingService() {
+        return new MatchingService(
+            PhoneNumberUtil.getInstance(),
+            PublicSuffixMatcherLoader.getDefault());
     }
 
     private Workspace newWorkspaceInSameOrg() {

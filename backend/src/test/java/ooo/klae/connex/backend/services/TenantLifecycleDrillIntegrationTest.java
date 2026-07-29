@@ -81,6 +81,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private AiOutputCacheMapper aiOutputCacheMapper;
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private AuditIntegrityService auditIntegrityService;
+    @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -150,7 +151,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
 
         assertTrue(entries.containsKey("manifest.json"));
         assertTrue(entries.containsKey("data/person.jsonl"));
+        assertTrue(entries.containsKey("data/person_identity.jsonl"));
         assertTrue(entries.containsKey("data/company.jsonl"));
+        assertTrue(entries.containsKey("data/company_identity.jsonl"));
+        assertTrue(entries.containsKey("data/identity_collision.jsonl"));
         assertTrue(entries.containsKey("data/deal.jsonl"));
         assertTrue(entries.containsKey("data/activity.jsonl"));
         assertTrue(entries.containsKey("data/note.jsonl"));
@@ -164,6 +168,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(personJsonl.contains(fixture.restrictedPersonName()));
         assertTrue(personJsonl.contains("suspended_at"));
         assertTrue(personJsonl.contains("provision_ceased_at"));
+        assertTrue(text(entries, "data/person_identity.jsonl").contains("backfill"));
         assertArrayEquals(BINARY, entries.get("objects/" + fixture.objectKey()));
         String manifest = text(entries, "manifest.json");
         assertTrue(manifest.contains("\"schemaVersion\":1"));
@@ -424,6 +429,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     private Fixture seedRepresentativeTenant() {
         Company company = newCompany();
         Person visible = newPerson(company);
+        newPerson(company);
         Person restricted = newPerson(company);
         personMapper.updateProcessingRestrictions(
             drillWorkspace.getId(),
@@ -474,6 +480,15 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         cache.setWarnings(0);
         cache.setGeneratedAt("2026-07-25T00:00:00Z");
         aiOutputCacheMapper.upsert(cache);
+        identityBackfillTransaction.backfillPersonPage(
+            null, drillWorkspace.getId(), 0, 500);
+        identityBackfillTransaction.backfillCompanyPage(
+            null, drillWorkspace.getId(), 0, 500);
+        int collisionMemberships = identityBackfillTransaction.rebuildCollisionReport(
+            null, drillWorkspace.getId());
+        assertTrue(rowCount("person_identity") > 0);
+        assertTrue(rowCount("company_identity") > 0);
+        assertTrue(collisionMemberships > 0);
         StoredBinary binary = storeAttachment(company);
         String token = binary.url().substring("/api/attachments/content/".length());
         String objectKey = "workspaces/" + drillWorkspace.getId()
@@ -481,6 +496,13 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         Path objectPath = objectStorageProperties.filesystemRootPath()
             .resolve(objectKey + ".object");
         return new Fixture(restricted.getName(), objectKey, objectPath);
+    }
+
+    private int rowCount(String table) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM " + table + " WHERE workspace_id = ?",
+            Integer.class,
+            drillWorkspace.getId());
     }
 
     private StoredBinary storeAttachment(Company company) {

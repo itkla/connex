@@ -72,11 +72,6 @@ public class IdentityBackfillTransaction {
         int skippedWrites = candidates.size() - lockedCandidates.size();
         LocalDateTime reconciledAt = utcNow();
         for (PersonIdentityBackfillCandidate candidate : lockedCandidates) {
-            identityMapper.updatePersonNormalizedName(
-                workspaceId,
-                candidate.getId(),
-                candidate.getName(),
-                matchingService.normalizeName(candidate.getName()).orElse(null));
             String email = candidate.getEmail();
             Optional<String> normalizedEmail =
                 matchingService.normalizeIdentifier(IdentityKind.EMAIL, email);
@@ -192,11 +187,6 @@ public class IdentityBackfillTransaction {
         int skippedWrites = candidates.size() - lockedCandidates.size();
         LocalDateTime reconciledAt = utcNow();
         for (CompanyIdentityBackfillCandidate candidate : lockedCandidates) {
-            identityMapper.updateCompanyNormalizedName(
-                workspaceId,
-                candidate.getId(),
-                candidate.getName(),
-                matchingService.normalizeName(candidate.getName()).orElse(null));
             String website = candidate.getWebsite();
             Optional<String> normalizedDomain =
                 matchingService.normalizeIdentifier(IdentityKind.DOMAIN, website);

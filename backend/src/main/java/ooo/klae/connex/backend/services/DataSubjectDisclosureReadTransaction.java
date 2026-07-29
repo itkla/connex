@@ -125,6 +125,8 @@ public class DataSubjectDisclosureReadTransaction {
         }
         DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
         disclosure.setPerson(person);
+        disclosure.setIdentities(
+            dataSubjectDisclosureMapper.findIdentities(workspaceId, personId, workspaceIds));
         disclosure.setTags(dataSubjectDisclosureMapper.findTags(workspaceId, personId, workspaceIds));
         disclosure.setCustomFieldValues(
             dataSubjectDisclosureMapper.findCustomFields(workspaceId, personId, workspaceIds));

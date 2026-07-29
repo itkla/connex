@@ -7,10 +7,8 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.CompanyIdentityBackfillCandidate;
 import ooo.klae.connex.backend.beans.IdentityKeyRow;
+import ooo.klae.connex.backend.beans.IdentityMatchRow;
 import ooo.klae.connex.backend.beans.PersonIdentityBackfillCandidate;
-import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
-import ooo.klae.connex.backend.dto.DuplicateIdentityKey;
-import ooo.klae.connex.backend.dto.DuplicateNameKey;
 
 /**
  * Workspace-scoped canonical identity persistence and backfill reads.
@@ -35,37 +33,15 @@ public interface IdentityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("recordIds") List<Integer> recordIds);
 
-    List<DuplicateCandidateRow> findVisiblePersonIdentityMatches(
+    List<IdentityMatchRow> findCurrentPersonIdentityMatches(
         @Param("workspaceId") int workspaceId,
-        @Param("keys") List<DuplicateIdentityKey> keys,
-        @Param("perKeyLimit") int perKeyLimit);
+        @Param("kind") String kind,
+        @Param("normalizedValues") List<String> normalizedValues);
 
-    List<DuplicateCandidateRow> findVisibleCompanyIdentityMatches(
+    List<IdentityMatchRow> findCurrentCompanyIdentityMatches(
         @Param("workspaceId") int workspaceId,
-        @Param("keys") List<DuplicateIdentityKey> keys,
-        @Param("perKeyLimit") int perKeyLimit);
-
-    List<DuplicateCandidateRow> findVisiblePersonNameMatches(
-        @Param("workspaceId") int workspaceId,
-        @Param("keys") List<DuplicateNameKey> keys,
-        @Param("perKeyLimit") int perKeyLimit);
-
-    List<DuplicateCandidateRow> findVisibleCompanyNameMatches(
-        @Param("workspaceId") int workspaceId,
-        @Param("keys") List<DuplicateNameKey> keys,
-        @Param("perKeyLimit") int perKeyLimit);
-
-    int updatePersonNormalizedName(
-        @Param("workspaceId") int workspaceId,
-        @Param("personId") int personId,
-        @Param("rawName") String rawName,
-        @Param("normalizedName") String normalizedName);
-
-    int updateCompanyNormalizedName(
-        @Param("workspaceId") int workspaceId,
-        @Param("companyId") int companyId,
-        @Param("rawName") String rawName,
-        @Param("normalizedName") String normalizedName);
+        @Param("kind") String kind,
+        @Param("normalizedValues") List<String> normalizedValues);
 
     PersonIdentityBackfillCandidate lockPersonIdentityParent(
         @Param("workspaceId") int workspaceId,
