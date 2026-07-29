@@ -1,4 +1,4 @@
-CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update_v127 BEFORE UPDATE ON audit_log
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update_v129 BEFORE UPDATE ON audit_log
 FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log is append-only';
 
 ALTER TABLE data_subject_request

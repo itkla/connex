@@ -61,10 +61,10 @@ class AuditLogGuardMigrationIntegrationTest {
     }
 
     @Test
-    void deployedV126CatalogRepairsMissingFinalGuardsBeforeV127() throws SQLException {
+    void deployedV126CatalogRepairsMissingFinalGuardsBeforeV129() throws SQLException {
         try (ScratchCatalog catalog = ScratchCatalog.create()) {
             flyway(catalog.url(), "126").migrate();
-            execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update_v127");
+            execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update_v129");
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_delete");
 
             flyway(catalog.url(), null).migrate();
@@ -267,14 +267,14 @@ class AuditLogGuardMigrationIntegrationTest {
                   AND EVENT_OBJECT_TABLE = 'audit_log'
                   AND TRIGGER_NAME IN (
                     'trg_audit_log_no_update',
-                    'trg_audit_log_no_update_v127',
+                    'trg_audit_log_no_update_v129',
                     'trg_audit_log_no_delete')
                   AND ACTION_TIMING = 'BEFORE'
                   AND (
                     (
                       TRIGGER_NAME IN (
                         'trg_audit_log_no_update',
-                        'trg_audit_log_no_update_v127')
+                        'trg_audit_log_no_update_v129')
                       AND EVENT_MANIPULATION = 'UPDATE'
                     )
                     OR (

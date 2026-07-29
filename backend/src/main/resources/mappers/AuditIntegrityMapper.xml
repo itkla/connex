@@ -33,14 +33,14 @@
         AND EVENT_OBJECT_TABLE = 'audit_log'
         AND TRIGGER_NAME IN (
           'trg_audit_log_no_update',
-          'trg_audit_log_no_update_v127',
+          'trg_audit_log_no_update_v129',
           'trg_audit_log_no_delete')
         AND ACTION_TIMING = 'BEFORE'
         AND (
           (
             TRIGGER_NAME IN (
               'trg_audit_log_no_update',
-              'trg_audit_log_no_update_v127')
+              'trg_audit_log_no_update_v129')
             AND EVENT_MANIPULATION = 'UPDATE'
           )
           OR (

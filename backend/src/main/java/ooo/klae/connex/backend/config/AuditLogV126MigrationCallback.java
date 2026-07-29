@@ -18,12 +18,12 @@ import org.flywaydb.core.api.callback.Event;
 import org.springframework.stereotype.Component;
 
 /**
- * Keeps {@code audit_log} append-only across the V126 and V127 trigger migrations.
+ * Keeps {@code audit_log} append-only across the V126 and V129 trigger migrations.
  */
 @Component
 public class AuditLogV126MigrationCallback implements Callback {
     static final String LEGACY_TRIGGER = "trg_audit_log_no_update";
-    static final String PERMANENT_TRIGGER = "trg_audit_log_no_update_v127";
+    static final String PERMANENT_TRIGGER = "trg_audit_log_no_update_v129";
     static final String DELETE_TRIGGER = "trg_audit_log_no_delete";
     static final String TEMPORARY_TRIGGER = "trg_audit_log_v126_migration_guard";
     static final String UPDATE_REPAIR_TRIGGER = "trg_audit_log_no_update_repair";
@@ -160,7 +160,7 @@ public class AuditLogV126MigrationCallback implements Callback {
     }
 
     private static boolean isAuditGuardMigration(Context context) {
-        return isV126(context) || isVersion(context, "127");
+        return isV126(context) || isVersion(context, "129");
     }
 
     private static boolean isV126(Context context) {

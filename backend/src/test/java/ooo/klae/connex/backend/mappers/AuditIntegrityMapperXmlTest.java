@@ -27,7 +27,7 @@ class AuditIntegrityMapperXmlTest {
                 "EVENT_OBJECT_SCHEMA = DATABASE()",
                 "EVENT_OBJECT_TABLE = 'audit_log'",
                 "'trg_audit_log_no_update'",
-                "'trg_audit_log_no_update_v127'",
+                "'trg_audit_log_no_update_v129'",
                 "'trg_audit_log_no_delete'",
                 "ACTION_TIMING = 'BEFORE'",
                 "EVENT_MANIPULATION = 'UPDATE'",

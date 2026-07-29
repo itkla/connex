@@ -66,7 +66,7 @@ class AuditLogV126MigrationCallbackTest {
     }
 
     @Test
-    void v127EventsValidateTheFinalGuardSet() throws SQLException {
+    void v129EventsValidateTheFinalGuardSet() throws SQLException {
         for (Event event : SUPPORTED_EVENTS) {
             SQLException routeFailure = new SQLException(event.name());
             Connection connection = mock(Connection.class);
@@ -79,7 +79,7 @@ class AuditLogV126MigrationCallbackTest {
                 routeFailure,
                 assertThrows(
                     FlywayException.class,
-                    () -> callback.handle(event, context("127", connection)))
+                    () -> callback.handle(event, context("129", connection)))
                     .getCause());
             verifyNonceCleared(clear);
         }
