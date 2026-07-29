@@ -1,57 +1,45 @@
 package ooo.klae.connex.backend.seeder;
 
-import java.net.URI;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Set;
 
 import javax.sql.DataSource;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.config.DeploymentProperties;
-import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
+import ooo.klae.connex.backend.seeder.SeederStartupConfigurationValidator.JdbcTarget;
+import ooo.klae.connex.backend.seeder.SeederStartupConfigurationValidator.ValidatedConfiguration;
 
 /**
- * Refuses unsafe seeder targets before Flyway or fixture writers may mutate them.
- *
- * <p>The guard asserts the whole invocation contract, not just the target: a seeder run
- * must be an explicitly activated, non-web, one-shot process in seeder maintenance mode.
- * Enabling {@code connex.seeder.enabled} alone therefore cannot arm fixture writing on a
- * serving deployment.
- *
- * <p>Configured URLs are checked before opening a JDBC connection because MySQL's
- * {@code createDatabaseIfNotExist=true} option can create a catalog during connection
- * establishment. Effective datasource metadata is then checked again.
+ * Revalidates effective seeder datasources before Flyway or fixture writers may mutate them.
  */
 @Component
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class SeederGuard {
 
-    private static final String PRODUCTION_DATABASE = "connex_pub";
-    private static final String SEEDER = "seeder";
-    private static final Set<String> DATABASE_SELECTING_QUERY_KEYS = Set.of("dbname", "database");
-    private static final Set<String> LOOPBACK_HOSTS = Set.of(
-        "localhost",
-        "127.0.0.1",
-        "::1",
-        "0:0:0:0:0:0:0:1"
-    );
+    private static final String JDBC_TARGET_VERIFICATION_FAILURE =
+        "could not verify effective JDBC target";
 
     private final Environment environment;
-    private final DeploymentProperties deploymentProperties;
-    private final SeederProperties properties;
     private final DataSource dataSource;
+
+    SeederGuard(
+            Environment environment,
+            DeploymentProperties deploymentProperties,
+            SeederProperties properties,
+            DataSource dataSource) {
+        this(environment, dataSource);
+    }
 
     /**
      * Verifies configured and effective application datasource targets.
@@ -66,25 +54,8 @@ public class SeederGuard {
      * @param additionalDataSources Flyway or other effective datasources to revalidate
      */
     public synchronized void verify(DataSource... additionalDataSources) {
-        verifyInvocationContract();
-        if (deploymentProperties.isConfigured()) {
-            throw new IllegalStateException(
-                "Seeder refused: explicitly configured deployment profile "
-                    + deploymentProperties.getProfile()
-                    + " is never seedable");
-        }
-
-        Set<String> databases = new LinkedHashSet<>();
-        for (String url : configuredUrls()) {
-            verifyJdbcUrl(url, properties.isAllowRemoteHost());
-            databases.add(parse(url.strip()).database().toLowerCase(Locale.ROOT));
-        }
-        if (databases.size() > 1) {
-            throw new IllegalStateException(
-                "Seeder refused: configured JDBC URLs disagree on the target database " + databases);
-        }
-        verifyConfiguredSchemas();
-
+        ValidatedConfiguration configuration =
+            SeederStartupConfigurationValidator.validate(environment);
         Set<DataSource> effectiveDataSources =
             Collections.newSetFromMap(new IdentityHashMap<>());
         effectiveDataSources.add(dataSource);
@@ -92,158 +63,78 @@ public class SeederGuard {
             Collections.addAll(effectiveDataSources, additionalDataSources);
         }
         for (DataSource effectiveDataSource : effectiveDataSources) {
-            verifyMetadata(effectiveDataSource);
+            verifyMetadata(effectiveDataSource, configuration);
         }
-    }
-
-    private void verifyInvocationContract() {
-        if (!environment.acceptsProfiles(Profiles.of(SEEDER))) {
-            throw new IllegalStateException(
-                "Seeder refused: the seeder Spring profile is not active");
-        }
-        if (!SEEDER.equals(normalized(environment.getProperty("connex.maintenance.mode")))) {
-            throw new IllegalStateException(
-                "Seeder refused: connex.maintenance.mode must be seeder");
-        }
-        if (!"none".equals(normalized(environment.getProperty("spring.main.web-application-type")))) {
-            throw new IllegalStateException(
-                "Seeder refused: only a non-web one-shot process may seed");
-        }
-        String routingMode = environment.getProperty(
-            "connex.tenancy.routing.mode",
-            TenantRoutingProperties.MODE_SINGLE_DATABASE
-        );
-        if (!TenantRoutingProperties.MODE_SINGLE_DATABASE.equals(normalized(routingMode))) {
-            throw new IllegalStateException(
-                "Seeder refused: only connex.tenancy.routing.mode=single-database is seedable");
-        }
-    }
-
-    private static String normalized(String value) {
-        return value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
     }
 
     static void verifyJdbcUrl(String url, boolean allowRemoteHost) {
-        if (!StringUtils.hasText(url)) {
-            throw new IllegalStateException("Seeder refused: JDBC URL is blank");
-        }
-
-        JdbcTarget target = parse(url.strip());
-        if (PRODUCTION_DATABASE.equalsIgnoreCase(target.database())) {
-            throw new IllegalStateException(
-                "Seeder refused: database connex_pub is a protected production target");
-        }
-        if (!LOOPBACK_HOSTS.contains(target.host().toLowerCase(Locale.ROOT)) && !allowRemoteHost) {
-            throw new IllegalStateException(
-                "Seeder refused: non-loopback database host "
-                    + target.host()
-                    + " requires connex.seeder.allow-remote-host=true");
-        }
+        SeederStartupConfigurationValidator.verifyJdbcUrl(url, allowRemoteHost);
     }
 
-    private Set<String> configuredUrls() {
-        Set<String> urls = new LinkedHashSet<>();
-        addConfiguredUrl(urls, "spring.datasource.url", true);
-        addConfiguredUrl(urls, "spring.datasource.hikari.jdbc-url", false);
-        addConfiguredUrl(urls, "spring.datasource.hikari.jdbcUrl", false);
-        addConfiguredUrl(urls, "spring.flyway.url", false);
-        return urls;
-    }
-
-    private void addConfiguredUrl(Set<String> urls, String propertyName, boolean required) {
-        String value = environment.getProperty(propertyName);
-        if (!StringUtils.hasText(value)) {
-            if (required) {
-                throw new IllegalStateException("Seeder refused: " + propertyName + " is required");
-            }
-            return;
-        }
-        urls.add(value.strip());
-    }
-
-    private void verifyConfiguredSchemas() {
-        for (String propertyName : new String[] {"spring.flyway.schemas", "spring.flyway.default-schema"}) {
-            String value = environment.getProperty(propertyName);
-            if (!StringUtils.hasText(value)) {
-                continue;
-            }
-            for (String schema : value.split(",")) {
-                if (PRODUCTION_DATABASE.equalsIgnoreCase(schema.strip())) {
-                    throw new IllegalStateException(
-                        "Seeder refused: " + propertyName
-                            + " names the protected production target connex_pub");
-                }
-            }
-        }
-    }
-
-    private void verifyMetadata(DataSource effectiveDataSource) {
+    private static void verifyMetadata(
+            DataSource effectiveDataSource,
+            ValidatedConfiguration configuration) {
         if (effectiveDataSource == null) {
-            throw new IllegalStateException("Seeder refused: effective datasource is unavailable");
+            throw SeederStartupConfigurationValidator.refused(
+                "effective datasource is unavailable"
+            );
         }
         try (Connection connection = effectiveDataSource.getConnection()) {
-            verifyJdbcUrl(connection.getMetaData().getURL(), properties.isAllowRemoteHost());
-            String catalog = connection.getCatalog();
-            if (catalog != null && PRODUCTION_DATABASE.equalsIgnoreCase(catalog.strip())) {
-                throw new IllegalStateException(
-                    "Seeder refused: effective catalog connex_pub is a protected production target");
+            JdbcTarget metadataTarget = SeederStartupConfigurationValidator.verifiedTarget(
+                connection.getMetaData().getURL(),
+                "effective datasource metadata URL",
+                configuration.allowRemoteHost()
+            );
+            if (!configuration.target().matches(metadataTarget)) {
+                throw SeederStartupConfigurationValidator.refused(
+                    "effective datasource metadata URL disagrees with spring.datasource.url"
+                );
             }
-        } catch (SQLException ex) {
-            throw new IllegalStateException("Seeder refused: could not verify effective JDBC target", ex);
+            verifyEffectiveDatabase(
+                effectiveDatabase(connection),
+                configuration.target().database()
+            );
+        } catch (SQLException exception) {
+            throw SeederStartupConfigurationValidator.refused(
+                JDBC_TARGET_VERIFICATION_FAILURE
+            );
+        } catch (RuntimeException exception) {
+            throw SeederStartupConfigurationValidator.cleanRefusal(
+                exception,
+                JDBC_TARGET_VERIFICATION_FAILURE
+            );
         }
     }
 
-    private static JdbcTarget parse(String url) {
-        if (!url.startsWith("jdbc:mysql://")) {
-            throw new IllegalStateException(
-                "Seeder refused: only simple jdbc:mysql:// URLs are supported");
-        }
-        try {
-            URI uri = URI.create(url.substring("jdbc:".length()));
-            String host = unbracketed(uri.getHost());
-            String rawPath = uri.getRawPath();
-            verifyNoDatabaseSelectingQuery(uri.getRawQuery());
-            if (!StringUtils.hasText(host)
-                    || !StringUtils.hasText(rawPath)
-                    || !rawPath.startsWith("/")
-                    || rawPath.length() == 1
-                    || rawPath.indexOf('/', 1) >= 0) {
-                throw new IllegalStateException(
-                    "Seeder refused: JDBC URL must name one unambiguous host and database");
+    private static String effectiveDatabase(Connection connection) throws SQLException {
+        try (PreparedStatement statement =
+                connection.prepareStatement("SELECT DATABASE()");
+                ResultSet result = statement.executeQuery()) {
+            if (!result.next()) {
+                return "";
             }
-            String database = URLDecoder.decode(rawPath.substring(1), StandardCharsets.UTF_8);
-            if (!StringUtils.hasText(database)) {
-                throw new IllegalStateException("Seeder refused: JDBC URL database name is blank");
-            }
-            return new JdbcTarget(host, database);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException("Seeder refused: JDBC URL is malformed", ex);
+            String database = result.getString(1);
+            return database == null ? "" : database.strip();
         }
     }
 
-    private static void verifyNoDatabaseSelectingQuery(String rawQuery) {
-        if (!StringUtils.hasText(rawQuery)) {
-            return;
+    private static void verifyEffectiveDatabase(
+            String effectiveDatabase,
+            String targetDatabase) {
+        if (!StringUtils.hasText(effectiveDatabase)) {
+            throw SeederStartupConfigurationValidator.refused(
+                "the effective connection reports no current database"
+            );
         }
-        for (String parameter : rawQuery.split("&")) {
-            int separator = parameter.indexOf('=');
-            String key = separator < 0 ? parameter : parameter.substring(0, separator);
-            if (DATABASE_SELECTING_QUERY_KEYS.contains(key.strip().toLowerCase(Locale.ROOT))) {
-                throw new IllegalStateException(
-                    "Seeder refused: JDBC URL selects its database through the query parameter "
-                        + key.strip());
-            }
+        if (SeederStartupConfigurationValidator.isProtectedDatabase(effectiveDatabase)) {
+            throw SeederStartupConfigurationValidator.refused(
+                "effective catalog is a protected Connex target"
+            );
         }
-    }
-
-    private static String unbracketed(String host) {
-        if (host != null && host.length() > 1 && host.charAt(0) == '['
-                && host.charAt(host.length() - 1) == ']') {
-            return host.substring(1, host.length() - 1);
+        if (!effectiveDatabase.equals(targetDatabase)) {
+            throw SeederStartupConfigurationValidator.refused(
+                "effective catalog is not the exact configured target database"
+            );
         }
-        return host;
-    }
-
-    private record JdbcTarget(String host, String database) {
     }
 }

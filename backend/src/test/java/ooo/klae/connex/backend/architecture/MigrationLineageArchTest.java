@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.architecture;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +39,13 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  */
 class MigrationLineageArchTest {
 
+    private static final Pattern VERSIONED_MIGRATION_FILE_NAME =
+        Pattern.compile("V(\\d+)__[a-z0-9_]+\\.sql");
+    private static final Pattern SQL_MIGRATION_FILE_NAME =
+        Pattern.compile("(?:V\\d+|R)__[a-z0-9_]+\\.sql");
+    private static final Set<Path> MIGRATION_METADATA_PATHS = Set.of(
+        Path.of("control/.gitkeep"),
+        Path.of("tenant/.gitkeep"));
     private static final List<Pattern> TABLE_REFERENCES = List.of(
         Pattern.compile(
             "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
@@ -70,6 +79,25 @@ class MigrationLineageArchTest {
         assertLineagePurity("control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
     }
 
+    @Test
+    void migrationFilesUseThePortableConvention() throws IOException {
+        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
+        List<String> invalidNames;
+        try (Stream<Path> files = Files.walk(root)) {
+            invalidNames = files
+                .filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                .filter(path -> !migrationResourceIsValid(root, path))
+                .map(path -> path.getFileName().toString())
+                .map(MigrationLineageArchTest::displayName)
+                .sorted()
+                .toList();
+        }
+        assertTrue(invalidNames.isEmpty(),
+            "Flyway migrations must be regular files named V{integer}__{snake_case}.sql "
+                + "or R__{snake_case}.sql, apart from the two lineage .gitkeep files: "
+                + invalidNames);
+    }
+
     /**
      * The interleaved root lineage is frozen at V65 (the FK-drop migration):
      * every migration after the split must land in one of the pure lineage
@@ -80,9 +108,15 @@ class MigrationLineageArchTest {
         Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
         List<String> escapees = new ArrayList<>();
         try (Stream<Path> files = Files.list(root)) {
-            for (Path file : files.filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql")).toList()) {
-                int version = Integer.parseInt(file.getFileName().toString().substring(1).split("__")[0]);
-                if (version > 65) {
+            for (Path file : files
+                    .filter(path -> SQL_MIGRATION_FILE_NAME
+                        .matcher(path.getFileName().toString()).matches())
+                    .toList()) {
+                String fileName = file.getFileName().toString();
+                Matcher versionedName = VERSIONED_MIGRATION_FILE_NAME.matcher(fileName);
+                if (!versionedName.matches()
+                        || new BigInteger(versionedName.group(1))
+                            .compareTo(BigInteger.valueOf(65)) > 0) {
                     escapees.add(file.getFileName().toString());
                 }
             }
@@ -125,6 +159,29 @@ class MigrationLineageArchTest {
 
     private static String stripComments(String sql) {
         return sql.replaceAll("--[^\\n]*", "").replaceAll("(?s)/\\*.*?\\*/", "");
+    }
+
+    private static boolean migrationResourceIsValid(Path root, Path path) {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        if (SQL_MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches()) {
+            return true;
+        }
+        try {
+            return MIGRATION_METADATA_PATHS.contains(root.relativize(path))
+                && Files.size(path) == 0;
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
+    private static String displayName(String name) {
+        return name
+            .replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
     }
 
     private Path repoRoot() {

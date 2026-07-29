@@ -20,6 +20,15 @@ This guide applies to `ocr/` in addition to the root `AGENTS.md`. The package is
 - Validate content length, media type, full decode, dimensions, pixel count, frame count, OCR response shape, text length, confidence, coordinates, and line count at the boundary. A valid engine result that exceeds the recognized-line ceiling is an image rejection with HTTP 422; it is not a native worker failure and must not trigger the fatal restart path.
 - Preserve non-blocking single-worker backpressure: overlapping inference returns `429`; it must not create an unbounded queue. HTTP handler threads are bounded by `CONNEX_OCR_MAX_REQUEST_HANDLERS`, slow request bodies must not occupy the inference slot, and every connection must remain under the absolute request deadline. The persistent supervisor must continuously probe the worker, distinguish adjacent requests by the health generation, immediately hard-kill native startup or inference that exceeds its deadline, and fail the container when configuration or a worker fails before readiness. Only a worker that previously reached readiness may be restarted, with bounded exponential backoff that resets after stable uptime. Compose uses `unless-stopped` so the supervisor also returns after a Docker daemon or host restart.
 
+## Delegation and review
+
+Follow the root delegation tiers and budgets.
+
+- Routine parser, validation, protocol, fixture, or documentation changes are normally Tier 1: one implementation owner and one independent review at most.
+- Changes to worker lifecycle, native-process supervision, deadlines, backpressure, network isolation, model acquisition, dependency pins, image decoding, or resource limits are Tier 3. Use two non-overlapping reviews: security/isolation and correctness/resource-failure behavior.
+- Do not send several agents to re-read the same Dockerfile, supervisor, and protocol tests. Give one explorer the complete runtime boundary and use the second slot only for a distinct backend-integration or container-security concern.
+- The Docker build, protocol tests, dependency audit, and canonical benchmark are stronger evidence than duplicate reviewer opinions. Run the applicable evidence once against the final candidate; do not repeat the full benchmark in parallel merely to increase reviewer count.
+
 ## Verification
 
 Run lightweight protocol, parser, and benchmark-manifest tests without loading Paddle models:

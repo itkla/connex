@@ -1,2 +1,3 @@
 org.springframework.boot.EnvironmentPostProcessor=\
+ooo.klae.connex.backend.seeder.SeederStartupEnvironmentPostProcessor,\
 ooo.klae.connex.backend.config.DatabaseTransportSecurityEnvironmentPostProcessor
