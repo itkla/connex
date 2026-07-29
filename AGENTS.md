@@ -66,6 +66,7 @@ This repo favors **aggressive parallel fan-out**. Reach for subagents and workfl
 **Model routing:**
 
 - **Backend work → codex.** Defer backend work to a **gpt-5.6** agent at **xhigh** reasoning effort spawned via the **codex** CLI. Claude handles the frontend and gap-filling where necessary.
+- **Security and adversarial review → Kimi K3 Max via OpenCode.** Route every security review, adversarial/refutation review, and independent security/logic bug hunt to **Kimi K3** at the **`max`** variant through **OpenCode**. Verify the provider with `opencode models kimi-for-coding --refresh`, then run `opencode run --agent plan -m kimi-for-coding/k3 --variant max "<review prompt>"` from the relevant repository or package root. Keep the pass independent and review-only: tell it to inspect the diff plus surrounding code, report `file:line` findings with severity, and never edit files. This route supersedes package-specific reviewer/model instructions for security or adversarial work. Do not silently substitute another model; if Kimi K3 Max is unavailable, report the blocker.
 - **Fundamental changes → Fable 5 advisor.** For high-level work that involves fundamental changes, consult a **Fable 5** subagent as an advisor before acting.
 
 **Plan-first dispatch (non-negotiable).** Every subagent dispatched to *implement* something — Claude or codex — must produce a short plan **before** writing code: scope and approach, files to touch, API/data contracts, migration versions (pre-assigned by the orchestrator to avoid Flyway collisions), and a test plan. The orchestrator reviews that plan against the codebase and these guides, corrects it if needed, and only then lets implementation proceed — for codex this means a read-only planning run first, then an implementation run with the approved plan embedded. Pure discovery, review, and verification agents are exempt.
@@ -124,7 +125,7 @@ A change is done only when **all** of these pass:
 2. If you touched a `*Controller`, fire real `curl` requests at `http://localhost:8080/api/...` and confirm responses (status, body, auth/tenant behavior). Protected endpoints need a session + CSRF token — see `backend/AGENTS.md` for how to authenticate, and test an other-tenant caller to prove isolation.
 3. Write automated tests and make them pass (`./gradlew test`).
 4. Scrutinize intensely for bugs and future failure modes — tenant leakage, RBAC gaps, null/edge cases, N+1 queries, migration safety.
-5. Use the **codex** CLI to spawn a **gpt-5.6** agent at **xhigh** effort to independently hunt security bugs and logic flaws, then triage its findings (see `backend/AGENTS.md` for the exact command).
+5. Use **OpenCode** to run **Kimi K3 at the `max` variant** as an independent, review-only security and logic reviewer, then triage its findings (see [Review](#review) and the model-routing command above).
 
 ### Frontend verify loop (required for frontend work)
 
@@ -139,9 +140,9 @@ A change is done only when **all** of these pass:
 Every non-trivial change gets **both**:
 
 1. **`/code-review`** on the diff — address findings before handing back.
-2. **Adversarial multi-agent review** — fan out independent reviewer agents tasked to *refute* the change (correctness, security, tenant isolation, RBAC, edge cases). Accept only what survives.
+2. **Adversarial multi-agent review** — fan out independent reviewer agents tasked to *refute* the change (correctness, security, tenant isolation, RBAC, edge cases). The required model-backed refutation pass is **Kimi K3 Max via OpenCode** using the route above; keep it review-only and independent of the implementation agent. Accept only what survives.
 
-Security-sensitive changes — auth, WebAuthn, tenant scoping, RBAC, sharing/permissions — additionally get **`/security-review`**.
+Security-sensitive changes — auth, WebAuthn, tenant scoping, RBAC, sharing/permissions — additionally get **`/security-review`**, and that security pass must use **Kimi K3 Max via OpenCode** too. One Kimi pass may satisfy both requirements only when its prompt explicitly covers the full adversarial matrix and the security-specific threat model; otherwise run separate passes.
 
 ## Git & issues
 
@@ -171,7 +172,7 @@ Treat GitHub as the system of record. For any tracked piece of work:
 - **No unjustified dependencies.** Prefer the libraries already in `package.json` / `build.gradle`. If a new dep is truly needed, call it out and say why before adding it.
 - **Audit new packages.** Whenever you install a frontend package, **always run `pnpm audit`** afterward and resolve or explicitly flag what it reports before continuing — don't introduce known-vulnerable dependencies. Check new backend (Gradle) deps for known CVEs the same way.
 - **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
-- **Don't leak code or secrets externally.** Look things up in docs/online, but never paste Connex source, data, or secrets into web searches or third-party tools.
+- **Don't leak code, data, or secrets through unapproved channels.** OpenCode/Kimi and the explicitly routed coding-agent providers are approved for source review, but prompts must exclude credentials, customer data, production logs, and other secrets. Never paste Connex source or data into web searches or unrelated third-party tools.
 - **Confirm irreversible actions.** No `git push --force`, no resetting or rewriting history on `main` or shared branches, no destructive database operations against shared/dev data — confirm with the user first.
 - **Don't weaken the toolchain.** No disabling/ignoring lint rules, no loosening `tsconfig` `strict`, no `// eslint-disable`, no `@SuppressWarnings` to dodge a real problem. Fix the cause.
 - **No scope creep.** Change what the task needs. Don't reformat, rename, or refactor unrelated code in the same change — it pollutes the diff and the review.
