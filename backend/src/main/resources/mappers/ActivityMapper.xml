@@ -75,6 +75,16 @@
     </choose>
   </sql>
 
+  <sql id="analyticsPeriods">
+    <foreach collection="periods" item="period" separator=" UNION ALL ">
+      SELECT #{period.index} AS bucket_index,
+             #{period.startDate} AS start_date,
+             #{period.endDate} AS end_date,
+             #{period.startUtc} AS start_utc,
+             #{period.endUtc} AS end_utc
+    </foreach>
+  </sql>
+
   <select id="activityVolume" resultType="ooo.klae.connex.backend.dto.ActivityVolumeBucketDto">
     SELECT
       <choose>
@@ -91,7 +101,8 @@
       COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'email' THEN 1 ELSE 0 END), 0) AS `email`,
       COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
       COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'note' THEN 1 ELSE 0 END), 0) AS `note`,
-      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`,
+      NULL AS period_start
     FROM activity a
     WHERE a.workspace_id = #{workspaceId}
     <include refid="activityMemberScope"/>
@@ -106,6 +117,29 @@
     </choose>
     GROUP BY bucket_index
     ORDER BY bucket_index
+  </select>
+
+  <select id="activityVolumeByBoundaries"
+          resultType="ooo.klae.connex.backend.dto.ActivityVolumeBucketDto">
+    SELECT boundary.bucket_index,
+           COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'call' THEN 1 ELSE 0 END), 0) AS `call`,
+           COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'email' THEN 1 ELSE 0 END), 0) AS `email`,
+           COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
+           COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'note' THEN 1 ELSE 0 END), 0) AS `note`,
+           COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN
+               ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`,
+           DATE_FORMAT(boundary.start_date, '%Y-%m-%d') AS period_start
+    FROM (<include refid="analyticsPeriods"/>) boundary
+    JOIN activity a
+      ON a.workspace_id = #{workspaceId}
+      AND a.timestamp &gt;= boundary.start_utc
+      AND a.timestamp &lt; boundary.end_utc
+    WHERE a.workspace_id = #{workspaceId}
+    <include refid="activityMemberScope"/>
+      AND a.timestamp &gt;= #{startUtc}
+      AND a.timestamp &lt; #{endUtc}
+    GROUP BY boundary.bucket_index, boundary.start_date
+    ORDER BY boundary.bucket_index
   </select>
 
   <select id="teamLeaderboard" resultType="ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto">
@@ -131,6 +165,34 @@
         AND n.visibility != 'private'
         AND n.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
         AND n.created_at &lt;= NOW()
+    ) touch
+    GROUP BY touch.user_id
+    ORDER BY touches DESC, touch.user_id
+  </select>
+
+  <select id="teamLeaderboardWindow" resultType="ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto">
+    SELECT touch.user_id, COUNT(*) AS touches
+    FROM (
+      SELECT a.created_by_id AS user_id
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.timestamp &gt;= #{startUtc}
+        AND a.timestamp &lt; #{endUtc}
+      UNION ALL
+      SELECT t.assigned_to_id AS user_id
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND t.assigned_to_id IS NOT NULL
+        AND t.completed = TRUE
+        AND t.updated_at &gt;= #{startUtc}
+        AND t.updated_at &lt; #{endUtc}
+      UNION ALL
+      SELECT n.author_id AS user_id
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.visibility != 'private'
+        AND n.created_at &gt;= #{startUtc}
+        AND n.created_at &lt; #{endUtc}
     ) touch
     GROUP BY touch.user_id
     ORDER BY touches DESC, touch.user_id

@@ -1,0 +1,15 @@
+# Connex on-prem backup-prune schedule (twice daily by default).
+# install.sh renders OnCalendar from CONNEX_BACKUP_PRUNE_CALENDAR. Running more
+# than once a day gives a transient failure a same-day retry inside the one-day
+# margin between the 29-day prune threshold and the 30-day legal ceiling.
+
+[Unit]
+Description=Schedule Connex database backup pruning
+
+[Timer]
+OnCalendar=*-*-* 04,16:30:00 Asia/Tokyo
+Persistent=true
+Unit=connex-backup-prune.service
+
+[Install]
+WantedBy=timers.target

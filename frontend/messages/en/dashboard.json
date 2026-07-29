@@ -5,8 +5,6 @@
     "contacts": "Contacts",
     "deals": "Deals",
     "pipelines": "Pipelines",
-    "companiesDescription": "You're up +1 company from last week",
-    "dealsDescription": "The last deal closed for $100,000",
     "pipeline": "Pipeline",
     "tasks": "Tasks",
     "recentActivity": "Recent activity",
@@ -35,7 +33,7 @@
     "teamLeaderboard": "Team leaderboard"
   },
   "CompanyWarmth": {
-    "empty": "Every company relationship is warm."
+    "empty": "No cooling companies right now."
   },
   "WarmthDistribution": {
     "empty": "No warmth data yet"
@@ -49,7 +47,7 @@
     "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
   },
   "CoolingRelationships": {
-    "empty": "Every relationship is warm — nothing cooling off.",
+    "empty": "No cooling relationships right now.",
     "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
     "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
     "noCompany": "No company",
@@ -59,7 +57,7 @@
     "scheduleFailed": "Couldn't schedule the follow-up."
   },
   "RecentMoves": {
-    "empty": "No recent job changes in your network.",
+    "empty": "No recent job changes among workspace contacts.",
     "unknown": "Unknown"
   },
   "DashboardGreeting": {
@@ -69,7 +67,7 @@
     "goodEvening": "Good evening,",
     "nothingUrgent": "Nothing urgent today. Smooth sailing.",
     "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
-    "upcomingTitle": "On your radar this week",
+    "upcomingTitle": "This week across the workspace",
     "tasksDue": "{count, plural, one {# task due} other {# tasks due}}",
     "dealsClosing": "{count, plural, one {# deadline} other {# deadlines}}",
     "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonRawValue;
 
 import lombok.Data;
@@ -15,6 +16,10 @@ public class AuditLog {
     private String entityType;
     private Integer entityId;
     private Integer actorId;
+    private Integer integrityWorkspaceId;
+    private Integer integrityOrgId;
+    private Integer integrityActorId;
+    private String integrityReferenceState;
     private String actorLabel;
     private String targetLabel;
     private String outcome;
@@ -88,6 +93,42 @@ public class AuditLog {
 
     public void setActorId(Integer actorId) {
         this.actorId = actorId;
+    }
+
+    @JsonIgnore
+    public Integer getIntegrityWorkspaceId() {
+        return integrityWorkspaceId;
+    }
+
+    public void setIntegrityWorkspaceId(Integer integrityWorkspaceId) {
+        this.integrityWorkspaceId = integrityWorkspaceId;
+    }
+
+    @JsonIgnore
+    public Integer getIntegrityOrgId() {
+        return integrityOrgId;
+    }
+
+    public void setIntegrityOrgId(Integer integrityOrgId) {
+        this.integrityOrgId = integrityOrgId;
+    }
+
+    @JsonIgnore
+    public Integer getIntegrityActorId() {
+        return integrityActorId;
+    }
+
+    public void setIntegrityActorId(Integer integrityActorId) {
+        this.integrityActorId = integrityActorId;
+    }
+
+    @JsonIgnore
+    public String getIntegrityReferenceState() {
+        return integrityReferenceState;
+    }
+
+    public void setIntegrityReferenceState(String integrityReferenceState) {
+        this.integrityReferenceState = integrityReferenceState;
     }
 
     public String getActorLabel() {

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.IdentityMapper">
+
+  <select id="findPersonBackfillCandidates" resultType="PersonIdentityBackfillCandidate">
+    SELECT p.id, p.email, p.phone, p.created_at
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.id &gt; #{afterId}
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND (
+        (p.email IS NOT NULL AND TRIM(p.email) &lt;&gt; '')
+        OR (p.phone IS NOT NULL AND TRIM(p.phone) &lt;&gt; '')
+      )
+    ORDER BY p.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findCompanyBackfillCandidates" resultType="CompanyIdentityBackfillCandidate">
+    SELECT c.id, c.website, c.created_at
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id &gt; #{afterId}
+      AND c.website IS NOT NULL
+      AND TRIM(c.website) &lt;&gt; ''
+    ORDER BY c.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findPersonIdentityKeys" resultType="IdentityKeyRow">
+    SELECT pi.person_id AS record_id, pi.kind, pi.normalized_value
+    FROM person_identity pi
+    JOIN person p ON p.workspace_id = pi.workspace_id AND p.id = pi.person_id
+    WHERE pi.workspace_id = #{workspaceId}
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND pi.person_id IN
+      <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
+        #{recordId}
+      </foreach>
+  </select>
+
+  <select id="findCompanyIdentityKeys" resultType="IdentityKeyRow">
+    SELECT ci.company_id AS record_id, ci.kind, ci.normalized_value
+    FROM company_identity ci
+    JOIN company c ON c.workspace_id = ci.workspace_id AND c.id = ci.company_id
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id IN
+      <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
+        #{recordId}
+      </foreach>
+  </select>
+
+  <insert id="insertBackfilledPersonEmailIfAbsent">
+    INSERT INTO person_identity (
+      workspace_id, person_id, kind, `value`, normalized_value,
+      source_system, source_channel, source_external_id, source_row_ref,
+      acquired_at, purpose_of_use_code
+    )
+    SELECT p.workspace_id, p.id, 'email', p.email, #{normalizedValue},
+           'backfill', 'person.email', NULL, CONCAT('person:', p.id),
+           p.created_at, NULL
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.id = #{personId}
+      AND CAST(p.email AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM person_identity existing
+        WHERE existing.workspace_id = #{workspaceId}
+          AND existing.person_id = #{personId}
+          AND existing.kind = 'email'
+          AND existing.normalized_value = #{normalizedValue}
+      )
+    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+  </insert>
+
+  <insert id="insertBackfilledPersonPhoneIfAbsent">
+    INSERT INTO person_identity (
+      workspace_id, person_id, kind, `value`, normalized_value,
+      source_system, source_channel, source_external_id, source_row_ref,
+      acquired_at, purpose_of_use_code
+    )
+    SELECT p.workspace_id, p.id, 'phone', p.phone, #{normalizedValue},
+           'backfill', 'person.phone', NULL, CONCAT('person:', p.id),
+           p.created_at, NULL
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.id = #{personId}
+      AND CAST(p.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM person_identity existing
+        WHERE existing.workspace_id = #{workspaceId}
+          AND existing.person_id = #{personId}
+          AND existing.kind = 'phone'
+          AND existing.normalized_value = #{normalizedValue}
+      )
+    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+  </insert>
+
+  <insert id="insertBackfilledCompanyDomainIfAbsent">
+    INSERT INTO company_identity (
+      workspace_id, company_id, kind, `value`, normalized_value,
+      source_system, source_channel, source_external_id, source_row_ref,
+      acquired_at, purpose_of_use_code
+    )
+    SELECT c.workspace_id, c.id, 'domain', c.website, #{normalizedValue},
+           'backfill', 'company.website', NULL, CONCAT('company:', c.id),
+           c.created_at, NULL
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id = #{companyId}
+      AND CAST(c.website AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM company_identity existing
+        WHERE existing.workspace_id = #{workspaceId}
+          AND existing.company_id = #{companyId}
+          AND existing.kind = 'domain'
+          AND existing.normalized_value = #{normalizedValue}
+      )
+    ON DUPLICATE KEY UPDATE company_identity.id = company_identity.id
+  </insert>
+
+  <delete id="deletePersonIdentitiesForWorkspace">
+    DELETE FROM person_identity
+    WHERE workspace_id = #{workspaceId}
+  </delete>
+
+  <delete id="deleteCompanyIdentitiesForWorkspace">
+    DELETE FROM company_identity
+    WHERE workspace_id = #{workspaceId}
+  </delete>
+
+</mapper>

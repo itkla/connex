@@ -91,7 +91,7 @@ import PipelineValue from '@/app/components/overview/analytics/PipelineValue';
 import StageFunnel from '@/app/components/overview/analytics/StageFunnel';
 import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
-import type { RangeKey } from '@/app/components/overview/analytics/metrics';
+import type { RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 
 const EMPTY_DEAL_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -144,7 +144,7 @@ const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
     dealRisksTruncated: false,
 };
 
-const DASHBOARD_RANGE: RangeKey = '90d';
+const DASHBOARD_RANGE: RollingRangeKey = '90d';
 
 /**
  * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
@@ -269,9 +269,9 @@ export default async function Dashboard() {
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" description={t('companiesDescription')} />
+                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" />
                 <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" />
-                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" description={t('dealsDescription')} />
+                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" />
                 <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" />
             </div>
         ),

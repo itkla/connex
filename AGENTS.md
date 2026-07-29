@@ -18,7 +18,7 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 
 ## Running the stack locally
 
-The verify loops require a running stack. **Prerequisites:** Node 20+, Java 26 (the backend toolchain), and Docker. Bring it up in this order:
+The verify loops require a running stack. **Prerequisites:** Node `^22.13.0 || >=24.0.0` (the frontend toolchain's floor, declared in `frontend/package.json` `engines` — 20.x, 21.x, 22.0–22.12 and 23.x are excluded; CI runs 22 and the frontend image runs 26), Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
 1. **Database** — from `backend/`: create `backend/.env` from `backend/.env.example`, fill local-only database passwords, then run `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`).
 2. **OCR (when testing card scanning)** — set a unique local `CONNEX_OCR_SERVICE_TOKEN` of at least 32 characters in `backend/.env`, then from `backend/` run `docker compose --profile ocr up -d ocr` (private service exposed to the host on `127.0.0.1:8090`). The image build pre-fetches its models; runtime model downloads are forbidden.
@@ -31,7 +31,7 @@ Auth is cookie/session based; workspace selection drives tenant context. See `fr
 
 1. **Explore → Plan → Question → Argue → Act.** Never write code for anything bigger than a one-liner before you've read the surrounding code, formed a short plan, and surfaced assumptions. If the request is ambiguous or looks wrong, push back *before* coding — don't guess.
 2. **Match what's already there.** Read neighboring files first and mirror their naming, structure, and idioms. The existing pattern beats the textbook one. Consistency > personal preference.
-3. **Comments are docs only.** The *only* permitted comments are Javadoc (backend) and JSDoc/TSDoc (frontend) on types, classes, methods, and exported functions. **No inline comments. None.** If code needs an inline comment to be understood, rename things or restructure instead.
+3. **Comments are docs only — in Java and TypeScript.** There, the *only* permitted comments are Javadoc (backend) and JSDoc/TSDoc (frontend) on types, classes, methods, and exported functions. **No inline comments. None.** If code needs an inline comment to be understood, rename things or restructure instead. **Shell, YAML, and SQL are exempt**: they have no doc-comment convention, and operator-facing scripts (`deploy/`, `.github/workflows/`, migrations) should carry comments explaining non-obvious constraints. See [#883](https://github.com/itkla/connex/issues/883).
 4. **Type- and null-safe, always.** No `any` and no unchecked casts in TS; no unguarded nulls in Java. Validate DTOs at the boundary. `strict` stays on.
 5. **Respect the layers.** Backend: controller → service → mapper. No business logic in controllers, no SQL/data access outside mappers. Frontend: no business logic or data fetching buried in presentational components.
 6. **Done means verified.** "It compiles" is not done. See [Definition of Done](#definition-of-done).

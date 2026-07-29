@@ -21,6 +21,16 @@ springBoot {
 				time.set(releaseBuildTime)
 			}
 		}
+		def gitSha = providers.gradleProperty('gitSha')
+		if (!gitSha.isPresent() && new File(projectDir.parentFile, '.git').exists()) {
+			gitSha = providers.exec {
+				commandLine 'git', 'rev-parse', 'HEAD'
+				ignoreExitValue = true
+			}.standardOutput.asText.map { it.trim() }
+		}
+		properties {
+			additional.put('gitSha', gitSha.map { sha -> sha.isEmpty() ? 'unknown' : sha }.orElse('unknown'))
+		}
 	}
 }
 
@@ -41,10 +51,12 @@ ext['jackson-2-bom.version'] = '2.21.5'
 ext['logback.version'] = '1.5.35'
 
 dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.apache.httpcomponents.client5:httpclient5'
+	implementation 'com.googlecode.libphonenumber:libphonenumber:9.0.35'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
@@ -61,8 +73,10 @@ dependencies {
 	implementation 'org.springframework.security:spring-security-messaging'
 	implementation platform('software.amazon.awssdk:bom:2.46.8')
 	implementation 'software.amazon.awssdk:s3'
+	compileOnly 'io.micrometer:micrometer-registry-prometheus'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	annotationProcessor 'org.projectlombok:lombok'
 	providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat-runtime'
@@ -70,6 +84,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter-test:4.1.0'
+	testCompileOnly 'io.micrometer:micrometer-registry-prometheus'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
@@ -77,10 +92,70 @@ dependencies {
 
 tasks.withType(JavaCompile).configureEach {
 	options.compilerArgs << '-parameters'
+	options.encoding = 'UTF-8'
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
 	maxHeapSize = '1536m'
 	forkEvery = 100
+}
+
+def seederRuntimeClasspath = sourceSets.main.output + configurations.productionRuntimeClasspath
+
+tasks.register('seedData', org.springframework.boot.gradle.tasks.run.BootRun) {
+	group = 'application'
+	description = 'Seeds deterministic tenant-scoped CRM data into a guarded database.'
+	mainClass = 'ooo.klae.connex.backend.seeder.SeederApplication'
+	classpath = seederRuntimeClasspath
+	args '--spring.main.web-application-type=none',
+		'--spring.profiles.active=seeder',
+		'--connex.seeder.enabled=true'
+	[
+		seederProfile: 'profile',
+		seederSeed: 'seed',
+		seederWorkspaces: 'workspaces',
+		seederAnchorDate: 'anchor-date',
+		seederAllowRemoteHost: 'allow-remote-host'
+	].each { projectProperty, applicationProperty ->
+		def propertyValue = providers.gradleProperty(projectProperty)
+		if (propertyValue.isPresent()) {
+			args "--connex.seeder.${applicationProperty}=${propertyValue.get()}"
+		}
+	}
+}
+
+def verifySeederDevtoolsIsolation = tasks.register(
+	'verifySeederDevtoolsIsolation',
+	JavaExec
+) {
+	group = 'verification'
+	description = 'Proves the seeder runtime ignores Spring DevTools home configuration.'
+	dependsOn tasks.named('testClasses')
+	mainClass = 'ooo.klae.connex.backend.seeder.SeederDevToolsIsolationProbe'
+	classpath = sourceSets.test.output + seederRuntimeClasspath
+	doFirst {
+		def devtoolsArtifacts = classpath.files.findAll {
+			it.name.startsWith('spring-boot-devtools-')
+		}
+		if (!devtoolsArtifacts.isEmpty()) {
+			throw new GradleException('Seeder verification classpath contains Spring DevTools')
+		}
+		def devtoolsConfigDirectory = new File(
+			temporaryDir,
+			'.config/spring-boot'
+		)
+		if (!devtoolsConfigDirectory.mkdirs() && !devtoolsConfigDirectory.isDirectory()) {
+			throw new GradleException('Cannot create the seeder DevTools probe directory')
+		}
+		new File(
+			devtoolsConfigDirectory,
+			'spring-boot-devtools.properties'
+		).text = 'context.initializer.classes=ooo.klae.connex.backend.seeder.SeederDevToolsIsolationProbe$CanaryInitializer\n'
+		environment 'SPRING_DEVTOOLS_HOME', temporaryDir.absolutePath
+	}
+}
+
+tasks.named('test') {
+	dependsOn verifySeederDevtoolsIsolation
 }

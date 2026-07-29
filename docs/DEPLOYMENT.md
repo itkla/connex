@@ -426,6 +426,40 @@ algorithm, so these variables cannot substitute a tag or alternate repository. R
 verifying a new manifest, replacing the complete three-digest set, and re-running `pull` plus
 `up -d`.
 
+## Monitoring & support (operator-facing)
+
+Connex deployments are frequently operated by the customer (silo / on-prem), so the observability
+surface is designed for **your** monitoring stack — Connex has no remote access and nothing phones
+home. The default error sink is local (structured `ERROR` log lines); no error data leaves the
+deployment unless the operator explicitly configures a vendor integration.
+
+- `GET /api/health` — liveness. Anonymous, returns `200 {"status":"UP"}` while the process serves
+  traffic. Safe for load-balancer checks; carries no version or build information.
+- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable, all Flyway
+  migrations are applied, and every startup task has finished, otherwise `503`. The body reports
+  the three checks separately (`checks.db`, `checks.migrations`, `checks.startup`) as status words
+  only — never exception details. Because the embedded server accepts connections before startup
+  tasks finish, this endpoint — not TCP connectivity — is what restarts and upgrades must gate on.
+  Startup tasks (backfills, secret rewrap) run once per upgrade and can take minutes on a large
+  dataset, so give any deployment health gate a timeout that accommodates them.
+- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. Readable **only** with
+  the operator-configured scrape token (`CONNEX_METRICS_SCRAPE_TOKEN`), sent as
+  `Authorization: Bearer <token>`; an ordinary authenticated session cannot read it and neither can
+  a `HEAD` request. Unset token = endpoint unavailable to every caller, which the backend warns
+  about at startup.
+
+**Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
+unexpected `500` responses include the same id in the JSON body. Production logs are structured
+JSON (ECS) and include the `correlationId` field, so when a user quotes that id the operator can
+find the exact server-side stack trace with e.g.
+`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket.
+For rendering failures the frontend error screen shows a `Reference:` digest instead; the app
+reports it (best-effort) to this deployment's own `/api/client-errors` sink, so the matching log
+line is found by grepping for the digest value itself:
+`journalctl -u <backend-unit> | grep '<reference>'` — the `CLIENT`-source entry carries the
+digest, the page path, and the client stack. Both lookups run entirely against the deployment's
+own logs — that pairing is the support path for deployments Connex does not operate.
+
 ## Local evaluation (not for production)
 
 For a zero-config local trial against the bundled MySQL, build from source and use the eval env,

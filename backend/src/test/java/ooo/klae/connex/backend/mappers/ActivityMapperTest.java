@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -26,6 +27,8 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
+import ooo.klae.connex.backend.util.AnalyticsPeriods;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 class ActivityMapperTest extends AbstractMapperTest {
 
@@ -350,8 +353,8 @@ class ActivityMapperTest extends AbstractMapperTest {
             .collect(Collectors.toMap(ActivityVolumeBucketDto::bucketIndex, bucket -> bucket));
 
         assertEquals(2, volume.size());
-        assertEquals(new ActivityVolumeBucketDto(5, 1, 1, 1, 1, 0), volume.get(5));
-        assertEquals(new ActivityVolumeBucketDto(4, 0, 0, 0, 0, 1), volume.get(4));
+        assertEquals(new ActivityVolumeBucketDto(5, 1, 1, 1, 1, 0, null), volume.get(5));
+        assertEquals(new ActivityVolumeBucketDto(4, 0, 0, 0, 0, 1, null), volume.get(4));
     }
 
     @Test
@@ -406,11 +409,11 @@ class ActivityMapperTest extends AbstractMapperTest {
             "members", List.of(creator.getId(), other.getId()), creator.getId());
         MemberScope unassigned = MemberScope.fromRequest("unassigned", null, creator.getId());
 
-        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0),
+        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0, null),
             volumeBucket(target, MemberScope.allTeam(), 5));
-        assertEquals(new ActivityVolumeBucketDto(5, 1, 1, 0, 0, 0),
+        assertEquals(new ActivityVolumeBucketDto(5, 1, 1, 0, 0, 0, null),
             volumeBucket(target, me, 5));
-        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0),
+        assertEquals(new ActivityVolumeBucketDto(5, 2, 1, 0, 0, 0, null),
             volumeBucket(target, members, 5));
         assertTrue(activityMapper.activityVolume(target.getId(), 30, 6, 5.0, unassigned).isEmpty());
     }
@@ -495,6 +498,25 @@ class ActivityMapperTest extends AbstractMapperTest {
             new TeamLeaderboardEntryDto(second.getId(), 1)
         ), leaderboard);
         assertEquals(1, activityMapper.upcomingCount(target.getId(), 7));
+
+        jdbcTemplate.update("UPDATE activity SET timestamp = ? WHERE id = ?",
+            LocalDateTime.of(2026, 3, 5, 12, 0), activity.getId());
+        jdbcTemplate.update("UPDATE activity SET timestamp = ? WHERE id = ?",
+            LocalDateTime.of(2026, 3, 6, 0, 0), upcoming.getId());
+        jdbcTemplate.update("UPDATE task SET updated_at = ? WHERE id IN (?, ?, ?)",
+            LocalDateTime.of(2026, 3, 5, 13, 0),
+            completed.getId(), incomplete.getId(), foreignCompleted.getId());
+        jdbcTemplate.update("UPDATE note SET created_at = ? WHERE id IN (?, ?, ?)",
+            LocalDateTime.of(2026, 3, 5, 14, 0),
+            note.getId(), foreignNote.getId(), privateNote.getId());
+        Window window = AnalyticsPeriods.requiredWindow(
+            "2026-03-05", "2026-03-05", "UTC", null);
+
+        assertEquals(List.of(
+            new TeamLeaderboardEntryDto(leader.getId(), 2),
+            new TeamLeaderboardEntryDto(second.getId(), 1)
+        ), activityMapper.teamLeaderboardWindow(
+            target.getId(), window.startUtc(), window.endUtc()));
     }
 
     private Workspace newWorkspace() {

@@ -100,6 +100,25 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void resolveFailsClosedWhenTeardownHasClearedTheJitWorkspace() {
+        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
+        connection.setJitWorkspaceId(null);
+        ssoConnectionMapper.upsert(connection);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> ssoLoginService.resolve(
+                PROVIDER,
+                ISSUER,
+                "sub-no-jit-workspace",
+                "no-jit-workspace@" + OWNED_DOMAIN,
+                true,
+                orgId,
+                "No JIT Workspace"));
+        assertNull(userMapper.getUserByEmail("no-jit-workspace@" + OWNED_DOMAIN));
+    }
+
+    @Test
     void existingIdentity_signsInAndTouchesLastLogin() {
         User linked = newUser();
         FederatedIdentity seed = new FederatedIdentity();

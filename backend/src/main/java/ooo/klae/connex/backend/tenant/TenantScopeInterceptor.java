@@ -51,6 +51,8 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "CompanyMapper",
+        MAPPERS + "IdentityCollisionMapper",
+        MAPPERS + "IdentityMapper",
         MAPPERS + "PersonMapper",
         MAPPERS + "PersonEmploymentMapper",
         MAPPERS + "PipelineMapper",
@@ -101,7 +103,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiOutputCacheMapper",
         MAPPERS + "ReportMapper",
         MAPPERS + "GoalMapper",
-        MAPPERS + "ScheduleMapper"
+        MAPPERS + "ScheduleMapper",
+        MAPPERS + "TenantLifecycleMapper"
     );
 
     /**
@@ -145,7 +148,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "UserObjectDeletionQueueMapper",
         MAPPERS + "WebauthnCredentialMapper",
         MAPPERS + "WebauthnUserEntityMapper",
-        MAPPERS + "WorkspaceMapper"
+        MAPPERS + "WorkspaceMapper",
+        MAPPERS + "TenantLifecycleControlMapper"
     );
 
     /**

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 
 /** Verifies every deal member-scope SQL branch resolves to the canonical owner predicate. */
 class DealMapperXmlTest {
@@ -25,6 +28,15 @@ class DealMapperXmlTest {
         "dealMetricsFiltered",
         "getFilteredDealIds"
     );
+    private static final List<String> ANALYTICS_SCOPED_STATEMENTS = List.of(
+        "dealKpiWindow",
+        "dealKpiClosedSeriesByBoundaries",
+        "dealKpiNewPipelineSeriesByBoundaries",
+        "dealPipelineValueWindow",
+        "revenueClosedByPeriods",
+        "revenueScheduledClosedByPeriods",
+        "revenueProjectedByPeriods"
+    );
 
     @Test
     void memberScopeBranchesKeepWorkspaceFirstAndRenderExpectedPredicates() throws Exception {
@@ -34,7 +46,8 @@ class DealMapperXmlTest {
         MemberScope members = MemberScope.fromRequest("members", List.of(3, 5), 7);
         MemberScope unassigned = MemberScope.fromRequest("unassigned", List.of(99), 7);
 
-        for (String statement : SCOPED_STATEMENTS) {
+        for (String statement : java.util.stream.Stream.concat(
+                SCOPED_STATEMENTS.stream(), ANALYTICS_SCOPED_STATEMENTS.stream()).toList()) {
             assertScopePredicate(configuration, statement, allTeam, null);
             assertScopePredicate(configuration, statement, me, "d.owner_id = ?");
             assertScopePredicate(configuration, statement, members, "d.owner_id IN");
@@ -82,6 +95,24 @@ class DealMapperXmlTest {
         }
     }
 
+    @Test
+    void analyticsPeriodQueriesUseBoundaryJoinsAndGroupedAggregation() throws Exception {
+        Configuration configuration = configuration();
+
+        for (String statement : List.of(
+                "dealKpiClosedSeriesByBoundaries",
+                "dealKpiNewPipelineSeriesByBoundaries",
+                "revenueClosedByPeriods",
+                "revenueScheduledClosedByPeriods",
+                "revenueProjectedByPeriods")) {
+            String sql = sql(configuration, statement, MemberScope.allTeam());
+
+            assertTrue(sql.contains("JOIN deal d"));
+            assertTrue(sql.contains("GROUP BY boundary.bucket_index"));
+            assertFalse(sql.contains("( SELECT SUM("));
+        }
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -114,6 +145,17 @@ class DealMapperXmlTest {
             new BoardPositionUpdate(29, 1)
         ));
         parameters.put("memberScope", scope);
+        parameters.put("currency", null);
+        parameters.put("startUtc", LocalDateTime.of(2026, 1, 1, 0, 0));
+        parameters.put("endUtc", LocalDateTime.of(2026, 1, 2, 0, 0));
+        parameters.put("startDate", LocalDate.of(2026, 1, 1));
+        parameters.put("endDate", LocalDate.of(2026, 1, 2));
+        parameters.put("periods", List.of(new AnalyticsPeriod(
+            0,
+            LocalDate.of(2026, 1, 1),
+            LocalDate.of(2026, 1, 2),
+            LocalDateTime.of(2026, 1, 1, 0, 0),
+            LocalDateTime.of(2026, 1, 2, 0, 0))));
         parameters.put("noCompany", false);
         parameters.put("limit", 25);
         parameters.put("offset", 0);

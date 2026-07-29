@@ -13,7 +13,6 @@ spring:
     sql:
         init:
             mode: never
-            encoding: UTF-8
     flyway:
         enabled: true
         baseline-on-migrate: true
@@ -32,6 +31,22 @@ spring:
         default-property-inclusion: non_null
         read:
             strict-duplicate-detection: true
+
+logging:
+    structured:
+        format:
+            console: ecs
+
+management:
+    endpoints:
+        web:
+            exposure:
+                exclude: "*"
+            discovery:
+                enabled: false
+        jmx:
+            exposure:
+                exclude: "*"
 
 connex:
     audit:
@@ -64,8 +79,9 @@ connex:
         max-sessions-per-user: ${CONNEX_WS_MAX_SESSIONS_PER_USER:10}
     workspaces:
         # When false, new registrations and the create endpoint cannot make workspaces
-        # (invite-only mode); users onboard by accepting an invite instead.
-        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
+        # (invite-only mode); users onboard by accepting an invite instead. Defaults to
+        # invite-only for the guided-pilot GTM; the dev profile re-enables self-service.
+        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:false}
     bootstrap:
         # Provisions the first owner account + workspace on startup when the instance has zero
         # login-capable users (fresh self-host/on-prem deploy). Set enabled=true with username,
@@ -109,6 +125,8 @@ connex:
         profile: ${CONNEX_DEPLOYMENT_PROFILE:}
     maintenance:
         mode: ${CONNEX_MAINTENANCE_MODE:off}
+    metrics:
+        scrape-token: ${CONNEX_METRICS_SCRAPE_TOKEN:}
     security:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
@@ -134,6 +152,7 @@ connex:
         import-max-body-bytes: ${CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
         business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
+        client-errors-max-body-bytes: ${CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
         workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
@@ -207,6 +226,10 @@ connex:
         max-failures-per-ip: ${CONNEX_LOGIN_MAX_FAILURES_PER_IP:50}
         max-failures-per-user: ${CONNEX_LOGIN_MAX_FAILURES_PER_USER:10}
         window-seconds: ${CONNEX_LOGIN_WINDOW_SECONDS:900}
+    client-errors:
+        max-reports-per-window: ${CONNEX_CLIENT_ERRORS_MAX_REPORTS_PER_WINDOW:20}
+        window-seconds: ${CONNEX_CLIENT_ERRORS_WINDOW_SECONDS:300}
+        eviction-delay-ms: ${CONNEX_CLIENT_ERRORS_EVICTION_DELAY_MS:300000}
     webauthn:
         # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
         # (no scheme/port); allowed-origins (CSV) must list every origin the SPA is served from.

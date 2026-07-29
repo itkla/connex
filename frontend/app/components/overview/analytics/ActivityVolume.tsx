@@ -17,49 +17,78 @@ import {
     ACTIVITY_COLORS,
     ACTIVITY_TYPES,
     buildTimeBuckets,
+    formatPeriodTick,
+    formatPeriodTooltipDate,
     type ActivityType,
-    type RangeKey,
+    type Granularity,
+    type RollingRangeKey,
 } from './metrics';
 
-type Row = { label: string } & Record<ActivityType, number>;
+type Row = { label: string; tooltipLabel: string } & Record<ActivityType, number>;
 
 /**
  * Stacked activity-volume chart. Consumes server-aggregated {@link ActivityVolumeBucket}s
- * (oldest→newest by {@code bucketIndex}) and renders one bar per time bucket. The {@code range}
- * only drives the human-readable bucket labels via {@link buildTimeBuckets}.
+ * (oldest→newest by {@code bucketIndex}) and renders one bar per time bucket. On the
+ * calendar-aligned path ({@code granularity} set) labels come from each bucket's
+ * server-provided {@code periodStart}; on the legacy rolling path {@code range} drives
+ * approximate labels via {@link buildTimeBuckets}.
  */
 export default function ActivityVolume({
     buckets,
     range,
+    granularity,
 }: {
     buckets: ActivityVolumeBucket[];
-    range: RangeKey;
+    range?: RollingRangeKey;
+    granularity?: Granularity;
 }) {
     const t = useTranslations('AnalyticsActivity');
+    const tPage = useTranslations('AnalyticsPage');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
 
-    const { data, activeTypes } = useMemo(() => {
-        const labels = buildTimeBuckets(range, now, locale);
-        const byIndex = new Map(buckets.map((bucket) => [bucket.bucketIndex, bucket]));
-        const rows: Row[] = labels.map((slot, index) => {
-            const bucket = byIndex.get(index);
-            return {
-                label: slot.label,
-                Call: bucket?.call ?? 0,
-                Email: bucket?.email ?? 0,
-                Meeting: bucket?.meeting ?? 0,
-                Note: bucket?.note ?? 0,
-                Other: bucket?.other ?? 0,
-            };
-        });
+    const { data, activeTypes, tooltipLabels } = useMemo(() => {
+        let rows: Row[];
+        if (granularity) {
+            rows = [...buckets]
+                .sort((a, b) => a.bucketIndex - b.bucketIndex)
+                .map((bucket) => {
+                    const periodStart = bucket.periodStart ?? '';
+                    const date = formatPeriodTooltipDate(periodStart, granularity, locale);
+                    return {
+                        label: formatPeriodTick(periodStart, granularity, locale),
+                        tooltipLabel: granularity === 'week' ? tPage('weekOf', { date }) : date,
+                        Call: bucket.call,
+                        Email: bucket.email,
+                        Meeting: bucket.meeting,
+                        Note: bucket.note,
+                        Other: bucket.other,
+                    };
+                });
+        } else {
+            const labels = buildTimeBuckets(range ?? '90d', now, locale);
+            const byIndex = new Map(buckets.map((bucket) => [bucket.bucketIndex, bucket]));
+            rows = labels.map((slot, index) => {
+                const bucket = byIndex.get(index);
+                return {
+                    label: slot.label,
+                    tooltipLabel: slot.label,
+                    Call: bucket?.call ?? 0,
+                    Email: bucket?.email ?? 0,
+                    Meeting: bucket?.meeting ?? 0,
+                    Note: bucket?.note ?? 0,
+                    Other: bucket?.other ?? 0,
+                };
+            });
+        }
         return {
             data: rows,
             activeTypes: ACTIVITY_TYPES.filter(
                 (type) => rows.reduce((sum, row) => sum + row[type], 0) > 0,
             ),
+            tooltipLabels: new Map(rows.map((row) => [row.label, row.tooltipLabel])),
         };
-    }, [buckets, range, now, locale]);
+    }, [buckets, granularity, range, now, locale, tPage]);
 
     const total = useMemo(
         () => data.reduce((sum, row) => sum + ACTIVITY_TYPES.reduce((s, type) => s + row[type], 0), 0),
@@ -82,9 +111,24 @@ export default function ActivityVolume({
         <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
             <BarChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
+                <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={10}
+                    minTickGap={16}
+                    interval="preserveStartEnd"
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
+                />
                 <YAxis tickLine={false} axisLine={false} tickMargin={4} width={36} allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
-                <ChartTooltip cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }} content={<ChartTooltipContent />} />
+                <ChartTooltip
+                    cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
+                    content={
+                        <ChartTooltipContent
+                            labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
+                        />
+                    }
+                />
                 {activeTypes.map((type, i) => (
                     <Bar
                         key={type}

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.storage;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -50,7 +51,23 @@ public class ManagedObjectReadAdmissionService {
     }
 
     public StoredObject admit(Supplier<StoredObject> opener) {
-        int userId = currentUserId.getAsInt();
+        return admit(
+            currentUserId.getAsInt(),
+            Duration.ofMillis(properties.getReadTimeoutMs()),
+            opener);
+    }
+
+    /**
+     * Admits an explicitly authorized actor's stream with an operation-specific
+     * hard deadline.
+     */
+    public StoredObject admit(
+            int userId,
+            Duration timeout,
+            Supplier<StoredObject> opener) {
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("Managed object read timeout must be positive");
+        }
         Lease lease = acquire(userId);
         StoredObject stored;
         try {
@@ -59,7 +76,7 @@ public class ManagedObjectReadAdmissionService {
             lease.close();
             throw exception;
         }
-        LeasedInputStream stream = new LeasedInputStream(stored, lease);
+        LeasedInputStream stream = new LeasedInputStream(stored, lease, timeout);
         try {
             stream.startTimeout();
             return new StoredObject(stream, stored.contentLength());
@@ -131,19 +148,24 @@ public class ManagedObjectReadAdmissionService {
     private final class LeasedInputStream extends InputStream {
         private final StoredObject stored;
         private final Lease lease;
+        private final Duration timeoutDuration;
         private final AtomicBoolean closed = new AtomicBoolean();
         private volatile ScheduledFuture<?> timeout;
 
-        private LeasedInputStream(StoredObject stored, Lease lease) {
+        private LeasedInputStream(
+                StoredObject stored,
+                Lease lease,
+                Duration timeoutDuration) {
             this.stored = stored;
             this.lease = lease;
+            this.timeoutDuration = timeoutDuration;
         }
 
         private void startTimeout() {
             timeout = timeoutExecutor.schedule(
                 this::closeAfterTimeout,
-                properties.getReadTimeoutMs(),
-                TimeUnit.MILLISECONDS);
+                timeoutDuration.toNanos(),
+                TimeUnit.NANOSECONDS);
         }
 
         private void closeAfterTimeout() {

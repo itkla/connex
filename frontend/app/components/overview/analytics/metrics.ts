@@ -1,9 +1,64 @@
 import { type Deal } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { fixedOffsetSeconds, parseMysqlDateTime } from '@/app/lib/utils';
 
-export type RangeKey = '30d' | '90d' | '12m';
+export type RollingRangeKey = '30d' | '90d' | '12m';
+export type CalendarRangeKey = 'this-week' | 'this-month' | 'last-month' | 'this-quarter';
+export type RangeKey = RollingRangeKey | CalendarRangeKey;
+export type Granularity = 'day' | 'week' | 'month';
 
-export const RANGE_DAYS: Record<RangeKey, number> = {
+export const ROLLING_RANGE_KEYS: readonly RollingRangeKey[] = ['30d', '90d', '12m'];
+export const CALENDAR_RANGE_KEYS: readonly CalendarRangeKey[] = [
+    'this-week',
+    'this-month',
+    'last-month',
+    'this-quarter',
+];
+
+/** Narrows an arbitrary URL value to a known analytics range key. */
+export function isRangeKey(value: string | null): value is RangeKey {
+    return value != null && (
+        (ROLLING_RANGE_KEYS as readonly string[]).includes(value)
+        || (CALENDAR_RANGE_KEYS as readonly string[]).includes(value)
+    );
+}
+
+/** Narrows an arbitrary URL value to a known series granularity. */
+export function isGranularity(value: string | null): value is Granularity {
+    return value === 'day' || value === 'week' || value === 'month';
+}
+
+/**
+ * Granularities offered per range, bounded so no combination explodes into an
+ * oversized series (mirrors the server's bucket cap — e.g. no day-grain 12 months).
+ */
+export const RANGE_GRANULARITIES: Record<RangeKey, readonly Granularity[]> = {
+    'this-week': ['day'],
+    'this-month': ['day', 'week'],
+    'last-month': ['day', 'week'],
+    'this-quarter': ['day', 'week', 'month'],
+    '30d': ['day', 'week'],
+    '90d': ['day', 'week', 'month'],
+    '12m': ['week', 'month'],
+};
+
+export const DEFAULT_GRANULARITY: Record<RangeKey, Granularity> = {
+    'this-week': 'day',
+    'this-month': 'day',
+    'last-month': 'day',
+    'this-quarter': 'week',
+    '30d': 'week',
+    '90d': 'week',
+    '12m': 'month',
+};
+
+/** Returns {@code choice} when the range supports it, otherwise the range's default grain. */
+export function clampGranularity(range: RangeKey, choice: Granularity | null): Granularity {
+    return choice != null && RANGE_GRANULARITIES[range].includes(choice)
+        ? choice
+        : DEFAULT_GRANULARITY[range];
+}
+
+export const RANGE_DAYS: Record<RollingRangeKey, number> = {
     '30d': 30,
     '90d': 90,
     '12m': 365,
@@ -170,7 +225,7 @@ export function computeKpis(
 
 export type TimeBucket = { start: number; end: number; label: string };
 
-export function buildTimeBuckets(range: RangeKey, now: number, locale: string): TimeBucket[] {
+export function buildTimeBuckets(range: RollingRangeKey, now: number, locale: string): TimeBucket[] {
     const out: TimeBucket[] = [];
     if (range === '12m') {
         const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
@@ -193,6 +248,197 @@ export function buildTimeBuckets(range: RangeKey, now: number, locale: string): 
         const s = startBase + i * span;
         const e = startBase + (i + 1) * span;
         out.push({ start: s, end: e, label: dayLabel.format(new Date(s)) });
+    }
+    return out;
+}
+
+/** Inclusive local-date window (ISO {@code yyyy-MM-dd}) an analytics range resolves to. */
+export type AnalyticsWindow = { from: string; to: string };
+
+function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
+    return new Date(Date.UTC(year, monthIndex, day));
+}
+
+function todayAnchor(now: number, timezone: string): Date {
+    const offsetSeconds = fixedOffsetSeconds(timezone);
+    if (offsetSeconds != null) {
+        const shifted = new Date(now + offsetSeconds * 1000);
+        return utcDateFromParts(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
+    }
+    try {
+        const iso = new Intl.DateTimeFormat('en-CA', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).format(new Date(now));
+        const parsed = new Date(`${iso}T00:00:00Z`);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    } catch {
+        return todayAnchor(now, 'UTC');
+    }
+    return todayAnchor(now, 'UTC');
+}
+
+function toIsoDate(anchor: Date): string {
+    return anchor.toISOString().slice(0, 10);
+}
+
+function addDaysUtc(anchor: Date, days: number): Date {
+    return utcDateFromParts(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() + days);
+}
+
+function mondayOfWeek(anchor: Date): Date {
+    return addDaysUtc(anchor, -((anchor.getUTCDay() + 6) % 7));
+}
+
+/**
+ * Resolves an analytics range key to its inclusive local-date window in the viewer's
+ * timezone. Rolling ranges end today; calendar presets cover their whole calendar
+ * period (weeks start Monday, matching the server's ISO-8601 bucketing).
+ */
+export function resolveAnalyticsWindow(range: RangeKey, now: number, timezone: string): AnalyticsWindow {
+    const today = todayAnchor(now, timezone);
+    const year = today.getUTCFullYear();
+    const month = today.getUTCMonth();
+    switch (range) {
+        case '30d':
+            return { from: toIsoDate(addDaysUtc(today, -29)), to: toIsoDate(today) };
+        case '90d':
+            return { from: toIsoDate(addDaysUtc(today, -89)), to: toIsoDate(today) };
+        case '12m':
+            return { from: toIsoDate(utcDateFromParts(year, month - 11, 1)), to: toIsoDate(today) };
+        case 'this-week': {
+            const monday = mondayOfWeek(today);
+            return { from: toIsoDate(monday), to: toIsoDate(addDaysUtc(monday, 6)) };
+        }
+        case 'this-month':
+            return {
+                from: toIsoDate(utcDateFromParts(year, month, 1)),
+                to: toIsoDate(utcDateFromParts(year, month + 1, 0)),
+            };
+        case 'last-month':
+            return {
+                from: toIsoDate(utcDateFromParts(year, month - 1, 1)),
+                to: toIsoDate(utcDateFromParts(year, month, 0)),
+            };
+        case 'this-quarter': {
+            const quarterStart = Math.floor(month / 3) * 3;
+            return {
+                from: toIsoDate(utcDateFromParts(year, quarterStart, 1)),
+                to: toIsoDate(utcDateFromParts(year, quarterStart + 3, 0)),
+            };
+        }
+    }
+}
+
+function periodStartAnchor(anchor: Date, granularity: Granularity): Date {
+    if (granularity === 'day') return anchor;
+    if (granularity === 'week') return mondayOfWeek(anchor);
+    return utcDateFromParts(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1);
+}
+
+function nextPeriodAnchor(anchor: Date, granularity: Granularity): Date {
+    if (granularity === 'day') return addDaysUtc(anchor, 1);
+    if (granularity === 'week') return addDaysUtc(anchor, 7);
+    return utcDateFromParts(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1);
+}
+
+/** ISO start date of the calendar period (Monday week / month 1st / same day) containing {@code isoDate}. */
+export function periodStartOf(isoDate: string, granularity: Granularity): string {
+    return toIsoDate(periodStartAnchor(new Date(`${isoDate}T00:00:00Z`), granularity));
+}
+
+/** Today's local calendar date ({@code yyyy-MM-dd}) in the given IANA timezone. */
+export function localIsoDate(now: number, timezone: string): string {
+    return toIsoDate(todayAnchor(now, timezone));
+}
+
+/**
+ * Extends a rolling window's end forward by three grain periods so forward-looking
+ * series (projected revenue) keep a horizon; calendar presets stay exactly their period.
+ */
+export function projectionWindow(
+    window: AnalyticsWindow,
+    range: RangeKey,
+    granularity: Granularity,
+): AnalyticsWindow {
+    if ((CALENDAR_RANGE_KEYS as readonly string[]).includes(range)) return window;
+    let anchor = periodStartAnchor(new Date(`${window.to}T00:00:00Z`), granularity);
+    for (let i = 0; i < 3; i++) anchor = nextPeriodAnchor(anchor, granularity);
+    const extended = toIsoDate(addDaysUtc(nextPeriodAnchor(anchor, granularity), -1));
+    return { from: window.from, to: extended < window.to ? window.to : extended };
+}
+
+/** Formats a bucket's start date as a compact axis tick for its grain and locale. */
+export function formatPeriodTick(
+    periodStart: string,
+    granularity: Granularity,
+    locale: string,
+    withYear = false,
+): string {
+    const date = new Date(`${periodStart}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) return periodStart;
+    if (granularity === 'month') {
+        return new Intl.DateTimeFormat(locale, {
+            month: 'short',
+            ...(withYear ? { year: 'numeric' as const } : {}),
+            timeZone: 'UTC',
+        }).format(date);
+    }
+    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+/** Formats a bucket's start date for tooltips: full date for day/week grains, month + year for months. */
+export function formatPeriodTooltipDate(periodStart: string, granularity: Granularity, locale: string): string {
+    const date = new Date(`${periodStart}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) return periodStart;
+    if (granularity === 'month') {
+        return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', timeZone: 'UTC' }).format(date);
+    }
+    return new Intl.DateTimeFormat(locale, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+    }).format(date);
+}
+
+const MAX_CLIENT_BUCKETS = 400;
+
+/**
+ * Enumerates the calendar buckets (browser-local epochs) covering an analytics window,
+ * for the panels that still bucket already-fetched client data. Weeks start Monday,
+ * matching the server-side bucketing.
+ */
+export function buildCalendarBuckets(
+    window: AnalyticsWindow,
+    granularity: Granularity,
+    locale: string,
+): TimeBucket[] {
+    const parse = (iso: string): Date | null => {
+        const [y, m, d] = iso.split('-').map(Number);
+        return Number.isInteger(y) && Number.isInteger(m) && Number.isInteger(d)
+            ? new Date(y, m - 1, d)
+            : null;
+    };
+    const from = parse(window.from);
+    const to = parse(window.to);
+    if (!from || !to || from.getTime() > to.getTime()) return [];
+    const localAnchor = (utc: Date) => new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
+    const toUtcAnchor = (local: Date) =>
+        utcDateFromParts(local.getFullYear(), local.getMonth(), local.getDate());
+    const out: TimeBucket[] = [];
+    let cursor = periodStartAnchor(toUtcAnchor(from), granularity);
+    const endExclusive = nextPeriodAnchor(periodStartAnchor(toUtcAnchor(to), granularity), granularity);
+    while (cursor.getTime() < endExclusive.getTime() && out.length < MAX_CLIENT_BUCKETS) {
+        const next = nextPeriodAnchor(cursor, granularity);
+        out.push({
+            start: localAnchor(cursor).getTime(),
+            end: localAnchor(next).getTime(),
+            label: formatPeriodTick(toIsoDate(cursor), granularity, locale),
+        });
+        cursor = next;
     }
     return out;
 }

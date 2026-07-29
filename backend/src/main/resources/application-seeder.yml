@@ -1,0 +1,75 @@
+spring:
+    main:
+        web-application-type: none
+    sql:
+        init:
+            mode: never
+            data-locations: optional:classpath:seeder-sql-init-canary.sql
+    datasource:
+        driver-class-name: com.mysql.cj.jdbc.Driver
+    flyway:
+        enabled: true
+        baseline-on-migrate: true
+        baseline-version: 0
+        clean-disabled: true
+        skip-executing-migrations: false
+        target: latest
+        table: flyway_schema_history
+        skip-default-resolvers: false
+        skip-default-callbacks: false
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        locations: classpath:db/migration
+        callback-locations: []
+        init-sqls: []
+        placeholder-replacement: false
+        sql-migration-prefix: V
+        repeatable-sql-migration-prefix: R
+        sql-migration-separator: __
+        sql-migration-suffixes: .sql
+        validate-on-migrate: true
+        validate-migration-naming: true
+        ignore-migration-patterns: []
+        out-of-order: false
+        fail-on-missing-locations: true
+
+mybatis:
+    mapper-locations: classpath:mappers/*.xml
+    type-aliases-package: ooo.klae.connex.backend.beans
+    configuration:
+        map-underscore-to-camel-case: true
+
+connex:
+    maintenance:
+        mode: seeder
+    tenancy:
+        routing:
+            mode: single-database
+    object-storage:
+        legacy-migration:
+            mode: "off"
+    bootstrap:
+        enabled: false
+    notifications:
+        scheduling-enabled: false
+    rules:
+        scheduling-enabled: false
+    reports:
+        scheduling-enabled: false
+    mail:
+        enabled: false
+    password-reset:
+        email-enabled: false
+        scheduling-enabled: false
+    email-change:
+        email-enabled: false
+        scheduling-enabled: false
+    registration-verification:
+        enabled: false
+        email-enabled: false
+        scheduling-enabled: false
+    secret-store:
+        master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+        batch-rewrap-on-startup: false
+    audit:
+        integrity:
+            hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:seeder-audit-integrity-hmac-secret}

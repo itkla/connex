@@ -80,7 +80,7 @@
   },
   "AccountConnections": {
     "title": "Connected accounts",
-    "subtitle": "Link the mailbox and calendar you already use so Connex can capture customer interactions. Connections are yours — teammates never see your account or its contents through this page.",
+    "subtitle": "Link the mailbox and calendar you already use, ready for interaction sync when it launches in a later release. Connections are yours — teammates never see your account or its contents through this page.",
     "provider_google": "Google",
     "provider_microsoft": "Microsoft",
     "status_connected": "Connected",
@@ -97,7 +97,7 @@
     "connectedNoEmail": "Connected",
     "notConnected": "Not connected",
     "lastSync": "Synced {time}",
-    "neverSynced": "Not synced yet",
+    "neverSynced": "Sync not yet available",
     "connectedToast": "{provider} account connected",
     "pausedToast": "Connection paused",
     "resumedToast": "Connection resumed",

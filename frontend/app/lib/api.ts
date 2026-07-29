@@ -719,13 +719,21 @@ export class ApiError extends Error {
     status: number;
     code?: string;
     fieldErrors?: ApiFieldErrors;
+    correlationId?: string;
 
-    constructor(message: string, status: number, code?: string, fieldErrors?: ApiFieldErrors) {
+    constructor(
+        message: string,
+        status: number,
+        code?: string,
+        fieldErrors?: ApiFieldErrors,
+        correlationId?: string,
+    ) {
         super(message);
         this.name = "ApiError";
         this.status = status;
         this.code = code;
         this.fieldErrors = fieldErrors;
+        this.correlationId = correlationId;
     }
 }
 
@@ -821,7 +829,7 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isStringRecord(data)) {
-            const { message, error, code, ...fieldErrors } = data;
+            const { message, error, code, correlationId, ...fieldErrors } = data;
             const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 
             return new ApiError(
@@ -829,6 +837,7 @@ async function getApiError(res: Response): Promise<ApiError> {
                 res.status,
                 code,
                 fields,
+                correlationId,
             );
         }
 
@@ -897,6 +906,15 @@ export function me(init: RequestInit = {}) {
     return getJson<Types.User>("/api/auth/me", init);
 }
 
+/**
+ * Resolves the authenticated user from a forwarded cookie header during SSR.
+ * Returns null when the session is absent or the backend rejects it, so pages
+ * can redirect to login; rethrows network-level failures (the backend being
+ * unreachable) so they surface in the segment error boundary instead of
+ * masquerading as a logged-out session.
+ * @param cookie the incoming request's cookie header, or null
+ * @returns the authenticated user, or null when unauthenticated
+ */
 export async function getCurrentUserFromCookie(cookie: string | null) {
     if (!cookie) {
         return null;
@@ -907,7 +925,10 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
             headers: { cookie },
             cache: "no-store",
         });
-    } catch {
+    } catch (error) {
+        if (error instanceof TypeError) {
+            throw error;
+        }
         return null;
     }
 }
@@ -2130,28 +2151,57 @@ export function getDealRevenueTimeseries(
         `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
 }
 
+/**
+ * Server-computed calendar-bucketed revenue series (realized won revenue vs projected value by
+ * expected close) over an explicit window at day/week/month granularity, zero-filled per bucket.
+ */
+export function getDealRevenueSeries(
+    window: Types.AnalyticsWindowParams,
+    currency?: string,
+    scope: Types.MemberScopeParams = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.DealRevenuePeriodSeries>(
+        `/api/deals/revenue-series${buildQuery({ currency, ...scope, ...window })}`, init);
+}
+
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
 
 /**
- * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
- * Replaces the client-side KPI/win-rate math over a bounded page slice.
+ * Server-computed deal KPIs over ALL deals, optionally scoped to a currency. Windowed calls pass
+ * {@code window} (calendar-aligned from/to + granularity, superseding {@code range}); legacy calls
+ * pass {@code range} (30d/90d/12m). Replaces the client-side KPI/win-rate math over a bounded page slice.
  */
 export function getDealKpis(
-    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    currency?: string,
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
 ) {
-    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range, ...scope })}`, init);
+    return getJson<Types.DealKpis>(
+        `/api/deals/kpis${buildQuery({ currency, range: window ? undefined : range, ...scope, ...window })}`,
+        init,
+    );
 }
 
 export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
     return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, withCookie(cookie));
 }
 
-/** Server-computed per-pipeline won-in-range + open rollup. */
+/** Server-computed per-pipeline won-in-range + open rollup; {@code window} bounds the won window. */
 export function getDealPipelineValue(
-    currency?: string, range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    currency?: string,
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
 ) {
+    const windowParams = window
+        ? { from: window.from, to: window.to, timezone: window.timezone }
+        : { range };
     return getJson<Types.DealPipelineValue[]>(
-        `/api/deals/pipeline-value${buildQuery({ currency, range, ...scope })}`, init);
+        `/api/deals/pipeline-value${buildQuery({ currency, ...scope, ...windowParams })}`, init);
 }
 
 export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
@@ -2189,18 +2239,41 @@ export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, li
     return getJson<Types.Deal[]>(`/api/deals/closing-soon${buildQuery({ days, limit })}`, withCookie(cookie));
 }
 
-/** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
-export function getActivityVolume(range?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {}) {
-    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range, ...scope })}`, init);
+/**
+ * Server-computed activity counts by type per time bucket, either over a calendar-aligned
+ * {@code window} (day/week/month buckets carrying {@code periodStart}) or the legacy
+ * {@code range} (30d/90d/12m).
+ */
+export function getActivityVolume(
+    range?: string,
+    scope: Types.MemberScopeParams = {},
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ActivityVolumeBucket[]>(
+        `/api/activities/volume${buildQuery({ range: window ? undefined : range, ...scope, ...window })}`,
+        init,
+    );
 }
 
 export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
     return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, withCookie(cookie));
 }
 
-/** Server-computed per-user touch counts (activities + completed tasks + notes) over {@code range}. */
-export function getTeamLeaderboard(range?: string, init: RequestInit = {}) {
-    return getJson<Types.TeamLeaderboardEntry[]>(`/api/activities/leaderboard${buildQuery({ range })}`, init);
+/**
+ * Server-computed per-user touch counts (activities + completed tasks + notes), over a
+ * calendar-aligned {@code window} or the legacy {@code range}.
+ */
+export function getTeamLeaderboard(
+    range?: string,
+    window?: Types.AnalyticsWindowParams,
+    init: RequestInit = {},
+) {
+    const windowParams = window
+        ? { from: window.from, to: window.to, timezone: window.timezone }
+        : { range };
+    return getJson<Types.TeamLeaderboardEntry[]>(
+        `/api/activities/leaderboard${buildQuery(windowParams)}`, init);
 }
 
 export function getTeamLeaderboardFromCookie(cookie: string | null, range?: string) {
@@ -3981,4 +4054,14 @@ export function createSuppression(payload: Types.SuppressionEntryPayload) {
 
 export function deleteSuppression(id: number) {
     return deleteJson<void>(`/api/suppressions/${id}`);
+}
+
+/**
+ * Reports a client-side error boundary hit to the backend error sink. Authenticated,
+ * workspace-scoped, and rate-limited server-side; callers must treat delivery as
+ * best-effort (see `reportBoundaryError` for the guarded entry point).
+ * @param payload the size-capped error report
+ */
+export function reportClientError(payload: Types.ClientErrorReportPayload) {
+    return postJson<void>(`/api/client-errors`, payload);
 }

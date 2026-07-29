@@ -55,6 +55,7 @@ public class TaskDto {
 
     private Integer dealId;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
 

@@ -8,3 +8,4 @@ skills-lock.json
 .impeccable/
 __pycache__/
 *.py[cod]
+.staging/

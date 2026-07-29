@@ -37,7 +37,7 @@ class AttachmentReadBoundaryArchTest {
     }
 
     @Test
-    void onlyAttachmentWriteOperationsInsertsAttachmentRows() throws IOException {
+    void onlyApprovedInternalWritersInsertAttachmentRows() throws IOException {
         List<String> callers = new ArrayList<>();
         Path sourceRoot = Path.of("src/main/java/ooo/klae/connex/backend");
         try (var paths = Files.walk(sourceRoot)) {
@@ -50,7 +50,7 @@ class AttachmentReadBoundaryArchTest {
         }
         callers.sort(String::compareTo);
 
-        assertEquals(List.of("AttachmentWriteOperations.java"), callers);
+        assertEquals(List.of("AttachmentWriteOperations.java", "SeederBatchWriter.java"), callers);
     }
 
     @Test

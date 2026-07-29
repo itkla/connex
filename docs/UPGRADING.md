@@ -22,7 +22,8 @@ migration-discipline part of #87 §9 / #102).
   intermediate minors is best-effort; skipping across a **major** requires stepping through the last
   minor of the prior major first.
 - Every upgrade is **forward-only**. Downgrades are not supported (migrations are not reversed);
-  recover by restoring the pre-upgrade backup.
+  recover by restoring the pre-upgrade backup taken with the shipped backup tooling
+  (`deploy/backup/`, see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
 
 ## Migration discipline
 
@@ -39,7 +40,10 @@ migration-discipline part of #87 §9 / #102).
   - **Drop** the old column/table **several releases later**, once no supported version still uses it.
   - Renames follow the same shape: add-new → backfill → drop-old-later, never an in-place rename.
 - Migrations are **non-destructive and defensive** wherever possible, and are tested against
-  realistic data volumes before release, not just empty schemas.
+  realistic data volumes before release, not just empty schemas. The
+  [deterministic volume seeder](VOLUME_SEEDER.md#migration-timing-evidence) logs fresh-schema
+  per-migration and total Flyway timing, then establishes the populated fixture used for separate
+  upgrade-drill measurements.
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
 
@@ -54,7 +58,8 @@ migration-discipline part of #87 §9 / #102).
 2. **Quiesce writers** — stop external ingress plus the frontend, backend, and OCR services. Keep the
    database running. Confirm no application or maintenance container remains able to create or delete
    records or objects.
-3. **Back up the quiesced set and exact deployment inputs** — snapshot the database, private object
+3. **Back up the quiesced set and exact deployment inputs** — snapshot the database (a
+   `connex-backup-full.sh` run — see [BACKUP_RESTORE.md](BACKUP_RESTORE.md)), private object
    storage, and any staged legacy media as one recovery point. Download and verify the currently
    deployed release manifest, signature bundle, and exact `connex-<version>-deploy.tar`; preserve the
    extracted bundle without modification. Copy the mode-0600 `deploy/.env` byte-for-byte into the

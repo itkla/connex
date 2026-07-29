@@ -29,9 +29,11 @@ import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.NotificationPreferenceService;
 import ooo.klae.connex.backend.services.NotificationQuietHoursService;
 import ooo.klae.connex.backend.services.NotificationService;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,6 +41,7 @@ class NotificationControllerTest {
     @Mock private NotificationService notificationService;
     @Mock private NotificationPreferenceService preferenceService;
     @Mock private NotificationQuietHoursService quietHoursService;
+    @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -47,7 +50,7 @@ class NotificationControllerTest {
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new NotificationController(notificationService, preferenceService, quietHoursService))
-            .setControllerAdvice(new GlobalExceptionHandler())
+            .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
     }
 

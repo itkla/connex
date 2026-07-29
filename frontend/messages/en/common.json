@@ -211,7 +211,8 @@
     "warm": "Warm",
     "cool": "Cool",
     "cold": "Cold",
-    "never": "no activity yet",
+    "noHistory": "No history",
+    "noHistoryTooltip": "Not enough interaction history to score this relationship yet.",
     "tooltip": "{score}% warm · last touch {lastTouch}",
     "goesCold": "goes cold {when}"
   }

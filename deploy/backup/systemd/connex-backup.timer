@@ -1,0 +1,13 @@
+# Connex on-prem daily full-backup schedule.
+# install.sh renders OnCalendar from CONNEX_BACKUP_FULL_CALENDAR.
+
+[Unit]
+Description=Schedule Connex daily full database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Tokyo
+Persistent=true
+Unit=connex-backup.service
+
+[Install]
+WantedBy=timers.target

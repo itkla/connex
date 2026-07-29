@@ -19,11 +19,11 @@ import {
 import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 import { formatCompactCurrency } from '@/app/lib/utils';
-import { type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { type RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 
 const MIN_MONTHS_FORWARD = 3;
 const MAX_MONTHS_FORWARD = 12;
-const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
+const MONTHS_BACK: Record<RollingRangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 
 type Metric = 'profit' | 'projections';
 type Bucket = { key: string; label: string; profit: number; projections: number };
@@ -41,7 +41,7 @@ function forwardHorizon(series: DealRevenueSeries, now: number): number {
     return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
 }
 
-function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey): Bucket[] {
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RollingRangeKey): Bucket[] {
     const start = new Date(now);
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
@@ -87,7 +87,7 @@ export default function PipelineChart({
 }: {
     series: DealRevenueSeries;
     currency: string;
-    range: RangeKey;
+    range: RollingRangeKey;
 }) {
     const t = useTranslations('DashboardPipelineChart');
     const locale = useLocale();

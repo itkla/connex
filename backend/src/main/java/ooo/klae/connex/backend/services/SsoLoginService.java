@@ -93,6 +93,11 @@ public class SsoLoginService {
         if (connection == null) {
             throw new BadRequestException("SSO is not configured for this organization");
         }
+        Integer jitWorkspaceId = connection.getJitWorkspaceId();
+        if (jitWorkspaceId == null) {
+            throw new ForbiddenException(
+                    "SSO provisioning is unavailable while its target workspace is being removed");
+        }
 
         User user = userMapper.getUserByEmail(email);
         if (user != null) {
@@ -108,7 +113,7 @@ public class SsoLoginService {
                     "SSO user provisioned", Map.of("userId", user.getId(), "provider", provider));
         }
 
-        workspaceService.ensureActiveMember(connection.getJitWorkspaceId(), user.getId(),
+        workspaceService.ensureActiveMember(jitWorkspaceId, user.getId(),
                 connection.getDefaultRole());
 
         FederatedIdentity link = new FederatedIdentity();

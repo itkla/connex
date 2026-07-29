@@ -20,43 +20,47 @@ class ObjectDeletionQueueMapperTest extends AbstractMapperTest {
     @Test
     void tenantQueueIsWorkspaceScopedAndIdempotent() {
         LocalDateTime now = LocalDateTime.of(2026, 7, 14, 12, 0);
+        Workspace target = newWorkspaceInSameOrg();
         Workspace sibling = newWorkspaceInSameOrg();
-        String key = "workspaces/" + workspace.getId() + "/attachments/object.pdf";
+        String key = "workspaces/" + target.getId() + "/attachments/object.pdf";
         String siblingKey = "workspaces/" + sibling.getId() + "/attachments/object.pdf";
 
-        objectDeletionQueueMapper.enqueue(workspace.getId(), key, 1, now);
-        objectDeletionQueueMapper.enqueue(workspace.getId(), key, 1, now.plusMinutes(1));
+        objectDeletionQueueMapper.enqueue(target.getId(), key, 1, now);
+        objectDeletionQueueMapper.enqueue(target.getId(), key, 1, now.plusMinutes(1));
         objectDeletionQueueMapper.enqueue(sibling.getId(), siblingKey, 1, now);
 
         List<ObjectDeletionTask> mine = objectDeletionQueueMapper.findDue(
-            workspace.getId(), now.plusSeconds(1), 10);
+            target.getId(), now.plusSeconds(1), 10);
         assertEquals(1, mine.size());
         assertEquals(key, mine.getFirst().objectKey());
         assertEquals(2, mine.getFirst().attempts());
         assertEquals(1, mine.getFirst().deletePassesRemaining());
-        assertEquals(1, objectDeletionQueueMapper.countPending(workspace.getId()));
+        assertEquals(1, objectDeletionQueueMapper.countPending(target.getId()));
         assertEquals(0, objectDeletionQueueMapper.deleteById(
             sibling.getId(), mine.getFirst().id()));
-        assertEquals(1, objectDeletionQueueMapper.countPending(workspace.getId()));
+        assertEquals(1, objectDeletionQueueMapper.countPending(target.getId()));
         assertTrue(objectDeletionQueueMapper.workspaceIdsWithDueTasks(
-            now.plusSeconds(1), 0, 10).containsAll(List.of(workspace.getId(), sibling.getId())));
+            now.plusSeconds(1), 0, 10).containsAll(List.of(target.getId(), sibling.getId())));
     }
 
     @Test
     void controlQueueStoresUserKeysOutsideTenantQueue() {
         LocalDateTime now = LocalDateTime.of(2026, 7, 14, 12, 0);
         String key = "users/7/profile-images/object.png";
+        long pendingBefore = userObjectDeletionQueueMapper.countPending();
 
         userObjectDeletionQueueMapper.enqueue(key, 1, now);
 
         List<ObjectDeletionTask> due = userObjectDeletionQueueMapper.findDue(
             now.plusSeconds(1), 10);
-        assertEquals(1, due.size());
-        assertEquals(0, due.getFirst().workspaceId());
-        assertEquals(key, due.getFirst().objectKey());
-        assertEquals(1, due.getFirst().deletePassesRemaining());
-        assertEquals(1, userObjectDeletionQueueMapper.deleteById(due.getFirst().id()));
-        assertEquals(0, userObjectDeletionQueueMapper.countPending());
+        ObjectDeletionTask task = due.stream()
+            .filter(candidate -> key.equals(candidate.objectKey()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(0, task.workspaceId());
+        assertEquals(1, task.deletePassesRemaining());
+        assertEquals(1, userObjectDeletionQueueMapper.deleteById(task.id()));
+        assertEquals(pendingBefore, userObjectDeletionQueueMapper.countPending());
     }
 
     @Test

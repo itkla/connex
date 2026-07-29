@@ -69,7 +69,8 @@ class AnalyticsMemberScopeGateTest {
     void dealKpisRejectMemberScopeForNonManager() {
         denyNonManager();
         assertThrows(ForbiddenException.class,
-            () -> dealController().getDealKpis(null, "90d", "members", List.of(3)));
+            () -> dealController().getDealKpis(
+                null, "90d", "members", List.of(3), null, null, null, null, null));
         verify(dealService, never()).getDealKpis(any(), anyInt(), any());
     }
 
@@ -85,7 +86,8 @@ class AnalyticsMemberScopeGateTest {
     void activityVolumeRejectsMemberScopeForNonManager() {
         denyNonManager();
         assertThrows(ForbiddenException.class,
-            () -> activityController().getActivityVolume("90d", "members", List.of(3)));
+            () -> activityController().getActivityVolume(
+                "90d", "members", List.of(3), null, null, null, null, null));
         verify(activityService, never()).getActivityVolume(anyInt(), any());
     }
 
@@ -100,9 +102,20 @@ class AnalyticsMemberScopeGateTest {
     @Test
     void dealKpisAllowAllTeamWithoutManagerCheck() {
         allowAllTeam();
-        dealController().getDealKpis(null, "90d", null, null);
+        dealController().getDealKpis(
+            null, "90d", null, null, null, null, null, null, null);
         verify(workspaceService, never()).requireRole(any());
         verify(dealService).getDealKpis(any(), eq(90), any());
+    }
+
+    @Test
+    void revenueSeriesRejectsMemberScopeForNonManager() {
+        denyNonManager();
+        assertThrows(ForbiddenException.class,
+            () -> dealController().getRevenueSeries(
+                "2026-01-01", "2026-01-31", "month", null,
+                null, null, "members", List.of(3)));
+        verify(dealService, never()).getRevenueSeries(any(), any(), any(), any());
     }
 
     @Test

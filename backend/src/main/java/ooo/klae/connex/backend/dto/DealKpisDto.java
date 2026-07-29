@@ -3,7 +3,7 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 
 /**
- * Current and previous deal KPIs with twelve-bucket trend series for the active workspace.
+ * Current and previous deal KPIs with ordered trend series for the active workspace.
  */
 public record DealKpisDto(
     double wonRevenue,

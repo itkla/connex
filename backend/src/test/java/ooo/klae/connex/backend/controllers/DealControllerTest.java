@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
@@ -89,6 +90,7 @@ class DealControllerTest {
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;
     @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
+    @MockitoBean private ErrorReporter errorReporter;
 
     @Test
     void updateNameDelegatesAndSerializesTheFullDeal() throws Exception {

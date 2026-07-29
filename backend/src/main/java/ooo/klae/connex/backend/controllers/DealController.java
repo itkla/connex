@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealNameUpdateRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRationaleDto;
@@ -61,15 +62,16 @@ import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.AnalyticsPeriods;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
+import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
-import java.time.DateTimeException;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import jakarta.validation.Valid;
@@ -286,7 +288,29 @@ public class DealController {
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getRevenueTimeseries(
-            normalizedCurrency, resolveTimezone(timezone, tzOffset), analyticsMemberScope(scope, memberIds));
+            normalizedCurrency, AnalyticsPeriods.resolveTimezone(timezone, tzOffset),
+            analyticsMemberScope(scope, memberIds));
+    }
+
+    /**
+     * GET endpoint for realized and projected deal revenue over aligned calendar periods.
+     */
+    @GetMapping("/revenue-series")
+    public DealRevenuePeriodSeriesDto getRevenueSeries(
+        @RequestParam String from,
+        @RequestParam String to,
+        @RequestParam String granularity,
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String timezone,
+        @RequestParam(required = false) String tzOffset,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        Window window = AnalyticsPeriods.requiredWindow(from, to, timezone, tzOffset);
+        List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window, granularity);
+        return dealService.getRevenueSeries(
+            normalizedCurrency, window, periods, analyticsMemberScope(scope, memberIds));
     }
 
     /**
@@ -310,9 +334,20 @@ public class DealController {
         @RequestParam(required = false) String currency,
         @RequestParam(defaultValue = "90d") String range,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) String from,
+        @RequestParam(required = false) String to,
+        @RequestParam(required = false) String granularity,
+        @RequestParam(required = false) String timezone,
+        @RequestParam(required = false) String tzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        if (window.isPresent()) {
+            List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window.get(), granularity);
+            return dealService.getDealKpis(
+                normalizedCurrency, window.get(), periods, analyticsMemberScope(scope, memberIds));
+        }
         return dealService.getDealKpis(
             normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
@@ -325,9 +360,18 @@ public class DealController {
         @RequestParam(required = false) String currency,
         @RequestParam(defaultValue = "90d") String range,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) String from,
+        @RequestParam(required = false) String to,
+        @RequestParam(required = false) String timezone,
+        @RequestParam(required = false) String tzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        if (window.isPresent()) {
+            return dealService.getDealPipelineValue(
+                normalizedCurrency, window.get(), analyticsMemberScope(scope, memberIds));
+        }
         return dealService.getDealPipelineValue(
             normalizedCurrency, analyticsRangeDays(range), analyticsMemberScope(scope, memberIds));
     }
@@ -462,25 +506,6 @@ public class DealController {
             throw new BadRequestException("days must be 366 or fewer");
         }
         return days;
-    }
-
-    private static String resolveTimezone(String timezone, String tzOffset) {
-        boolean hasTimezone = timezone != null && !timezone.isBlank();
-        boolean hasOffset = tzOffset != null && !tzOffset.isBlank();
-        if (hasTimezone && hasOffset) {
-            throw new BadRequestException("Specify either timezone or tzOffset, not both");
-        }
-        if (!hasTimezone && !hasOffset) {
-            return null;
-        }
-        String value = hasTimezone ? timezone.trim() : tzOffset.trim();
-        try {
-            return hasTimezone ? ZoneId.of(value).getId() : ZoneOffset.of(value).getId();
-        } catch (DateTimeException exception) {
-            throw new BadRequestException(hasTimezone
-                ? "Invalid timezone: " + value
-                : "tzOffset must be a UTC offset like +09:00 or -05:00");
-        }
     }
 
     /**
