@@ -250,18 +250,86 @@ prune_binlogs() {
 }
 
 prune_staging() {
-    local entry
+    local entry raw destination status mtime age now grace_age
+    local -a files=() pending_destinations=()
+    now="$(date +%s)"
+    grace_age=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
     while IFS= read -r entry; do
         if [[ "$entry" != "$CONNEX_BACKUP_ROOT/binlog/.fetch."* ]]; then
             prune_skip reason unexpected_binlog_directory path "$entry"
             continue
         fi
-        rm -rf -- "$entry" || { prune_skip reason staging_remove_failed path "$entry"; continue; }
-        backup_log warn abandoned_binlog_staging_pruned path "$entry"
+        mapfile -t files < <(find "$entry" -mindepth 1 -maxdepth 1 -type f -print)
+        if [ "${#files[@]}" -eq 1 ] &&
+            ! find "$entry" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            raw="${files[0]}"
+            destination="$CONNEX_BACKUP_ROOT/binlog/$(basename "$raw")"
+            if [ ! -e "$destination" ] && [ ! -L "$destination" ] &&
+                [ ! -e "$destination.pending" ] && [ ! -L "$destination.pending" ] &&
+                backup_validate_binlog_components \
+                    "$raw" "$destination.meta.pending" "$destination.sha256.pending" "$destination"; then
+                if ! backup_sync_file "$raw" ||
+                    ! mv -T -- "$raw" "$destination.pending" ||
+                    ! backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" ||
+                    ! backup_recover_binlog_triplet "$destination"; then
+                    prune_skip reason binlog_staging_recovery_failed path "$entry"
+                    continue
+                fi
+                rmdir "$entry" || {
+                    prune_skip reason staging_remove_failed path "$entry"
+                    continue
+                }
+                backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+                continue
+            fi
+        fi
+        if ! mtime="$(stat -c %Y "$entry" 2>/dev/null)"; then
+            prune_skip reason staging_age_unreadable path "$entry"
+            continue
+        fi
+        age=$((now - mtime))
+        if [ "$age" -lt "$grace_age" ]; then
+            prune_skip reason interrupted_binlog_staging path "$entry" age_seconds "$age"
+            continue
+        fi
+        rm -rf -- "$entry" || {
+            prune_skip reason staging_remove_failed path "$entry"
+            continue
+        }
+        backup_log warn abandoned_binlog_staging_pruned path "$entry" age_seconds "$age"
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type d -print)
-    if find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f \( -name '*.pending' -o -name '.pitr-query.*' \) -delete -print | grep -q .; then
-        backup_log warn abandoned_binlog_pending_pruned
+    while IFS= read -r entry; do
+        case "$entry" in
+            *.meta.pending)
+                pending_destinations+=("${entry%.meta.pending}")
+                ;;
+            *.sha256.pending)
+                pending_destinations+=("${entry%.sha256.pending}")
+                ;;
+            *.pending)
+                pending_destinations+=("${entry%.pending}")
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -name '*.pending' -print | sort)
+    if [ "${#pending_destinations[@]}" -gt 0 ]; then
+        mapfile -t pending_destinations < <(printf '%s\n' "${pending_destinations[@]}" | sort -u)
     fi
+    for destination in "${pending_destinations[@]}"; do
+        if backup_recover_binlog_triplet "$destination"; then
+            backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+            continue
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ] && [ "$status" -ne "$EXIT_INTEGRITY" ]; then
+            return "$status"
+        fi
+        prune_skip reason interrupted_binlog_publication file "$(basename "$destination")"
+    done
+    find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f -name '.pitr-query.*' -delete
 }
 
 prune_freshness_check() {

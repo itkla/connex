@@ -211,24 +211,97 @@ archive_magic_valid() {
     [ "$(od -An -t x1 -N4 "$path" | tr -d ' \n')" = fe62696e ]
 }
 
+archive_recoverable_raw() {
+    local destination="$1"
+    local server_size="$2"
+    local candidate=
+    if { [ -e "$destination" ] || [ -L "$destination" ]; } &&
+        { [ -e "$destination.pending" ] || [ -L "$destination.pending" ]; }; then
+        return 1
+    fi
+    if [ -f "$destination" ] && [ ! -L "$destination" ]; then
+        candidate="$destination"
+    elif [ -f "$destination.pending" ] && [ ! -L "$destination.pending" ]; then
+        candidate="$destination.pending"
+    else
+        return 1
+    fi
+    if [ "$(stat -c '%s' "$candidate")" != "$server_size" ] ||
+        ! archive_magic_valid "$candidate"; then
+        return 1
+    fi
+    printf '%s\n' "$candidate"
+}
+
+archive_clear_binlog_sidecars() {
+    local destination="$1"
+    rm -f -- \
+        "$destination.meta" "$destination.sha256" \
+        "$destination.meta.pending" "$destination.sha256.pending"
+}
+
+archive_clear_binlog_namespace() {
+    local destination="$1"
+    rm -f -- \
+        "$destination" "$destination.meta" "$destination.sha256" \
+        "$destination.pending" "$destination.meta.pending" "$destination.sha256.pending"
+}
+
+archive_recover_publications() {
+    local pending destination status
+    local -a destinations=()
+    while IFS= read -r pending; do
+        case "$pending" in
+            *.meta.pending)
+                destinations+=("${pending%.meta.pending}")
+                ;;
+            *.sha256.pending)
+                destinations+=("${pending%.sha256.pending}")
+                ;;
+            *.pending)
+                destinations+=("${pending%.pending}")
+                ;;
+        esac
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -name '*.pending' -print | sort)
+    if [ "${#destinations[@]}" -eq 0 ]; then
+        return 0
+    fi
+    while IFS= read -r destination; do
+        if backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID"; then
+            backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+            continue
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ] && [ "$status" -ne "$EXIT_INTEGRITY" ]; then
+            return "$status"
+        fi
+        backup_log warn binlog_publication_incomplete file "$(basename "$destination")"
+    done < <(printf '%s\n' "${destinations[@]}" | sort -u)
+}
+
 archive_existing_matches() {
     local destination="$1"
     local server_size="$2"
     local meta="$destination.meta"
-    local recorded_server_size recorded_local_size local_size
-    if [ ! -e "$destination" ] && [ ! -e "$destination.meta" ] && [ ! -e "$destination.sha256" ]; then
-        return 1
+    local recorded_server_size recorded_local_size local_size status
+    if backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID"; then
+        :
+    else
+        status=$?
+        if [ "$status" -eq 1 ] || [ "$status" -eq "$EXIT_INTEGRITY" ]; then
+            return 1
+        fi
+        return "$status"
     fi
-    if ! backup_validate_binlog_triplet "$destination"; then
-        rm -f "$destination" "$destination.meta" "$destination.sha256" "$destination.meta.pending" "$destination.sha256.pending"
-        backup_log warn binlog_partial_removed file "$(basename "$destination")"
+    if [ ! -e "$destination" ]; then
         return 1
     fi
     recorded_server_size="$(backup_meta_value "$meta" server_size)" || return "$EXIT_BINLOG_ARCHIVE"
     recorded_local_size="$(backup_meta_value "$meta" local_size)" || return "$EXIT_BINLOG_ARCHIVE"
     local_size="$(stat -c '%s' "$destination")"
     if [ "$recorded_server_size" != "$server_size" ] || [ "$recorded_local_size" != "$local_size" ]; then
-        rm -f "$destination" "$destination.meta" "$destination.sha256"
+        archive_clear_binlog_namespace "$destination"
         backup_log warn binlog_stale_removed file "$(basename "$destination")" server_size "$server_size" recorded_server_size "$recorded_server_size" local_size "$local_size" recorded_local_size "$recorded_local_size"
         return 1
     fi
@@ -306,16 +379,17 @@ archive_fetch_to_temporary() {
 archive_publish_file() {
     local file="$1"
     local server_size="$2"
-    local temporary_directory="$3"
+    local source_file="$3"
     local destination="$CONNEX_BACKUP_ROOT/binlog/$file"
-    local temporary_file="$temporary_directory/$file"
+    local pending_raw="$destination.pending"
+    local temporary_checksum temporary_meta
     local hash local_size time_range created_epoch last_event_epoch created_utc last_event_utc
-    hash="$(sha256sum "$temporary_file" | awk '{print $1}')"
-    local_size="$(stat -c '%s' "$temporary_file")"
+    hash="$(sha256sum "$source_file" | awk '{print $1}')"
+    local_size="$(stat -c '%s' "$source_file")"
     if [ "$CONNEX_BACKUP_BINLOG_FETCH_MODE" = stream ]; then
         time_range="$(archive_source_time_range "$file")" || return "$EXIT_BINLOG_ARCHIVE"
     else
-        time_range="$(archive_decode_time_range "$temporary_file")" || return "$EXIT_BINLOG_ARCHIVE"
+        time_range="$(archive_decode_time_range "$source_file")" || return "$EXIT_BINLOG_ARCHIVE"
     fi
     IFS=$'\t' read -r created_epoch last_event_epoch <<< "$time_range"
     if [ "$created_epoch" -gt "$(date +%s)" ] || [ "$last_event_epoch" -gt "$(date +%s)" ]; then
@@ -325,14 +399,20 @@ archive_publish_file() {
     created_utc="$(date -u -d "@$created_epoch" +%Y-%m-%dT%H:%M:%SZ)"
     last_event_utc="$(date -u -d "@$last_event_epoch" +%Y-%m-%dT%H:%M:%SZ)"
     if [ $(( $(date +%s) - created_epoch )) -ge $(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 )) ]; then
-        rm -f "$temporary_file"
+        archive_clear_binlog_namespace "$destination"
+        rm -f -- "$source_file"
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
         ARCHIVE_RETENTION_GAP=true
         archive_record_coverage_gap "$file" "$created_epoch" "$last_event_epoch" || return "$EXIT_BINLOG_ARCHIVE"
         backup_log warn binlog_skipped file "$file" reason outside_retention file_created_utc "$created_utc"
         return 0
     fi
-    printf '%s  %s\n' "$hash" "$file" > "$destination.sha256.pending"
+    temporary_checksum="$(mktemp "$CONNEX_BACKUP_ROOT/binlog/.sha256.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
+    temporary_meta="$(mktemp "$CONNEX_BACKUP_ROOT/binlog/.meta.XXXXXX")" || {
+        rm -f -- "$temporary_checksum"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    printf '%s  %s\n' "$hash" "$file" > "$temporary_checksum"
     {
         printf 'metadata_version\t1\n'
         printf 'file\t%s\n' "$file"
@@ -346,10 +426,27 @@ archive_publish_file() {
         printf 'last_event_utc\t%s\n' "$last_event_utc"
         printf 'archived_at_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'fetch_mode\t%s\n' "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
-    } > "$destination.meta.pending"
-    mv "$temporary_file" "$destination"
-    mv "$destination.sha256.pending" "$destination.sha256"
-    mv "$destination.meta.pending" "$destination.meta"
+    } > "$temporary_meta"
+    if ! backup_sync_file "$temporary_checksum" || ! backup_sync_file "$temporary_meta"; then
+        rm -f -- "$temporary_checksum" "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    mv -T -- "$temporary_checksum" "$destination.sha256.pending" || {
+        rm -f -- "$temporary_checksum" "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    mv -T -- "$temporary_meta" "$destination.meta.pending" || {
+        rm -f -- "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" || return "$EXIT_BINLOG_ARCHIVE"
+    if [ "$source_file" != "$destination" ] && [ "$source_file" != "$pending_raw" ]; then
+        backup_sync_file "$source_file" || return "$EXIT_BINLOG_ARCHIVE"
+        mv -T -- "$source_file" "$pending_raw" || return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" || return "$EXIT_BINLOG_ARCHIVE"
+    backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID" ||
+        return "$EXIT_BINLOG_ARCHIVE"
     ARCHIVE_FETCHED=$((ARCHIVE_FETCHED + 1))
     ARCHIVE_BYTES=$((ARCHIVE_BYTES + local_size))
     backup_log info binlog_fetch_completed file "$file" server_size "$server_size" local_size "$local_size" sha256 "$hash" file_created_utc "$created_utc" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
@@ -359,7 +456,7 @@ archive_fetch_file() {
     local file="$1"
     local server_size="$2"
     local destination="$CONNEX_BACKUP_ROOT/binlog/$file"
-    local temporary_directory
+    local temporary_directory='' source_file=''
     if archive_existing_matches "$destination" "$server_size"; then
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
         backup_log info binlog_skipped file "$file" reason already_archived size "$server_size"
@@ -370,18 +467,28 @@ archive_fetch_file() {
             return "$EXIT_BINLOG_ARCHIVE"
         fi
     fi
-    temporary_directory="$(mktemp -d "$CONNEX_BACKUP_ROOT/binlog/.fetch.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
-    backup_log info binlog_fetch_started file "$file" server_size "$server_size" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
-    if ! archive_fetch_to_temporary "$file" "$server_size" "$temporary_directory"; then
-        rm -rf "$temporary_directory"
-        backup_log error binlog_fetch_failed file "$file" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+    source_file="$(archive_recoverable_raw "$destination" "$server_size" || true)"
+    if [ -n "$source_file" ]; then
+        archive_clear_binlog_sidecars "$destination"
+        backup_log warn binlog_publication_resumed file "$file"
+    else
+        archive_clear_binlog_namespace "$destination"
+        temporary_directory="$(mktemp -d "$CONNEX_BACKUP_ROOT/binlog/.fetch.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
+        backup_log info binlog_fetch_started file "$file" server_size "$server_size" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+        if ! archive_fetch_to_temporary "$file" "$server_size" "$temporary_directory"; then
+            rm -rf "$temporary_directory"
+            backup_log error binlog_fetch_failed file "$file" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+            return "$EXIT_BINLOG_ARCHIVE"
+        fi
+        source_file="$temporary_directory/$file"
+    fi
+    if ! archive_publish_file "$file" "$server_size" "$source_file"; then
+        backup_log error binlog_publish_failed file "$file"
         return "$EXIT_BINLOG_ARCHIVE"
     fi
-    if ! archive_publish_file "$file" "$server_size" "$temporary_directory"; then
-        rm -rf "$temporary_directory"
-        return "$EXIT_BINLOG_ARCHIVE"
+    if [ -n "$temporary_directory" ]; then
+        rmdir "$temporary_directory"
     fi
-    rmdir "$temporary_directory"
 }
 
 # Walks the closed logs the server currently lists, resuming after the named
@@ -524,6 +631,7 @@ archive_run() {
     BACKUP_PHASE=binlog_preflight
     archive_preflight || return $?
     archive_validate_state || return $?
+    archive_recover_publications || return $?
     BACKUP_PHASE=binlog_rotation
     archive_rotate_and_list || return $?
     archive_verify_server_retention || return $?

@@ -111,6 +111,28 @@ write_fake_binlog() {
     printf 'connex-test-payload\n' >> "$path"
 }
 
+write_binlog_sidecars() {
+    local raw="$1"
+    local metadata="$2"
+    local checksum="$3"
+    local destination="$4"
+    local created_epoch="$5"
+    local hash size
+    hash="$(sha256sum "$raw" | awk '{print $1}')"
+    size="$(stat -c '%s' "$raw")"
+    printf '%s  %s\n' "$hash" "$(basename "$destination")" > "$checksum"
+    {
+        printf 'metadata_version\t1\n'
+        printf 'file\t%s\n' "$(basename "$destination")"
+        printf 'server_uuid\ttest-uuid\n'
+        printf 'server_size\t%s\n' "$size"
+        printf 'local_size\t%s\n' "$size"
+        printf 'sha256\t%s\n' "$hash"
+        printf 'file_created_epoch\t%s\n' "$created_epoch"
+        printf 'last_event_epoch\t%s\n' "$((created_epoch + 600))"
+    } > "$metadata"
+}
+
 case_schema_selection() {
     set +e
     # shellcheck source=deploy/backup/connex-backup-lib.sh
@@ -178,6 +200,7 @@ case_pitr_filtered_statements() {
     source "$SANDBOX/pitr-lib.sh"
     local log="$SANDBOX/pitr-filtered.log"
     local unfiltered="$SANDBOX/unfiltered.decode"
+    local filtered="$SANDBOX/filtered.decode"
     local status
 
     {
@@ -190,26 +213,25 @@ case_pitr_filtered_statements() {
         printf 'BEGIN\n'
         printf '/*!*/;\n'
     } > "$unfiltered"
+    : > "$filtered"
 
     backup_mysqlbinlog_local() {
-        return 0
+        cat "$filtered"
     }
 
     PITR_SOURCE_SCHEMA=src
     PITR_TARGET_TIME='2026-01-01 13:00:00'
     PITR_BINLOG_POSITION=4
     PITR_BINLOG_FILES=("$SANDBOX/binlog.000001")
-    PITR_SCRATCH_FILE="$SANDBOX/pitr-scratch"
-    pitr_extract_query_statements < "$unfiltered" > "$PITR_SCRATCH_FILE"
+    PITR_DECODE_SCRATCH_FILE="$unfiltered"
 
     : > "$log"
     pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
     status=$?
     assert_status empty_filtered_decode_with_source_reference 1 "$status" || return 1
     assert_contains refusal_reason 'reason=qualified_statement_without_matching_default_database' "$log" || return 1
-    assert_contains dropped_count 'dropped_lines=1' "$log" || return 1
-    assert_contains dropped_statement 'dropped_first=ALTER%20TABLE%20src.foo' "$log" || return 1
-    assert_absent single_escaping '%2520' "$log" || return 1
+    assert_contains dropped_count 'dropped_events=1' "$log" || return 1
+    assert_contains dropped_hash 'dropped_first_hash=' "$log" || return 1
 
     {
         printf '#260101 12:00:00 server id 1  end_log_pos 100 \tQuery\tthread_id=5\texec_time=0\terror_code=0\n'
@@ -221,7 +243,6 @@ case_pitr_filtered_statements() {
         printf 'BEGIN\n'
         printf '/*!*/;\n'
     } > "$unfiltered"
-    pitr_extract_query_statements < "$unfiltered" > "$PITR_SCRATCH_FILE"
 
     : > "$log"
     pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
@@ -239,8 +260,7 @@ case_pitr_filtered_statements() {
         printf "ALTER TABLE other.bar COMMENT = '\x00binary'\n"
         printf '/*!*/;\n'
     } > "$unfiltered"
-    pitr_extract_query_statements < "$unfiltered" > "$PITR_SCRATCH_FILE"
-    if [ "$(tr -dc '\0' < "$PITR_SCRATCH_FILE" | wc -c)" -eq 0 ]; then
+    if [ "$(tr -dc '\0' < "$unfiltered" | wc -c)" -eq 0 ]; then
         printf 'harness error: the decoded window lost its NUL byte\n'
         return 1
     fi
@@ -250,7 +270,76 @@ case_pitr_filtered_statements() {
     status=$?
     assert_status nul_byte_does_not_blind_the_guard 1 "$status" || return 1
     assert_contains nul_refusal_reason 'reason=qualified_statement_without_matching_default_database' "$log" || return 1
-    assert_contains nul_dropped_count 'dropped_lines=1' "$log" || return 1
+    assert_contains nul_dropped_count 'dropped_events=1' "$log" || return 1
+
+    {
+        printf '#260101 12:00:00 server id 1  end_log_pos 100 \tQuery\tthread_id=5\texec_time=0\terror_code=0\n'
+        printf "use \`other\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268800/*!*/;\n'
+        printf 'ALTER TABLE src.foo\n'
+        printf 'ADD COLUMN lost_column INT\n'
+        printf '/*!*/;\n'
+        printf '#260101 12:00:01 server id 1  end_log_pos 200 \tQuery\tthread_id=6\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268801/*!*/;\n'
+        printf 'ALTER TABLE src.foo\n'
+        printf 'ADD COLUMN kept_column INT\n'
+        printf '/*!*/;\n'
+    } > "$unfiltered"
+    {
+        printf '#260101 12:00:01 server id 1  end_log_pos 200 \tQuery\tthread_id=6\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268801/*!*/;\n'
+        printf 'ALTER TABLE src.foo\n'
+        printf 'ADD COLUMN kept_column INT\n'
+        printf '/*!*/;\n'
+    } > "$filtered"
+
+    : > "$log"
+    pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
+    status=$?
+    assert_status multiline_event_loss_refused 1 "$status" || return 1
+    assert_contains multiline_event_loss_reason 'reason=qualified_statement_without_matching_default_database' "$log" || return 1
+
+    {
+        printf '#260101 12:00:00 server id 1  end_log_pos 100 \tQuery\tthread_id=5\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268800/*!*/;\n'
+        printf 'ALTER TABLE src.foo ADD COLUMN duplicate_guard INT\n'
+        printf '/*!*/;\n'
+        printf '#260101 12:00:01 server id 1  end_log_pos 200 \tQuery\tthread_id=6\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268801/*!*/;\n'
+        printf 'ALTER TABLE src.foo ADD COLUMN duplicate_guard INT\n'
+        printf '/*!*/;\n'
+    } > "$unfiltered"
+    {
+        printf '#260101 12:00:01 server id 1  end_log_pos 200 \tQuery\tthread_id=6\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268801/*!*/;\n'
+        printf 'ALTER TABLE src.foo ADD COLUMN duplicate_guard INT\n'
+        printf '/*!*/;\n'
+    } > "$filtered"
+
+    : > "$log"
+    pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
+    status=$?
+    assert_status duplicate_event_loss_refused 1 "$status" || return 1
+    assert_contains duplicate_event_loss_count 'dropped_events=1' "$log" || return 1
+
+    {
+        printf '#260101 12:00:00 server id 1  end_log_pos 100 \tQuery\tthread_id=5\texec_time=0\terror_code=0\n'
+        printf "use \`src\`/*!*/;\n"
+        printf 'SET TIMESTAMP=1767268800/*!*/;\n'
+        printf 'ALTER TABLE src.foo ADD COLUMN incomplete_guard INT\n'
+    } > "$unfiltered"
+    : > "$filtered"
+
+    : > "$log"
+    pitr_verify_no_statement_is_filtered_away >> "$log" 2>&1
+    status=$?
+    assert_status incomplete_event_refused 1 "$status" || return 1
+    assert_contains incomplete_event_reason 'reason=query_event_extraction' "$log" || return 1
 }
 
 case_pitr_coverage_gap_guard() {
@@ -562,6 +651,77 @@ case_prune_orphan_binlogs() {
     assert_absent coverage_gap_not_warned 'file=coverage-gap' "$log" || return 1
 }
 
+case_interrupted_publication_recovery() {
+    set +e
+    source "$SANDBOX/prune-lib.sh"
+    local root="$SANDBOX/publication-recovery"
+    local binlog_dir="$root/binlog"
+    local log="$SANDBOX/publication-recovery.log"
+    local destination staging_raw outside
+    mkdir -p "$binlog_dir"
+    CONNEX_BACKUP_ROOT="$root"
+    backup_set_defaults
+
+    destination="$binlog_dir/binlog.000020"
+    write_fake_binlog "$destination"
+    write_binlog_sidecars \
+        "$destination" "$destination.meta.pending" "$destination.sha256.pending" \
+        "$destination" 1767225600
+    : > "$log"
+    prune_staging >> "$log" 2>&1
+    assert_file_exists interrupted_raw_preserved "$destination" || return 1
+    assert_file_exists interrupted_meta_finalized "$destination.meta" || return 1
+    assert_file_exists interrupted_checksum_finalized "$destination.sha256" || return 1
+    assert_file_missing interrupted_meta_pending_removed "$destination.meta.pending" || return 1
+    assert_file_missing interrupted_checksum_pending_removed "$destination.sha256.pending" || return 1
+    backup_validate_binlog_triplet "$destination" || return 1
+
+    destination="$binlog_dir/binlog.000021"
+    write_fake_binlog "$destination.pending"
+    write_binlog_sidecars \
+        "$destination.pending" "$destination.meta" "$destination.sha256.pending" \
+        "$destination" 1767225600
+    : > "$log"
+    prune_staging >> "$log" 2>&1
+    assert_file_exists mixed_raw_finalized "$destination" || return 1
+    assert_file_exists mixed_meta_preserved "$destination.meta" || return 1
+    assert_file_exists mixed_checksum_finalized "$destination.sha256" || return 1
+    backup_validate_binlog_triplet "$destination" || return 1
+
+    destination="$binlog_dir/binlog.000022"
+    mkdir "$binlog_dir/.fetch.recovery"
+    staging_raw="$binlog_dir/.fetch.recovery/binlog.000022"
+    write_fake_binlog "$staging_raw"
+    write_binlog_sidecars \
+        "$staging_raw" "$destination.meta.pending" "$destination.sha256.pending" \
+        "$destination" 1767225600
+    : > "$log"
+    prune_staging >> "$log" 2>&1
+    assert_file_exists staged_raw_finalized "$destination" || return 1
+    assert_file_missing staged_directory_removed "$binlog_dir/.fetch.recovery" || return 1
+    backup_validate_binlog_triplet "$destination" || return 1
+
+    destination="$binlog_dir/binlog.000023"
+    write_fake_binlog "$destination.pending"
+    : > "$log"
+    prune_staging >> "$log" 2>&1
+    assert_file_exists incomplete_raw_retained "$destination.pending" || return 1
+    assert_contains incomplete_raw_logged 'reason=interrupted_binlog_publication' "$log" || return 1
+
+    destination="$binlog_dir/binlog.000024"
+    outside="$root/outside"
+    write_fake_binlog "$outside"
+    ln -s "$outside" "$destination.pending"
+    : > "$log"
+    prune_staging >> "$log" 2>&1
+    if [ ! -L "$destination.pending" ]; then
+        printf 'pending symlink was unexpectedly replaced\n'
+        return 1
+    fi
+    assert_file_exists symlink_target_preserved "$outside" || return 1
+    assert_contains symlink_pending_logged 'reason=interrupted_binlog_publication' "$log" || return 1
+}
+
 run_case() {
     local name="$1"
     local output status=0
@@ -580,6 +740,7 @@ run_case case_pitr_coverage_gap_guard
 run_case case_archive_rebases_missing_cursor
 run_case case_archive_retention_gap
 run_case case_prune_orphan_binlogs
+run_case case_interrupted_publication_recovery
 
 if [ "$FAILURES" -ne 0 ]; then
     printf '%s case(s) failed\n' "$FAILURES" >&2

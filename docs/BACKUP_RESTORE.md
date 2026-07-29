@@ -208,8 +208,9 @@ The vendor-side reference drill that produced the published RTO above is recorde
   database-level statements (`GRANT`, `CREATE USER`, `SET GLOBAL`, `CREATE DATABASE`, …) that a
   schema rewrite cannot contain, or a qualified reference split across lines that the rewriter
   cannot safely retarget. It also decodes the window a second time through the exact filter the
-  replay uses: statements the replay would drop while still naming the source schema — an
-  `ALTER TABLE src.foo …` issued under a different default database — are a refusal
+  replay uses and compares complete Query events as a hash multiset, preserving event boundaries
+  and duplicate occurrences. Statements the replay would drop while still naming the source
+  schema — an `ALTER TABLE src.foo …` issued under a different default database — are a refusal
   (`reason=qualified_statement_without_matching_default_database`), because they would otherwise go
   missing from an apparently successful restore. A window in which the source schema was merely
   idle drops plenty of unrelated text and is not a refusal.
@@ -233,12 +234,14 @@ The vendor-side reference drill that produced the published RTO above is recorde
   (`event=prune_skipped`), never aborting the whole prune — one bad file can't silently freeze
   retention. The prune timer runs twice daily and a failed run retries every 15 minutes, so a
   transient failure still clears well inside the one-day margin under the legal ceiling.
-- **An archived binlog with no metadata is deleted on the failed-run grace, not the 29-day line.**
-  Without its `.meta` sidecar a binlog can never be validated or replayed, and the archive re-fetches
-  it for as long as the server still holds it, so it is quarantined after the 24-hour grace
-  (`reason=orphaned_binlog_without_metadata`). That is also the only clock that honours the ceiling:
-  the file's mtime is the local fetch time, so a catch-up archive run would otherwise keep month-old
-  events for another 29 days. "Archived binlog" is decided by the archive's own naming — the file
+- **Interrupted binlog publication is recovered before orphan pruning.** The raw bytes, checksum,
+  and metadata are synced under pending names before final atomic renames. Archive and prune runs
+  validate and finish any complete pending triplet, including the legacy crash state with final raw
+  bytes and pending sidecars. A genuinely metadata-less raw file that is not part of a recoverable
+  publication is still quarantined after the 24-hour failed-run grace
+  (`reason=orphaned_binlog_without_metadata`). That clock honours the ceiling: the file's mtime is
+  the local fetch time, so a catch-up archive run would otherwise keep month-old events for another
+  29 days. "Archived binlog" is decided by the archive's own naming — the file
   prefix recorded in `binlog/archive-state`, or in the metadata sidecars if that file is gone —
   *and* the binary-log magic bytes. Anything else in the binlog root — an operator's own file, a
   future sidecar, anything at all when neither source can tell the pruner what the archive's files

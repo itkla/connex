@@ -895,25 +895,134 @@ backup_meta_value() {
     awk -F '\t' -v key="$key" '$1 == key { print $2; count++ } END { if (count != 1) exit 1 }' "$meta"
 }
 
-backup_validate_binlog_triplet() {
+backup_sync_file() {
     local path="$1"
-    local meta="$path.meta"
-    local checksum="$path.sha256"
-    local expected_hash recorded_file
+    if [ ! -f "$path" ] || [ -L "$path" ]; then
+        return "$EXIT_INTEGRITY"
+    fi
+    sync -d -- "$path" || return "$EXIT_INTEGRITY"
+}
+
+backup_sync_directory() {
+    local path="$1"
+    if [ ! -d "$path" ] || [ -L "$path" ]; then
+        return "$EXIT_INTEGRITY"
+    fi
+    sync -f -- "$path" || return "$EXIT_INTEGRITY"
+}
+
+backup_validate_binlog_components() {
+    local path="$1"
+    local meta="$2"
+    local checksum="$3"
+    local destination="$4"
+    local expected_server_uuid="${5:-}"
+    local expected_hash recorded_file recorded_server_uuid component properties file_type links extra
     if [ ! -f "$path" ] || [ -L "$path" ] || [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -f "$checksum" ] || [ -L "$checksum" ]; then
         return "$EXIT_INTEGRITY"
     fi
+    for component in "$path" "$meta" "$checksum"; do
+        properties="$(stat -c '%F:%h' -- "$component" 2>/dev/null)" ||
+            return "$EXIT_INTEGRITY"
+        IFS=: read -r file_type links extra <<< "$properties"
+        if [ -n "$extra" ] || [ "$file_type" != "regular file" ] || [ "$links" != 1 ]; then
+            return "$EXIT_INTEGRITY"
+        fi
+    done
     read -r expected_hash recorded_file < "$checksum"
-    if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]] || [ "$recorded_file" != "$(basename "$path")" ]; then
+    if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]] ||
+        [ "$recorded_file" != "$(basename "$destination")" ]; then
         return "$EXIT_INTEGRITY"
     fi
     if [ "$(sha256sum "$path" | awk '{print $1}')" != "$expected_hash" ]; then
         return "$EXIT_INTEGRITY"
     fi
+    if [ "$(backup_meta_value "$meta" file)" != "$(basename "$destination")" ]; then
+        return "$EXIT_INTEGRITY"
+    fi
     if [ "$(backup_meta_value "$meta" sha256)" != "$expected_hash" ]; then
+        return "$EXIT_INTEGRITY"
+    fi
+    recorded_server_uuid="$(backup_meta_value "$meta" server_uuid 2>/dev/null || true)"
+    if [ -n "$expected_server_uuid" ] && [ "$recorded_server_uuid" != "$expected_server_uuid" ]; then
         return "$EXIT_INTEGRITY"
     fi
     if [ "$(od -An -t x1 -N4 "$path" | tr -d ' \n')" != fe62696e ]; then
         return "$EXIT_INTEGRITY"
     fi
+}
+
+backup_validate_binlog_triplet() {
+    local path="$1"
+    local expected_server_uuid="${2:-}"
+    backup_validate_binlog_components \
+        "$path" "$path.meta" "$path.sha256" "$path" "$expected_server_uuid"
+}
+
+backup_binlog_namespace_absent() {
+    local path="$1"
+    local component
+    for component in \
+        "$path" "$path.meta" "$path.sha256" \
+        "$path.pending" "$path.meta.pending" "$path.sha256.pending"; do
+        if [ -e "$component" ] || [ -L "$component" ]; then
+            return 1
+        fi
+    done
+}
+
+backup_recover_binlog_triplet() {
+    local path="$1"
+    local expected_server_uuid="${2:-}"
+    local raw meta checksum final pending component
+    if backup_validate_binlog_triplet "$path" "$expected_server_uuid"; then
+        if [ -e "$path.pending" ] || [ -L "$path.pending" ] ||
+            [ -e "$path.meta.pending" ] || [ -L "$path.meta.pending" ] ||
+            [ -e "$path.sha256.pending" ] || [ -L "$path.sha256.pending" ]; then
+            return "$EXIT_INTEGRITY"
+        fi
+        return 0
+    fi
+    if backup_binlog_namespace_absent "$path"; then
+        return 1
+    fi
+    while IFS=$'\t' read -r final pending; do
+        if { [ -e "$final" ] || [ -L "$final" ]; } &&
+            { [ -e "$pending" ] || [ -L "$pending" ]; }; then
+            return "$EXIT_INTEGRITY"
+        fi
+        component=
+        if [ -e "$final" ] || [ -L "$final" ]; then
+            component="$final"
+        elif [ -e "$pending" ] || [ -L "$pending" ]; then
+            component="$pending"
+        else
+            return "$EXIT_INTEGRITY"
+        fi
+        if [ "$final" = "$path" ]; then
+            raw="$component"
+        elif [ "$final" = "$path.meta" ]; then
+            meta="$component"
+        else
+            checksum="$component"
+        fi
+    done <<EOF
+$path	$path.pending
+$path.meta	$path.meta.pending
+$path.sha256	$path.sha256.pending
+EOF
+    backup_validate_binlog_components \
+        "$raw" "$meta" "$checksum" "$path" "$expected_server_uuid" ||
+        return "$EXIT_INTEGRITY"
+    if [ "$checksum" = "$path.sha256.pending" ]; then
+        mv -T -- "$checksum" "$path.sha256" || return "$EXIT_INTEGRITY"
+    fi
+    if [ "$meta" = "$path.meta.pending" ]; then
+        mv -T -- "$meta" "$path.meta" || return "$EXIT_INTEGRITY"
+    fi
+    if [ "$raw" = "$path.pending" ]; then
+        mv -T -- "$raw" "$path" || return "$EXIT_INTEGRITY"
+    fi
+    backup_sync_directory "$(dirname "$path")" || return "$EXIT_INTEGRITY"
+    backup_validate_binlog_triplet "$path" "$expected_server_uuid"
 }

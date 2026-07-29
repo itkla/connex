@@ -32,7 +32,7 @@ password=REPLACE_WITH_OPERATOR_SECRET
 
 Create separate mode-0600 `verify.cnf` and `restore.cnf` files when those targets use different credentials. Managed databases may put CA/certificate paths and verified TLS settings in the same defaults files.
 
-Daily dumps and binary-log archiving work with the bundled `mysql:8.4.10` database image alone. Archive stream mode lists closed logs through MySQL, then copies their immutable bytes from `/var/lib/mysql` with `docker exec ... cat`. Each copy must match the server-reported size and binary-log magic before it is published. The paired stat command records filesystem birth and close times; stream mode fails closed when the database filesystem cannot report a positive birth time because legal-age pruning would otherwise be ambiguous.
+Daily dumps and binary-log archiving work with the bundled `mysql:8.4.10` database image alone. Archive stream mode lists closed logs through MySQL, then copies their immutable bytes from `/var/lib/mysql` with `docker exec ... cat`. Each copy must match the server-reported size and binary-log magic before it is published. Raw bytes, checksum, and metadata are synced before final atomic renames; archive and prune runs recover a valid interrupted publication instead of discarding its only raw copy. The paired stat command records filesystem birth and close times; stream mode fails closed when the database filesystem cannot report a positive birth time because legal-age pruning would otherwise be ambiguous.
 
 PITR replay additionally requires a real `mysqlbinlog` executable. Set `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server:8.4` to use the supplied shim, or set `MYSQLBINLOG` to a native Oracle-compatible client. Verify this prerequisite during installation:
 
