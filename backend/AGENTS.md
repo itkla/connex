@@ -141,7 +141,7 @@ Any implementation agent, including Codex, receives an approved plan before edit
    ```
 
    This is the standard independent adversarial review; do not automatically add a second generic `/code-review` run. Triage every finding rather than accepting it blindly.
-6. **Tier 3 escalation only.** For auth/WebAuthn, tenant routing, RBAC/sharing, secrets/crypto, provider egress/sync, destructive data movement, money/approvals, concurrency/locking, or release-critical work, rerun the security/tenant charter at **xhigh**, add `/security-review`, and use one second reviewer focused on correctness/concurrency/migration safety. Do not add further reviewers unless the two disagree or a concrete high-risk question remains unresolved.
+6. **Tier 3 escalation only.** For auth/WebAuthn, tenant routing, RBAC/sharing, secrets/crypto, provider egress/sync, destructive data movement, money/approvals, concurrency/locking, or release-critical work, use `/security-review` for the security/tenant slot and one fresh **gpt-5.6/xhigh** Codex review focused on correctness/concurrency/migration safety. Do not add further reviewers unless the two disagree or a concrete high-risk question remains unresolved.
 
 ## Commands
 
