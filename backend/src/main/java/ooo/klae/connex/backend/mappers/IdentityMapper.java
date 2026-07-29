@@ -43,6 +43,24 @@ public interface IdentityMapper {
         @Param("kind") String kind,
         @Param("normalizedValues") List<String> normalizedValues);
 
+    List<IdentityKeyRow> lockCurrentPersonIdentityKeysForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId);
+
+    List<IdentityKeyRow> lockCurrentCompanyIdentityKeysForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId);
+
+    List<Long> lockCurrentPersonIdentityGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    List<Long> lockCurrentCompanyIdentityGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
     PersonIdentityBackfillCandidate lockPersonIdentityParent(
         @Param("workspaceId") int workspaceId,
         @Param("personId") int personId);

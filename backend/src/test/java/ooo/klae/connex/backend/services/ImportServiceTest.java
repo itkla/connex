@@ -96,6 +96,88 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void personImportPreservesFallbackMatchingAndDedupeForAcceptedNoncanonicalEmail() {
+        String storedEmail = "A..B-" + unique() + "@Example.com";
+        Person existing = new Person();
+        existing.setName("Fallback email person");
+        existing.setEmail(storedEmail);
+        Person created = personService.create(existing);
+        String importedEmail = storedEmail.toLowerCase();
+        ImportPreviewResult matched = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Fallback email update", "Email", importedEmail)),
+            "fill_empty"));
+
+        assertEquals(1, matched.getToUpdate());
+        assertEquals(created.getId(), matched.getRows().getFirst().getMatchedId());
+        assertEquals(
+            0,
+            rowCount(
+                "SELECT COUNT(*) FROM person_identity WHERE workspace_id = ? AND person_id = ?",
+                workspace.getId(),
+                created.getId()));
+
+        String duplicateEmail = "C..D-" + unique() + "@Example.com";
+        ImportRequest duplicateRequest = req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(
+                Map.of("Name", "Fallback first", "Email", duplicateEmail),
+                Map.of(
+                    "Name", "Fallback second",
+                    "Email", "  " + duplicateEmail.toLowerCase() + "  ")),
+            "fill_empty");
+        ImportPreviewResult preview = importService.previewPersons(duplicateRequest);
+        ImportResult result = importService.commitPersons(duplicateRequest);
+
+        assertEquals(1, preview.getToCreate());
+        assertEquals(1, preview.getToSkip());
+        assertEquals(1, result.getCreated());
+        assertEquals(1, result.getSkipped());
+        Person imported = personMapper.findByEmails(
+            workspace.getId(), List.of(duplicateEmail.toLowerCase())).getFirst();
+        assertEquals(
+            0,
+            rowCount(
+                "SELECT COUNT(*) FROM person_identity WHERE workspace_id = ? AND person_id = ?",
+                workspace.getId(),
+                imported.getId()));
+    }
+
+    @Test
+    void personImportFallbackEmailMatchingRejectsAmbiguityAndRestrictions() {
+        String ambiguousEmail = "Ambiguous..Email-" + unique() + "@Example.com";
+        Person first = new Person();
+        first.setName("First fallback match");
+        first.setEmail(ambiguousEmail);
+        Person firstCreated = personService.create(first);
+        Person second = new Person();
+        second.setName("Second fallback match");
+        second.setEmail(ambiguousEmail.toLowerCase());
+        Person secondCreated = personService.create(second);
+        ImportRequest request = req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of(
+                "Name", "Ambiguous fallback import",
+                "Email", ambiguousEmail.toLowerCase())),
+            "fill_empty");
+
+        ImportPreviewResult ambiguous = importService.previewPersons(request);
+
+        assertEquals(1, ambiguous.getInvalid());
+        assertTrue(ambiguous.getRows().getFirst().getErrors().getFirst()
+            .contains("Multiple contacts"));
+
+        personService.updateProcessingRestrictions(firstCreated.getId(), true, false);
+        personService.updateProcessingRestrictions(secondCreated.getId(), false, true);
+
+        ImportPreviewResult restricted = importService.previewPersons(request);
+
+        assertEquals(1, restricted.getToCreate());
+        assertEquals(0, restricted.getToUpdate());
+        assertEquals(0, restricted.getInvalid());
+    }
+
+    @Test
     void recordImportsWriteTraceableIdentityProvenanceForCreatesAndUpdates() {
         String companyDomain = "identity-import-" + unique() + ".co.jp";
         ImportRequest personCreate = req(

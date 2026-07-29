@@ -3,6 +3,9 @@ package ooo.klae.connex.backend.services;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -11,6 +14,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.IdentityKeyRow;
+import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 
 /**
@@ -31,7 +36,12 @@ import ooo.klae.connex.backend.mappers.IdentityMapper;
 @RequiredArgsConstructor
 public class IdentityIntakeService {
 
+    private static final Comparator<IdentityGroup> IDENTITY_GROUP_ORDER =
+        Comparator.comparing(IdentityGroup::kind)
+            .thenComparing(IdentityGroup::normalizedValue);
+
     private final IdentityMapper identityMapper;
+    private final IdentityCollisionMapper identityCollisionMapper;
     private final MatchingService matchingService;
     private final Clock clock;
 
@@ -81,16 +91,27 @@ public class IdentityIntakeService {
             boolean phoneAcquired) {
         requireRecord(workspaceId, personId, source);
         LocalDateTime acquiredAt = now();
+        String normalizedEmail =
+            emailAcquired ? normalized(IdentityKind.EMAIL, email) : null;
+        String normalizedPhone =
+            phoneAcquired ? normalized(IdentityKind.PHONE, phone) : null;
+        List<IdentityGroup> affectedGroups = affectedGroups(
+            identityMapper.lockCurrentPersonIdentityKeysForRecord(workspaceId, personId),
+            emailAcquired, IdentityKind.EMAIL, normalizedEmail,
+            phoneAcquired, IdentityKind.PHONE, normalizedPhone);
+        lockPersonGroups(workspaceId, affectedGroups);
+        deletePersonGroups(workspaceId, affectedGroups);
         if (emailAcquired) {
             reconcilePersonEmail(
-                workspaceId, personId, email, normalized(IdentityKind.EMAIL, email),
+                workspaceId, personId, email, normalizedEmail,
                 source, sourceRowRef, acquiredAt);
         }
         if (phoneAcquired) {
             reconcilePersonPhone(
-                workspaceId, personId, phone, normalized(IdentityKind.PHONE, phone),
+                workspaceId, personId, phone, normalizedPhone,
                 source, sourceRowRef, acquiredAt);
         }
+        insertPersonGroups(workspaceId, affectedGroups, acquiredAt);
     }
 
     /**
@@ -139,16 +160,27 @@ public class IdentityIntakeService {
             boolean phoneAcquired) {
         requireRecord(workspaceId, companyId, source);
         LocalDateTime acquiredAt = now();
+        String normalizedDomain =
+            websiteAcquired ? normalized(IdentityKind.DOMAIN, website) : null;
+        String normalizedPhone =
+            phoneAcquired ? normalized(IdentityKind.PHONE, phone) : null;
+        List<IdentityGroup> affectedGroups = affectedGroups(
+            identityMapper.lockCurrentCompanyIdentityKeysForRecord(workspaceId, companyId),
+            websiteAcquired, IdentityKind.DOMAIN, normalizedDomain,
+            phoneAcquired, IdentityKind.PHONE, normalizedPhone);
+        lockCompanyGroups(workspaceId, affectedGroups);
+        deleteCompanyGroups(workspaceId, affectedGroups);
         if (websiteAcquired) {
             reconcileCompanyDomain(
-                workspaceId, companyId, website, normalized(IdentityKind.DOMAIN, website),
+                workspaceId, companyId, website, normalizedDomain,
                 source, sourceRowRef, acquiredAt);
         }
         if (phoneAcquired) {
             reconcileCompanyPhone(
-                workspaceId, companyId, phone, normalized(IdentityKind.PHONE, phone),
+                workspaceId, companyId, phone, normalizedPhone,
                 source, sourceRowRef, acquiredAt);
         }
+        insertCompanyGroups(workspaceId, affectedGroups, acquiredAt);
     }
 
     private void reconcilePersonEmail(
@@ -224,6 +256,92 @@ public class IdentityIntakeService {
         return normalized.orElse(null);
     }
 
+    private List<IdentityGroup> affectedGroups(
+            List<IdentityKeyRow> currentKeys,
+            boolean firstAcquired,
+            IdentityKind firstKind,
+            String firstNormalizedValue,
+            boolean secondAcquired,
+            IdentityKind secondKind,
+            String secondNormalizedValue) {
+        List<IdentityGroup> groups = new ArrayList<>();
+        for (IdentityKeyRow currentKey : currentKeys) {
+            IdentityKeyRow required = Objects.requireNonNull(currentKey, "current identity key");
+            String kind = Objects.requireNonNull(required.getKind(), "current identity kind");
+            if ((firstAcquired && firstKind.getDatabaseValue().equals(kind))
+                    || (secondAcquired && secondKind.getDatabaseValue().equals(kind))) {
+                groups.add(new IdentityGroup(
+                    kind,
+                    Objects.requireNonNull(
+                        required.getNormalizedValue(), "current normalized identity value")));
+            }
+        }
+        addGroup(groups, firstAcquired, firstKind, firstNormalizedValue);
+        addGroup(groups, secondAcquired, secondKind, secondNormalizedValue);
+        return groups.stream()
+            .distinct()
+            .sorted(IDENTITY_GROUP_ORDER)
+            .toList();
+    }
+
+    private static void addGroup(
+            List<IdentityGroup> groups,
+            boolean acquired,
+            IdentityKind kind,
+            String normalizedValue) {
+        if (acquired && normalizedValue != null) {
+            groups.add(new IdentityGroup(kind.getDatabaseValue(), normalizedValue));
+        }
+    }
+
+    private void lockPersonGroups(int workspaceId, List<IdentityGroup> groups) {
+        for (IdentityGroup group : groups) {
+            identityMapper.lockCurrentPersonIdentityGroup(
+                workspaceId, group.kind(), group.normalizedValue());
+        }
+    }
+
+    private void lockCompanyGroups(int workspaceId, List<IdentityGroup> groups) {
+        for (IdentityGroup group : groups) {
+            identityMapper.lockCurrentCompanyIdentityGroup(
+                workspaceId, group.kind(), group.normalizedValue());
+        }
+    }
+
+    private void deletePersonGroups(int workspaceId, List<IdentityGroup> groups) {
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.deletePersonCollisionGroup(
+                workspaceId, group.kind(), group.normalizedValue());
+        }
+    }
+
+    private void deleteCompanyGroups(int workspaceId, List<IdentityGroup> groups) {
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.deleteCompanyCollisionGroup(
+                workspaceId, group.kind(), group.normalizedValue());
+        }
+    }
+
+    private void insertPersonGroups(
+            int workspaceId,
+            List<IdentityGroup> groups,
+            LocalDateTime rebuiltAt) {
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.insertPersonCollisionGroup(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+        }
+    }
+
+    private void insertCompanyGroups(
+            int workspaceId,
+            List<IdentityGroup> groups,
+            LocalDateTime rebuiltAt) {
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.insertCompanyCollisionGroup(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+        }
+    }
+
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
     }
@@ -234,5 +352,8 @@ public class IdentityIntakeService {
             throw new IllegalArgumentException("Identity intake requires a persisted tenant record");
         }
         Objects.requireNonNull(source, "source");
+    }
+
+    private record IdentityGroup(String kind, String normalizedValue) {
     }
 }

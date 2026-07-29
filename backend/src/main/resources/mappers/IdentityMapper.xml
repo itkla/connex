@@ -79,6 +79,48 @@
     ORDER BY ci.normalized_value, ci.company_id
   </select>
 
+  <select id="lockCurrentPersonIdentityKeysForRecord" resultType="IdentityKeyRow">
+    SELECT pi.person_id AS record_id, pi.kind, pi.normalized_value
+    FROM person_identity pi
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.superseded_at IS NULL
+    ORDER BY pi.kind, pi.normalized_value
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentCompanyIdentityKeysForRecord" resultType="IdentityKeyRow">
+    SELECT ci.company_id AS record_id, ci.kind, ci.normalized_value
+    FROM company_identity ci
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.superseded_at IS NULL
+    ORDER BY ci.kind, ci.normalized_value
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentPersonIdentityGroup" resultType="long">
+    SELECT pi.id
+    FROM person_identity pi
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.kind = #{kind}
+      AND pi.normalized_value = #{normalizedValue}
+      AND pi.superseded_at IS NULL
+    ORDER BY pi.person_id, pi.id
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentCompanyIdentityGroup" resultType="long">
+    SELECT ci.id
+    FROM company_identity ci
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.kind = #{kind}
+      AND ci.normalized_value = #{normalizedValue}
+      AND ci.superseded_at IS NULL
+    ORDER BY ci.company_id, ci.id
+    FOR UPDATE
+  </select>
+
   <select id="lockPersonIdentityParent" resultType="PersonIdentityBackfillCandidate">
     SELECT id, email, phone, created_at
     FROM person

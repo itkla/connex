@@ -220,12 +220,21 @@ public class ImportService {
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", null, null, null);
 
         Set<String> emails = new LinkedHashSet<>();
+        Set<String> fallbackEmails = new LinkedHashSet<>();
         for (PlanRow row : plan) {
-            String email = canonicalIdentity(IdentityKind.EMAIL, row.std.get("email"));
-            if (email != null) emails.add(email);
+            String rawEmail = row.std.get("email");
+            String email = canonicalIdentity(IdentityKind.EMAIL, rawEmail);
+            if (email != null) {
+                emails.add(email);
+            } else {
+                String fallbackEmail = fallbackEmailKey(rawEmail);
+                if (fallbackEmail != null) fallbackEmails.add(fallbackEmail);
+            }
         }
         Map<String, List<IdentityMatchRow>> byEmail = currentPersonIdentityMatches(
             workspaceId, IdentityKind.EMAIL, emails);
+        Map<String, List<Person>> byFallbackEmail =
+            fallbackPersonEmailMatches(workspaceId, fallbackEmails);
         Map<Integer, Integer> links = request.getLinks() == null ? Map.of() : request.getLinks();
         for (PlanRow row : plan) {
             if (INVALID.equals(row.status)) continue;
@@ -239,10 +248,14 @@ public class ImportService {
             String email = canonicalIdentity(IdentityKind.EMAIL, row.std.get("email"));
             if (email != null) {
                 applyIdentityMatch(row, byEmail.get(email), "contacts");
+            } else {
+                applyFallbackPersonEmailMatch(
+                    row,
+                    byFallbackEmail.get(fallbackEmailKey(row.std.get("email"))));
             }
         }
         dedupeWithinFile(
-            plan, row -> canonicalIdentity(IdentityKind.EMAIL, row.std.get("email")));
+            plan, row -> personImportEmailKey(row.std.get("email")));
         return plan;
     }
 
@@ -700,6 +713,23 @@ public class ImportService {
             workspaceId, kind.getDatabaseValue(), List.copyOf(normalizedValues)));
     }
 
+    private Map<String, List<Person>> fallbackPersonEmailMatches(
+            int workspaceId,
+            Set<String> fallbackEmails) {
+        if (fallbackEmails.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<Person>> byEmail = new HashMap<>();
+        for (Person person : personMapper.findByEmails(
+                workspaceId, List.copyOf(fallbackEmails))) {
+            String key = fallbackEmailKey(person.getEmail());
+            if (key != null && fallbackEmails.contains(key)) {
+                byEmail.computeIfAbsent(key, ignored -> new ArrayList<>()).add(person);
+            }
+        }
+        return byEmail;
+    }
+
     private static Map<String, List<IdentityMatchRow>> matchesByValue(
             List<IdentityMatchRow> matches) {
         Map<String, List<IdentityMatchRow>> byValue = new HashMap<>();
@@ -725,6 +755,20 @@ public class ImportService {
         markMatch(row, match.getRecordId(), match.getName());
     }
 
+    private static void applyFallbackPersonEmailMatch(
+            PlanRow row,
+            List<Person> matches) {
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+        if (matches.size() > 1) {
+            fail(row, "Multiple contacts match the supplied email");
+            return;
+        }
+        Person match = matches.getFirst();
+        markMatch(row, match.getId(), match.getName());
+    }
+
     private static void applyCompanyNameMatch(PlanRow row, List<Company> matches) {
         if (matches == null || matches.isEmpty()) {
             return;
@@ -739,6 +783,17 @@ public class ImportService {
 
     private String canonicalIdentity(IdentityKind kind, String rawValue) {
         return matchingService.normalizeIdentifier(kind, rawValue).orElse(null);
+    }
+
+    private String personImportEmailKey(String rawEmail) {
+        String canonical = canonicalIdentity(IdentityKind.EMAIL, rawEmail);
+        return canonical != null ? canonical : fallbackEmailKey(rawEmail);
+    }
+
+    private static String fallbackEmailKey(String rawEmail) {
+        if (rawEmail == null) return null;
+        String normalized = rawEmail.trim().toLowerCase(Locale.ROOT);
+        return normalized.isBlank() ? null : normalized;
     }
 
     private static String dealKey(String name, Integer companyId) {

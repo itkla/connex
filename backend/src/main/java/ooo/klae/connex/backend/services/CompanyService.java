@@ -48,6 +48,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -365,15 +366,28 @@ public class CompanyService {
      * Ensures the website is unique within the company's workspace.
      */
     private void assertUniqueWebsite(Company company) {
-        String target = matchingService.normalizeIdentifier(
+        String legacyTarget = legacyWebsiteKey(company.getWebsite());
+        if (legacyTarget.isEmpty()) return;
+        String canonicalTarget = matchingService.normalizeIdentifier(
             IdentityKind.DOMAIN, company.getWebsite()).orElse(null);
-        if (target == null) return;
         for (Company other : companyMapper.getCompaniesWithWebsite(company.getWorkspaceId())) {
             if (other.getId() == company.getId()) continue;
-            if (target.equals(matchingService.normalizeIdentifier(
-                    IdentityKind.DOMAIN, other.getWebsite()).orElse(null)))
+            boolean legacyMatch = legacyTarget.equals(legacyWebsiteKey(other.getWebsite()));
+            boolean canonicalMatch = canonicalTarget != null
+                && canonicalTarget.equals(matchingService.normalizeIdentifier(
+                    IdentityKind.DOMAIN, other.getWebsite()).orElse(null));
+            if (legacyMatch || canonicalMatch) {
                 throw new DuplicateResourceException("website", "A company with this website already exists");
+            }
         }
+    }
+
+    private static String legacyWebsiteKey(String website) {
+        if (website == null) return "";
+        String normalized = website.trim().toLowerCase(Locale.ROOT);
+        normalized = normalized.replaceFirst("^https?://", "");
+        normalized = normalized.replaceFirst("^www\\.", "");
+        return normalized.replaceAll("/+$", "");
     }
 
     /**

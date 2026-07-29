@@ -24,6 +24,28 @@ public interface IdentityCollisionMapper {
         @Param("workspaceId") int workspaceId,
         @Param("rebuiltAt") LocalDateTime rebuiltAt);
 
+    int deletePersonCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int insertPersonCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
+    int deleteCompanyCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int insertCompanyCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
     long countForWorkspace(@Param("workspaceId") int workspaceId);
 
     List<IdentityCollisionGroupPageRow> findVisibleGroupPage(

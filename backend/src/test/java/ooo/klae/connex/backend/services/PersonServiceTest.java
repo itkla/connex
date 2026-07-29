@@ -150,7 +150,57 @@ class PersonServiceTest extends AbstractServiceTest {
                 """,
                 String.class,
                 workspace.getId(),
-                created.getId()));
+            created.getId()));
+    }
+
+    @Test
+    void liveEmailChangesRefreshPersonCollisionMembership() {
+        String sharedEmail = "live-collision-" + unique() + "@example.com";
+        Person first = new Person();
+        first.setName("First collision person");
+        first.setEmail(sharedEmail);
+        personService.create(first);
+        Person second = new Person();
+        second.setName("Second collision person");
+        second.setEmail(sharedEmail);
+        Person createdSecond = personService.create(second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM identity_collision ic
+                JOIN person_identity pi
+                  ON pi.workspace_id = ic.workspace_id
+                  AND pi.id = ic.person_identity_id
+                WHERE ic.workspace_id = ?
+                  AND pi.kind = 'email'
+                  AND pi.normalized_value = ?
+                """,
+                Integer.class,
+                workspace.getId(),
+                sharedEmail));
+
+        second.setEmail("other-" + unique() + "@example.com");
+        personService.update(createdSecond.getId(), second);
+
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        second.setEmail(sharedEmail);
+        personService.update(createdSecond.getId(), second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
     }
 
     @Test

@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -141,7 +142,91 @@ class CompanyServiceTest extends AbstractServiceTest {
                 String.class,
                 workspace.getId(),
                 created.getId(),
-                updatedDomain));
+            updatedDomain));
+    }
+
+    @Test
+    void livePhoneChangesRefreshCompanyCollisionMembership() {
+        String sharedPhone = "090-6789-0123";
+        Company first = new Company();
+        first.setName("First collision company");
+        first.setWebsite("https://first-" + unique() + ".co.jp");
+        first.setPhone(sharedPhone);
+        companyService.createCompany(first);
+        Company second = new Company();
+        second.setName("Second collision company");
+        second.setWebsite("https://second-" + unique() + ".co.jp");
+        second.setPhone(sharedPhone);
+        Company createdSecond = companyService.createCompany(second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM identity_collision ic
+                JOIN company_identity ci
+                  ON ci.workspace_id = ic.workspace_id
+                  AND ci.id = ic.company_identity_id
+                WHERE ic.workspace_id = ?
+                  AND ci.kind = 'phone'
+                  AND ci.normalized_value = '+819067890123'
+                """,
+                Integer.class,
+                workspace.getId()));
+
+        second.setPhone("090-7890-1234");
+        companyService.updateCompany(createdSecond.getId(), second);
+
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        second.setPhone(sharedPhone);
+        companyService.updateCompany(createdSecond.getId(), second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+    }
+
+    @Test
+    void websiteUniquenessPreservesLegacyAndCanonicalEquivalence() {
+        Company noncanonical = new Company();
+        noncanonical.setName("Noncanonical website");
+        noncanonical.setWebsite("https://github.io/");
+        Company created = companyService.createCompany(noncanonical);
+        Company equivalentUpdate = new Company();
+        equivalentUpdate.setName(created.getName());
+        equivalentUpdate.setWebsite("https://www.github.io");
+
+        companyService.updateCompany(created.getId(), equivalentUpdate);
+
+        Company legacyDuplicate = new Company();
+        legacyDuplicate.setName("Legacy duplicate");
+        legacyDuplicate.setWebsite("https://github.io");
+        assertThrows(
+            DuplicateResourceException.class,
+            () -> companyService.createCompany(legacyDuplicate));
+
+        String canonicalDomain = unique() + ".co.jp";
+        Company canonical = new Company();
+        canonical.setName("Canonical website");
+        canonical.setWebsite("https://sales." + canonicalDomain + "/path");
+        companyService.createCompany(canonical);
+        Company canonicalDuplicate = new Company();
+        canonicalDuplicate.setName("Canonical duplicate");
+        canonicalDuplicate.setWebsite("https://www." + canonicalDomain + "/other");
+
+        assertThrows(
+            DuplicateResourceException.class,
+            () -> companyService.createCompany(canonicalDuplicate));
     }
 
     @Test
