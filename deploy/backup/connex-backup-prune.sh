@@ -118,19 +118,21 @@ prune_binlog_triplet() {
 # A binlog whose sidecars are missing or unreadable can never be classified, so
 # an unconditional skip would retain customer data past the hard retention
 # ceiling. Fall back to the file's own mtime and quarantine-delete it once it is
-# older than the legal age.
+# older than the caller's ceiling. The mtime is a local fetch time, not a content
+# time, so callers that can prove the file is unusable pass the short failed-run
+# grace instead of the legal age.
 prune_quarantine_expired_binlog() {
     local raw="$1"
     local reason="$2"
     local now="$3"
-    local legal_age="$4"
+    local max_age="$4"
     local mtime age
     if ! mtime="$(stat -c %Y "$raw" 2>/dev/null)"; then
         prune_skip reason "$reason" file "$(basename "$raw")"
         return 0
     fi
     age=$((now - mtime))
-    if [ "$age" -ge "$legal_age" ]; then
+    if [ "$age" -ge "$max_age" ]; then
         if prune_binlog_triplet "$raw"; then
             backup_log warn binlog_quarantine_pruned reason "$reason" file "$(basename "$raw")" age_seconds "$age"
         else
@@ -141,10 +143,59 @@ prune_quarantine_expired_binlog() {
     prune_skip reason "$reason" file "$(basename "$raw")" age_seconds "$age"
 }
 
+# The archive's own file naming, taken from archive-state and - when an operator
+# has removed that file - from the metadata sidecars that are still there. A
+# digit-shaped suffix alone is not the archive's naming: the binlog root is an
+# operator-visible directory, so matching any "*.NNNNNN" would make a file such
+# as legacy-export.202401 a delete target.
+prune_binlog_prefix() {
+    local state="$CONNEX_BACKUP_ROOT/binlog/archive-state"
+    local key candidate meta name
+    for key in active_file last_closed_file; do
+        candidate=
+        if [ -f "$state" ]; then
+            candidate="$(backup_meta_value "$state" "$key" 2>/dev/null)" || candidate=
+        fi
+        if [[ "$candidate" =~ ^(.+)[.][0-9]+$ ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done
+    while IFS= read -r meta; do
+        name="$(basename "${meta%.meta}")"
+        if [[ "$name" =~ ^(.+)[.][0-9]+$ ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f -name '*.meta' ! -name '*.pending' -print | sort)
+    return 0
+}
+
+# An orphan is a file that carries the archive's naming *and* the binary-log
+# magic. Both are required: the name alone would catch operator files, and the
+# magic alone would catch a binlog an operator copied in under a name of their
+# own. The suffix is matched as a number rather than as six digits so a server
+# that has rotated past 999999 is still classified.
+prune_is_orphaned_binlog() {
+    local entry="$1"
+    local prefix="$2"
+    local name
+    name="$(basename "$entry")"
+    if [ "$name" = "${name%.*}" ] || [[ ! "${name##*.}" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if [ -z "$prefix" ] || [ "${name%.*}" != "$prefix" ]; then
+        return 1
+    fi
+    [ "$(od -An -t x1 -N4 "$entry" | tr -d ' \n')" = fe62696e ]
+}
+
 prune_binlogs() {
-    local now legal_age meta raw created_epoch age entry name
+    local now legal_age orphan_grace meta raw created_epoch age entry name prefix
     now="$(date +%s)"
     legal_age=$(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 ))
+    orphan_grace=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
+    prefix="$(prune_binlog_prefix)"
     while IFS= read -r meta; do
         raw="${meta%.meta}"
         if ! backup_validate_binlog_triplet "$raw"; then
@@ -171,31 +222,114 @@ prune_binlogs() {
     while IFS= read -r entry; do
         name="$(basename "$entry")"
         case "$name" in
-            archive-state|*.meta|*.sha256)
+            archive-state|coverage-gap|*.meta|*.sha256)
                 ;;
             *)
-                if [ -f "$entry.meta" ] && [ -f "$entry.sha256" ]; then
+                # Anything with a .meta was already classified by the loop above,
+                # on the legal-age clock.
+                if [ -f "$entry.meta" ]; then
                     continue
                 fi
-                prune_skip reason unclassifiable_binlog_entry file "$name"
+                # A raw binlog with no metadata can never be validated or
+                # replayed, and the archive re-fetches it while the server still
+                # holds it, so the short failed-run grace is both safe and the
+                # only clock that actually meets the ceiling: mtime is the local
+                # fetch time, which a catch-up run sets to now for content that
+                # is already nearly a month old. Everything else - operator
+                # files, future sidecars, and anything at all when the archive's
+                # naming cannot be determined - keeps its advisory warning
+                # instead of becoming a delete target.
+                if prune_is_orphaned_binlog "$entry" "$prefix"; then
+                    prune_quarantine_expired_binlog "$entry" orphaned_binlog_without_metadata "$now" "$orphan_grace"
+                else
+                    prune_skip reason unclassifiable_binlog_entry file "$name"
+                fi
                 ;;
         esac
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f ! -name '*.pending' -print | sort)
 }
 
 prune_staging() {
-    local entry
+    local entry raw destination status mtime age now grace_age
+    local -a files=() pending_destinations=()
+    now="$(date +%s)"
+    grace_age=$(( CONNEX_BACKUP_FAILED_GRACE_HOURS * 3600 ))
     while IFS= read -r entry; do
         if [[ "$entry" != "$CONNEX_BACKUP_ROOT/binlog/.fetch."* ]]; then
             prune_skip reason unexpected_binlog_directory path "$entry"
             continue
         fi
-        rm -rf -- "$entry" || { prune_skip reason staging_remove_failed path "$entry"; continue; }
-        backup_log warn abandoned_binlog_staging_pruned path "$entry"
+        mapfile -t files < <(find "$entry" -mindepth 1 -maxdepth 1 -type f -print)
+        if [ "${#files[@]}" -eq 1 ] &&
+            ! find "$entry" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            raw="${files[0]}"
+            destination="$CONNEX_BACKUP_ROOT/binlog/$(basename "$raw")"
+            if [ ! -e "$destination" ] && [ ! -L "$destination" ] &&
+                [ ! -e "$destination.pending" ] && [ ! -L "$destination.pending" ] &&
+                backup_validate_binlog_components \
+                    "$raw" "$destination.meta.pending" "$destination.sha256.pending" "$destination"; then
+                if ! backup_sync_file "$raw" ||
+                    ! mv -T -- "$raw" "$destination.pending" ||
+                    ! backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" ||
+                    ! backup_recover_binlog_triplet "$destination"; then
+                    prune_skip reason binlog_staging_recovery_failed path "$entry"
+                    continue
+                fi
+                rmdir "$entry" || {
+                    prune_skip reason staging_remove_failed path "$entry"
+                    continue
+                }
+                backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+                continue
+            fi
+        fi
+        if ! mtime="$(stat -c %Y "$entry" 2>/dev/null)"; then
+            prune_skip reason staging_age_unreadable path "$entry"
+            continue
+        fi
+        age=$((now - mtime))
+        if [ "$age" -lt "$grace_age" ]; then
+            prune_skip reason interrupted_binlog_staging path "$entry" age_seconds "$age"
+            continue
+        fi
+        rm -rf -- "$entry" || {
+            prune_skip reason staging_remove_failed path "$entry"
+            continue
+        }
+        backup_log warn abandoned_binlog_staging_pruned path "$entry" age_seconds "$age"
     done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type d -print)
-    if find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f \( -name '*.pending' -o -name '.pitr-query.*' \) -delete -print | grep -q .; then
-        backup_log warn abandoned_binlog_pending_pruned
+    while IFS= read -r entry; do
+        case "$entry" in
+            *.meta.pending)
+                pending_destinations+=("${entry%.meta.pending}")
+                ;;
+            *.sha256.pending)
+                pending_destinations+=("${entry%.sha256.pending}")
+                ;;
+            *.pending)
+                pending_destinations+=("${entry%.pending}")
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -name '*.pending' -print | sort)
+    if [ "${#pending_destinations[@]}" -gt 0 ]; then
+        mapfile -t pending_destinations < <(printf '%s\n' "${pending_destinations[@]}" | sort -u)
     fi
+    for destination in "${pending_destinations[@]}"; do
+        if backup_recover_binlog_triplet "$destination"; then
+            backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+            continue
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ] && [ "$status" -ne "$EXIT_INTEGRITY" ]; then
+            return "$status"
+        fi
+        prune_skip reason interrupted_binlog_publication file "$(basename "$destination")"
+    done
+    find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -type f -name '.pitr-query.*' -delete
 }
 
 prune_freshness_check() {

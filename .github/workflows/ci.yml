@@ -60,6 +60,17 @@ jobs:
       - name: Regression-test migration guards
         run: bash .github/scripts/test-migration-immutability.sh
 
+  backup:
+    name: Backup tooling — offline regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Lint the backup shell tooling
+        run: shellcheck -x deploy/backup/*.sh deploy/backup/tests/run-tests.sh
+      - name: Selection, coverage, and retention regression tests
+        run: bash deploy/backup/tests/run-tests.sh
+
   backend:
     name: Backend — build & test
     runs-on: ubuntu-latest

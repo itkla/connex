@@ -32,7 +32,7 @@ password=REPLACE_WITH_OPERATOR_SECRET
 
 Create separate mode-0600 `verify.cnf` and `restore.cnf` files when those targets use different credentials. Managed databases may put CA/certificate paths and verified TLS settings in the same defaults files.
 
-Daily dumps and binary-log archiving work with the bundled `mysql:8.4.10` database image alone. Archive stream mode lists closed logs through MySQL, then copies their immutable bytes from `/var/lib/mysql` with `docker exec ... cat`. Each copy must match the server-reported size and binary-log magic before it is published. The paired stat command records filesystem birth and close times; stream mode fails closed when the database filesystem cannot report a positive birth time because legal-age pruning would otherwise be ambiguous.
+Daily dumps and binary-log archiving work with the bundled `mysql:8.4.10` database image alone. Archive stream mode lists closed logs through MySQL, then copies their immutable bytes from `/var/lib/mysql` with `docker exec ... cat`. Each copy must match the server-reported size and binary-log magic before it is published. Raw bytes, checksum, and metadata are synced before final atomic renames; archive and prune runs recover a valid interrupted publication instead of discarding its only raw copy. The paired stat command records filesystem birth and close times; stream mode fails closed when the database filesystem cannot report a positive birth time because legal-age pruning would otherwise be ambiguous.
 
 PITR replay additionally requires a real `mysqlbinlog` executable. Set `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server:8.4` to use the supplied shim, or set `MYSQLBINLOG` to a native Oracle-compatible client. Verify this prerequisite during installation:
 
@@ -67,6 +67,14 @@ Retention is legally capped at 30 days. Daily pruning starts at `RETENTION_DAYS 
 Native hosts may select `CONNEX_BACKUP_BINLOG_FETCH_MODE=mysqlbinlog` to use `mysqlbinlog --read-from-remote-server --raw`. Stream commands always receive the absolute source binary-log path as their final argument. A native database host can use `CONNEX_BACKUP_BINLOG_STREAM=cat` with `CONNEX_BACKUP_BINLOG_DIR` set to its datadir; custom remote shims may stream one file to stdout under the same contract.
 
 GTID-disabled servers are the normal Connex configuration. GTID-enabled sources can be dumped with `--set-gtid-purged=AUTO`, but optional scratch restore verification may require additional `SET_ANY_DEFINER` or related privileges. Restores are schema-level: `SET @@GLOBAL.GTID_PURGED` and `SET @@SESSION.SQL_LOG_BIN` statements embedded in a dump are stripped during import so restoring one schema never mutates global state on the target server.
+
+## Tests
+
+```bash
+deploy/backup/tests/run-tests.sh
+```
+
+Offline regression tests for schema selection, the PITR preflight refusals, binlog coverage-gap handling, and retention pruning. They source the real scripts with stubbed server calls against a sandbox backup root, so they need no database, Docker, or root, and they run in CI on every pull request. The sandbox parent defaults to `/var/tmp/connex-backup-tests` and can be moved with `CONNEX_BACKUP_TEST_ROOT`; the harness runs that path through the real `backup_validate_absolute_path` before creating anything, so it cannot live under `/tmp` any more than a production backup root can.
 
 ## Exit codes
 
