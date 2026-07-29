@@ -10,6 +10,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.sql.SQLTimeoutException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,12 +25,15 @@ import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -39,6 +43,7 @@ import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The data-integrity handler must not echo which unique column collided (#81): a duplicate email or
@@ -82,6 +87,34 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.METHOD_NOT_ALLOWED, response.getStatusCode());
         assertEquals(Set.of(HttpMethod.POST), response.getHeaders().getAllow());
         assertEquals("Request method is not supported", response.getBody());
+    }
+
+    @Test
+    void unsupportedMediaTypeMapsToExactSanitized415WithoutHeaders() {
+        HttpMediaTypeNotSupportedException failure =
+            new HttpMediaTypeNotSupportedException(
+                MediaType.parseMediaType("text/plain;profile=private"),
+                List.of(MediaType.APPLICATION_JSON),
+                HttpMethod.POST,
+                "secret media failure");
+
+        ResponseEntity<String> response = handler.mediaTypeNotSupported(failure);
+
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, response.getStatusCode());
+        assertTrue(response.getHeaders().isEmpty());
+        assertEquals("Unsupported media type", response.getBody());
+    }
+
+    @Test
+    void missingResource_mapsTo404WithoutLoggingAnInternalError() {
+        ResponseEntity<String> response = handler.resourceNotFound(
+                new NoResourceFoundException(
+                        HttpMethod.GET,
+                        "/api/identity-collisions/members",
+                        "/api/identity-collisions/members"));
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals("Resource not found", response.getBody());
     }
 
     @Test
@@ -185,6 +218,39 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
         assertEquals("Encrypted secret is unavailable", response.getBody());
+    }
+
+    @Test
+    void identityCollisionReportTimeoutReturnsExactStructured503WithoutLoggingPii()
+            throws Exception {
+        IdentityCollisionReportTimeoutException failure =
+            new IdentityCollisionReportTimeoutException(
+                new SQLTimeoutException("canonical@example.com"));
+        failure.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("example.IdentityReport", "list", "IdentityReport.java", 19)
+        });
+
+        List<ILoggingEvent> events =
+            captureHandlerLogs(() -> handler.identityCollisionReportTimeout(failure));
+        ResponseEntity<Map<String, String>> response =
+            handler.identityCollisionReportTimeout(failure);
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertEquals(Map.of(
+            "code",
+            "IDENTITY_COLLISION_REPORT_TIMEOUT",
+            "message",
+            "Identity collision report timed out; narrow the filters and retry"),
+            response.getBody());
+        assertEquals(
+            "{\"code\":\"IDENTITY_COLLISION_REPORT_TIMEOUT\","
+                + "\"message\":\"Identity collision report timed out; "
+                + "narrow the filters and retry\"}",
+            new ObjectMapper().writeValueAsString(response.getBody()));
+        assertEquals(1, events.size());
+        assertNull(events.getFirst().getThrowableProxy());
+        assertFalse(events.getFirst().getFormattedMessage().contains(
+            "canonical@example.com"));
     }
 
     @Test
