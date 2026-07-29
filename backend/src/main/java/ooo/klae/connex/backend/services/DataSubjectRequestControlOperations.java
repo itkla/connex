@@ -80,11 +80,6 @@ public class DataSubjectRequestControlOperations {
     @Transactional(readOnly = true)
     public void requireMutationAccess(int orgId, int actorId) {
         if (!tenantLifecycleControlMapper.isOrgAdminForLifecycle(orgId, actorId)) {
-            var organization = tenantLifecycleControlMapper.findOrganization(orgId);
-            if (organization == null || !"active".equals(organization.lifecycleState())) {
-                throw new ConflictException(
-                    "The organization is being removed and cannot record data-subject requests");
-            }
             throw new ForbiddenException("Requires an organization administrator role");
         }
         sessionSecurityService.requireRecentAuthentication(actorId);

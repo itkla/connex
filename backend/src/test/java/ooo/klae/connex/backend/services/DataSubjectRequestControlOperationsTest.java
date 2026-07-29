@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -75,15 +76,15 @@ class DataSubjectRequestControlOperationsTest {
     }
 
     @Test
-    void preliminaryAccessReportsAMissingOrganizationAsLifecycleConflict() {
+    void preliminaryAccessDeniesMissingOrganizationsUniformly() {
         when(tenantLifecycleControlMapper.isOrgAdminForLifecycle(ORG_ID, ACTOR_ID))
             .thenReturn(false);
-        when(tenantLifecycleControlMapper.findOrganization(ORG_ID)).thenReturn(null);
 
         assertThrows(
-            ConflictException.class,
+            ForbiddenException.class,
             () -> operations.requireMutationAccess(ORG_ID, ACTOR_ID));
 
+        verify(tenantLifecycleControlMapper, never()).findOrganization(ORG_ID);
         verify(sessionSecurityService, never()).requireRecentAuthentication(ACTOR_ID);
     }
 
