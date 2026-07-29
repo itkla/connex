@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.architecture;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,8 +39,10 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  */
 class MigrationLineageArchTest {
 
-    private static final Pattern MIGRATION_FILE_NAME =
-        Pattern.compile("V\\d+__[a-z0-9_]+\\.sql");
+    private static final Pattern VERSIONED_MIGRATION_FILE_NAME =
+        Pattern.compile("V(\\d+)__[a-z0-9_]+\\.sql");
+    private static final Pattern SQL_MIGRATION_FILE_NAME =
+        Pattern.compile("(?:V\\d+|R)__[a-z0-9_]+\\.sql");
     private static final List<Pattern> TABLE_REFERENCES = List.of(
         Pattern.compile(
             "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
@@ -73,21 +77,22 @@ class MigrationLineageArchTest {
     }
 
     @Test
-    void migrationNamesUseThePortableVersionedConvention() throws IOException {
+    void migrationFilesUseThePortableConvention() throws IOException {
         Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
         List<String> invalidNames;
         try (Stream<Path> files = Files.walk(root)) {
             invalidNames = files
-                .filter(Files::isRegularFile)
+                .filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                .filter(path -> !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                    || !SQL_MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches())
                 .map(path -> path.getFileName().toString())
-                .filter(name -> name.endsWith(".sql"))
-                .filter(name -> !MIGRATION_FILE_NAME.matcher(name).matches())
                 .map(MigrationLineageArchTest::displayName)
                 .sorted()
                 .toList();
         }
         assertTrue(invalidNames.isEmpty(),
-            "Flyway SQL migrations must use V{integer}__{snake_case}.sql names: " + invalidNames);
+            "Flyway migrations must be regular files named V{integer}__{snake_case}.sql "
+                + "or R__{snake_case}.sql: " + invalidNames);
     }
 
     /**
@@ -101,10 +106,14 @@ class MigrationLineageArchTest {
         List<String> escapees = new ArrayList<>();
         try (Stream<Path> files = Files.list(root)) {
             for (Path file : files
-                    .filter(path -> MIGRATION_FILE_NAME.matcher(path.getFileName().toString()).matches())
+                    .filter(path -> SQL_MIGRATION_FILE_NAME
+                        .matcher(path.getFileName().toString()).matches())
                     .toList()) {
-                int version = Integer.parseInt(file.getFileName().toString().substring(1).split("__")[0]);
-                if (version > 65) {
+                String fileName = file.getFileName().toString();
+                Matcher versionedName = VERSIONED_MIGRATION_FILE_NAME.matcher(fileName);
+                if (!versionedName.matches()
+                        || new BigInteger(versionedName.group(1))
+                            .compareTo(BigInteger.valueOf(65)) > 0) {
                     escapees.add(file.getFileName().toString());
                 }
             }

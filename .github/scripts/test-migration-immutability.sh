@@ -163,6 +163,33 @@ git -C "$repository" add backend/src/main/resources/db/migration/tenant/V127.1__
 git -C "$repository" commit -qm invalid-version-name
 expect_failure "$repository" "$base"
 
+repository="$(new_repository trailing-newline-name control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+relative_path=$'backend/src/main/resources/db/migration/tenant/V127__trailing.sql\n'
+printf 'SELECT 127;\n' > "$repository/$relative_path"
+git -C "$repository" add -- "$relative_path"
+git -C "$repository" commit -qm trailing-newline-name
+expect_failure "$repository" "$base"
+
+repository="$(new_repository inert-migration-names control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+printf 'SELECT 127;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V127__uppercase.SQL"
+printf 'SELECT 128;\n' \
+  > "$repository/backend/src/main/resources/db/migration/tenant/V128__backup.sql.bak"
+git -C "$repository" add backend/src/main/resources/db/migration/tenant
+git -C "$repository" commit -qm inert-migration-names
+expect_failure "$repository" "$base"
+
+repository="$(new_repository symbolic-link-migration control 126)"
+base="$(git -C "$repository" rev-parse HEAD)"
+ln -s /dev/null \
+  "$repository/backend/src/main/resources/db/migration/tenant/V127__symbolic_link.sql"
+git -C "$repository" add \
+  backend/src/main/resources/db/migration/tenant/V127__symbolic_link.sql
+git -C "$repository" commit -qm symbolic-link-migration
+expect_failure "$repository" "$base"
+
 repository="$(new_repository control-character-name control 126)"
 base="$(git -C "$repository" rev-parse HEAD)"
 relative_path=$'backend/src/main/resources/db/migration/tenant/V100__evil\n.sql'

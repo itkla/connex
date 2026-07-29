@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+export LC_ALL=C
 
 BASE_SHA="${1:?base commit is required}"
 HEAD_SHA="${2:-HEAD}"
@@ -26,11 +27,38 @@ if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] \
   exit 1
 fi
 git cat-file -e "${BASE_SHA}^{commit}"
+if [[ "$HEAD_SHA" = -* ]]; then
+  echo "The head revision must not begin with an option prefix." >&2
+  exit 1
+fi
 git cat-file -e "${HEAD_SHA}^{commit}"
 test -n "$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
 
 tree_entry() {
-  git ls-tree "$1" -- "$2"
+  git ls-tree "$1" -- ":(literal)$2"
+}
+
+versioned_migration_version() {
+  local file_name="$1"
+
+  if [[ "${file_name}/" =~ ^V([0-9]+)__[a-z0-9_]+\.sql/$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+repeatable_migration_name_is_valid() {
+  local file_name="$1"
+
+  [[ "${file_name}/" =~ ^R__[a-z0-9_]+\.sql/$ ]]
+}
+
+tree_entry_is_regular_file() {
+  local revision="$1"
+  local path_name="$2"
+
+  [[ "$(tree_entry "$revision" "$path_name")" = "100644 blob "* ]]
 }
 
 normalize_version() {
@@ -144,19 +172,22 @@ base_max="0"
 invalid_base_names=()
 while IFS= read -r -d '' path_name; do
   file_name="${path_name##*/}"
-  if [[ "$file_name" =~ ^V([0-9]+)__[a-z0-9_]+\.sql$ ]]; then
-    version="$(normalize_version "${BASH_REMATCH[1]}")"
+  if version_digits="$(versioned_migration_version "$file_name")"; then
+    version="$(normalize_version "$version_digits")"
     if version_is_greater "$version" "$base_max"; then
       base_max="$version"
     fi
-  elif [[ "$file_name" = *.sql ]]; then
+  elif ! repeatable_migration_name_is_valid "$file_name"; then
+    invalid_base_names+=("$path_name")
+  fi
+  if ! tree_entry_is_regular_file "$BASE_SHA" "$path_name"; then
     invalid_base_names+=("$path_name")
   fi
 done < <(git ls-tree -r -z --name-only "$BASE_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_base_names[@]}" -gt 0 ]; then
-  echo "Base revision contains SQL migrations outside the required V{integer}__{snake_case}.sql convention:" >&2
-  print_paths "${invalid_base_names[@]}" >&2
+  echo "Base revision migration files must be regular files named V{integer}__{snake_case}.sql or R__{snake_case}.sql:" >&2
+  print_paths "${invalid_base_names[@]}" | sort -u >&2
   exit 1
 fi
 
@@ -166,8 +197,8 @@ duplicate_versions=()
 declare -A head_version_paths=()
 while IFS= read -r -d '' path_name; do
   file_name="${path_name##*/}"
-  if [[ "$file_name" =~ ^V([0-9]+)__[a-z0-9_]+\.sql$ ]]; then
-    version="$(normalize_version "${BASH_REMATCH[1]}")"
+  if version_digits="$(versioned_migration_version "$file_name")"; then
+    version="$(normalize_version "$version_digits")"
     if [ -n "${head_version_paths[$version]:-}" ]; then
       duplicate_versions+=("${head_version_paths[$version]}" "$path_name")
     else
@@ -177,14 +208,17 @@ while IFS= read -r -d '' path_name; do
         && ! version_is_greater "$version" "$base_max"; then
       non_monotonic_additions+=("$path_name")
     fi
-  elif [[ "$file_name" = *.sql ]]; then
+  elif ! repeatable_migration_name_is_valid "$file_name"; then
+    invalid_added_names+=("$path_name")
+  fi
+  if ! tree_entry_is_regular_file "$HEAD_SHA" "$path_name"; then
     invalid_added_names+=("$path_name")
   fi
 done < <(git ls-tree -r -z --name-only "$HEAD_SHA" -- "$MIGRATION_ROOT")
 
 if [ "${#invalid_added_names[@]}" -gt 0 ]; then
-  echo "SQL migrations must use V{integer}__{snake_case}.sql names:" >&2
-  print_paths "${invalid_added_names[@]}" >&2
+  echo "Migration files must be regular files named V{integer}__{snake_case}.sql or R__{snake_case}.sql:" >&2
+  print_paths "${invalid_added_names[@]}" | sort -u >&2
   exit 1
 fi
 
