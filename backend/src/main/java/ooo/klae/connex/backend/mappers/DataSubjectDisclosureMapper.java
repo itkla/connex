@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.DealAssociationDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.EmploymentDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.IntroductionDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonIdentityDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RelationshipEdgeDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.TagDto;
@@ -25,6 +26,10 @@ public interface DataSubjectDisclosureMapper {
         @Param("personId") int personId);
 
     PersonDto findPerson(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<PersonIdentityDto> findIdentities(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 

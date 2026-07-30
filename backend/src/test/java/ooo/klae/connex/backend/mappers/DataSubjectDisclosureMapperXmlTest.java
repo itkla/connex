@@ -39,7 +39,7 @@ class DataSubjectDisclosureMapperXmlTest {
         parameters.put("personId", 5);
         parameters.put("workspaceIds", List.of(4, 6));
         Set<String> expectedStatements = Set.of(
-            "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findTags",
+            "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
             "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
             "findEmployment", "findEdges", "findDeals", "findIntroductions", "findProvisions");
         String namespacePrefix = DataSubjectDisclosureMapper.class.getName() + ".";

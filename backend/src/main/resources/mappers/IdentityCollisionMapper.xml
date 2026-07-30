@@ -22,6 +22,7 @@
       ON p.workspace_id = pi.workspace_id
       AND p.id = pi.person_id
     WHERE pi.workspace_id = #{workspaceId}
+      AND pi.superseded_at IS NULL
       <if test="kind != null">
         AND pi.kind = #{kind}
       </if>
@@ -41,6 +42,7 @@
       ON ic.workspace_id = ci.workspace_id
       AND ic.company_identity_id = ci.id
     WHERE ci.workspace_id = #{workspaceId}
+      AND ci.superseded_at IS NULL
       <if test="kind != null">
         AND ci.kind = #{kind}
       </if>
@@ -67,6 +69,7 @@
         ON p.workspace_id = pi.workspace_id
         AND p.id = pi.person_id
       WHERE pi.workspace_id = #{workspaceId}
+        AND pi.superseded_at IS NULL
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
     ) collision
@@ -88,6 +91,71 @@
         ON c.workspace_id = ci.workspace_id
         AND c.id = ci.company_id
       WHERE ci.workspace_id = #{workspaceId}
+        AND ci.superseded_at IS NULL
+    ) collision
+    WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
+  <delete id="deletePersonCollisionGroup">
+    DELETE ic
+    FROM identity_collision ic
+    JOIN person_identity pi
+      ON pi.workspace_id = ic.workspace_id
+      AND pi.id = ic.person_identity_id
+    WHERE ic.workspace_id = #{workspaceId}
+      AND pi.kind = #{kind}
+      AND pi.normalized_value = #{normalizedValue}
+  </delete>
+
+  <insert id="insertPersonCollisionGroup">
+    INSERT INTO identity_collision (workspace_id, person_identity_id, rebuilt_at)
+    SELECT collision.workspace_id, collision.identity_id, #{rebuiltAt}
+    FROM (
+      SELECT pi.workspace_id,
+             pi.id AS identity_id,
+             COUNT(*) OVER () AS collision_size
+      FROM person_identity pi
+      JOIN person p
+        ON p.workspace_id = pi.workspace_id
+        AND p.id = pi.person_id
+      WHERE pi.workspace_id = #{workspaceId}
+        AND pi.kind = #{kind}
+        AND pi.normalized_value = #{normalizedValue}
+        AND pi.superseded_at IS NULL
+        AND p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+    ) collision
+    WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
+  <delete id="deleteCompanyCollisionGroup">
+    DELETE ic
+    FROM identity_collision ic
+    JOIN company_identity ci
+      ON ci.workspace_id = ic.workspace_id
+      AND ci.id = ic.company_identity_id
+    WHERE ic.workspace_id = #{workspaceId}
+      AND ci.kind = #{kind}
+      AND ci.normalized_value = #{normalizedValue}
+  </delete>
+
+  <insert id="insertCompanyCollisionGroup">
+    INSERT INTO identity_collision (workspace_id, company_identity_id, rebuilt_at)
+    SELECT collision.workspace_id, collision.identity_id, #{rebuiltAt}
+    FROM (
+      SELECT ci.workspace_id,
+             ci.id AS identity_id,
+             COUNT(*) OVER () AS collision_size
+      FROM company_identity ci
+      JOIN company c
+        ON c.workspace_id = ci.workspace_id
+        AND c.id = ci.company_id
+      WHERE ci.workspace_id = #{workspaceId}
+        AND ci.kind = #{kind}
+        AND ci.normalized_value = #{normalizedValue}
+        AND ci.superseded_at IS NULL
     ) collision
     WHERE collision.collision_size &gt;= 2
     ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
@@ -179,6 +247,7 @@
                ON p.workspace_id = pi.workspace_id
                AND p.id = pi.person_id
              WHERE pi.workspace_id = #{workspaceId}
+               AND pi.superseded_at IS NULL
                AND pi.kind = #{group.kind}
                AND pi.normalized_value = #{group.normalizedValue}
                AND pi.person_id &gt; #{afterRecordId}
@@ -200,6 +269,7 @@
                ON c.workspace_id = ci.workspace_id
                AND c.id = ci.company_id
              WHERE ci.workspace_id = #{workspaceId}
+               AND ci.superseded_at IS NULL
                AND ci.kind = #{group.kind}
                AND ci.normalized_value = #{group.normalizedValue}
                AND ci.company_id &gt; #{afterRecordId}

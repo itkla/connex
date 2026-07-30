@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 /**
- * Reconstructs the deployed V122-to-V126 lineage, upgrades through V128, and
+ * Reconstructs the deployed V122-to-V126 lineage, upgrades through V130, and
  * verifies the canonical identity schema at the real MySQL boundary.
  */
 class CanonicalIdentityMigrationIntegrationTest {
@@ -71,7 +71,7 @@ class CanonicalIdentityMigrationIntegrationTest {
     }
 
     @Test
-    void v127AndV128UpgradeAnExistingV126Catalog() throws SQLException {
+    void v127ThroughV130UpgradeAnExistingV126Catalog() throws SQLException {
         Flyway throughV122 = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
@@ -96,7 +96,7 @@ class CanonicalIdentityMigrationIntegrationTest {
             assertEquals(0L, identityTableCount(connection));
         }
 
-        Flyway flyway = Flyway.configure()
+        Flyway throughV128 = Flyway.configure()
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration")
             .callbacks(new AuditLogV126MigrationCallback())
@@ -105,7 +105,7 @@ class CanonicalIdentityMigrationIntegrationTest {
             .outOfOrder(false)
             .target(MigrationVersion.fromVersion("128"))
             .load();
-        flyway.migrate();
+        throughV128.migrate();
 
         try (Connection connection = DriverManager.getConnection(scratchUrl, username, password)) {
             assertEquals(
@@ -136,10 +136,33 @@ class CanonicalIdentityMigrationIntegrationTest {
             assertFullNormalizedValueIsIndexed(connection);
         }
 
-        flyway.migrate();
+        Flyway throughV130 = Flyway.configure()
+            .dataSource(scratchUrl, username, password)
+            .locations("classpath:db/migration")
+            .callbacks(new AuditLogV126MigrationCallback())
+            .baselineOnMigrate(true)
+            .baselineVersion(MigrationVersion.fromVersion("0"))
+            .outOfOrder(false)
+            .target(MigrationVersion.fromVersion("130"))
+            .load();
+        throughV130.migrate();
 
-        assertEquals(0, flyway.info().pending().length);
-        flyway.validate();
+        try (Connection connection = DriverManager.getConnection(scratchUrl, username, password)) {
+            assertEquals(1L, migrationVersionCount(connection, "130"));
+            assertEquals(2L, supersededLegacyBackfillCount(connection));
+            assertEquals(2L, supersededColumnCount(connection));
+            assertEquals(
+                List.of(
+                    "idx_company_identity_current_lookup",
+                    "idx_person_identity_current_lookup"),
+                currentIdentityIndexes(connection));
+            assertEquals(0L, normalizedNameColumnCount(connection));
+        }
+
+        throughV130.migrate();
+
+        assertEquals(0, throughV130.info().pending().length);
+        throughV130.validate();
     }
 
     private static long migrationVersionCount(Connection connection, String version)
@@ -163,6 +186,72 @@ class CanonicalIdentityMigrationIntegrationTest {
                 FROM information_schema.tables
                 WHERE table_schema = ?
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
+                """)) {
+            statement.setString(1, SCRATCH_CATALOG);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static long supersededLegacyBackfillCount(Connection connection)
+            throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("""
+                    SELECT COUNT(*)
+                    FROM person_identity
+                    WHERE source_system = 'backfill'
+                      AND superseded_at IS NOT NULL
+                    """)) {
+            resultSet.next();
+            return resultSet.getLong(1);
+        }
+    }
+
+    private static long supersededColumnCount(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = ?
+                  AND table_name IN ('person_identity', 'company_identity')
+                  AND column_name = 'superseded_at'
+                """)) {
+            statement.setString(1, SCRATCH_CATALOG);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private static List<String> currentIdentityIndexes(Connection connection)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT DISTINCT index_name
+                FROM information_schema.statistics
+                WHERE table_schema = ?
+                  AND index_name IN (
+                    'idx_person_identity_current_lookup',
+                    'idx_company_identity_current_lookup'
+                  )
+                ORDER BY index_name
+                """)) {
+            statement.setString(1, SCRATCH_CATALOG);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return strings(resultSet);
+            }
+        }
+    }
+
+    private static long normalizedNameColumnCount(Connection connection)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = ?
+                  AND table_name IN ('person', 'company')
+                  AND column_name = 'normalized_name'
                 """)) {
             statement.setString(1, SCRATCH_CATALOG);
             try (ResultSet resultSet = statement.executeQuery()) {

@@ -10,21 +10,15 @@
       AND p.id &gt; #{afterId}
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND (
-        (p.email IS NOT NULL AND TRIM(p.email) &lt;&gt; '')
-        OR (p.phone IS NOT NULL AND TRIM(p.phone) &lt;&gt; '')
-      )
     ORDER BY p.id
     LIMIT #{limit}
   </select>
 
   <select id="findCompanyBackfillCandidates" resultType="CompanyIdentityBackfillCandidate">
-    SELECT c.id, c.website, c.created_at
+    SELECT c.id, c.website, c.phone, c.created_at
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.id &gt; #{afterId}
-      AND c.website IS NOT NULL
-      AND TRIM(c.website) &lt;&gt; ''
     ORDER BY c.id
     LIMIT #{limit}
   </select>
@@ -36,6 +30,7 @@
     WHERE pi.workspace_id = #{workspaceId}
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
+      AND pi.superseded_at IS NULL
       AND pi.person_id IN
       <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
         #{recordId}
@@ -47,86 +42,245 @@
     FROM company_identity ci
     JOIN company c ON c.workspace_id = ci.workspace_id AND c.id = ci.company_id
     WHERE ci.workspace_id = #{workspaceId}
+      AND ci.superseded_at IS NULL
       AND ci.company_id IN
       <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
         #{recordId}
       </foreach>
   </select>
 
-  <insert id="insertBackfilledPersonEmailIfAbsent">
+  <select id="findCurrentPersonIdentityMatches" resultType="IdentityMatchRow">
+    SELECT pi.person_id AS record_id, p.name, pi.kind, pi.normalized_value
+    FROM person_identity pi
+    JOIN person p ON p.workspace_id = pi.workspace_id AND p.id = pi.person_id
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.kind = #{kind}
+      AND pi.superseded_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND pi.normalized_value IN
+      <foreach item="normalizedValue" collection="normalizedValues" open="(" separator="," close=")">
+        #{normalizedValue}
+      </foreach>
+    ORDER BY pi.normalized_value, pi.person_id
+  </select>
+
+  <select id="findCurrentCompanyIdentityMatches" resultType="IdentityMatchRow">
+    SELECT ci.company_id AS record_id, c.name, ci.kind, ci.normalized_value
+    FROM company_identity ci
+    JOIN company c ON c.workspace_id = ci.workspace_id AND c.id = ci.company_id
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.kind = #{kind}
+      AND ci.superseded_at IS NULL
+      AND ci.normalized_value IN
+      <foreach item="normalizedValue" collection="normalizedValues" open="(" separator="," close=")">
+        #{normalizedValue}
+      </foreach>
+    ORDER BY ci.normalized_value, ci.company_id
+  </select>
+
+  <select id="lockCurrentPersonIdentityKeysForRecord" resultType="IdentityKeyRow">
+    SELECT pi.person_id AS record_id, pi.kind, pi.normalized_value
+    FROM person_identity pi
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.superseded_at IS NULL
+    ORDER BY pi.kind, pi.normalized_value
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentCompanyIdentityKeysForRecord" resultType="IdentityKeyRow">
+    SELECT ci.company_id AS record_id, ci.kind, ci.normalized_value
+    FROM company_identity ci
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.superseded_at IS NULL
+    ORDER BY ci.kind, ci.normalized_value
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentPersonIdentityGroup" resultType="long">
+    SELECT pi.id
+    FROM person_identity pi
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.kind = #{kind}
+      AND pi.normalized_value = #{normalizedValue}
+      AND pi.superseded_at IS NULL
+    ORDER BY pi.person_id, pi.id
+    FOR UPDATE
+  </select>
+
+  <select id="lockCurrentCompanyIdentityGroup" resultType="long">
+    SELECT ci.id
+    FROM company_identity ci
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.kind = #{kind}
+      AND ci.normalized_value = #{normalizedValue}
+      AND ci.superseded_at IS NULL
+    ORDER BY ci.company_id, ci.id
+    FOR UPDATE
+  </select>
+
+  <select id="lockPersonIdentityParent" resultType="PersonIdentityBackfillCandidate">
+    SELECT id, email, phone, created_at
+    FROM person
+    WHERE workspace_id = #{workspaceId} AND id = #{personId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockCompanyIdentityParent" resultType="CompanyIdentityBackfillCandidate">
+    SELECT id, website, phone, created_at
+    FROM company
+    WHERE workspace_id = #{workspaceId} AND id = #{companyId}
+    FOR UPDATE
+  </select>
+
+  <update id="supersedePersonEmailIdentities">
+    UPDATE person_identity pi
+    JOIN person p
+      ON p.workspace_id = pi.workspace_id
+      AND p.id = pi.person_id
+    SET pi.superseded_at = #{supersededAt}
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.kind = 'email'
+      AND pi.superseded_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND (
+        (p.email IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(p.email AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND pi.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedePersonPhoneIdentities">
+    UPDATE person_identity pi
+    JOIN person p
+      ON p.workspace_id = pi.workspace_id
+      AND p.id = pi.person_id
+    SET pi.superseded_at = #{supersededAt}
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.person_id = #{personId}
+      AND pi.kind = 'phone'
+      AND pi.superseded_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND (
+        (p.phone IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(p.phone AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND pi.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedeCompanyDomainIdentities">
+    UPDATE company_identity ci
+    JOIN company c
+      ON c.workspace_id = ci.workspace_id
+      AND c.id = ci.company_id
+    SET ci.superseded_at = #{supersededAt}
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.kind = 'domain'
+      AND ci.superseded_at IS NULL
+      AND (
+        (c.website IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(c.website AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND ci.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <update id="supersedeCompanyPhoneIdentities">
+    UPDATE company_identity ci
+    JOIN company c
+      ON c.workspace_id = ci.workspace_id
+      AND c.id = ci.company_id
+    SET ci.superseded_at = #{supersededAt}
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.company_id = #{companyId}
+      AND ci.kind = 'phone'
+      AND ci.superseded_at IS NULL
+      AND (
+        (c.phone IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
+        OR CAST(c.phone AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
+      )
+      <if test="normalizedValue != null">
+        AND ci.normalized_value &lt;&gt; #{normalizedValue}
+      </if>
+  </update>
+
+  <insert id="upsertPersonEmailIdentity">
     INSERT INTO person_identity (
       workspace_id, person_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT p.workspace_id, p.id, 'email', p.email, #{normalizedValue},
-           'backfill', 'person.email', NULL, CONCAT('person:', p.id),
-           p.created_at, NULL
+    SELECT p.workspace_id, p.id, 'email', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'person.email', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.email AS BINARY) = CAST(#{rawValue} AS BINARY)
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM person_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.person_id = #{personId}
-          AND existing.kind = 'email'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
-  <insert id="insertBackfilledPersonPhoneIfAbsent">
+  <insert id="upsertPersonPhoneIdentity">
     INSERT INTO person_identity (
       workspace_id, person_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT p.workspace_id, p.id, 'phone', p.phone, #{normalizedValue},
-           'backfill', 'person.phone', NULL, CONCAT('person:', p.id),
-           p.created_at, NULL
+    SELECT p.workspace_id, p.id, 'phone', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'person.phone', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM person_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.person_id = #{personId}
-          AND existing.kind = 'phone'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE person_identity.id = person_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
-  <insert id="insertBackfilledCompanyDomainIfAbsent">
+  <insert id="upsertCompanyDomainIdentity">
     INSERT INTO company_identity (
       workspace_id, company_id, kind, `value`, normalized_value,
       source_system, source_channel, source_external_id, source_row_ref,
       acquired_at, purpose_of_use_code
     )
-    SELECT c.workspace_id, c.id, 'domain', c.website, #{normalizedValue},
-           'backfill', 'company.website', NULL, CONCAT('company:', c.id),
-           c.created_at, NULL
+    SELECT c.workspace_id, c.id, 'domain', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'company.website', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.id = #{companyId}
       AND CAST(c.website AS BINARY) = CAST(#{rawValue} AS BINARY)
-      AND NOT EXISTS (
-        SELECT 1
-        FROM company_identity existing
-        WHERE existing.workspace_id = #{workspaceId}
-          AND existing.company_id = #{companyId}
-          AND existing.kind = 'domain'
-          AND existing.normalized_value = #{normalizedValue}
-      )
-    ON DUPLICATE KEY UPDATE company_identity.id = company_identity.id
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
+  </insert>
+
+  <insert id="upsertCompanyPhoneIdentity">
+    INSERT INTO company_identity (
+      workspace_id, company_id, kind, `value`, normalized_value,
+      source_system, source_channel, source_external_id, source_row_ref,
+      acquired_at, purpose_of_use_code
+    )
+    SELECT c.workspace_id, c.id, 'phone', #{rawValue}, #{normalizedValue},
+           #{sourceSystem}, 'company.phone', NULL, #{sourceRowRef},
+           #{acquiredAt}, NULL
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id = #{companyId}
+      AND CAST(c.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
+    ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
   <delete id="deletePersonIdentitiesForWorkspace">

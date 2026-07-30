@@ -32,6 +32,22 @@
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
   </select>
 
+  <select id="findIdentities"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$PersonIdentityDto">
+    SELECT pi.id, pi.workspace_id, pi.kind, pi.`value`,
+           pi.source_system, pi.source_channel, pi.source_external_id, pi.source_row_ref,
+           pi.acquired_at, pi.purpose_of_use_code, pi.superseded_at, pi.created_at
+    FROM person p
+    JOIN person_identity pi
+      ON pi.workspace_id = p.workspace_id AND pi.person_id = p.id
+      AND pi.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY pi.acquired_at DESC, pi.id DESC
+  </select>
+
   <select id="findTags"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TagDto">
     SELECT t.id, t.workspace_id, t.name, t.color

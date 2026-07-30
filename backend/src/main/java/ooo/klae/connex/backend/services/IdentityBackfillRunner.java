@@ -24,6 +24,12 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Rerunnable startup sweep that backfills canonical identities and collision membership.
+ *
+ * <p>Control-plane placement resolution stays fatal: a workspace that cannot be pinned to its
+ * active catalog must never be swept, because writing tenant data into the wrong catalog is a
+ * containment failure. Sweeping one workspace's own tenant data is not fatal. The sweep is
+ * derived, rerunnable state, so a single workspace's failure is logged with its cause and the
+ * remaining workspaces — and the application itself — still start.
  */
 @Component
 @ConditionalOnProperty(
@@ -76,13 +82,25 @@ public class IdentityBackfillRunner implements ApplicationRunner {
                             throw new IllegalStateException(
                                 "Workspace " + workspaceId + " is stored outside its active placement");
                         }
-                        backfillWorkspace(resolvedCatalog, workspaceId);
+                        sweepWorkspace(resolvedCatalog, workspaceId);
                         return null;
                     });
                 } catch (ServiceUnavailableException exception) {
                     warnSkipped(workspaceId, exception);
                 }
             }
+        }
+    }
+
+    private void sweepWorkspace(String catalog, int workspaceId) {
+        try {
+            backfillWorkspace(catalog, workspaceId);
+        } catch (RuntimeException exception) {
+            log.error(
+                "Canonical identity backfill failed for workspace {}; the sweep reruns on the "
+                    + "next start and duplicate detection stays degraded for it until then",
+                workspaceId,
+                exception);
         }
     }
 

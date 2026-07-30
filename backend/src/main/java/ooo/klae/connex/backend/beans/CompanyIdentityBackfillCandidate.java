@@ -13,5 +13,6 @@ import lombok.NoArgsConstructor;
 public class CompanyIdentityBackfillCandidate {
     private int id;
     private String website;
+    private String phone;
     private LocalDateTime createdAt;
 }

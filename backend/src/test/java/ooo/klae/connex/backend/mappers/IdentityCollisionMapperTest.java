@@ -133,6 +133,36 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void supersededIdentitiesStopMatchingBeforeAndAfterARebuild() {
+        Company company = newCompany();
+        Person first = newPerson(
+            workspace, company, "superseded@example.com", "090-1111-1111");
+        Person second = newPerson(
+            workspace, company, "superseded@example.com", "090-2222-2222");
+        long firstIdentity =
+            insertPersonIdentity(first, "email", "superseded@example.com");
+        insertPersonIdentity(second, "email", "superseded@example.com");
+        assertEquals(2, rebuild(workspace.getId()));
+
+        jdbcTemplate.update(
+            """
+            UPDATE person_identity
+            SET superseded_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = ? AND id = ?
+            """,
+            workspace.getId(),
+            firstIdentity);
+
+        assertEquals(
+            0L,
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "person", "email", 100, 0)));
+        assertEquals(2L, collisionMapper.countForWorkspace(workspace.getId()));
+        assertEquals(0, rebuild(workspace.getId()));
+        assertEquals(0L, collisionMapper.countForWorkspace(workspace.getId()));
+    }
+
+    @Test
     void rebuildDeletesStaleMembershipBeforeReinsertion() {
         Company company = newCompany();
         Person first = newPerson(workspace, company, "stale@example.com", "090-1111-1111");

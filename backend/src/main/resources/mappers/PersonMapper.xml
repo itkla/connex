@@ -383,6 +383,8 @@
     SELECT p.id, p.email, p.name
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
       AND p.email IN
       <foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
   </select>

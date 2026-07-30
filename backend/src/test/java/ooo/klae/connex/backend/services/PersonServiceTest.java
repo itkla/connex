@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import javax.imageio.ImageIO;
 
@@ -60,6 +61,172 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired WorkspaceService workspaceService;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
+
+    @Test
+    void createAndUpdateReconcileCurrentIdentityHistory() {
+        Company company = newCompany();
+        Person draft = new Person();
+        draft.setName("Identity person");
+        draft.setEmail("Case@Example.com");
+        draft.setPhone("090-1234-5678");
+        draft.setTitle("Engineer");
+        draft.setCompany(company);
+
+        Person created = personService.create(draft);
+
+        assertEquals(
+            List.of("email", "phone"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT kind
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                ORDER BY kind
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ?
+                  AND source_system = 'interactive_create'
+                  AND purpose_of_use_code IS NULL
+                  AND superseded_at IS NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+
+        Person update = new Person();
+        update.setName(created.getName());
+        update.setEmail("new@example.com");
+        update.setPhone("invalid phone");
+        update.setTitle(created.getTitle());
+        update.setCompany(company);
+        personService.update(created.getId(), update);
+        personService.update(created.getId(), update);
+
+        assertEquals(
+            3,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM person_identity WHERE workspace_id = ? AND person_id = ?",
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            List.of("new@example.com"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT normalized_value
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ? AND superseded_at IS NULL
+                ORDER BY normalized_value
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ? AND superseded_at IS NOT NULL
+                """,
+                Integer.class,
+                workspace.getId(),
+                created.getId()));
+        assertEquals(
+            "interactive_update",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT source_system
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ? AND normalized_value = 'new@example.com'
+                """,
+                String.class,
+                workspace.getId(),
+            created.getId()));
+    }
+
+    @Test
+    void liveEmailChangesRefreshPersonCollisionMembership() {
+        String sharedEmail = "live-collision-" + unique() + "@example.com";
+        Person first = new Person();
+        first.setName("First collision person");
+        first.setEmail(sharedEmail);
+        personService.create(first);
+        Person second = new Person();
+        second.setName("Second collision person");
+        second.setEmail(sharedEmail);
+        Person createdSecond = personService.create(second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM identity_collision ic
+                JOIN person_identity pi
+                  ON pi.workspace_id = ic.workspace_id
+                  AND pi.id = ic.person_identity_id
+                WHERE ic.workspace_id = ?
+                  AND pi.kind = 'email'
+                  AND pi.normalized_value = ?
+                """,
+                Integer.class,
+                workspace.getId(),
+                sharedEmail));
+
+        second.setEmail("other-" + unique() + "@example.com");
+        personService.update(createdSecond.getId(), second);
+
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        second.setEmail(sharedEmail);
+        personService.update(createdSecond.getId(), second);
+
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+    }
+
+    @Test
+    void businessCardCreateRetainsRequestProvenance() {
+        Person draft = new Person();
+        draft.setName("Business card identity");
+        draft.setEmail("card@example.com");
+
+        Person created = personService.createFromBusinessCard(
+            draft, "business-card:02a25a23-70af-4f8e-a64a-6cfc5f8c69be");
+
+        Map<String, Object> provenance = jdbcTemplate.queryForMap(
+            """
+            SELECT source_system, source_channel, source_row_ref, purpose_of_use_code
+            FROM person_identity
+            WHERE workspace_id = ? AND person_id = ? AND kind = 'email'
+            """,
+            workspace.getId(),
+            created.getId());
+        assertEquals("business_card", provenance.get("source_system"));
+        assertEquals("person.email", provenance.get("source_channel"));
+        assertEquals(
+            "business-card:02a25a23-70af-4f8e-a64a-6cfc5f8c69be",
+            provenance.get("source_row_ref"));
+        assertNull(provenance.get("purpose_of_use_code"));
+    }
 
     @Test
     void updateProcessingRestrictionsPreservesTimestampClearsIndependentlyAndAuditsChanges() {
@@ -471,7 +638,8 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(CustomFieldValueService.class),
             mock(ReferenceService.class),
             mock(RuleTriggerPublisher.class),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(IdentityIntakeService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(

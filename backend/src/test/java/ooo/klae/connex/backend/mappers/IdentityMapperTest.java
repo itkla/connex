@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -157,20 +158,24 @@ class IdentityMapperTest extends AbstractMapperTest {
 
         assertEquals(
             0,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), active.getId(), "case@example.com", "case@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), active.getId(), "case@example.com", "case@example.com",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
         assertEquals(
             0,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), suspended.getId(), suspended.getEmail(), "blocked@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), suspended.getId(), suspended.getEmail(), "blocked@example.com",
+                "backfill", "person:" + suspended.getId(), createdAt(suspended.getId())));
         assertEquals(
             1,
-            identityMapper.insertBackfilledPersonEmailIfAbsent(
-                workspace.getId(), active.getId(), active.getEmail(), "case@example.com"));
+            identityMapper.upsertPersonEmailIdentity(
+                workspace.getId(), active.getId(), active.getEmail(), "case@example.com",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
         assertEquals(
             1,
-            identityMapper.insertBackfilledPersonPhoneIfAbsent(
-                workspace.getId(), active.getId(), active.getPhone(), "+819012345678"));
+            identityMapper.upsertPersonPhoneIdentity(
+                workspace.getId(), active.getId(), active.getPhone(), "+819012345678",
+                "backfill", "person:" + active.getId(), createdAt(active.getId())));
 
         assertEquals(
             2,
@@ -256,11 +261,14 @@ class IdentityMapperTest extends AbstractMapperTest {
             "manual@example.com",
             "manual");
 
-        identityMapper.insertBackfilledPersonEmailIfAbsent(
+        identityMapper.upsertPersonEmailIdentity(
             workspace.getId(),
             person.getId(),
             person.getEmail(),
-            "manual@example.com");
+            "manual@example.com",
+            "backfill",
+            "person:" + person.getId(),
+            createdAt(person.getId()));
 
         assertEquals(
             "manual",
@@ -372,6 +380,74 @@ class IdentityMapperTest extends AbstractMapperTest {
         assertTrue(collations.stream().allMatch("utf8mb4_0900_ai_ci"::equals));
         assertEquals(2, prefixes.size());
         assertTrue(prefixes.stream().allMatch(prefix -> prefix == null));
+    }
+
+    @Test
+    void currentIdentityMatchesExcludeSupersededAndRestrictedRecords() {
+        Company company = newCompany();
+        Person current = newPerson(
+            workspace, company, "current@example.com", "090-1111-1111");
+        Person superseded = newPerson(
+            workspace, company, "old@example.com", "090-2222-2222");
+        Person restricted = newPerson(
+            workspace, company, "restricted@example.com", "090-3333-3333");
+        insertPersonIdentity(
+            workspace.getId(), current.getId(), "email",
+            current.getEmail(), "shared@example.com", "manual");
+        insertPersonIdentity(
+            workspace.getId(), superseded.getId(), "email",
+            superseded.getEmail(), "shared@example.com", "manual");
+        insertPersonIdentity(
+            workspace.getId(), restricted.getId(), "email",
+            restricted.getEmail(), "shared@example.com", "manual");
+        jdbcTemplate.update(
+            """
+            UPDATE person_identity
+            SET superseded_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = ? AND person_id = ?
+            """,
+            workspace.getId(),
+            superseded.getId());
+        personMapper.updateProcessingRestrictions(
+            workspace.getId(), restricted.getId(), true, false);
+
+        var matches = identityMapper.findCurrentPersonIdentityMatches(
+            workspace.getId(), "email", List.of("shared@example.com"));
+
+        assertEquals(1, matches.size());
+        assertEquals(current.getId(), matches.getFirst().getRecordId());
+
+        Company currentCompany = newCompany(workspace, "current-" + unique() + ".example.com");
+        Company supersededCompany =
+            newCompany(workspace, "superseded-" + unique() + ".example.com");
+        insertCompanyIdentity(
+            workspace.getId(), currentCompany.getId(), "domain",
+            currentCompany.getWebsite(), "shared.example.com", "manual");
+        insertCompanyIdentity(
+            workspace.getId(), supersededCompany.getId(), "domain",
+            supersededCompany.getWebsite(), "shared.example.com", "manual");
+        jdbcTemplate.update(
+            """
+            UPDATE company_identity
+            SET superseded_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = ? AND company_id = ?
+            """,
+            workspace.getId(),
+            supersededCompany.getId());
+
+        var companyMatches = identityMapper.findCurrentCompanyIdentityMatches(
+            workspace.getId(), "domain", List.of("shared.example.com"));
+
+        assertEquals(1, companyMatches.size());
+        assertEquals(currentCompany.getId(), companyMatches.getFirst().getRecordId());
+    }
+
+    private LocalDateTime createdAt(int personId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT created_at FROM person WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.class,
+            workspace.getId(),
+            personId);
     }
 
     private Workspace newWorkspace(String prefix) {

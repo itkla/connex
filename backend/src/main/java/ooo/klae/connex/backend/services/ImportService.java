@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -20,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.IdentityMatchRow;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -52,6 +55,10 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * row, and do not fire per-row rule/notification triggers for them. Tags and auto-created custom-field definitions are resolved up
  * front through their permission-checked services; referenced companies are created through
  * {@code CompanyService} so {@code COMPANY_CREATE} is enforced even during a contact or deal import.
+ *
+ * <p>Identity provenance uses {@code csv-row:N}, where {@code N} is the one-based ordinal in the
+ * reviewed row payload. The client parser does not retain enough source metadata to claim a
+ * physical CSV line number, especially for blank or multiline records.
  */
 @Service
 @RequiredArgsConstructor
@@ -61,6 +68,7 @@ public class ImportService {
     private final AuthService authService;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
+    private final IdentityMapper identityMapper;
     private final CompanyService companyService;
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
@@ -73,6 +81,8 @@ public class ImportService {
     private final CustomFieldDefinitionService customFieldDefinitionService;
     private final CustomFieldValueService customFieldValueService;
     private final AuditService auditService;
+    private final IdentityIntakeService identityIntakeService;
+    private final MatchingService matchingService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
@@ -187,6 +197,9 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Person bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
+                identityIntakeService.recordPerson(
+                    workspaceId, bean.getId(), bean.getEmail(), bean.getPhone(),
+                    IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row));
                 Integer companyId = bean.getCompany() != null ? bean.getCompany().getId() : null;
                 if (companyId != null) {
                     employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
@@ -206,17 +219,22 @@ public class ImportService {
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("person", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", null, null, null);
 
-        List<String> emails = new ArrayList<>();
+        Set<String> emails = new LinkedHashSet<>();
+        Set<String> fallbackEmails = new LinkedHashSet<>();
         for (PlanRow row : plan) {
-            String email = row.std.get("email");
-            if (email != null) emails.add(email);
-        }
-        Map<String, Person> byEmail = new HashMap<>();
-        if (!emails.isEmpty()) {
-            for (Person existing : personMapper.findByEmails(workspaceId, emails.stream().distinct().toList())) {
-                if (existing.getEmail() != null) byEmail.putIfAbsent(normEmail(existing.getEmail()), existing);
+            String rawEmail = row.std.get("email");
+            String email = canonicalIdentity(IdentityKind.EMAIL, rawEmail);
+            if (email != null) {
+                emails.add(email);
+            } else {
+                String fallbackEmail = fallbackEmailKey(rawEmail);
+                if (fallbackEmail != null) fallbackEmails.add(fallbackEmail);
             }
         }
+        Map<String, List<IdentityMatchRow>> byEmail = currentPersonIdentityMatches(
+            workspaceId, IdentityKind.EMAIL, emails);
+        Map<String, List<Person>> byFallbackEmail =
+            fallbackPersonEmailMatches(workspaceId, fallbackEmails);
         Map<Integer, Integer> links = request.getLinks() == null ? Map.of() : request.getLinks();
         for (PlanRow row : plan) {
             if (INVALID.equals(row.status)) continue;
@@ -227,11 +245,18 @@ public class ImportService {
                 markMatch(row, existing.getId(), existing.getName());
                 continue;
             }
-            String email = row.std.get("email");
-            Person existing = email == null ? null : byEmail.get(email);
-            if (existing != null) markMatch(row, existing.getId(), existing.getName());
+            String email = canonicalIdentity(IdentityKind.EMAIL, row.std.get("email"));
+            if (email != null) {
+                applyIdentityMatch(row, byEmail.get(email), "contacts");
+            } else {
+                String fallbackEmail = fallbackEmailKey(row.std.get("email"));
+                if (fallbackEmail != null) {
+                    applyFallbackPersonEmailMatch(row, byFallbackEmail.get(fallbackEmail));
+                }
+            }
         }
-        dedupeWithinFile(plan, r -> r.std.get("email"));
+        dedupeWithinFile(
+            plan, row -> personImportEmailKey(row.std.get("email")));
         return plan;
     }
 
@@ -243,6 +268,8 @@ public class ImportService {
             return false;
         }
         Integer beforeCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
+        boolean emailAcquired = fieldAcquired(action, existing.getEmail(), row.std.get("email"));
+        boolean phoneAcquired = fieldAcquired(action, existing.getPhone(), row.std.get("phone"));
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
@@ -254,6 +281,10 @@ public class ImportService {
             existing.setCompany(stub);
         }
         personMapper.update(existing);
+        identityIntakeService.recordPerson(
+            workspaceId, existing.getId(), existing.getEmail(), existing.getPhone(),
+            IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row),
+            emailAcquired, phoneAcquired);
         Integer afterCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
         if (afterCompanyId != null && !afterCompanyId.equals(beforeCompanyId)) {
             employmentService.recordTransition(workspaceId, existing.getId(), afterCompanyId, existing.getTitle());
@@ -332,6 +363,9 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Company bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
+                identityIntakeService.recordCompany(
+                    workspaceId, bean.getId(), bean.getWebsite(), bean.getPhone(),
+                    IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row));
                 attachTags(workspaceId, "company", bean.getId(), row.tagNames, tagByName);
                 applyCustomValues("company", bean.getId(), row.custom, columnToDef, action, false);
             }
@@ -347,14 +381,14 @@ public class ImportService {
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("company", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, null, null, null, null);
 
-        Map<String, Integer> byWebsite = new HashMap<>();
-        Map<String, Integer> byName = new HashMap<>();
-        for (Company existing : companyMapper.getCompaniesForDedup(workspaceId)) {
-            String website = normWebsite(existing.getWebsite());
-            if (!website.isEmpty()) byWebsite.putIfAbsent(website, existing.getId());
-            String name = normName(existing.getName());
-            if (name != null) byName.putIfAbsent(name, existing.getId());
+        Set<String> websites = new LinkedHashSet<>();
+        for (PlanRow row : plan) {
+            String website = canonicalIdentity(IdentityKind.DOMAIN, row.std.get("website"));
+            if (website != null) websites.add(website);
         }
+        Map<String, List<IdentityMatchRow>> byWebsite = currentCompanyIdentityMatches(
+            workspaceId, IdentityKind.DOMAIN, websites);
+        Map<String, List<Company>> byName = companiesByCanonicalName(workspaceId);
         Map<Integer, Integer> links = request.getLinks() == null ? Map.of() : request.getLinks();
         for (PlanRow row : plan) {
             if (INVALID.equals(row.status)) continue;
@@ -365,14 +399,18 @@ public class ImportService {
                 markMatch(row, existing.getId(), existing.getName());
                 continue;
             }
-            String website = normWebsite(row.std.get("website"));
-            Integer matchId = website.isEmpty() ? null : byWebsite.get(website);
-            if (matchId == null) matchId = byName.get(normName(row.std.get("name")));
-            if (matchId != null) markMatch(row, matchId, row.std.get("name"));
+            String website = canonicalIdentity(IdentityKind.DOMAIN, row.std.get("website"));
+            List<IdentityMatchRow> identityMatches =
+                website == null ? null : byWebsite.get(website);
+            if (identityMatches != null && !identityMatches.isEmpty()) {
+                applyIdentityMatch(row, identityMatches, "companies");
+                continue;
+            }
+            applyCompanyNameMatch(row, byName.get(normName(row.std.get("name"))));
         }
         dedupeWithinFile(plan, r -> {
-            String website = normWebsite(r.std.get("website"));
-            return website.isEmpty() ? normName(r.std.get("name")) : website;
+            String website = canonicalIdentity(IdentityKind.DOMAIN, r.std.get("website"));
+            return website == null ? normName(r.std.get("name")) : website;
         });
         return plan;
     }
@@ -384,12 +422,19 @@ public class ImportService {
             fail(row, "Matched company #" + row.matchedId + " not found");
             return false;
         }
+        boolean websiteAcquired =
+            fieldAcquired(action, existing.getWebsite(), row.std.get("website"));
+        boolean phoneAcquired = fieldAcquired(action, existing.getPhone(), row.std.get("phone"));
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setWebsite(merge(action, existing.getWebsite(), row.std.get("website")));
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
         companyMapper.update(existing);
+        identityIntakeService.recordCompany(
+            workspaceId, existing.getId(), existing.getWebsite(), existing.getPhone(),
+            IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row),
+            websiteAcquired, phoneAcquired);
         attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
         return true;
@@ -599,10 +644,14 @@ public class ImportService {
             if (willWrite(row, action)) emails.addAll(row.peopleEmails);
         }
         Map<String, Integer> byEmail = new HashMap<>();
-        if (!emails.isEmpty()) {
-            for (Person person : personMapper.findByEmails(workspaceId, List.copyOf(emails))) {
-                if (person.getEmail() != null) byEmail.putIfAbsent(normEmail(person.getEmail()), person.getId());
+        Map<String, List<IdentityMatchRow>> matches = currentPersonIdentityMatches(
+            workspaceId, IdentityKind.EMAIL, emails);
+        for (Map.Entry<String, List<IdentityMatchRow>> entry : matches.entrySet()) {
+            if (entry.getValue().size() > 1) {
+                throw new BadRequestException(
+                    "Multiple contacts match a deal participant email");
             }
+            byEmail.put(entry.getKey(), entry.getValue().getFirst().getRecordId());
         }
         return byEmail;
     }
@@ -630,6 +679,122 @@ public class ImportService {
             if (name != null) byName.putIfAbsent(name, existing.getId());
         }
         return byName;
+    }
+
+    private Map<String, List<Company>> companiesByCanonicalName(int workspaceId) {
+        Map<String, List<Company>> byName = new HashMap<>();
+        for (Company company : companyMapper.getCompaniesForDedup(workspaceId)) {
+            String name = normName(company.getName());
+            if (name != null) {
+                byName.computeIfAbsent(name, ignored -> new ArrayList<>()).add(company);
+            }
+        }
+        return byName;
+    }
+
+    private Map<String, List<IdentityMatchRow>> currentPersonIdentityMatches(
+            int workspaceId,
+            IdentityKind kind,
+            Set<String> normalizedValues) {
+        if (normalizedValues.isEmpty()) {
+            return Map.of();
+        }
+        return matchesByValue(identityMapper.findCurrentPersonIdentityMatches(
+            workspaceId, kind.getDatabaseValue(), List.copyOf(normalizedValues)));
+    }
+
+    private Map<String, List<IdentityMatchRow>> currentCompanyIdentityMatches(
+            int workspaceId,
+            IdentityKind kind,
+            Set<String> normalizedValues) {
+        if (normalizedValues.isEmpty()) {
+            return Map.of();
+        }
+        return matchesByValue(identityMapper.findCurrentCompanyIdentityMatches(
+            workspaceId, kind.getDatabaseValue(), List.copyOf(normalizedValues)));
+    }
+
+    private Map<String, List<Person>> fallbackPersonEmailMatches(
+            int workspaceId,
+            Set<String> fallbackEmails) {
+        if (fallbackEmails.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<Person>> byEmail = new HashMap<>();
+        for (Person person : personMapper.findByEmails(
+                workspaceId, List.copyOf(fallbackEmails))) {
+            String key = fallbackEmailKey(person.getEmail());
+            if (key != null && fallbackEmails.contains(key)) {
+                byEmail.computeIfAbsent(key, ignored -> new ArrayList<>()).add(person);
+            }
+        }
+        return byEmail;
+    }
+
+    private static Map<String, List<IdentityMatchRow>> matchesByValue(
+            List<IdentityMatchRow> matches) {
+        Map<String, List<IdentityMatchRow>> byValue = new HashMap<>();
+        for (IdentityMatchRow match : matches) {
+            byValue.computeIfAbsent(
+                match.getNormalizedValue(), ignored -> new ArrayList<>()).add(match);
+        }
+        return byValue;
+    }
+
+    private static void applyIdentityMatch(
+            PlanRow row,
+            List<IdentityMatchRow> matches,
+            String recordLabel) {
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+        if (matches.size() > 1) {
+            fail(row, "Multiple " + recordLabel + " match the supplied identity");
+            return;
+        }
+        IdentityMatchRow match = matches.getFirst();
+        markMatch(row, match.getRecordId(), match.getName());
+    }
+
+    private static void applyFallbackPersonEmailMatch(
+            PlanRow row,
+            List<Person> matches) {
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+        if (matches.size() > 1) {
+            fail(row, "Multiple contacts match the supplied email");
+            return;
+        }
+        Person match = matches.getFirst();
+        markMatch(row, match.getId(), match.getName());
+    }
+
+    private static void applyCompanyNameMatch(PlanRow row, List<Company> matches) {
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+        if (matches.size() > 1) {
+            fail(row, "Multiple companies match the supplied name");
+            return;
+        }
+        Company match = matches.getFirst();
+        markMatch(row, match.getId(), match.getName());
+    }
+
+    private String canonicalIdentity(IdentityKind kind, String rawValue) {
+        return matchingService.normalizeIdentifier(kind, rawValue).orElse(null);
+    }
+
+    private String personImportEmailKey(String rawEmail) {
+        String canonical = canonicalIdentity(IdentityKind.EMAIL, rawEmail);
+        return canonical != null ? canonical : fallbackEmailKey(rawEmail);
+    }
+
+    private static String fallbackEmailKey(String rawEmail) {
+        if (rawEmail == null) return null;
+        String normalized = rawEmail.trim().toLowerCase(Locale.ROOT);
+        return normalized.isBlank() ? null : normalized;
     }
 
     private static String dealKey(String name, Integer companyId) {
@@ -732,8 +897,8 @@ public class ImportService {
         }
     }
 
-    private static String normalizeStandard(String field, String value) {
-        if ("email".equals(field)) return normEmail(value);
+    private String normalizeStandard(String field, String value) {
+        if ("email".equals(field)) return value.toLowerCase(Locale.ROOT);
         return value;
     }
 
@@ -1036,6 +1201,18 @@ public class ImportService {
         return (existing == null || existing.isBlank()) ? incoming : existing;
     }
 
+    private static boolean fieldAcquired(String action, String existing, String incoming) {
+        return incoming != null
+            && (OVERWRITE.equals(action)
+                || existing == null
+                || existing.isBlank()
+                || incoming.equals(existing));
+    }
+
+    private static String csvRowRef(PlanRow row) {
+        return "csv-row:" + (row.rowIndex + 1);
+    }
+
     private static void markMatch(PlanRow row, Integer id, String label) {
         row.status = MATCH;
         row.matchedId = id;
@@ -1057,7 +1234,7 @@ public class ImportService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static List<String> splitMulti(String value) {
+    private List<String> splitMulti(String value) {
         List<String> parts = new ArrayList<>();
         for (String part : value.split("[,;]")) {
             String trimmed = part.trim();
@@ -1066,25 +1243,12 @@ public class ImportService {
         return parts;
     }
 
-    private static String normEmail(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim().toLowerCase();
-        return trimmed.isEmpty() ? null : trimmed;
+    private String normEmail(String value) {
+        return canonicalIdentity(IdentityKind.EMAIL, value);
     }
 
-    private static String normName(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim().toLowerCase().replaceAll("\\s+", " ");
-        return trimmed.isEmpty() ? null : trimmed;
-    }
-
-    private static String normWebsite(String website) {
-        if (website == null) return "";
-        String w = website.trim().toLowerCase();
-        w = w.replaceFirst("^https?://", "");
-        w = w.replaceFirst("^www\\.", "");
-        w = w.replaceAll("/+$", "");
-        return w;
+    private String normName(String value) {
+        return matchingService.normalizeName(value).orElse(null);
     }
 
     private static int parseCustomId(String field) {

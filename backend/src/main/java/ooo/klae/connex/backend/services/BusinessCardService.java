@@ -243,7 +243,8 @@ public class BusinessCardService {
                 workspaceId, fileName, validated.contentType(), content);
         requireStored(stored, content.length);
         Company company = resolveCompany(reviewed);
-        Person person = personService.create(toPerson(reviewed, company));
+        Person person = personService.createFromBusinessCard(
+            toPerson(reviewed, company), "business-card:" + requestId);
         Attachment attachment = attachment(validated, stored, fileName, person.getId());
         Attachment createdAttachment = attachmentService.createManaged(attachment);
         int completed = importRequestMapper.complete(
