@@ -450,7 +450,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const {
         displayMode,
         effectiveDisplayMode,
-        isMobile,
         setDisplayMode,
         query,
         setQuery,
@@ -1386,72 +1385,81 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     members: activeMembers,
                                     counts: ownerCounts,
                                 }}
+                                mobileControls={
+                                    <SegmentBuilder
+                                        definition={definition}
+                                        fields={segmentFields}
+                                        options={segmentOptions}
+                                        recordType="deal"
+                                        allowGroups
+                                        onChange={changeDefinition}
+                                    />
+                                }
+                                hasAdditionalFilters={hasSegments}
                                 hasActiveFilters={hasActiveFilters}
                                 onClearAll={clearAll}
                             />
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                            <SegmentBuilder
-                                definition={definition}
-                                fields={segmentFields}
-                                options={segmentOptions}
-                                recordType="deal"
-                                allowGroups
-                                onChange={changeDefinition}
-                            />
-                            {effectiveDisplayMode !== 'table' && (
-                                <RecordsSortMenu
-                                    columns={columns}
-                                    sortKey={sortKey}
-                                    sortDirection={sortDir}
-                                    onSortChange={handleSortChange}
+                                <SegmentBuilder
+                                    definition={definition}
+                                    fields={segmentFields}
+                                    options={segmentOptions}
+                                    recordType="deal"
+                                    allowGroups
+                                    onChange={changeDefinition}
                                 />
-                            )}
-                            {!isMobile && (
-                            <div
-                                role="group"
-                                aria-label={t('displayMode')}
-                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('grid')}
-                                    aria-label={t('gridView')}
-                                    aria-pressed={displayMode === 'grid'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                {effectiveDisplayMode !== 'table' && (
+                                    <RecordsSortMenu
+                                        columns={columns}
+                                        sortKey={sortKey}
+                                        sortDirection={sortDir}
+                                        onSortChange={handleSortChange}
+                                    />
+                                )}
+                                <div
+                                    role="group"
+                                    aria-label={t('displayMode')}
+                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
                                 >
-                                    <Squares2X2Icon className="size-4" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('table')}
-                                    aria-label={t('tableView')}
-                                    aria-pressed={displayMode === 'table'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <TableCellsIcon className="size-4" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('kanban')}
-                                    aria-label={t('kanbanView')}
-                                    aria-pressed={displayMode === 'kanban'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <ViewColumnsIcon className="size-4" />
-                                </button>
-                            </div>
-                            )}
-                            {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                            {effectiveDisplayMode === 'table' && (
-                                <ColumnVisibilityMenu
-                                    toggles={toggles}
-                                    onColumnVisibleChange={setColumnVisible}
-                                    onReset={resetColumns}
-                                    hiddenCount={hiddenCount}
-                                />
-                            )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('grid')}
+                                        aria-label={t('gridView')}
+                                        aria-pressed={displayMode === 'grid'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <Squares2X2Icon className="size-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('table')}
+                                        aria-label={t('tableView')}
+                                        aria-pressed={displayMode === 'table'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <TableCellsIcon className="size-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('kanban')}
+                                        aria-label={t('kanbanView')}
+                                        aria-pressed={displayMode === 'kanban'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <ViewColumnsIcon className="size-4" />
+                                    </button>
+                                </div>
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >

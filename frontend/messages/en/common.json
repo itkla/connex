@@ -18,7 +18,10 @@
     "sortBy": "Sort",
     "sortAscending": "Ascending",
     "sortDescending": "Descending",
-    "done": "Done"
+    "done": "Done",
+    "filter": "Filters",
+    "filterAria": "Filter tasks",
+    "filterDescription": "Choose which tasks the list shows."
   },
   "MemberScope": {
     "label": "Owner",

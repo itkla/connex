@@ -18,7 +18,10 @@
     "sortBy": "並び替え",
     "sortAscending": "昇順",
     "sortDescending": "降順",
-    "done": "完了"
+    "done": "完了",
+    "filter": "絞り込み",
+    "filterAria": "タスクを絞り込む",
+    "filterDescription": "一覧に表示するタスクを選びます。"
   },
   "MemberScope": {
     "label": "担当者",

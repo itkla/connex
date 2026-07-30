@@ -141,7 +141,6 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     const {
         displayMode,
         effectiveDisplayMode,
-        isMobile,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -881,6 +880,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 onSortChange={onSortChange}
                                 facets={facets}
                                 filterState={filterState}
+                                countedFilterState={facetFilterState}
                                 onFilterStateChange={setFilterState}
                                 ownerScope={{
                                     values: filterState.owner,
@@ -888,6 +888,31 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                     members: activeMembers,
                                     counts: ownerCounts,
                                 }}
+                                mobileControls={
+                                    <>
+                                        {(showArchived || (companyFacets?.archivedCount ?? 0) > 0) && (
+                                            <SegmentedToggle
+                                                ariaLabel={t('archivedScopeAria')}
+                                                value={showArchived ? 'archived' : 'active'}
+                                                onChange={(next) => setShowArchived(next === 'archived')}
+                                                options={[
+                                                    { value: 'active', label: t('scopeActive'), icon: <BuildingOffice2Icon className="size-4" /> },
+                                                    { value: 'archived', label: t('scopeArchived', { count: companyFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                                ]}
+                                            />
+                                        )}
+                                        {!showArchived && (
+                                            <SegmentBuilder
+                                                definition={definition}
+                                                fields={segmentFields}
+                                                options={segmentOptions}
+                                                allowGroups
+                                                onChange={setDefinition}
+                                            />
+                                        )}
+                                    </>
+                                }
+                                hasAdditionalFilters={showArchived || hasSegments}
                                 hasActiveFilters={hasActiveFilters}
                                 onClearAll={clearAll}
                             />
@@ -911,17 +936,16 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                {!isMobile && (
-                                    <SegmentedToggle
-                                        ariaLabel={t('displayModeAriaLabel')}
-                                        value={displayMode}
-                                        onChange={setDisplayMode}
-                                        options={[
-                                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
-                                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
-                                        ]}
-                                    />
-                                )}
+                                <SegmentedToggle
+                                    ariaLabel={t('displayModeAriaLabel')}
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
+                                    ]}
+                                    className="hidden md:inline-flex"
+                                />
                                 {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                                 {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
@@ -1010,7 +1034,10 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                             />
                         )}
                         renderListRow={(item) => (
-                            <CompanyListRow company={item} temperature={tempByCompanyId.get(item.id)} />
+                            <CompanyListRow
+                                company={item}
+                                temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
+                            />
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}

@@ -42,6 +42,9 @@ import {
     type RecordMenuModel,
 } from '@/app/components/records/RecordActionMenu';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
+import TaskFilterSheet, {
+    type TaskFilterSheetSection,
+} from '@/app/components/activity/tasks/TaskFilterSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
@@ -49,6 +52,9 @@ import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tas
 import Rise from '@/app/components/motion/Rise';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
+import { effectiveListView } from '@/app/hooks/viewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
@@ -68,6 +74,7 @@ type Props = {
 
 type Bucket = 'overdue' | 'today' | 'upcoming' | 'noDate' | 'completed';
 type Queue = 'myOpen' | 'dueToday' | 'overdue' | 'unassigned' | 'allOpen' | 'completed';
+type TaskView = 'list' | 'board';
 type IconType = ComponentType<{ className?: string }>;
 
 const ACTIVE_BUCKETS: Bucket[] = ['overdue', 'today', 'upcoming', 'noDate'];
@@ -90,6 +97,10 @@ const QUEUE_ICON: Record<Queue, IconType> = {
 
 function isQueue(value: unknown): value is Queue {
     return typeof value === 'string' && (ALL_QUEUES as string[]).includes(value);
+}
+
+function isTaskView(value: unknown): value is TaskView {
+    return value === 'list' || value === 'board';
 }
 
 function startOfToday(): number {
@@ -174,6 +185,7 @@ export default function TasksBrowser({
     const pathname = usePathname() ?? '';
     const reduce = useReducedMotion() ?? false;
     const { activeWorkspaceId, switching } = useWorkspace();
+    const isMobile = useIsMobile();
     const [originPathname] = useState(pathname);
 
     const [now] = useState(() => Date.now());
@@ -194,8 +206,15 @@ export default function TasksBrowser({
     const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
     const [queue, setQueue] = useState<Queue>('myOpen');
     const [queueInitialized, setQueueInitialized] = useState(false);
-    const [view, setView] = useState<'list' | 'board'>('list');
-    const [viewInitialized, setViewInitialized] = useState(false);
+    const [view, setView] = useScopedViewPreference<TaskView>({
+        storageKey: VIEW_STORAGE_KEY,
+        userId: currentUserId,
+        workspaceId: activeWorkspaceId,
+        initialValue: null,
+        fallback: 'list',
+        isValue: isTaskView,
+    });
+    const effectiveView: TaskView = effectiveListView(view, isMobile);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
     const [deletingTask, setDeletingTask] = useState<Task | null>(null);
@@ -279,18 +298,6 @@ export default function TasksBrowser({
         if (!queueInitialized) return;
         window.localStorage.setItem(QUEUE_STORAGE_KEY, queue);
     }, [queue, queueInitialized]);
-
-    useEffect(() => {
-        const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (stored === 'board' || stored === 'list') setView(stored);
-        setViewInitialized(true);
-    }, []);
-
-    useEffect(() => {
-        if (!viewInitialized) return;
-        window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-    }, [view, viewInitialized]);
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
@@ -682,6 +689,34 @@ export default function TasksBrowser({
         setDealFilter(new Set());
         setCompanyFilter(new Set());
     };
+    const activeDimensionCount =
+        assigneeFilter.size + personFilter.size + dealFilter.size + companyFilter.size;
+    const taskFilterSections: TaskFilterSheetSection[] = [
+        {
+            label: tf('assignee'),
+            options: dimensionOptions.assignees,
+            selected: assigneeFilter,
+            onToggle: (value) => toggleInSet(setAssigneeFilter, value),
+        },
+        {
+            label: tf('contact'),
+            options: dimensionOptions.persons,
+            selected: personFilter,
+            onToggle: (value) => toggleInSet(setPersonFilter, value),
+        },
+        {
+            label: tf('deal'),
+            options: dimensionOptions.deals,
+            selected: dealFilter,
+            onToggle: (value) => toggleInSet(setDealFilter, value),
+        },
+        {
+            label: tf('company'),
+            options: dimensionOptions.companies,
+            selected: companyFilter,
+            onToggle: (value) => toggleInSet(setCompanyFilter, value),
+        },
+    ];
 
     const renderRow = (task: Task, bucket: Bucket) => {
         const label = noteSnippet(task.description, 60) || t('entityLabel');
@@ -738,7 +773,7 @@ export default function TasksBrowser({
                             <div
                                 role="group"
                                 aria-label={t('displayMode')}
-                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                                className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
                             >
                                 <button
                                     type="button"
@@ -792,7 +827,7 @@ export default function TasksBrowser({
                 )}
 
                 <Rise delay={0.12}>
-                    {view === 'board' ? (
+                    {effectiveView === 'board' ? (
                         <div className="min-w-0 space-y-4">
                             <FilterBar
                                 reduce={reduce}
@@ -870,6 +905,15 @@ export default function TasksBrowser({
                                             placeholder={t('searchPlaceholder')}
                                             searchAria={tf('searchAria')}
                                             clearAria={tf('clearSearchAria')}
+                                            className="min-w-0 flex-1 md:flex-initial"
+                                        />
+                                    }
+                                    collapsed={
+                                        <TaskFilterSheet
+                                            sections={taskFilterSections}
+                                            activeCount={activeDimensionCount}
+                                            hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                                            onClearAll={clearAllFilters}
                                         />
                                     }
                                 >

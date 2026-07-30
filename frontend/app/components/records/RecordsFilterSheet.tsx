@@ -59,8 +59,11 @@ interface Props<T> {
     onSortChange: (key: string) => void;
     facets: ColumnFilterFacet[];
     filterState: FilterState;
+    countedFilterState?: FilterState;
     onFilterStateChange: (next: FilterState) => void;
     ownerScope?: FilterSheetOwnerScope;
+    mobileControls?: ReactNode;
+    hasAdditionalFilters?: boolean;
     hasActiveFilters: boolean;
     onClearAll: () => void;
 }
@@ -132,8 +135,11 @@ export default function RecordsFilterSheet<T>({
     onSortChange,
     facets,
     filterState,
+    countedFilterState,
     onFilterStateChange,
     ownerScope,
+    mobileControls,
+    hasAdditionalFilters = false,
     hasActiveFilters,
     onClearAll,
 }: Props<T>) {
@@ -141,7 +147,8 @@ export default function RecordsFilterSheet<T>({
     const ts = useTranslations('MemberScope');
 
     const sortOptions = sortOptionsFromColumns(columns);
-    const activeCount = countActiveFilters(filterState);
+    const activeCount = countActiveFilters(countedFilterState ?? filterState);
+    const triggerActive = activeCount > 0 || hasAdditionalFilters;
     const scope = interpretMemberScope(ownerScope?.values);
     const memberCap = scope.mode === 'members' && scope.memberIds.length >= MEMBER_SCOPE_MAX_MEMBERS;
 
@@ -151,7 +158,7 @@ export default function RecordsFilterSheet<T>({
                 <button
                     type="button"
                     aria-label={t('filterSortAria')}
-                    className={cn(pillClass(activeCount > 0), 'shrink-0 md:hidden')}
+                    className={cn(pillClass(triggerActive), 'shrink-0 md:hidden')}
                 >
                     <AdjustmentsHorizontalIcon className="size-4 shrink-0" aria-hidden />
                     <span className="truncate">{t('filterSort')}</span>
@@ -175,6 +182,12 @@ export default function RecordsFilterSheet<T>({
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
+                    {mobileControls && (
+                        <div className="flex flex-wrap items-center gap-2 border-b border-border px-2 py-3">
+                            {mobileControls}
+                        </div>
+                    )}
+
                     {sortOptions.length > 0 && (
                         <Section title={t('sortBy')}>
                             {sortOptions.map((option) => {

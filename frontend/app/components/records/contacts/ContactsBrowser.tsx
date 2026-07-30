@@ -92,7 +92,6 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const {
         displayMode,
         effectiveDisplayMode,
-        isMobile,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -746,6 +745,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 onSortChange={onSortChange}
                                 facets={facets}
                                 filterState={filterState}
+                                countedFilterState={facetFilterState}
                                 onFilterStateChange={setFilterState}
                                 ownerScope={{
                                     values: filterState.owner,
@@ -753,6 +753,20 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                     members: activeMembers,
                                     counts: ownerCounts,
                                 }}
+                                mobileControls={
+                                    (showArchived || (personFacets?.archivedCount ?? 0) > 0) ? (
+                                        <SegmentedToggle
+                                            ariaLabel={t('archivedScopeAria')}
+                                            value={showArchived ? 'archived' : 'active'}
+                                            onChange={(next) => setShowArchived(next === 'archived')}
+                                            options={[
+                                                { value: 'active', label: t('scopeActive'), icon: <UsersIcon className="size-4" /> },
+                                                { value: 'archived', label: t('scopeArchived', { count: personFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                            ]}
+                                        />
+                                    ) : undefined
+                                }
+                                hasAdditionalFilters={showArchived}
                                 hasActiveFilters={hasActiveFilters}
                                 onClearAll={clearAll}
                             />
@@ -767,17 +781,16 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                {!isMobile && (
-                                    <SegmentedToggle
-                                        ariaLabel={t('displayModeAria')}
-                                        value={displayMode}
-                                        onChange={setDisplayMode}
-                                        options={[
-                                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
-                                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
-                                        ]}
-                                    />
-                                )}
+                                <SegmentedToggle
+                                    ariaLabel={t('displayModeAria')}
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                                    ]}
+                                    className="hidden md:inline-flex"
+                                />
                                 {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                                 {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
@@ -868,7 +881,10 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                             />
                         )}
                         renderListRow={(item) => (
-                            <ContactListRow contact={item} temperature={tempByContactId.get(item.id)} />
+                            <ContactListRow
+                                contact={item}
+                                temperature={showArchived ? undefined : tempByContactId.get(item.id)}
+                            />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}

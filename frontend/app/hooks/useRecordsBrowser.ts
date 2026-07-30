@@ -14,23 +14,14 @@ import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
 import { parseListQuery, SAVED_VIEW_URL_KEY } from './listStateUrl';
 import { useActions } from './useActions';
 import { useIsMobile } from './useIsMobile';
+import { useScopedViewPreference } from './useScopedViewPreference';
+import { effectiveListView } from './viewPreference';
 import { useWorkspace } from './useWorkspace';
 
 /** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
  * deep link, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
  * ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
 const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, SAVED_VIEW_URL_KEY, ...SERVER_RECORDS_URL_KEYS]);
-
-const VIEW_PREFIX = 'connex:view:';
-
-/**
- * Scopes the persisted view preference to the active user + workspace, matching
- * {@link useRecordDensity}, so the choice survives sessions without leaking between accounts sharing a
- * browser.
- */
-function viewStorageKey(storageKey: string, userId: number | null, workspaceId: number | null): string {
-    return `${VIEW_PREFIX}${userId ?? 'anon'}:${workspaceId ?? 'none'}:${storageKey}`;
-}
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -70,13 +61,16 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const isMobile = useIsMobile();
     const { context } = useActions();
     const { activeWorkspaceId } = useWorkspace();
-    const scopedStorageKey = viewStorageKey(storageKey, context.user?.id ?? null, activeWorkspaceId);
 
     const urlView = searchParams.get('view');
-    const [displayMode, setDisplayMode] = useState<SelectableDisplayMode>(
-        isSelectableDisplayMode(urlView) ? urlView : initialDisplayMode,
-    );
-    const [initialized, setInitialized] = useState(false);
+    const [displayMode, setDisplayMode] = useScopedViewPreference<SelectableDisplayMode>({
+        storageKey,
+        userId: context.user?.id ?? null,
+        workspaceId: activeWorkspaceId,
+        initialValue: isSelectableDisplayMode(urlView) ? urlView : null,
+        fallback: initialDisplayMode,
+        isValue: isSelectableDisplayMode,
+    });
     const [query, setQuery] = useState(() => (
         restoreUrlQuery ? parseListQuery(searchParams.get('q')) : ''
     ));
@@ -91,25 +85,6 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     useEffect(() => {
-        if (!urlView) {
-            let stored: string | null = null;
-            try {
-                stored = window.localStorage.getItem(scopedStorageKey);
-            } catch {
-                stored = null;
-            }
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            if (isSelectableDisplayMode(stored)) setDisplayMode(stored);
-        }
-        setInitialized(true);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scopedStorageKey]);
-
-    useEffect(() => {
-        if (!initialized) return;
-        try {
-            window.localStorage.setItem(scopedStorageKey, displayMode);
-        } catch {}
         const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
@@ -121,9 +96,9 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         const next = params.toString();
         if (next === window.location.search.replace(/^\?/, '')) return;
         window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
-    }, [displayMode, filterState, initialized, pathname, scopedStorageKey, searchParams]);
+    }, [displayMode, filterState, pathname, searchParams]);
 
-    const effectiveDisplayMode: DisplayMode = isMobile ? 'list' : displayMode;
+    const effectiveDisplayMode: DisplayMode = effectiveListView(displayMode, isMobile);
 
     const filteredItems = useMemo(() => {
         const q = query.trim().toLowerCase();
