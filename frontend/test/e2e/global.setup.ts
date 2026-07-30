@@ -60,7 +60,7 @@ setup("provision tenant and seed records", async () => {
     });
     const archiveCompany = await seed.post("/api/companies", {
         name: fixture.companies.archive.name,
-        website: `https://archive-${runId}.example.com`,
+        website: `https://archive-${runId}.example.net`,
         industry: "Manufacturing",
     });
     fixture.companies.archive.id = Number(archiveCompany.id);
