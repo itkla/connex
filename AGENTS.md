@@ -42,6 +42,18 @@ Auth is cookie/session based; workspace selection drives tenant context. See `fr
 11. **Report honestly and concisely.** Say what you did, what you didn't, and what you couldn't verify. If tests fail, show the output. Never claim something works or is done when you haven't confirmed it.
 12. **Use agent capacity deliberately.** High scrutiny comes from precise charters, independent challenge, and executable evidence — not from unlimited fan-out. Follow the delegation budget below.
 
+## Execution discipline — evidence before effort
+
+Work against the active issue's acceptance and exit criteria, not hypothetical completeness. Verification must be sufficient, proportionate, and directed at an observable risk.
+
+1. **No failure signal, no investigation.** Pending, slow, or unusually long is not the same as failed. Before opening a side investigation, state in one sentence which tracked acceptance or exit criterion it closes and which observed failure it resolves. If you cannot write that sentence, do not start the investigation.
+2. **Use the smallest local check that can refute the change.** Run tests for the classes changed and the directly implicated architecture, tenancy, routing, migration, or security guards. Do not broaden verification merely to accumulate more confidence after the relevant evidence is sufficient.
+3. **CI owns exhaustive suites.** Do not run the complete backend test corpus on the shared development host when the required `Backend — build & test` CI job runs the same Gradle suite. A full local suite is permitted only to reproduce an actual full-suite CI failure that cannot be isolated, when an acceptance criterion explicitly requires it, or when the user explicitly directs it. State the applicable exception before starting the run.
+4. **Do not repair the shared development host during product work.** Local disk contention, slow fsync, Docker/MySQL contention, Gradle worker tuning, temporary-filesystem experiments, and container rebuilds are infrastructure work, not evidence of a product defect. If a local verification run is slow without producing a code failure, cancel it and use targeted checks or CI. Investigate the host only when the active issue explicitly concerns the development environment.
+5. **Do not invent gates.** Once the tracked acceptance criteria pass, required checks are green, merge state is clean, and all review feedback is resolved, merge the PR. Do not introduce combined-head, cross-PR, or repeated smoke validation unless the parent issue explicitly requires it. When a parent issue requires one integrated smoke run at a milestone, run it once at that milestone rather than once per constituent PR.
+6. **Wait without polling turns.** Use one blocking command: `gh pr checks <pr-number> --watch --fail-fast` or `gh run watch <run-id> --exit-status`. Do not use sleep loops, repeated empty-input calls, or commentary that only says a job is still running. Report transitions, failures, and final results, not liveness.
+7. **Review evidence is provider-independent.** A completed review remains valid until the diff changes materially. Optional external reviewers are never a reason to debug installations, authentication, provider sessions, model names, or binaries during product work. After one failed invocation, use another available fresh read-only review context or disclose that the independent review could not be run. Do not resurrect reviewer tooling as a side task.
+
 ## Workflow: Explore → Plan → Question → Argue → Act
 
 For any non-trivial task:
@@ -142,7 +154,7 @@ When sources conflict, prefer existing reference pages + tokens, then raise the 
 A change is done only when **all** of these pass:
 
 - **Lint + typecheck clean.** Frontend: `pnpm lint` and `pnpm exec tsc --noEmit`. Backend: compiles with no warnings introduced.
-- **Tests pass and new behavior is covered (backend).** Run `./gradlew test` and add tests for what you changed; don't ship untested logic. The frontend has no unit-test runner — its gate is the browser verification below.
+- **Relevant local verification passes and required CI is green.** Backend changes add automated coverage and pass the smallest local test set that directly exercises the diff and affected invariants; the required `Backend — build & test` CI job owns the exhaustive backend suite. Frontend changes follow the package-specific lint, typecheck, unit, and browser requirements.
 - **Verified by actually running it** (see per-package verify loops below).
 - **Self-reviewed and independently reviewed** according to [Review](#review).
 - **Cleaned up.** No debug logging, `console.log` / `System.out`, commented-out or dead code, stray scratch TODOs, or temp files left behind.
@@ -151,9 +163,9 @@ A change is done only when **all** of these pass:
 
 1. Start a test server (`./gradlew bootRun`, DB via `backend/docker-compose.yml`).
 2. If you touched a `*Controller`, fire real `curl` requests at `http://localhost:8080/api/...` and confirm responses (status, body, auth/tenant behavior). Protected endpoints need a session + CSRF token — see `backend/AGENTS.md` for how to authenticate, and test an other-tenant caller to prove isolation.
-3. Write automated tests and make them pass (`./gradlew test`).
+3. Write automated tests, then run every added or changed test class plus the directly implicated architecture, tenancy, routing, migration, or security guards with Gradle `--tests` selectors. The required `Backend — build & test` CI job owns the complete suite; do not run bare `./gradlew test` locally except under the documented execution-discipline exceptions.
 4. Scrutinize intensely for bugs and future failure modes — tenant leakage, RBAC gaps, null/edge cases, N+1 queries, migration safety.
-5. Run one independent backend review. Use a fresh **gpt-5.6/high** read-only Codex review for standard work; use **xhigh** plus the Tier 3 security/correctness split only for critical changes. See `backend/AGENTS.md` for the exact command and escalation rules.
+5. Run one independent backend review once per material diff. Use a fresh **gpt-5.6/high** read-only Codex review for standard work; use **xhigh** plus the Tier 3 security/correctness split only for critical changes. See `backend/AGENTS.md` for the exact command and escalation rules.
 
 ### Frontend verify loop (required for frontend work)
 
@@ -176,6 +188,8 @@ Tier 3 changes additionally get:
 - **one second reviewer with a non-overlapping charter**, normally correctness/concurrency/migration safety when the first reviewer owns security, or vice versa.
 
 Cross-layer or release-critical work may use the same two-reviewer split even when it is not security-sensitive. Do not exceed two reviewers unless they disagree, a high-severity finding remains unresolved, or a concrete risk is still uncovered. Review findings are inputs: reproduce or reason through them, fix valid problems, and record why false positives are rejected.
+
+Review evidence remains valid until the reviewed diff changes materially. A provider or tool session failing afterward does not invalidate a completed review; follow the execution-discipline fallback instead of debugging reviewer infrastructure.
 
 ## Git & issues
 
