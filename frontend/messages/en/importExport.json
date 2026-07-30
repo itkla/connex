@@ -63,6 +63,8 @@
       "overwrite": "Overwrite"
     },
     "countNew": "new",
+    "rowMergeRepresentative": "Will combine {count} source rows into one record.",
+    "rowMergeContributor": "Will merge into row #{row} before references are created.",
     "countUpdate": "update",
     "countSkip": "skip",
     "countInvalid": "invalid",

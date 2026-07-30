@@ -64,7 +64,8 @@ public class IdentityIntakeService {
             IdentityAcquisitionSource source,
             String sourceRowRef) {
         recordPerson(
-            workspaceId, personId, email, phone, source, sourceRowRef, true, true);
+            workspaceId, personId, email, phone, source,
+            sourceRowRef, sourceRowRef, true, true);
     }
 
     /**
@@ -89,6 +90,36 @@ public class IdentityIntakeService {
             String sourceRowRef,
             boolean emailAcquired,
             boolean phoneAcquired) {
+        recordPerson(
+            workspaceId, personId, email, phone, source,
+            sourceRowRef, sourceRowRef, emailAcquired, phoneAcquired);
+    }
+
+    /**
+     * Reconciles only person fields supplied by an import mutation, retaining independent
+     * provenance for each winning identity.
+     *
+     * @param workspaceId owning workspace derived from tenant context
+     * @param personId persisted person id
+     * @param email current raw email value
+     * @param phone current raw phone value
+     * @param source acquisition source
+     * @param emailSourceRowRef optional email import row or request reference
+     * @param phoneSourceRowRef optional phone import row or request reference
+     * @param emailAcquired whether this intake supplied the email field
+     * @param phoneAcquired whether this intake supplied the phone field
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordPerson(
+            int workspaceId,
+            int personId,
+            String email,
+            String phone,
+            IdentityAcquisitionSource source,
+            String emailSourceRowRef,
+            String phoneSourceRowRef,
+            boolean emailAcquired,
+            boolean phoneAcquired) {
         requireRecord(workspaceId, personId, source);
         LocalDateTime acquiredAt = now();
         String normalizedEmail =
@@ -104,12 +135,12 @@ public class IdentityIntakeService {
         if (emailAcquired) {
             reconcilePersonEmail(
                 workspaceId, personId, email, normalizedEmail,
-                source, sourceRowRef, acquiredAt);
+                source, emailSourceRowRef, acquiredAt);
         }
         if (phoneAcquired) {
             reconcilePersonPhone(
                 workspaceId, personId, phone, normalizedPhone,
-                source, sourceRowRef, acquiredAt);
+                source, phoneSourceRowRef, acquiredAt);
         }
         insertPersonGroups(workspaceId, affectedGroups, acquiredAt);
     }
@@ -133,7 +164,8 @@ public class IdentityIntakeService {
             IdentityAcquisitionSource source,
             String sourceRowRef) {
         recordCompany(
-            workspaceId, companyId, website, phone, source, sourceRowRef, true, true);
+            workspaceId, companyId, website, phone, source,
+            sourceRowRef, sourceRowRef, true, true);
     }
 
     /**
@@ -158,6 +190,36 @@ public class IdentityIntakeService {
             String sourceRowRef,
             boolean websiteAcquired,
             boolean phoneAcquired) {
+        recordCompany(
+            workspaceId, companyId, website, phone, source,
+            sourceRowRef, sourceRowRef, websiteAcquired, phoneAcquired);
+    }
+
+    /**
+     * Reconciles only company fields supplied by an import mutation, retaining independent
+     * provenance for each winning identity.
+     *
+     * @param workspaceId owning workspace derived from tenant context
+     * @param companyId persisted company id
+     * @param website current raw website or domain value
+     * @param phone current raw phone value
+     * @param source acquisition source
+     * @param websiteSourceRowRef optional website import row or request reference
+     * @param phoneSourceRowRef optional phone import row or request reference
+     * @param websiteAcquired whether this intake supplied the website field
+     * @param phoneAcquired whether this intake supplied the phone field
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordCompany(
+            int workspaceId,
+            int companyId,
+            String website,
+            String phone,
+            IdentityAcquisitionSource source,
+            String websiteSourceRowRef,
+            String phoneSourceRowRef,
+            boolean websiteAcquired,
+            boolean phoneAcquired) {
         requireRecord(workspaceId, companyId, source);
         LocalDateTime acquiredAt = now();
         String normalizedDomain =
@@ -173,12 +235,12 @@ public class IdentityIntakeService {
         if (websiteAcquired) {
             reconcileCompanyDomain(
                 workspaceId, companyId, website, normalizedDomain,
-                source, sourceRowRef, acquiredAt);
+                source, websiteSourceRowRef, acquiredAt);
         }
         if (phoneAcquired) {
             reconcileCompanyPhone(
                 workspaceId, companyId, phone, normalizedPhone,
-                source, sourceRowRef, acquiredAt);
+                source, phoneSourceRowRef, acquiredAt);
         }
         insertCompanyGroups(workspaceId, affectedGroups, acquiredAt);
     }

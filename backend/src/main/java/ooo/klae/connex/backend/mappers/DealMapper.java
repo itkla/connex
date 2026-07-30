@@ -395,6 +395,11 @@ public interface DealMapper {
         @Param("personId") int personId,
         @Param("role") String role
     );
+    int addPersonIfAbsent(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("personId") int personId
+    );
     int updatePersonRole(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,

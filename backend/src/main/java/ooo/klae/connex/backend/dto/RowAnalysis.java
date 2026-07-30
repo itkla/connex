@@ -9,8 +9,9 @@ import lombok.NoArgsConstructor;
 /**
  * Per-row outcome of a dry-run import analysis: {@code status} is one of "create", "match",
  * "skip", or "invalid"; {@code matchedId}/{@code matchedLabel} identify an existing record when
- * matched; {@code errors} lists validation problems for the row; {@code candidates} carries
- * bounded duplicate-preflight suggestions for explicit review.
+ * matched; {@code canonicalRowIndex}/{@code mergedRowCount} identify rows that will be coalesced
+ * into one canonical mutation; {@code errors} lists validation problems for the row;
+ * {@code candidates} carries bounded duplicate-preflight suggestions for explicit review.
  */
 @Data
 @NoArgsConstructor
@@ -20,6 +21,8 @@ public class RowAnalysis {
     private String status;
     private Integer matchedId;
     private String matchedLabel;
+    private Integer canonicalRowIndex;
+    private Integer mergedRowCount;
     private List<String> errors;
     private List<DuplicateCandidateDto> candidates;
 }
