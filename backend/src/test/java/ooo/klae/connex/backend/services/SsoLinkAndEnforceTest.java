@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -52,6 +53,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private AuditService auditService;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private int orgId;
 
@@ -124,6 +126,59 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
                         new MockHttpServletRequest(), new MockHttpServletResponse()));
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-c"),
                 "an expired challenge must link nothing");
+    }
+
+    @Test
+    void tearingDownOrganizationRefusesChallengeBeforeInvalidationOrInsertion() {
+        User user = userWithPassword("Correct1!");
+        String rawToken = "existing-link-token-" + unique();
+        SsoLinkChallenge existing = new SsoLinkChallenge();
+        existing.setTokenHash(sha256Hex(rawToken));
+        existing.setUserId(user.getId());
+        existing.setProvider(PROVIDER);
+        existing.setIssuer(ISSUER);
+        existing.setExternalSubject("sub-existing-challenge");
+        existing.setOrgId(orgId);
+        ssoLinkChallengeMapper.insert(existing, 15);
+        jdbcTemplate.update(
+            "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            orgId);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> ssoLinkService.createChallenge(linkRequired(user.getId(), "sub-refused")));
+
+        assertNotNull(ssoLinkChallengeMapper.findByTokenHash(sha256Hex(rawToken)));
+        assertNull(federatedIdentityMapper.findByProviderIssuerSubject(
+            PROVIDER,
+            ISSUER,
+            "sub-refused"));
+    }
+
+    @Test
+    void tearingDownOrganizationRefusesConfirmationBeforeConsumptionOrSession() {
+        User user = userWithPassword("Correct1!");
+        String token = ssoLinkService.createChallenge(linkRequired(user.getId(), "sub-confirm-refused"));
+        jdbcTemplate.update(
+            "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            orgId);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> ssoLinkService.confirm(
+                token,
+                "Correct1!",
+                "203.0.113.14",
+                request,
+                new MockHttpServletResponse()));
+
+        assertNotNull(ssoLinkChallengeMapper.findByTokenHash(sha256Hex(token)));
+        assertNull(federatedIdentityMapper.findByProviderIssuerSubject(
+            PROVIDER,
+            ISSUER,
+            "sub-confirm-refused"));
+        assertNull(request.getSession(false));
     }
 
     @Test

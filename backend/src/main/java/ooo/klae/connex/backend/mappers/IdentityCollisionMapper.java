@@ -5,7 +5,8 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
-import ooo.klae.connex.backend.dto.IdentityCollisionGroupRow;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupKey;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.IdentityCollisionMemberRow;
 
 /**
@@ -23,19 +24,40 @@ public interface IdentityCollisionMapper {
         @Param("workspaceId") int workspaceId,
         @Param("rebuiltAt") LocalDateTime rebuiltAt);
 
-    List<IdentityCollisionGroupRow> findVisibleGroups(
+    int deletePersonCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int insertPersonCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
+    int deleteCompanyCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int insertCompanyCollisionGroup(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
+    long countForWorkspace(@Param("workspaceId") int workspaceId);
+
+    List<IdentityCollisionGroupPageRow> findVisibleGroupPage(
         @Param("workspaceId") int workspaceId,
         @Param("recordType") String recordType,
         @Param("kind") String kind,
         @Param("limit") int limit,
         @Param("offset") long offset);
 
-    long countVisibleGroups(
-        @Param("workspaceId") int workspaceId,
-        @Param("recordType") String recordType,
-        @Param("kind") String kind);
-
     List<IdentityCollisionMemberRow> findVisibleMembers(
         @Param("workspaceId") int workspaceId,
-        @Param("groups") List<IdentityCollisionGroupRow> groups);
+        @Param("groups") List<IdentityCollisionGroupKey> groups,
+        @Param("afterRecordId") int afterRecordId,
+        @Param("memberLimit") int memberLimit);
 }

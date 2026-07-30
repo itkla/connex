@@ -29,47 +29,50 @@
     LIMIT #{limit}
   </delete>
 
-  <select id="findActiveObjectReferencesAfter"
-          resultType="ooo.klae.connex.backend.dto.ActiveObjectReference">
+  <sql id="activeObjectCandidates">
+    SELECT CONCAT('workspaces/', #{workspaceId}, '/attachments/',
+                  SUBSTRING_INDEX(a.url, '/', -1)) AS object_key,
+           'attachment' AS kind,
+           0 AS owner_id,
+           a.url AS persisted_url
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.url LIKE '/api/attachments/content/%'
+    UNION DISTINCT
+    SELECT CONCAT('workspaces/', #{workspaceId}, '/person-images/', p.id, '/',
+                  SUBSTRING_INDEX(p.image_url, '/', -1)) AS object_key,
+           'person_image' AS kind,
+           p.id AS owner_id,
+           p.image_url AS persisted_url
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.image_url LIKE CONCAT('/api/persons/', p.id, '/profile-picture/%')
+    UNION DISTINCT
+    SELECT CONCAT('workspaces/', #{workspaceId}, '/company-images/', c.id, '/',
+                  SUBSTRING_INDEX(c.logo_url, '/', -1)) AS object_key,
+           'company_image' AS kind,
+           c.id AS owner_id,
+           c.logo_url AS persisted_url
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.logo_url LIKE CONCAT('/api/companies/', c.id, '/logo/%')
+  </sql>
+
+  <select id="streamActiveObjectReferences"
+          resultType="ooo.klae.connex.backend.dto.ActiveObjectReference"
+          resultSetType="FORWARD_ONLY" fetchSize="-2147483648" useCache="false">
     SELECT candidates.object_key AS objectKey,
            candidates.kind,
            candidates.owner_id AS ownerId,
            candidates.persisted_url AS persistedUrl,
            u.size_bytes AS usageSizeBytes
     FROM (
-      SELECT CONCAT('workspaces/', #{workspaceId}, '/attachments/',
-                    SUBSTRING_INDEX(a.url, '/', -1)) AS object_key,
-             'attachment' AS kind,
-             0 AS owner_id,
-             a.url AS persisted_url
-      FROM attachment a
-      WHERE a.workspace_id = #{workspaceId}
-        AND a.url LIKE '/api/attachments/content/%'
-      UNION DISTINCT
-      SELECT CONCAT('workspaces/', #{workspaceId}, '/person-images/', p.id, '/',
-                    SUBSTRING_INDEX(p.image_url, '/', -1)) AS object_key,
-             'person_image' AS kind,
-             p.id AS owner_id,
-             p.image_url AS persisted_url
-      FROM person p
-      WHERE p.workspace_id = #{workspaceId}
-        AND p.image_url LIKE CONCAT('/api/persons/', p.id, '/profile-picture/%')
-      UNION DISTINCT
-      SELECT CONCAT('workspaces/', #{workspaceId}, '/company-images/', c.id, '/',
-                    SUBSTRING_INDEX(c.logo_url, '/', -1)) AS object_key,
-             'company_image' AS kind,
-             c.id AS owner_id,
-             c.logo_url AS persisted_url
-      FROM company c
-      WHERE c.workspace_id = #{workspaceId}
-        AND c.logo_url LIKE CONCAT('/api/companies/', c.id, '/logo/%')
+      <include refid="activeObjectCandidates"/>
     ) candidates
     LEFT JOIN managed_object_usage u
       ON u.workspace_id = #{workspaceId}
      AND u.object_key = candidates.object_key
-    WHERE candidates.object_key &gt; #{afterKey}
     ORDER BY candidates.object_key
-    LIMIT #{limit}
   </select>
 
   <select id="findLifecycleObjectKeysAfter" resultType="string">

@@ -68,24 +68,27 @@
     LIMIT 1
   </select>
 
-  <select id="lockActiveWorkspaceForExport"
+  <select id="lockWorkspaceForShare"
           resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
-    SELECT <include refid="workspaceLifecycleColumns"/>
-    FROM organization o
-    JOIN workspace w ON w.org_id = o.id
-    WHERE o.id = #{orgId}
-      AND w.id = #{workspaceId}
-      AND o.lifecycle_state = 'active'
-      AND w.lifecycle_state = 'active'
-    FOR UPDATE
+    SELECT w.id,
+           w.org_id AS orgId,
+           w.name,
+           w.slug,
+           w.lifecycle_state AS lifecycleState
+    FROM workspace w
+    WHERE w.id = #{workspaceId}
+    FOR SHARE
   </select>
 
   <select id="lockWorkspaceInOrg"
           resultType="ooo.klae.connex.backend.dto.WorkspaceLifecycleRef">
-    SELECT <include refid="workspaceLifecycleColumns"/>
-    FROM organization o
-    JOIN workspace w ON w.org_id = o.id
-    WHERE o.id = #{orgId} AND w.id = #{workspaceId}
+    SELECT w.id,
+           w.org_id AS orgId,
+           w.name,
+           w.slug,
+           w.lifecycle_state AS lifecycleState
+    FROM workspace w
+    WHERE w.id = #{workspaceId}
     FOR UPDATE
   </select>
 
@@ -97,7 +100,7 @@
            workspace_slug AS slug,
            'tearing_down' AS lifecycleState
     FROM tenant_cleanup_tombstone
-    WHERE org_id = #{orgId} AND workspace_id = #{workspaceId}
+    WHERE workspace_id = #{workspaceId}
     FOR UPDATE
   </select>
 
@@ -114,6 +117,13 @@
     FROM organization
     WHERE id = #{orgId}
     FOR UPDATE
+  </select>
+
+  <select id="lockActiveOrganizationForShare" resultType="java.lang.Integer">
+    SELECT id
+    FROM organization
+    WHERE id = #{orgId} AND lifecycle_state = 'active'
+    FOR SHARE
   </select>
 
   <select id="findWorkspacesInOrgAfter"
@@ -165,6 +175,28 @@
     )
   </select>
 
+  <select id="lockOrgAdminMembershipForUpdate" resultType="java.lang.Integer">
+    SELECT user_id
+    FROM org_member
+    WHERE org_id = #{orgId}
+      AND user_id = #{userId}
+      AND org_role IN ('admin', 'owner')
+    FOR UPDATE
+  </select>
+
+  <select id="lockExportAdmissionCapacityNowait" resultType="int">
+    SELECT capacity
+    FROM tenant_export_admission_control
+    WHERE id = 1
+    FOR UPDATE NOWAIT
+  </select>
+
+  <select id="countGlobalExportLeases" resultType="int">
+    SELECT COUNT(*)
+    FROM tenant_operation_lease
+    WHERE lease_kind = 'export'
+  </select>
+
   <insert id="insertOperationLease">
     INSERT INTO tenant_operation_lease
       (org_id, workspace_id, lease_kind, lease_token)
@@ -194,6 +226,18 @@
     SELECT COUNT(*)
     FROM tenant_operation_lease
     WHERE workspace_id = #{workspaceId} AND lease_kind = #{leaseKind}
+  </select>
+
+  <select id="countAllOperationLeases" resultType="int">
+    SELECT COUNT(*)
+    FROM tenant_operation_lease
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="countOperationLeasesInOrg" resultType="int">
+    SELECT COUNT(*)
+    FROM tenant_operation_lease
+    WHERE org_id = #{orgId}
   </select>
 
   <update id="markWorkspaceTearingDown">
@@ -226,11 +270,43 @@
     WHERE org_id = #{orgId} AND workspace_id = #{workspaceId}
   </delete>
 
+  <select id="findFederatedIdentityBatch" resultType="FederatedIdentity">
+    SELECT id, user_id
+    FROM federated_identity
+    WHERE org_id = #{orgId}
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
   <delete id="deleteFederatedIdentityBatch">
     DELETE FROM federated_identity
-    WHERE org_id = #{orgId}
-    LIMIT #{limit}
+    WHERE org_id = #{orgId} AND id IN
+    <foreach collection="identityIds" item="identityId" open="(" separator="," close=")">
+      #{identityId}
+    </foreach>
   </delete>
+
+  <select id="countOpenSubjectRequestsForWorkspace" resultType="int">
+    SELECT COUNT(*)
+    FROM data_subject_request
+    WHERE org_id = #{orgId}
+      AND subject_workspace_id = #{workspaceId}
+      AND status NOT IN ('closed', 'refused')
+  </select>
+
+  <select id="countOpenSubjectRequestsForOrg" resultType="int">
+    SELECT COUNT(*)
+    FROM data_subject_request
+    WHERE org_id = #{orgId}
+      AND status NOT IN ('closed', 'refused')
+  </select>
+
+  <update id="clearSubjectRequestWorkspaceLinks">
+    UPDATE data_subject_request
+    SET subject_workspace_id = NULL,
+        subject_person_id = NULL
+    WHERE org_id = #{orgId} AND subject_workspace_id = #{workspaceId}
+  </update>
 
   <delete id="deleteWorkspace">
     DELETE FROM workspace

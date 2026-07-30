@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -62,6 +63,21 @@ class ClientErrorServiceTest {
                 "Render failed",
                 "Digest: digest-7\nStack:\nat Component",
                 "/dashboard"), captor.getValue());
+    }
+
+    @Test
+    void redactsCredentialBearingClientPathsWithoutFlatteningDocumentationSlugs() {
+        tenantContext.set(7, 8, 9, "member", null);
+        service.report(new ClientErrorRequest(
+                null, "Render failed", null, "/invite/aBc123defGhi456jklMno"));
+        service.report(new ClientErrorRequest(
+                null, "Render failed", null, "/docs/using-connex/notifications-and-mentions"));
+
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter, times(2)).report(captor.capture());
+        assertEquals("/invite/{token}", captor.getAllValues().getFirst().path());
+        assertEquals("/docs/using-connex/notifications-and-mentions",
+                captor.getAllValues().getLast().path());
     }
 
     @Test

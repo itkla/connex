@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -163,9 +164,60 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class,
             () -> dataSubjectRequestService.create(mine.getId(), currentUser.getId(), foreign));
 
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            mineWorkspace.getId());
+        assertThrows(
+            BadRequestException.class,
+            () -> dataSubjectRequestService.create(
+                mine.getId(),
+                currentUser.getId(),
+                linkedRequest(mineWorkspace.getId(), minePerson.getId())));
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM data_subject_request WHERE org_id = ?",
+                Integer.class,
+                mine.getId()));
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'active' WHERE id = ?",
+            mineWorkspace.getId());
+
         DataSubjectRequestDto linked = dataSubjectRequestService.create(
             mine.getId(), currentUser.getId(), linkedRequest(mineWorkspace.getId(), minePerson.getId()));
         assertEquals(minePerson.getId(), linked.getSubjectPersonId());
+    }
+
+    @Test
+    void updateRejectsAnInitiallyInactiveLinkedWorkspaceWithoutWriting() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        DataSubjectRequestDto created = dataSubjectRequestService.create(
+            org.getId(),
+            currentUser.getId(),
+            linkedRequest(subjectWorkspace.getId(), subject.getId()));
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?",
+            subjectWorkspace.getId());
+        DataSubjectRequestUpsertRequest update = request("disclosure");
+        update.setStatus("closed");
+
+        assertThrows(
+            BadRequestException.class,
+            () -> dataSubjectRequestService.update(
+                org.getId(),
+                created.getId(),
+                currentUser.getId(),
+                update));
+
+        assertEquals(
+            "received",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM data_subject_request WHERE org_id = ? AND id = ?",
+                String.class,
+                org.getId(),
+                created.getId()));
     }
 
     @Test
@@ -209,6 +261,52 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             () -> dataSubjectRequestService.disclosure(org.getId(), wrongType.getId(), currentUser.getId()));
         assertThrows(BadRequestException.class,
             () -> dataSubjectRequestService.disclosure(org.getId(), unverified.getId(), currentUser.getId()));
+    }
+
+    @Test
+    void disclosureIncludesCurrentAndHistoricalIdentityProvenance() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        jdbcTemplate.update(
+            """
+            INSERT INTO person_identity (
+              workspace_id, person_id, kind, `value`, normalized_value,
+              source_system, source_channel, source_external_id, source_row_ref,
+              acquired_at, purpose_of_use_code, superseded_at
+            )
+            VALUES
+              (?, ?, 'email', 'old@example.com', 'old@example.com',
+               'csv_import', 'person.email', 'crm-17', 'csv-row:4',
+               '2025-01-02 03:04:05', 'relationship_management', '2026-01-02 03:04:05'),
+              (?, ?, 'email', 'current@example.com', 'current@example.com',
+               'interactive_update', 'person.email', NULL, NULL,
+               '2026-01-02 03:04:05', NULL, NULL)
+            """,
+            subjectWorkspace.getId(),
+            subject.getId(),
+            subjectWorkspace.getId(),
+            subject.getId());
+        DataSubjectRequestDto request = dataSubjectRequestService.create(
+            org.getId(),
+            currentUser.getId(),
+            linkedRequest(subjectWorkspace.getId(), subject.getId()));
+
+        var identities = dataSubjectRequestService.disclosure(
+            org.getId(), request.getId(), currentUser.getId()).getIdentities();
+
+        assertEquals(2, identities.size());
+        assertEquals("current@example.com", identities.getFirst().getValue());
+        assertNull(identities.getFirst().getSupersededAt());
+        assertEquals("old@example.com", identities.getLast().getValue());
+        assertEquals("csv_import", identities.getLast().getSourceSystem());
+        assertEquals("person.email", identities.getLast().getSourceChannel());
+        assertEquals("crm-17", identities.getLast().getSourceExternalId());
+        assertEquals("csv-row:4", identities.getLast().getSourceRowRef());
+        assertEquals(
+            "relationship_management",
+            identities.getLast().getPurposeOfUseCode());
+        assertNotNull(identities.getLast().getSupersededAt());
     }
 
     @Test

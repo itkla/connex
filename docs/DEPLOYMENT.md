@@ -251,6 +251,16 @@ defaults of 32 global reads, four reads per user, and a 30-second hard stream de
 limit. Filesystem deletion waits for active readers, so quota is not released while deleted bytes
 remain held by an open descriptor.
 
+Workspace exports use the singleton `tenant_export_admission_control` row for database-global
+admission. Its seeded capacity is four; capacity exhaustion or concurrent admission-row contention
+returns HTTP 429 immediately. Each admitted export persists a database lease in the same control
+transaction, captures tenant tables and active-object references in one repeatable-read database
+snapshot, closes the snapshot before private-provider reads, and holds the database lease until
+streaming cleanup completes. Export leases do not expire and are never reaped automatically:
+workspace and organization teardown fail closed while they remain. Remove a stranded lease only
+after operationally proving that no backend instance or response stream still owns that exact
+export.
+
 Object removal uses durable database queues. Tenant-owned objects are recorded in that tenant
 catalog's `object_deletion_queue`; control-plane user-profile objects use
 `user_object_deletion_queue`. The metadata update and deletion intent commit atomically. The backend
@@ -435,12 +445,22 @@ deployment unless the operator explicitly configures a vendor integration.
 
 - `GET /api/health` — liveness. Anonymous, returns `200 {"status":"UP"}` while the process serves
   traffic. Safe for load-balancer checks; carries no version or build information.
-- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable and all
-  Flyway migrations are applied, otherwise `503`. Status words only — the body never carries
-  exception details. Gate restarts/upgrades on this endpoint.
-- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. **Never anonymous**:
-  authenticate with a logged-in session or configure a static scrape token and send it as
-  `Authorization: Bearer <token>`. Unset token = endpoint unavailable to scrapers.
+- `GET /api/health/ready` — readiness. Anonymous, `200` when the database is reachable, all Flyway
+  migrations are applied, and every startup task has finished, otherwise `503`. The body reports
+  `checks.db`, `checks.migrations`, and `checks.startup` separately as status words only — never
+  exception details. Because the embedded server accepts connections before startup tasks finish,
+  this endpoint — not TCP connectivity — is what restarts and upgrades must gate on. Startup tasks
+  (backfills, secret rewrap) run once per upgrade and can take minutes on a large dataset, so give
+  any deployment health gate a timeout that accommodates them. `checks.auditGuard` additionally
+  reports whether all three exact append-only `audit_log` guards are visible; it is **reported, never
+  gating** (an application user without the MySQL `TRIGGER` privilege cannot see them), so alert on
+  a `DOWN` there and on the matching `ERROR` log line rather than taking an instance out of
+  rotation.
+- `GET /api/metrics` — JVM, HTTP, and connection-pool metrics for scraping. Readable **only** with
+  the operator-configured scrape token (`CONNEX_METRICS_SCRAPE_TOKEN`), sent as
+  `Authorization: Bearer <token>`; an ordinary authenticated session cannot read it and neither can
+  a `HEAD` request. Unset token = endpoint unavailable to every caller, which the backend warns
+  about at startup.
 
 **Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
 unexpected `500` responses include the same id in the JSON body. Production logs are structured

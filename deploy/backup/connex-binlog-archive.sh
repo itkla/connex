@@ -22,6 +22,11 @@ ARCHIVE_SERVER_VERSION=
 ARCHIVE_COVERAGE_UTC=
 ARCHIVE_COVERAGE_EPOCH=0
 ARCHIVE_RETENTION_GAP=false
+ARCHIVE_COVERAGE_PINNED=false
+ARCHIVE_CURSOR_SEEN=false
+ARCHIVE_PROCESSED_LAST=
+ARCHIVE_DEFERRED_EXIT=0
+ARCHIVE_DEFERRED_PHASE=
 ARCHIVE_ACTIVE_FILE=
 ARCHIVE_LAST_CLOSED=
 declare -a ARCHIVE_SERVER_LOGS=()
@@ -132,6 +137,40 @@ archive_validate_state() {
     fi
 }
 
+# archive-state is rewritten in full on every run and the in-memory gap flag is
+# reset on every invocation, so a hole recorded only there is erased fifteen
+# minutes later and the archive goes back to claiming continuous coverage. This
+# sidecar is append-only, is never rewritten by archive_publish_state, and is on
+# the pruner's keep list, so the hole survives for the PITR guard to refuse on.
+archive_record_coverage_gap() {
+    local file="$1"
+    local from_epoch="$2"
+    local through_epoch="$3"
+    local marker="$CONNEX_BACKUP_ROOT/binlog/coverage-gap"
+    printf 'gap\t%s\t%s\t%s\t%s\n' "$file" "$from_epoch" "$through_epoch" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$marker"
+}
+
+# Coverage may never advance across a hole. Pin it to the coverage a previous
+# run already published - the last event the archive proved it can replay -
+# rather than to this run's flush timestamp, which would report a recoverable
+# window that has a piece missing. A first run that finds a hole has no earlier
+# coverage to fall back on and therefore publishes coverage 0, which blocks PITR
+# entirely until the next clean run advances it; that is deliberate and lasts a
+# single timer interval, because the hole is recorded and never re-walked.
+archive_pin_coverage() {
+    local epoch
+    epoch="$(archive_state_value coverage_through_epoch || true)"
+    if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch=0
+    fi
+    ARCHIVE_COVERAGE_EPOCH="$epoch"
+    ARCHIVE_COVERAGE_UTC=
+    if [ "$epoch" -gt 0 ]; then
+        ARCHIVE_COVERAGE_UTC="$(date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+    ARCHIVE_COVERAGE_PINNED=true
+}
+
 archive_event_stamp_to_epoch() {
     local stamp="$1"
     if [[ ! "$stamp" =~ ^([0-9]{2})([0-9]{2})([0-9]{2})[[:space:]]([0-9]{1,2}:[0-9]{2}:[0-9]{2})$ ]]; then
@@ -172,24 +211,103 @@ archive_magic_valid() {
     [ "$(od -An -t x1 -N4 "$path" | tr -d ' \n')" = fe62696e ]
 }
 
+archive_recoverable_raw() {
+    local destination="$1"
+    local server_size="$2"
+    local candidate=
+    if { [ -e "$destination" ] || [ -L "$destination" ]; } &&
+        { [ -e "$destination.pending" ] || [ -L "$destination.pending" ]; }; then
+        return 1
+    fi
+    if [ -e "$destination.meta" ] || [ -L "$destination.meta" ] ||
+        [ -e "$destination.sha256" ] || [ -L "$destination.sha256" ] ||
+        [ -e "$destination.meta.pending" ] || [ -L "$destination.meta.pending" ] ||
+        [ -e "$destination.sha256.pending" ] || [ -L "$destination.sha256.pending" ]; then
+        return 1
+    fi
+    if [ -f "$destination" ] && [ ! -L "$destination" ]; then
+        candidate="$destination"
+    elif [ -f "$destination.pending" ] && [ ! -L "$destination.pending" ]; then
+        candidate="$destination.pending"
+    else
+        return 1
+    fi
+    if [ "$(stat -c '%s' "$candidate")" != "$server_size" ] ||
+        ! archive_magic_valid "$candidate"; then
+        return 1
+    fi
+    printf '%s\n' "$candidate"
+}
+
+archive_clear_binlog_sidecars() {
+    local destination="$1"
+    rm -f -- \
+        "$destination.meta" "$destination.sha256" \
+        "$destination.meta.pending" "$destination.sha256.pending"
+}
+
+archive_clear_binlog_namespace() {
+    local destination="$1"
+    rm -f -- \
+        "$destination" "$destination.meta" "$destination.sha256" \
+        "$destination.pending" "$destination.meta.pending" "$destination.sha256.pending"
+}
+
+archive_recover_publications() {
+    local pending destination status
+    local -a destinations=()
+    while IFS= read -r pending; do
+        case "$pending" in
+            *.meta.pending)
+                destinations+=("${pending%.meta.pending}")
+                ;;
+            *.sha256.pending)
+                destinations+=("${pending%.sha256.pending}")
+                ;;
+            *.pending)
+                destinations+=("${pending%.pending}")
+                ;;
+        esac
+    done < <(find "$CONNEX_BACKUP_ROOT/binlog" -mindepth 1 -maxdepth 1 -name '*.pending' -print | sort)
+    if [ "${#destinations[@]}" -eq 0 ]; then
+        return 0
+    fi
+    while IFS= read -r destination; do
+        if backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID"; then
+            backup_log warn binlog_publication_recovered file "$(basename "$destination")"
+            continue
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ] && [ "$status" -ne "$EXIT_INTEGRITY" ]; then
+            return "$status"
+        fi
+        backup_log warn binlog_publication_incomplete file "$(basename "$destination")"
+    done < <(printf '%s\n' "${destinations[@]}" | sort -u)
+}
+
 archive_existing_matches() {
     local destination="$1"
     local server_size="$2"
     local meta="$destination.meta"
-    local recorded_server_size recorded_local_size local_size
-    if [ ! -e "$destination" ] && [ ! -e "$destination.meta" ] && [ ! -e "$destination.sha256" ]; then
-        return 1
+    local recorded_server_size recorded_local_size local_size status
+    if backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID"; then
+        :
+    else
+        status=$?
+        if [ "$status" -eq 1 ] || [ "$status" -eq "$EXIT_INTEGRITY" ]; then
+            return 1
+        fi
+        return "$status"
     fi
-    if ! backup_validate_binlog_triplet "$destination"; then
-        rm -f "$destination" "$destination.meta" "$destination.sha256" "$destination.meta.pending" "$destination.sha256.pending"
-        backup_log warn binlog_partial_removed file "$(basename "$destination")"
+    if [ ! -e "$destination" ]; then
         return 1
     fi
     recorded_server_size="$(backup_meta_value "$meta" server_size)" || return "$EXIT_BINLOG_ARCHIVE"
     recorded_local_size="$(backup_meta_value "$meta" local_size)" || return "$EXIT_BINLOG_ARCHIVE"
     local_size="$(stat -c '%s' "$destination")"
     if [ "$recorded_server_size" != "$server_size" ] || [ "$recorded_local_size" != "$local_size" ]; then
-        rm -f "$destination" "$destination.meta" "$destination.sha256"
+        archive_clear_binlog_namespace "$destination"
         backup_log warn binlog_stale_removed file "$(basename "$destination")" server_size "$server_size" recorded_server_size "$recorded_server_size" local_size "$local_size" recorded_local_size "$recorded_local_size"
         return 1
     fi
@@ -267,16 +385,17 @@ archive_fetch_to_temporary() {
 archive_publish_file() {
     local file="$1"
     local server_size="$2"
-    local temporary_directory="$3"
+    local source_file="$3"
     local destination="$CONNEX_BACKUP_ROOT/binlog/$file"
-    local temporary_file="$temporary_directory/$file"
+    local pending_raw="$destination.pending"
+    local temporary_checksum temporary_meta
     local hash local_size time_range created_epoch last_event_epoch created_utc last_event_utc
-    hash="$(sha256sum "$temporary_file" | awk '{print $1}')"
-    local_size="$(stat -c '%s' "$temporary_file")"
+    hash="$(sha256sum "$source_file" | awk '{print $1}')"
+    local_size="$(stat -c '%s' "$source_file")"
     if [ "$CONNEX_BACKUP_BINLOG_FETCH_MODE" = stream ]; then
         time_range="$(archive_source_time_range "$file")" || return "$EXIT_BINLOG_ARCHIVE"
     else
-        time_range="$(archive_decode_time_range "$temporary_file")" || return "$EXIT_BINLOG_ARCHIVE"
+        time_range="$(archive_decode_time_range "$source_file")" || return "$EXIT_BINLOG_ARCHIVE"
     fi
     IFS=$'\t' read -r created_epoch last_event_epoch <<< "$time_range"
     if [ "$created_epoch" -gt "$(date +%s)" ] || [ "$last_event_epoch" -gt "$(date +%s)" ]; then
@@ -286,13 +405,20 @@ archive_publish_file() {
     created_utc="$(date -u -d "@$created_epoch" +%Y-%m-%dT%H:%M:%SZ)"
     last_event_utc="$(date -u -d "@$last_event_epoch" +%Y-%m-%dT%H:%M:%SZ)"
     if [ $(( $(date +%s) - created_epoch )) -ge $(( (CONNEX_BACKUP_RETENTION_DAYS - 1) * 86400 )) ]; then
-        rm -f "$temporary_file"
+        archive_clear_binlog_namespace "$destination"
+        rm -f -- "$source_file"
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
         ARCHIVE_RETENTION_GAP=true
+        archive_record_coverage_gap "$file" "$created_epoch" "$last_event_epoch" || return "$EXIT_BINLOG_ARCHIVE"
         backup_log warn binlog_skipped file "$file" reason outside_retention file_created_utc "$created_utc"
         return 0
     fi
-    printf '%s  %s\n' "$hash" "$file" > "$destination.sha256.pending"
+    temporary_checksum="$(mktemp "$CONNEX_BACKUP_ROOT/binlog/.sha256.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
+    temporary_meta="$(mktemp "$CONNEX_BACKUP_ROOT/binlog/.meta.XXXXXX")" || {
+        rm -f -- "$temporary_checksum"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    printf '%s  %s\n' "$hash" "$file" > "$temporary_checksum"
     {
         printf 'metadata_version\t1\n'
         printf 'file\t%s\n' "$file"
@@ -306,10 +432,27 @@ archive_publish_file() {
         printf 'last_event_utc\t%s\n' "$last_event_utc"
         printf 'archived_at_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'fetch_mode\t%s\n' "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
-    } > "$destination.meta.pending"
-    mv "$temporary_file" "$destination"
-    mv "$destination.sha256.pending" "$destination.sha256"
-    mv "$destination.meta.pending" "$destination.meta"
+    } > "$temporary_meta"
+    if ! backup_sync_file "$temporary_checksum" || ! backup_sync_file "$temporary_meta"; then
+        rm -f -- "$temporary_checksum" "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    mv -T -- "$temporary_checksum" "$destination.sha256.pending" || {
+        rm -f -- "$temporary_checksum" "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    mv -T -- "$temporary_meta" "$destination.meta.pending" || {
+        rm -f -- "$temporary_meta"
+        return "$EXIT_BINLOG_ARCHIVE"
+    }
+    backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" || return "$EXIT_BINLOG_ARCHIVE"
+    if [ "$source_file" != "$destination" ] && [ "$source_file" != "$pending_raw" ]; then
+        backup_sync_file "$source_file" || return "$EXIT_BINLOG_ARCHIVE"
+        mv -T -- "$source_file" "$pending_raw" || return "$EXIT_BINLOG_ARCHIVE"
+    fi
+    backup_sync_directory "$CONNEX_BACKUP_ROOT/binlog" || return "$EXIT_BINLOG_ARCHIVE"
+    backup_recover_binlog_triplet "$destination" "$ARCHIVE_SERVER_UUID" ||
+        return "$EXIT_BINLOG_ARCHIVE"
     ARCHIVE_FETCHED=$((ARCHIVE_FETCHED + 1))
     ARCHIVE_BYTES=$((ARCHIVE_BYTES + local_size))
     backup_log info binlog_fetch_completed file "$file" server_size "$server_size" local_size "$local_size" sha256 "$hash" file_created_utc "$created_utc" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
@@ -319,7 +462,7 @@ archive_fetch_file() {
     local file="$1"
     local server_size="$2"
     local destination="$CONNEX_BACKUP_ROOT/binlog/$file"
-    local temporary_directory
+    local temporary_directory='' source_file=''
     if archive_existing_matches "$destination" "$server_size"; then
         ARCHIVE_SKIPPED=$((ARCHIVE_SKIPPED + 1))
         backup_log info binlog_skipped file "$file" reason already_archived size "$server_size"
@@ -330,26 +473,40 @@ archive_fetch_file() {
             return "$EXIT_BINLOG_ARCHIVE"
         fi
     fi
-    temporary_directory="$(mktemp -d "$CONNEX_BACKUP_ROOT/binlog/.fetch.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
-    backup_log info binlog_fetch_started file "$file" server_size "$server_size" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
-    if ! archive_fetch_to_temporary "$file" "$server_size" "$temporary_directory"; then
-        rm -rf "$temporary_directory"
-        backup_log error binlog_fetch_failed file "$file" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+    source_file="$(archive_recoverable_raw "$destination" "$server_size" || true)"
+    if [ -n "$source_file" ]; then
+        archive_clear_binlog_sidecars "$destination"
+        backup_log warn binlog_publication_resumed file "$file"
+    else
+        archive_clear_binlog_namespace "$destination"
+        temporary_directory="$(mktemp -d "$CONNEX_BACKUP_ROOT/binlog/.fetch.XXXXXX")" || return "$EXIT_BINLOG_ARCHIVE"
+        backup_log info binlog_fetch_started file "$file" server_size "$server_size" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+        if ! archive_fetch_to_temporary "$file" "$server_size" "$temporary_directory"; then
+            rm -rf "$temporary_directory"
+            backup_log error binlog_fetch_failed file "$file" fetch_mode "$CONNEX_BACKUP_BINLOG_FETCH_MODE"
+            return "$EXIT_BINLOG_ARCHIVE"
+        fi
+        source_file="$temporary_directory/$file"
+    fi
+    if ! archive_publish_file "$file" "$server_size" "$source_file"; then
+        backup_log error binlog_publish_failed file "$file"
         return "$EXIT_BINLOG_ARCHIVE"
     fi
-    if ! archive_publish_file "$file" "$server_size" "$temporary_directory"; then
-        rm -rf "$temporary_directory"
-        return "$EXIT_BINLOG_ARCHIVE"
+    if [ -n "$temporary_directory" ]; then
+        rmdir "$temporary_directory"
     fi
-    rmdir "$temporary_directory"
 }
 
-archive_process_logs() {
-    local last_archived line file server_size
-    local seen_state=false processed_last=
-    last_archived="$(archive_state_value last_closed_file || true)"
-    if [ -z "$last_archived" ]; then
-        seen_state=true
+# Walks the closed logs the server currently lists, resuming after the named
+# cursor. An empty cursor archives every closed log from the oldest one the
+# server still holds. ARCHIVE_CURSOR_SEEN reports whether the cursor was found,
+# so the caller can tell "nothing new" apart from "the cursor is gone".
+archive_fetch_closed_logs() {
+    local resume_after="$1"
+    local line file server_size
+    ARCHIVE_CURSOR_SEEN=false
+    if [ -z "$resume_after" ]; then
+        ARCHIVE_CURSOR_SEEN=true
     fi
     for line in "${ARCHIVE_SERVER_LOGS[@]}"; do
         IFS=$'\t' read -r file server_size _ <<< "$line"
@@ -360,40 +517,99 @@ archive_process_logs() {
             backup_log error binlog_list reason invalid_server_entry file "$file" size "$server_size"
             return "$EXIT_BINLOG_ARCHIVE"
         fi
-        if [ "$seen_state" = false ]; then
-            if [ "$file" = "$last_archived" ]; then
-                seen_state=true
+        if [ "$ARCHIVE_CURSOR_SEEN" = false ]; then
+            if [ "$file" = "$resume_after" ]; then
+                ARCHIVE_CURSOR_SEEN=true
             fi
             continue
         fi
         archive_fetch_file "$file" "$server_size" || return $?
-        processed_last="$file"
+        ARCHIVE_PROCESSED_LAST="$file"
     done
+}
+
+# The hole opened where the archive stopped and closes where it can pick the
+# chain back up: the creation of the oldest closed log the server still holds
+# and this run therefore archives. Recording the hole as running to "now"
+# instead would swallow every full backup taken since the hole opened, even
+# though those backups are restorable from exactly the logs this run just
+# fetched. Falls back to now when that file has no metadata, which only happens
+# when it could not be archived either.
+archive_first_closed_log_epoch() {
+    local line file epoch=
+    for line in "${ARCHIVE_SERVER_LOGS[@]}"; do
+        IFS=$'\t' read -r file _ _ <<< "$line"
+        if [ "$file" = "$ARCHIVE_ACTIVE_FILE" ]; then
+            continue
+        fi
+        if [ -f "$CONNEX_BACKUP_ROOT/binlog/$file.meta" ]; then
+            epoch="$(backup_meta_value "$CONNEX_BACKUP_ROOT/binlog/$file.meta" file_created_epoch)" || epoch=
+        fi
+        break
+    done
+    if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch="$(date +%s)"
+    fi
+    printf '%s\n' "$epoch"
+}
+
+archive_process_logs() {
+    local last_archived previous_coverage gap_through
+    ARCHIVE_PROCESSED_LAST=
+    last_archived="$(archive_state_value last_closed_file || true)"
+    previous_coverage="$(archive_state_value coverage_through_epoch || true)"
+    if [[ ! "$previous_coverage" =~ ^[0-9]+$ ]]; then
+        previous_coverage=0
+    fi
+    archive_fetch_closed_logs "$last_archived" || return $?
+    # The file the archive stopped at is gone from the server, so the run can
+    # never resume from it. Returning here would leave last_closed_file pointing
+    # at a file that is never coming back and every later run would take this
+    # same branch, stalling the archive permanently. Sweep the whole list
+    # instead: the closed logs the server still holds are inside retention and
+    # fully archivable, and abandoning them would strand every full backup taken
+    # since the hole opened. Only the span the server no longer has is a hole,
+    # and that is what gets recorded. The caller publishes the re-based state
+    # before failing.
+    if [ -n "$last_archived" ] && [ "$ARCHIVE_CURSOR_SEEN" = false ]; then
+        archive_fetch_closed_logs "" || return $?
+        gap_through="$(archive_first_closed_log_epoch)"
+        if [ "$gap_through" -lt "$previous_coverage" ]; then
+            gap_through="$previous_coverage"
+        fi
+        archive_record_coverage_gap "$last_archived" "$previous_coverage" "$gap_through" || return "$EXIT_BINLOG_ARCHIVE"
+        archive_pin_coverage
+        ARCHIVE_LAST_CLOSED="$ARCHIVE_PROCESSED_LAST"
+        ARCHIVE_DEFERRED_EXIT="$EXIT_BINLOG_ARCHIVE"
+        ARCHIVE_DEFERRED_PHASE="$BACKUP_PHASE"
+        backup_log error binlog_state reason last_closed_file_missing file "$last_archived" \
+            rebased_to "${ARCHIVE_PROCESSED_LAST:-none}" gap_from_epoch "$previous_coverage" gap_through_epoch "$gap_through"
+        return 0
+    fi
     # A closed binlog that is already past the retention ceiling cannot be
     # archived, so the recoverable window has a hole. Publishing coverage across
     # it would report success while a later PITR fails on the missing file.
     if [ "$ARCHIVE_RETENTION_GAP" = true ]; then
+        archive_pin_coverage
+        ARCHIVE_DEFERRED_EXIT="$EXIT_BINLOG_ARCHIVE"
+        ARCHIVE_DEFERRED_PHASE="$BACKUP_PHASE"
         backup_log error binlog_coverage_gap reason unarchivable_file_past_retention \
+            coverage_through "${ARCHIVE_COVERAGE_UTC:-none}" \
             remedy "take a new full backup to re-base the point-in-time coordinate"
-        return "$EXIT_BINLOG_ARCHIVE"
     fi
-    if [ -n "$last_archived" ] && [ "$seen_state" = false ]; then
-        backup_log error binlog_state reason last_closed_file_missing file "$last_archived"
-        return "$EXIT_BINLOG_ARCHIVE"
+    if [ -z "$ARCHIVE_PROCESSED_LAST" ]; then
+        ARCHIVE_PROCESSED_LAST="$last_archived"
     fi
-    if [ -z "$processed_last" ]; then
-        processed_last="$last_archived"
+    if [ -z "$ARCHIVE_PROCESSED_LAST" ] && [ "${#ARCHIVE_SERVER_LOGS[@]}" -gt 1 ]; then
+        IFS=$'\t' read -r ARCHIVE_PROCESSED_LAST _ _ <<< "${ARCHIVE_SERVER_LOGS[-2]}"
     fi
-    if [ -z "$processed_last" ] && [ "${#ARCHIVE_SERVER_LOGS[@]}" -gt 1 ]; then
-        IFS=$'\t' read -r processed_last _ _ <<< "${ARCHIVE_SERVER_LOGS[-2]}"
-    fi
-    ARCHIVE_LAST_CLOSED="$processed_last"
+    ARCHIVE_LAST_CLOSED="$ARCHIVE_PROCESSED_LAST"
 }
 
 archive_publish_state() {
     local state="$CONNEX_BACKUP_ROOT/binlog/archive-state"
     local temporary="$state.tmp.$$"
-    if [ "$CONNEX_BACKUP_BINLOG_FLUSH" = false ] && [ -n "$ARCHIVE_LAST_CLOSED" ] && [ -f "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" ]; then
+    if [ "$ARCHIVE_COVERAGE_PINNED" = false ] && [ "$CONNEX_BACKUP_BINLOG_FLUSH" = false ] && [ -n "$ARCHIVE_LAST_CLOSED" ] && [ -f "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" ]; then
         ARCHIVE_COVERAGE_EPOCH="$(backup_meta_value "$CONNEX_BACKUP_ROOT/binlog/$ARCHIVE_LAST_CLOSED.meta" last_event_epoch)" || return "$EXIT_BINLOG_ARCHIVE"
         ARCHIVE_COVERAGE_UTC="$(date -u -d "@$ARCHIVE_COVERAGE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
     fi
@@ -421,6 +637,7 @@ archive_run() {
     BACKUP_PHASE=binlog_preflight
     archive_preflight || return $?
     archive_validate_state || return $?
+    archive_recover_publications || return $?
     BACKUP_PHASE=binlog_rotation
     archive_rotate_and_list || return $?
     archive_verify_server_retention || return $?
@@ -428,6 +645,13 @@ archive_run() {
     archive_process_logs || return $?
     BACKUP_PHASE=binlog_publish
     archive_publish_state || return "$EXIT_BINLOG_ARCHIVE"
+    # A coverage hole fails the run, but only after the state it discovered has
+    # been written down: failing first would discard the re-based cursor and the
+    # pinned coverage, and the next run would rediscover the same hole forever.
+    if [ "$ARCHIVE_DEFERRED_EXIT" -ne 0 ]; then
+        BACKUP_PHASE="$ARCHIVE_DEFERRED_PHASE"
+        return "$ARCHIVE_DEFERRED_EXIT"
+    fi
 }
 
 main() {

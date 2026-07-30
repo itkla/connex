@@ -11,11 +11,12 @@ import lombok.RequiredArgsConstructor;
 /**
  * Operator-consumable Prometheus metrics endpoint.
  *
- * <p>Session-authenticated users and callers holding the operator-configured scrape token can read
- * this instance-global telemetry. The endpoint deliberately bypasses tenant resolution because it
- * contains no workspace data. Connex has no login-capable platform-admin authority yet, so every
- * authenticated session can temporarily read it; a future instance-admin role must replace that
- * session gate.
+ * <p>Only a caller holding the operator-configured scrape token can read this instance-global
+ * telemetry: the security chain gates every method on this path behind the
+ * {@code METRICS_SCRAPE} authority, which the scrape-token filter is the sole source of. An
+ * ordinary authenticated session cannot read it. The endpoint deliberately bypasses tenant
+ * resolution because it contains no workspace data. With no scrape token configured the endpoint
+ * is unavailable to everyone.
  */
 @RestController
 @RequestMapping("/api/metrics")

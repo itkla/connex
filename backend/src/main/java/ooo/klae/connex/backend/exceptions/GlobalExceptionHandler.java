@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
@@ -29,6 +31,14 @@ import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
+/**
+ * Maps domain and framework exceptions to sanitized HTTP responses.
+ *
+ * <p>Logging here is metadata-only: exception class names and stack frames may be emitted, never
+ * throwable messages, because those can carry connection strings, key identifiers and other
+ * deployment secrets. Log through {@link #stackDetail(Throwable)} rather than passing a throwable
+ * to the logger.
+ */
 @RestControllerAdvice
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
@@ -114,7 +124,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<String> illegalState(IllegalStateException ex) {
-        log.warn("Illegal state", ex);
+        log.warn("Illegal state: exception={} detail={}", ex.getClass().getName(), stackDetail(ex));
         return ResponseEntity.status(HttpStatus.CONFLICT).body("The request conflicts with the current state");
     }
 
@@ -125,14 +135,27 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SecretUnavailableException.class)
     public ResponseEntity<String> secretUnavailable(SecretUnavailableException ex) {
-        log.warn("Encrypted secret unavailable", ex);
+        log.warn("Encrypted secret unavailable: exception={} detail={}",
+                ex.getClass().getName(), stackDetail(ex));
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Encrypted secret is unavailable");
     }
 
     @ExceptionHandler(ServiceUnavailableException.class)
     public ResponseEntity<String> serviceUnavailable(ServiceUnavailableException ex) {
-        log.warn("Refusing request this deployment cannot serve safely", ex);
+        log.warn("Refusing request this deployment cannot serve safely: exception={} detail={}",
+                ex.getClass().getName(), stackDetail(ex));
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("This deployment cannot serve the request");
+    }
+
+    @ExceptionHandler(IdentityCollisionReportTimeoutException.class)
+    public ResponseEntity<Map<String, String>> identityCollisionReportTimeout(
+            IdentityCollisionReportTimeoutException ex) {
+        log.warn("Identity collision report deadline exceeded: exception={} detail={}",
+                ex.getClass().getName(), stackDetail(ex));
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("code", IdentityCollisionReportTimeoutException.CODE);
+        body.put("message", IdentityCollisionReportTimeoutException.MESSAGE);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
     @ExceptionHandler(ConflictException.class)
@@ -162,11 +185,22 @@ public class GlobalExceptionHandler {
                 .body("Missing required multipart part: " + ex.getRequestPartName());
     }
 
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<String> mediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body("Unsupported media type");
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(ex.getStatusCode())
                 .headers(ex.getHeaders())
                 .body("Request method is not supported");
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<String> resourceNotFound(NoResourceFoundException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body("Resource not found");
     }
 
     @ExceptionHandler(RequestBodyTooLargeException.class)
@@ -195,6 +229,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> internalError(Exception ex, HttpServletRequest request) {
         String correlationId = CorrelationIds.current();
+        String detail = stackDetail(ex);
         try {
             errorReporter.report(new ReportedError(
                     Source.SERVER,
@@ -202,11 +237,14 @@ public class GlobalExceptionHandler {
                     tenantContext.getWorkspaceId(),
                     tenantContext.getUserId(),
                     ex.getClass().getName(),
-                    stackDetail(ex),
+                    detail,
                     request.getRequestURI()));
         } catch (Throwable reportingFailure) {
-            log.error("Application error reporter failed", reportingFailure);
-            log.error("Unhandled exception", ex);
+            log.error("Application error reporter failed: reporter={} reporterDetail={} exception={} detail={}",
+                    reportingFailure.getClass().getName(),
+                    stackDetail(reportingFailure),
+                    ex.getClass().getName(),
+                    detail);
         }
         Map<String, String> response = new LinkedHashMap<>();
         response.put("message", "An unexpected error occurred");

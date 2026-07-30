@@ -14,8 +14,10 @@ import lombok.Data;
  * {@code single-database} (the default, and the only mode for on-prem/silo
  * deployments) never switches catalogs and fails closed when an organization's
  * placement demands routing. {@code catalog-per-placement} switches the pooled
- * connection to the org's {@code database_handle} at checkout and resets it on
- * return; off-request-thread work resolves the tenant catalog via
+ * connection to the org's {@code database_handle} at checkout, temporarily
+ * returns physically control-only mapper statements to the default catalog on
+ * the same transaction-bound connection, and resets it on return;
+ * off-request-thread work resolves the tenant catalog via
  * {@code TenantWorkScope}. It must not be enabled in production until the
  * flag-enable gate (#485) clears.
  */

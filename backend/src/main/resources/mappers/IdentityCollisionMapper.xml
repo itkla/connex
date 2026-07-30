@@ -3,40 +3,51 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.IdentityCollisionMapper">
 
-  <sql id="visibleCollisionMembers">
+  <sql id="visiblePersonRestriction">
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
+  </sql>
+
+  <sql id="visiblePersonCollisionGroups">
     SELECT 'person' AS record_type,
            pi.kind,
            pi.normalized_value,
-           pi.person_id AS record_id,
-           p.name AS record_name,
-           ic.rebuilt_at
-    FROM identity_collision ic
-    JOIN person_identity pi
-      ON pi.workspace_id = ic.workspace_id
-      AND pi.id = ic.person_identity_id
+           COUNT(*) AS collision_size,
+           MAX(ic.rebuilt_at) AS rebuilt_at
+    FROM person_identity pi
+    JOIN identity_collision ic
+      ON ic.workspace_id = pi.workspace_id
+      AND ic.person_identity_id = pi.id
     JOIN person p
       ON p.workspace_id = pi.workspace_id
       AND p.id = pi.person_id
-    WHERE ic.workspace_id = #{workspaceId}
-      AND ic.person_identity_id IS NOT NULL
-      AND p.suspended_at IS NULL
-      AND p.provision_ceased_at IS NULL
-    UNION ALL
+    WHERE pi.workspace_id = #{workspaceId}
+      AND pi.superseded_at IS NULL
+      <if test="kind != null">
+        AND pi.kind = #{kind}
+      </if>
+      <include refid="visiblePersonRestriction"/>
+    GROUP BY pi.kind, pi.normalized_value
+    HAVING COUNT(*) &gt;= 2
+  </sql>
+
+  <sql id="visibleCompanyCollisionGroups">
     SELECT 'company' AS record_type,
            ci.kind,
            ci.normalized_value,
-           ci.company_id AS record_id,
-           c.name AS record_name,
-           ic.rebuilt_at
-    FROM identity_collision ic
-    JOIN company_identity ci
-      ON ci.workspace_id = ic.workspace_id
-      AND ci.id = ic.company_identity_id
-    JOIN company c
-      ON c.workspace_id = ci.workspace_id
-      AND c.id = ci.company_id
-    WHERE ic.workspace_id = #{workspaceId}
-      AND ic.company_identity_id IS NOT NULL
+           COUNT(*) AS collision_size,
+           MAX(ic.rebuilt_at) AS rebuilt_at
+    FROM company_identity ci
+    JOIN identity_collision ic
+      ON ic.workspace_id = ci.workspace_id
+      AND ic.company_identity_id = ci.id
+    WHERE ci.workspace_id = #{workspaceId}
+      AND ci.superseded_at IS NULL
+      <if test="kind != null">
+        AND ci.kind = #{kind}
+      </if>
+    GROUP BY ci.kind, ci.normalized_value
+    HAVING COUNT(*) &gt;= 2
   </sql>
 
   <delete id="deleteForWorkspace">
@@ -58,10 +69,12 @@
         ON p.workspace_id = pi.workspace_id
         AND p.id = pi.person_id
       WHERE pi.workspace_id = #{workspaceId}
+        AND pi.superseded_at IS NULL
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
     ) collision
     WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
   </insert>
 
   <insert id="insertCompanyCollisionMembers">
@@ -78,76 +91,194 @@
         ON c.workspace_id = ci.workspace_id
         AND c.id = ci.company_id
       WHERE ci.workspace_id = #{workspaceId}
+        AND ci.superseded_at IS NULL
     ) collision
     WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
   </insert>
 
-  <select id="findVisibleGroups"
-          resultType="ooo.klae.connex.backend.dto.IdentityCollisionGroupRow">
-    WITH visible_collision_members AS (
-      <include refid="visibleCollisionMembers"/>
-    )
-    SELECT record_type,
-           kind,
-           normalized_value,
-           COUNT(*) AS collision_size,
-           MAX(rebuilt_at) AS rebuilt_at
-    FROM visible_collision_members
-    <where>
-      <if test="recordType != null">record_type = #{recordType}</if>
-      <if test="kind != null">AND kind = #{kind}</if>
-    </where>
-    GROUP BY record_type, kind, normalized_value
-    HAVING COUNT(*) &gt;= 2
-    ORDER BY record_type, kind, normalized_value
-    LIMIT #{limit} OFFSET #{offset}
+  <delete id="deletePersonCollisionGroup">
+    DELETE ic
+    FROM identity_collision ic
+    JOIN person_identity pi
+      ON pi.workspace_id = ic.workspace_id
+      AND pi.id = ic.person_identity_id
+    WHERE ic.workspace_id = #{workspaceId}
+      AND pi.kind = #{kind}
+      AND pi.normalized_value = #{normalizedValue}
+  </delete>
+
+  <insert id="insertPersonCollisionGroup">
+    INSERT INTO identity_collision (workspace_id, person_identity_id, rebuilt_at)
+    SELECT collision.workspace_id, collision.identity_id, #{rebuiltAt}
+    FROM (
+      SELECT pi.workspace_id,
+             pi.id AS identity_id,
+             COUNT(*) OVER () AS collision_size
+      FROM person_identity pi
+      JOIN person p
+        ON p.workspace_id = pi.workspace_id
+        AND p.id = pi.person_id
+      WHERE pi.workspace_id = #{workspaceId}
+        AND pi.kind = #{kind}
+        AND pi.normalized_value = #{normalizedValue}
+        AND pi.superseded_at IS NULL
+        AND p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+    ) collision
+    WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
+  <delete id="deleteCompanyCollisionGroup">
+    DELETE ic
+    FROM identity_collision ic
+    JOIN company_identity ci
+      ON ci.workspace_id = ic.workspace_id
+      AND ci.id = ic.company_identity_id
+    WHERE ic.workspace_id = #{workspaceId}
+      AND ci.kind = #{kind}
+      AND ci.normalized_value = #{normalizedValue}
+  </delete>
+
+  <insert id="insertCompanyCollisionGroup">
+    INSERT INTO identity_collision (workspace_id, company_identity_id, rebuilt_at)
+    SELECT collision.workspace_id, collision.identity_id, #{rebuiltAt}
+    FROM (
+      SELECT ci.workspace_id,
+             ci.id AS identity_id,
+             COUNT(*) OVER () AS collision_size
+      FROM company_identity ci
+      JOIN company c
+        ON c.workspace_id = ci.workspace_id
+        AND c.id = ci.company_id
+      WHERE ci.workspace_id = #{workspaceId}
+        AND ci.kind = #{kind}
+        AND ci.normalized_value = #{normalizedValue}
+        AND ci.superseded_at IS NULL
+    ) collision
+    WHERE collision.collision_size &gt;= 2
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
+  <select id="countForWorkspace" resultType="long">
+    SELECT COUNT(*)
+    FROM identity_collision
+    WHERE workspace_id = #{workspaceId}
   </select>
 
-  <select id="countVisibleGroups" resultType="long">
-    WITH visible_collision_members AS (
-      <include refid="visibleCollisionMembers"/>
+  <select id="findVisibleGroupPage"
+          resultType="ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow"
+          timeout="3">
+    WITH collision_groups AS (
+      <choose>
+        <when test="recordType == 'person' or (recordType == null and kind == 'email')">
+          <include refid="visiblePersonCollisionGroups"/>
+        </when>
+        <when test="recordType == 'company' or (recordType == null and kind == 'domain')">
+          <include refid="visibleCompanyCollisionGroups"/>
+        </when>
+        <otherwise>
+          <include refid="visiblePersonCollisionGroups"/>
+          UNION ALL
+          <include refid="visibleCompanyCollisionGroups"/>
+        </otherwise>
+      </choose>
+    ),
+    collision_groups_with_sentinel AS (
+      SELECT record_type,
+             kind,
+             normalized_value,
+             collision_size,
+             rebuilt_at
+      FROM collision_groups
+      UNION ALL
+      SELECT NULL, NULL, NULL, NULL, NULL
+    ),
+    numbered_collision_groups AS (
+      SELECT record_type,
+             kind,
+             normalized_value,
+             collision_size,
+             rebuilt_at,
+             COUNT(record_type) OVER () AS total,
+             ROW_NUMBER() OVER (
+               ORDER BY record_type IS NULL, record_type, kind, normalized_value
+             ) AS page_ordinal
+      FROM collision_groups_with_sentinel
     )
-    SELECT COUNT(*)
-    FROM (
-      SELECT record_type, kind, normalized_value
-      FROM visible_collision_members
-      <where>
-        <if test="recordType != null">record_type = #{recordType}</if>
-        <if test="kind != null">AND kind = #{kind}</if>
-      </where>
-      GROUP BY record_type, kind, normalized_value
-      HAVING COUNT(*) &gt;= 2
-    ) collision_groups
+    SELECT /*+ MAX_EXECUTION_TIME(3000) */ record_type,
+           kind,
+           normalized_value,
+           collision_size,
+           rebuilt_at,
+           total,
+           page_ordinal
+    FROM numbered_collision_groups
+    WHERE (
+        record_type IS NOT NULL
+        AND page_ordinal &gt; #{offset}
+        AND page_ordinal &lt;= #{offset} + #{limit}
+      )
+      OR (
+        record_type IS NULL
+        AND total &lt;= #{offset}
+      )
+    ORDER BY page_ordinal
   </select>
 
   <select id="findVisibleMembers"
           resultType="ooo.klae.connex.backend.dto.IdentityCollisionMemberRow">
-    WITH visible_collision_members AS (
-      <include refid="visibleCollisionMembers"/>
-    ),
-    sized_collision_members AS (
-      SELECT record_type,
-             kind,
-             normalized_value,
-             record_id,
-             record_name,
-             COUNT(*) OVER (
-               PARTITION BY record_type, kind, normalized_value
-             ) AS collision_size
-      FROM visible_collision_members
-    )
     SELECT record_type, kind, normalized_value, record_id, record_name
-    FROM sized_collision_members
-    WHERE collision_size &gt;= 2
-      AND (
-        <foreach item="group" collection="groups" separator=" OR ">
-          (
-            record_type = #{group.recordType}
-            AND kind = #{group.kind}
-            AND normalized_value = #{group.normalizedValue}
-          )
-        </foreach>
-      )
+    FROM (
+      <foreach item="group" collection="groups" separator=" UNION ALL ">
+        <choose>
+          <when test="group.recordType == 'person'">
+            (SELECT 'person' AS record_type,
+                    pi.kind AS kind,
+                    pi.normalized_value AS normalized_value,
+                    pi.person_id AS record_id,
+                    p.name AS record_name
+             FROM person_identity pi
+             JOIN identity_collision ic
+               ON ic.workspace_id = pi.workspace_id
+               AND ic.person_identity_id = pi.id
+             JOIN person p
+               ON p.workspace_id = pi.workspace_id
+               AND p.id = pi.person_id
+             WHERE pi.workspace_id = #{workspaceId}
+               AND pi.superseded_at IS NULL
+               AND pi.kind = #{group.kind}
+               AND pi.normalized_value = #{group.normalizedValue}
+               AND pi.person_id &gt; #{afterRecordId}
+               <include refid="visiblePersonRestriction"/>
+             ORDER BY pi.person_id
+             LIMIT #{memberLimit})
+          </when>
+          <otherwise>
+            (SELECT 'company' AS record_type,
+                    ci.kind AS kind,
+                    ci.normalized_value AS normalized_value,
+                    ci.company_id AS record_id,
+                    c.name AS record_name
+             FROM company_identity ci
+             JOIN identity_collision ic
+               ON ic.workspace_id = ci.workspace_id
+               AND ic.company_identity_id = ci.id
+             JOIN company c
+               ON c.workspace_id = ci.workspace_id
+               AND c.id = ci.company_id
+             WHERE ci.workspace_id = #{workspaceId}
+               AND ci.superseded_at IS NULL
+               AND ci.kind = #{group.kind}
+               AND ci.normalized_value = #{group.normalizedValue}
+               AND ci.company_id &gt; #{afterRecordId}
+             ORDER BY ci.company_id
+             LIMIT #{memberLimit})
+          </otherwise>
+        </choose>
+      </foreach>
+    ) bounded_members
     ORDER BY record_type, kind, normalized_value, record_id
   </select>
 

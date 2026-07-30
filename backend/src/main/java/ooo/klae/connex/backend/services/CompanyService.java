@@ -28,7 +28,6 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
-import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -49,6 +48,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -83,6 +83,8 @@ public class CompanyService {
     private final ReferenceService referenceService;
     private final Clock clock;
     private final ManagedObjectService managedObjectService;
+    private final IdentityIntakeService identityIntakeService;
+    private final MatchingService matchingService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -108,7 +110,7 @@ public class CompanyService {
      * an ambiguous OCR candidate automatically.
      */
     public NormalizedCompanyMatches findVisibleByNormalizedName(String name) {
-        String key = BusinessCardTextNormalizer.companyKey(name);
+        String key = matchingService.normalizeName(name).orElse("");
         if (key.isBlank()) {
             return new NormalizedCompanyMatches(List.of(), false);
         }
@@ -121,7 +123,8 @@ public class CompanyService {
         boolean truncated = candidates.size() > COMPANY_NAME_CANDIDATE_LIMIT;
         List<Company> matches = candidates.stream()
                 .limit(COMPANY_NAME_CANDIDATE_LIMIT)
-                .filter(company -> key.equals(BusinessCardTextNormalizer.companyKey(company.getName())))
+                .filter(company -> key.equals(
+                    matchingService.normalizeName(company.getName()).orElse(null)))
                 .toList();
         return new NormalizedCompanyMatches(matches, truncated);
     }
@@ -340,6 +343,7 @@ public class CompanyService {
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
@@ -348,6 +352,9 @@ public class CompanyService {
         company.setCreatedAt(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
+        identityIntakeService.recordCompany(
+            company.getWorkspaceId(), company.getId(), company.getWebsite(), company.getPhone(),
+            IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
             auditService.diff(null, company, AUDIT_FIELDS));
@@ -359,26 +366,28 @@ public class CompanyService {
      * Ensures the website is unique within the company's workspace.
      */
     private void assertUniqueWebsite(Company company) {
-        String target = normalizeWebsite(company.getWebsite());
-        if (target.isEmpty()) return;
+        String legacyTarget = legacyWebsiteKey(company.getWebsite());
+        if (legacyTarget.isEmpty()) return;
+        String canonicalTarget = matchingService.normalizeIdentifier(
+            IdentityKind.DOMAIN, company.getWebsite()).orElse(null);
         for (Company other : companyMapper.getCompaniesWithWebsite(company.getWorkspaceId())) {
-            if (other.getId() == company.getId()) continue; // skip self (id is 0 on create)
-            if (target.equals(normalizeWebsite(other.getWebsite())))
+            if (other.getId() == company.getId()) continue;
+            boolean legacyMatch = legacyTarget.equals(legacyWebsiteKey(other.getWebsite()));
+            boolean canonicalMatch = canonicalTarget != null
+                && canonicalTarget.equals(matchingService.normalizeIdentifier(
+                    IdentityKind.DOMAIN, other.getWebsite()).orElse(null));
+            if (legacyMatch || canonicalMatch) {
                 throw new DuplicateResourceException("website", "A company with this website already exists");
+            }
         }
     }
 
-    /**
-     * Normalizes a website for comparison.
-     * Lowercases, trims, removes leading "www." and trailing slashes.
-     */
-    private static String normalizeWebsite(String website) {
+    private static String legacyWebsiteKey(String website) {
         if (website == null) return "";
-        String w = website.trim().toLowerCase();
-        w = w.replaceFirst("^https?://", "");
-        w = w.replaceFirst("^www\\.", "");
-        w = w.replaceAll("/+$", "");
-        return w;
+        String normalized = website.trim().toLowerCase(Locale.ROOT);
+        normalized = normalized.replaceFirst("^https?://", "");
+        normalized = normalized.replaceFirst("^www\\.", "");
+        return normalized.replaceAll("/+$", "");
     }
 
     /**
@@ -396,6 +405,9 @@ public class CompanyService {
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
         Company after = requireOwnedCompany(workspaceId, id);
+        identityIntakeService.recordCompany(
+            workspaceId, id, after.getWebsite(), after.getPhone(),
+            IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
         auditService.record("company.update", "company", id, after.getName(),
             "Updated company " + after.getName(),
             auditService.diff(before, after, AUDIT_FIELDS));

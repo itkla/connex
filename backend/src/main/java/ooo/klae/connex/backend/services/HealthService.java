@@ -10,55 +10,93 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.availability.ApplicationAvailability;
+import org.springframework.boot.availability.ReadinessState;
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Probes instance database and migration readiness without exposing diagnostic details.
+ * Probes instance database, migration, startup, and audit-guard readiness without exposing
+ * diagnostic details.
+ *
+ * <p>The append-only {@code audit_log} guard is reported but deliberately kept out of
+ * {@link Readiness#isUp()}: no application statement can update {@code audit_log}, so a
+ * missing trigger is a defence-in-depth regression to alert on, never a reason to take an
+ * instance out of rotation. A deployment whose application user lacks the {@code TRIGGER}
+ * privilege cannot see the trigger at all and must not be failed for it.
  */
 @Service
 public class HealthService {
+    private static final Logger log = LoggerFactory.getLogger(HealthService.class);
     private static final long CACHE_NANOS = TimeUnit.SECONDS.toNanos(3);
 
     private final DataSource dataSource;
     private final Flyway flyway;
     private final TenantWorkScope tenantWorkScope;
+    private final AuditIntegrityMapper auditIntegrityMapper;
+    private final ApplicationAvailability applicationAvailability;
     private final long cacheNanos;
 
     private final ReentrantLock probeLock = new ReentrantLock();
 
     private volatile Snapshot snapshot;
+    private volatile Status lastAuditGuardStatus;
 
     @Autowired
-    public HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope) {
-        this(dataSource, flyway, tenantWorkScope, CACHE_NANOS);
+    public HealthService(
+            DataSource dataSource,
+            Flyway flyway,
+            TenantWorkScope tenantWorkScope,
+            AuditIntegrityMapper auditIntegrityMapper,
+            ApplicationAvailability applicationAvailability) {
+        this(
+                dataSource,
+                flyway,
+                tenantWorkScope,
+                auditIntegrityMapper,
+                applicationAvailability,
+                CACHE_NANOS);
     }
 
-    HealthService(DataSource dataSource, Flyway flyway, TenantWorkScope tenantWorkScope, long cacheNanos) {
+    HealthService(
+            DataSource dataSource,
+            Flyway flyway,
+            TenantWorkScope tenantWorkScope,
+            AuditIntegrityMapper auditIntegrityMapper,
+            ApplicationAvailability applicationAvailability,
+            long cacheNanos) {
         this.dataSource = dataSource;
         this.flyway = flyway;
         this.tenantWorkScope = tenantWorkScope;
+        this.auditIntegrityMapper = auditIntegrityMapper;
+        this.applicationAvailability = applicationAvailability;
         this.cacheNanos = cacheNanos;
     }
 
     /**
-     * Returns a briefly cached readiness snapshot.
+     * Returns the dependency readiness snapshot composed with the current startup status.
      *
-     * <p>Only one caller probes at a time; while a probe is in flight, concurrent callers are
-     * served the previous snapshot (even a just-expired one) instead of queueing request threads
-     * behind a potentially slow database probe.
+     * <p>Only the database and migration probes are cached, and only one caller probes at a time;
+     * while a probe is in flight, concurrent callers are served the previous probe result (even a
+     * just-expired one) instead of queueing request threads behind a potentially slow database
+     * probe. Startup readiness is read on every call so the flip to accepting traffic — published
+     * by Spring Boot only after every {@code ApplicationRunner} completes — is observed
+     * immediately rather than up to one cache window late.
      *
-     * @return the database and migration readiness statuses
+     * @return the database, migration and startup readiness statuses
      */
     public Readiness readiness() {
         Snapshot current = snapshot;
         if (isCurrent(current, System.nanoTime())) {
-            return current.readiness();
+            return compose(current);
         }
         if (current != null && !probeLock.tryLock()) {
-            return current.readiness();
+            return compose(current);
         }
         if (current == null) {
             probeLock.lock();
@@ -66,15 +104,30 @@ public class HealthService {
         try {
             current = snapshot;
             if (isCurrent(current, System.nanoTime())) {
-                return current.readiness();
+                return compose(current);
             }
-            Readiness readiness = tenantWorkScope.unrouted(
-                    () -> new Readiness(status(databaseReady()), status(migrationsReady())));
-            snapshot = new Snapshot(System.nanoTime(), readiness);
-            return readiness;
+            Snapshot probed = tenantWorkScope.unrouted(() -> new Snapshot(
+                    System.nanoTime(),
+                    status(databaseReady()),
+                    status(migrationsReady()),
+                    auditGuardStatus()));
+            snapshot = probed;
+            return compose(probed);
         } finally {
             probeLock.unlock();
         }
+    }
+
+    private Readiness compose(Snapshot probed) {
+        return new Readiness(
+                probed.db(),
+                probed.migrations(),
+                startupStatus(),
+                probed.auditGuard());
+    }
+
+    private Status startupStatus() {
+        return status(applicationAvailability.getReadinessState() == ReadinessState.ACCEPTING_TRAFFIC);
     }
 
     private boolean isCurrent(Snapshot snapshot, long now) {
@@ -106,6 +159,30 @@ public class HealthService {
         }
     }
 
+    private Status auditGuardStatus() {
+        Status current = status(auditAppendOnlyGuardInstalled());
+        Status previous = lastAuditGuardStatus;
+        lastAuditGuardStatus = current;
+        if (current == previous) {
+            return current;
+        }
+        if (current == Status.DOWN) {
+            log.error("The three exact append-only audit_log guards are not visible on this catalog; "
+                    + "the immutability control is degraded until all three are restored");
+        } else if (previous != null) {
+            log.info("All three exact append-only audit_log guards are installed again");
+        }
+        return current;
+    }
+
+    private boolean auditAppendOnlyGuardInstalled() {
+        try {
+            return auditIntegrityMapper.appendOnlyGuardInstalled();
+        } catch (Throwable exception) {
+            return false;
+        }
+    }
+
     private static Status status(boolean ready) {
         return ready ? Status.UP : Status.DOWN;
     }
@@ -123,18 +200,20 @@ public class HealthService {
      *
      * @param db database connectivity status
      * @param migrations migration status
+     * @param startup startup-runner completion status
+     * @param auditGuard append-only audit-log guard status, reported but not gating
      */
-    public record Readiness(Status db, Status migrations) {
+    public record Readiness(Status db, Status migrations, Status startup, Status auditGuard) {
         /**
-         * Returns whether every readiness check is up.
+         * Returns whether every rotation-gating readiness check is up.
          *
          * @return whether the instance is ready
          */
         public boolean isUp() {
-            return db == Status.UP && migrations == Status.UP;
+            return db == Status.UP && migrations == Status.UP && startup == Status.UP;
         }
     }
 
-    private record Snapshot(long probedAtNanos, Readiness readiness) {
+    private record Snapshot(long probedAtNanos, Status db, Status migrations, Status auditGuard) {
     }
 }

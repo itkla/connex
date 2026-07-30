@@ -9,11 +9,13 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -38,6 +40,12 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * </ol>
  * The target workspace, organization, and default role are read only from the stored
  * {@link SsoConnection}; nothing about the destination is taken from the caller.
+ *
+ * <p>Returning identities pin their stored user before the organization. Existing-account JIT
+ * resolution pins the stored user, JIT workspace, and organization in that order. A new JIT user
+ * has no user root to lock, so its stored workspace and organization are pinned before the
+ * account is inserted. Every path revalidates its discovered identity or connection after those
+ * locks, preventing federation side effects across a lifecycle fence.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +55,7 @@ public class SsoLoginService {
     private final UserMapper userMapper;
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
+    private final TenantLifecycleControlMapper tenantLifecycleControlMapper;
     private final WorkspaceService workspaceService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final SsoUserProvisioner ssoUserProvisioner;
@@ -62,8 +71,9 @@ public class SsoLoginService {
      * @param orgId the organization whose connection minted this login
      * @param displayName the IdP-asserted display name, used when provisioning
      * @return a login outcome, or a link-required outcome when the email collides with a password account
-     * @throws ForbiddenException when the email is unverified, its domain is not owned by this
-     *         organization, or the account is already federated to a different organization
+     * @throws ForbiddenException when the organization is being removed, the email is unverified,
+     *         its domain is not owned by this organization, or the account is already federated to
+     *         a different organization
      * @throws BadRequestException when the organization has no SSO connection
      */
     @Transactional
@@ -72,8 +82,7 @@ public class SsoLoginService {
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
-            federatedIdentityMapper.touchLogin(identity.getId());
-            return SsoLoginResult.login(userMapper.getUserById(identity.getUserId()));
+            return resolveReturningIdentity(identity, provider, issuer, subject, orgId);
         }
 
         if (!emailVerified) {
@@ -101,6 +110,14 @@ public class SsoLoginService {
 
         User user = userMapper.getUserByEmail(email);
         if (user != null) {
+            user = lockExistingJitRoots(
+                user,
+                connection,
+                provider,
+                issuer,
+                subject,
+                email,
+                orgId);
             if (user.getPassword() != null) {
                 return SsoLoginResult.linkRequired(user.getId(), provider, issuer, subject, orgId);
             }
@@ -108,6 +125,13 @@ public class SsoLoginService {
                 throw new ForbiddenException("This account is managed by a different organization");
             }
         } else {
+            lockNewJitRoots(
+                connection,
+                provider,
+                issuer,
+                subject,
+                email,
+                orgId);
             user = ssoUserProvisioner.provision(email, displayName, true);
             auditService.record("org.sso_user.provision", "organization", orgId, user.getDisplayName(),
                     "SSO user provisioned", Map.of("userId", user.getId(), "provider", provider));
@@ -127,6 +151,104 @@ public class SsoLoginService {
                 "Federated identity linked", Map.of("userId", user.getId(), "provider", provider));
 
         return SsoLoginResult.login(user);
+    }
+
+    private SsoLoginResult resolveReturningIdentity(
+            FederatedIdentity discovered,
+            String provider,
+            String issuer,
+            String subject,
+            int orgId) {
+        User user = userMapper.getUserByIdForShare(discovered.getUserId());
+        if (user == null) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
+        requireActiveOrganization(orgId);
+        FederatedIdentity current = federatedIdentityMapper.findByOrgProviderIssuerSubject(
+            orgId,
+            provider,
+            issuer,
+            subject);
+        if (!discovered.equals(current) || current.getUserId() != user.getId()) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
+        federatedIdentityMapper.touchLogin(current.getId());
+        return SsoLoginResult.login(user);
+    }
+
+    private User lockExistingJitRoots(
+            User discovered,
+            SsoConnection connection,
+            String provider,
+            String issuer,
+            String subject,
+            String email,
+            int orgId) {
+        User user = userMapper.getUserByIdForShare(discovered.getId());
+        if (user == null) {
+            throw new ForbiddenException("SSO account resolution changed; retry sign-in");
+        }
+        lockJitWorkspace(connection, orgId);
+        requireActiveOrganization(orgId);
+        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId);
+        User currentByEmail = userMapper.getUserByEmail(email);
+        if (currentByEmail == null || currentByEmail.getId() != user.getId()) {
+            throw new ForbiddenException("SSO account resolution changed; retry sign-in");
+        }
+        return user;
+    }
+
+    private void lockNewJitRoots(
+            SsoConnection connection,
+            String provider,
+            String issuer,
+            String subject,
+            String email,
+            int orgId) {
+        lockJitWorkspace(connection, orgId);
+        requireActiveOrganization(orgId);
+        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId);
+        if (userMapper.getUserByEmail(email) != null) {
+            throw new ForbiddenException("SSO account resolution changed; retry sign-in");
+        }
+    }
+
+    private void lockJitWorkspace(SsoConnection connection, int orgId) {
+        Integer workspaceId = connection.getJitWorkspaceId();
+        WorkspaceLifecycleRef workspace = workspaceId == null
+            ? null
+            : tenantLifecycleControlMapper.lockWorkspaceForShare(workspaceId);
+        if (workspace == null
+                || workspace.orgId() != orgId
+                || !"active".equals(workspace.lifecycleState())) {
+            throw new ForbiddenException(
+                "SSO provisioning is unavailable while its target workspace is being removed");
+        }
+    }
+
+    private void requireJitStateUnchanged(
+            SsoConnection discovered,
+            String provider,
+            String issuer,
+            String subject,
+            String email,
+            int orgId) {
+        SsoConnection current = ssoConnectionMapper.findByOrg(orgId);
+        if (!discovered.equals(current)
+                || federatedIdentityMapper.findByProviderIssuerSubject(
+                    provider,
+                    issuer,
+                    subject) != null
+                || !isDomainAuthorizedForOrg(email, orgId)
+                || !orgAllowedDomainService.isJoinAllowedForShare(orgId, email)) {
+            throw new ForbiddenException("SSO account resolution changed; retry sign-in");
+        }
+    }
+
+    private void requireActiveOrganization(int orgId) {
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(orgId) == null) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
     }
 
     private boolean isDomainAuthorizedForOrg(String email, int orgId) {

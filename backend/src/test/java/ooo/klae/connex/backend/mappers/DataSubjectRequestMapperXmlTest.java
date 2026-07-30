@@ -53,7 +53,16 @@ class DataSubjectRequestMapperXmlTest {
         assertTrue(auditSql.contains("entity_id = ?"));
 
         Set<String> expectedStatements = Set.of(
-            "insert", "update", "findById", "findByOrg", "findDisclosureAudit", "countDisclosureAudit");
+            "insert", "update", "findById", "findByIdForUpdate", "findByOrg",
+            "findDisclosureAudit", "countDisclosureAudit");
+        parameters.put("requestId", 7L);
+        String lockingSql = configuration.getMappedStatement(
+            DataSubjectRequestMapper.class.getName() + ".findByIdForUpdate")
+            .getBoundSql(parameters)
+            .getSql();
+        assertTrue(lockingSql.contains("org_id = ?"));
+        assertTrue(lockingSql.contains("id = ?"));
+        assertTrue(lockingSql.contains("FOR UPDATE"));
         String namespacePrefix = DataSubjectRequestMapper.class.getName() + ".";
         for (MappedStatement statement : new HashSet<>(configuration.getMappedStatements())) {
             if (!statement.getId().startsWith(namespacePrefix) || statement.getId().contains("!")) {

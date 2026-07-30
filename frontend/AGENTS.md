@@ -6,7 +6,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Frontend — Agent Guide
 
-The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds frontend-specific rules. The Golden Rules — Explore→Plan→Question→Act, match existing patterns, docs-only comments, strict types, mandatory skills, mandatory review — are not optional here.
+The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds frontend-specific rules. The Golden Rules — Explore→Plan→Question→Act, match existing patterns, docs-only comments, strict types, scoped skills, and independent risk-tiered review — are not optional here.
 
 ## Stack
 
@@ -14,11 +14,11 @@ Next.js 16 (App Router, RSC) · React 19 · TypeScript strict · Tailwind v4 · 
 
 Path alias: `@/*` → project root. Utils at `@/lib/utils` (`cn`), UI at `@/components/ui`, hooks at `@/hooks`.
 
-## Skills are mandatory for UI work
+## Skills are mandatory when their scope matches
 
-Which skills you run depends on the scope of the change. Always run them **before** building, not after.
+Always run the smallest design-skill pipeline that covers the actual change, and run it **before** building. Do not spend three overlapping design passes on a routine component that extends an established pattern.
 
-### Full pipeline — new pages, redesigns, net-new components
+### Full pipeline — new pages, redesigns, or a new interaction/visual system
 
 Run all three **in this order** — broad to specific, each pass building on the last:
 
@@ -28,9 +28,9 @@ Run all three **in this order** — broad to specific, each pass building on the
 
 Don't reorder: polish (step 3) belongs on top of a settled structure (step 1), never before it.
 
-### Small in-place edits — tweaks to existing UI
+### Focused pipeline — routine components and in-place edits
 
-For minor changes to existing components/pages (spacing, copy, a single prop, a small style fix), run **`emil-design-eng`** only — skip `impeccable` and `design-taste-frontend`. If the "small" edit turns out to touch hierarchy, layout, or IA, stop and escalate to the full pipeline.
+For components that clearly extend an existing page/component pattern, or minor changes to existing UI (spacing, copy, a prop, a small style fix), run **`emil-design-eng`** only and ground the change in the live reference page. Skip `impeccable` and `design-taste-frontend` unless the work changes hierarchy, layout, information architecture, or establishes a reusable visual/interaction pattern. If it does, stop and escalate to the full pipeline.
 
 ## Design system — honor every source of truth
 
@@ -79,9 +79,17 @@ When in doubt, open a reference page and mirror it.
 - Color and contrast come from tokens (which carry the contrast guarantees) — don't hand-pick colors that break it.
 - Respect `prefers-reduced-motion` for animations (the `motion` lib + `review-animations` skill cover this).
 
-## Delegated work is plan-first
+## Delegated frontend work
 
-Any subagent dispatched to implement frontend work must first return a short plan — components/files to touch, design-system pieces reused, state/URL contracts, i18n keys, and the browser-verification steps — and get it reviewed by the orchestrator before editing code (see the root `AGENTS.md` → *Plan-first dispatch*). Discovery, review, and verification agents are exempt.
+Follow the root delegation tiers and budget.
+
+- The orchestrator writes the plan for Tier 1 and most Tier 2 frontend changes; do not dispatch a separate Plan agent to restate settled page/component contracts.
+- Use one mutating frontend owner. Split a second mutating lane only when the API contract is fixed and the file sets do not overlap.
+- Give every frontend agent exact routes, components, reference pages, state/URL contracts, i18n keys, responsive states, and browser-verification steps.
+- Reuse one context packet and one running browser session for related flows. Do not send several agents to rediscover the same reference page or repeat the same Playwright journey.
+- Standard frontend work needs one independent adversarial review. Add a second review only for a distinct Tier 3 concern such as auth/session, permission visibility, cross-workspace state, destructive bulk behavior, or a release-critical migration.
+
+Any subagent dispatched to implement frontend work must receive the approved plan before editing: components/files to touch, design-system pieces reused, state/URL contracts, i18n keys, and browser-verification steps. Discovery, review, and verification agents are exempt.
 
 ## Definition of Done (frontend)
 
@@ -89,7 +97,8 @@ Any subagent dispatched to implement frontend work must first return a short pla
 2. **Run the test harness.** `pnpm test` (vitest, pure logic under `test/unit/`) must pass, and if your change touches one of the covered flows, `pnpm e2e` (Playwright, `test/e2e/`) against a running stack must too — see [`docs/FRONTEND_TESTING.md`](../docs/FRONTEND_TESTING.md). Add or update unit tests when you change pure logic that already has coverage.
 3. **Verify in a real browser — this is the frontend test gate.** Run `pnpm dev`, then use the **Playwright MCP** to open the implemented page and confirm it renders and the flow completes with no console errors. Interactive browser verification is mandatory, not optional — the e2e suite covers only eight core flows. (Requires the Playwright MCP server connected — if absent, say so, don't skip.)
    - **Run the Playwright MCP in `--isolated` mode.** Several agents share this one clone, and Chrome lets only one process hold a profile at a time — the default shared profile serializes browsing to a single agent and fails the rest with `Browser is already in use for …/mcp-chrome-… use --isolated`. With `--isolated`, each agent gets its own fresh browser profile/context, so concurrent verification doesn't collide. Configure it where the server is registered, e.g. `npx @playwright/mcp@latest --isolated` (add `--headless` for CI/headless runs). Trade-off: an isolated profile starts logged-out, so make session login part of the verification flow (hit `/auth/login`, authenticate, then drive the page) rather than relying on a persisted session.
-4. `/code-review` **and** adversarial multi-agent review; address findings. Auth, invite, sharing, or permissions UI changes also get `/security-review`.
+   - Cover every materially changed path in one coherent verification pass where practical; duplicate browser runs are not a substitute for broader state coverage.
+4. Self-review the diff, then run **one independent adversarial review**. A matching `/code-review` satisfies this requirement. Auth, invite, sharing, cross-workspace state, or permissions UI changes additionally get `/security-review`; add a second reviewer only when the root Tier 3 rules require a distinct charter.
 
 ## Commands
 

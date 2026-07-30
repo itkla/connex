@@ -71,7 +71,7 @@ dependencies {
 	implementation("org.springframework.data:spring-data-commons:4.1.0")
 	implementation 'org.springframework.security:spring-security-webauthn'
 	implementation 'org.springframework.security:spring-security-messaging'
-	implementation platform('software.amazon.awssdk:bom:2.46.8')
+	implementation platform('software.amazon.awssdk:bom:2.49.4')
 	implementation 'software.amazon.awssdk:s3'
 	compileOnly 'io.micrometer:micrometer-registry-prometheus'
 	compileOnly 'org.projectlombok:lombok'
@@ -101,12 +101,13 @@ tasks.named('test') {
 	forkEvery = 100
 }
 
+def seederRuntimeClasspath = sourceSets.main.output + configurations.productionRuntimeClasspath
+
 tasks.register('seedData', org.springframework.boot.gradle.tasks.run.BootRun) {
 	group = 'application'
 	description = 'Seeds deterministic tenant-scoped CRM data into a guarded database.'
-	mainClass = 'ooo.klae.connex.backend.BackendApplication'
-	classpath = sourceSets.main.runtimeClasspath
-	systemProperty 'spring.devtools.restart.enabled', 'false'
+	mainClass = 'ooo.klae.connex.backend.seeder.SeederApplication'
+	classpath = seederRuntimeClasspath
 	args '--spring.main.web-application-type=none',
 		'--spring.profiles.active=seeder',
 		'--connex.seeder.enabled=true'
@@ -122,4 +123,39 @@ tasks.register('seedData', org.springframework.boot.gradle.tasks.run.BootRun) {
 			args "--connex.seeder.${applicationProperty}=${propertyValue.get()}"
 		}
 	}
+}
+
+def verifySeederDevtoolsIsolation = tasks.register(
+	'verifySeederDevtoolsIsolation',
+	JavaExec
+) {
+	group = 'verification'
+	description = 'Proves the seeder runtime ignores Spring DevTools home configuration.'
+	dependsOn tasks.named('testClasses')
+	mainClass = 'ooo.klae.connex.backend.seeder.SeederDevToolsIsolationProbe'
+	classpath = sourceSets.test.output + seederRuntimeClasspath
+	doFirst {
+		def devtoolsArtifacts = classpath.files.findAll {
+			it.name.startsWith('spring-boot-devtools-')
+		}
+		if (!devtoolsArtifacts.isEmpty()) {
+			throw new GradleException('Seeder verification classpath contains Spring DevTools')
+		}
+		def devtoolsConfigDirectory = new File(
+			temporaryDir,
+			'.config/spring-boot'
+		)
+		if (!devtoolsConfigDirectory.mkdirs() && !devtoolsConfigDirectory.isDirectory()) {
+			throw new GradleException('Cannot create the seeder DevTools probe directory')
+		}
+		new File(
+			devtoolsConfigDirectory,
+			'spring-boot-devtools.properties'
+		).text = 'context.initializer.classes=ooo.klae.connex.backend.seeder.SeederDevToolsIsolationProbe$CanaryInitializer\n'
+		environment 'SPRING_DEVTOOLS_HOME', temporaryDir.absolutePath
+	}
+}
+
+tasks.named('test') {
+	dependsOn verifySeederDevtoolsIsolation
 }

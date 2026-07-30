@@ -44,7 +44,9 @@ class CompanySegmentServiceTest {
         segmentService,
         mock(ReferenceService.class),
         Clock.systemUTC(),
-        mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
+        mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+        mock(IdentityIntakeService.class),
+        mock(MatchingService.class)
     );
 
     @Test

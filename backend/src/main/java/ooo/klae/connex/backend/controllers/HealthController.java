@@ -31,7 +31,7 @@ public class HealthController {
     }
 
     /**
-     * Returns independently reduced database and migration readiness statuses.
+     * Returns independently reduced database, migration and startup readiness statuses.
      *
      * @return readiness with 200 when all checks pass or 503 otherwise
      */
@@ -40,7 +40,11 @@ public class HealthController {
         Readiness readiness = healthService.readiness();
         ReadinessResponse response = new ReadinessResponse(
                 readiness.isUp() ? Status.UP : Status.DOWN,
-                new Checks(readiness.db(), readiness.migrations()));
+                new Checks(
+                        readiness.db(),
+                        readiness.migrations(),
+                        readiness.startup(),
+                        readiness.auditGuard()));
         return ResponseEntity.status(readiness.isUp() ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
                 .body(response);
     }
@@ -67,7 +71,9 @@ public class HealthController {
      *
      * @param db database connectivity status
      * @param migrations migration status
+     * @param startup startup-runner completion status
+     * @param auditGuard append-only audit-log guard status, reported but not gating
      */
-    public record Checks(Status db, Status migrations) {
+    public record Checks(Status db, Status migrations, Status startup, Status auditGuard) {
     }
 }

@@ -14,6 +14,10 @@ public interface DataSubjectRequestMapper {
 
     DataSubjectRequest findById(@Param("orgId") int orgId, @Param("requestId") long requestId);
 
+    DataSubjectRequest findByIdForUpdate(
+        @Param("orgId") int orgId,
+        @Param("requestId") long requestId);
+
     List<DataSubjectRequest> findByOrg(@Param("orgId") int orgId,
         @Param("status") String status,
         @Param("limit") int limit,

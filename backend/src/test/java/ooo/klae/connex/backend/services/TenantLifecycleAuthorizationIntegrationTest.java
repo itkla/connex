@@ -236,7 +236,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
         exportService.prepare(
             organization.getId(),
             workspace.getId(),
-            currentUser.getId()).closeIfNotStarted();
+            currentUser.getId()).cancel();
     }
 
     private void expireStepUp() {

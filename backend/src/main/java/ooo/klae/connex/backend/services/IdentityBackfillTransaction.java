@@ -21,6 +21,10 @@ import ooo.klae.connex.backend.mappers.IdentityMapper;
 
 /**
  * Bounded transactions for canonical identity backfill pages and collision rebuilds.
+ *
+ * <p>Backfill provenance records the reconciliation time as {@code acquired_at}: pre-spine parent
+ * rows do not retain a trustworthy field-level acquisition timestamp, so their creation time must
+ * not be presented as one.
  */
 @Service
 @RequiredArgsConstructor
@@ -50,21 +54,34 @@ public class IdentityBackfillTransaction {
         if (candidates.isEmpty()) {
             return IdentityBackfillBatch.empty(afterPersonId);
         }
-        List<Integer> recordIds = candidates.stream()
+        List<PersonIdentityBackfillCandidate> lockedCandidates = candidates.stream()
+            .map(candidate ->
+                identityMapper.lockPersonIdentityParent(workspaceId, candidate.getId()))
+            .filter(Objects::nonNull)
+            .toList();
+        List<Integer> recordIds = lockedCandidates.stream()
             .map(candidate -> Objects.requireNonNull(candidate, "person candidate").getId())
             .toList();
-        Set<IdentityKey> existing = identityKeys(
-            identityMapper.findPersonIdentityKeys(workspaceId, recordIds));
+        Set<IdentityKey> existing = recordIds.isEmpty()
+            ? new HashSet<>()
+            : identityKeys(identityMapper.findPersonIdentityKeys(workspaceId, recordIds));
         int created = 0;
         int alreadyPresent = 0;
         int invalidEmail = 0;
         int invalidPhone = 0;
-        int skippedWrites = 0;
-        for (PersonIdentityBackfillCandidate candidate : candidates) {
+        int skippedWrites = candidates.size() - lockedCandidates.size();
+        LocalDateTime reconciledAt = utcNow();
+        for (PersonIdentityBackfillCandidate candidate : lockedCandidates) {
             String email = candidate.getEmail();
+            Optional<String> normalizedEmail =
+                matchingService.normalizeIdentifier(IdentityKind.EMAIL, email);
+            String normalizedEmailValue = normalizedEmail.orElse(null);
+            identityMapper.supersedePersonEmailIdentities(
+                workspaceId, candidate.getId(), email, normalizedEmailValue, reconciledAt);
+            retainCurrentKey(
+                existing, candidate.getId(), IdentityKind.EMAIL, normalizedEmailValue);
             if (email != null && !email.isBlank()) {
-                Optional<String> normalized =
-                    matchingService.normalizeIdentifier(IdentityKind.EMAIL, email);
+                Optional<String> normalized = normalizedEmail;
                 if (normalized.isEmpty()) {
                     invalidEmail++;
                 } else {
@@ -72,20 +89,33 @@ public class IdentityBackfillTransaction {
                         candidate.getId(), IdentityKind.EMAIL.getDatabaseValue(), normalized.orElseThrow());
                     if (existing.contains(key)) {
                         alreadyPresent++;
-                    } else if (identityMapper.insertBackfilledPersonEmailIfAbsent(
-                            workspaceId, candidate.getId(), email, normalized.orElseThrow()) == 1) {
-                        existing.add(key);
-                        created++;
                     } else {
-                        existing.add(key);
-                        skippedWrites++;
+                        int written = identityMapper.upsertPersonEmailIdentity(
+                            workspaceId, candidate.getId(), email, normalized.orElseThrow(),
+                            IdentityAcquisitionSource.BACKFILL.getDatabaseValue(),
+                            "person:" + candidate.getId(), reconciledAt);
+                        if (written == 1) {
+                            existing.add(key);
+                            created++;
+                        } else if (written == 2) {
+                            existing.add(key);
+                            alreadyPresent++;
+                        } else {
+                            skippedWrites++;
+                        }
                     }
                 }
             }
             String phone = candidate.getPhone();
+            Optional<String> normalizedPhone =
+                matchingService.normalizeIdentifier(IdentityKind.PHONE, phone);
+            String normalizedPhoneValue = normalizedPhone.orElse(null);
+            identityMapper.supersedePersonPhoneIdentities(
+                workspaceId, candidate.getId(), phone, normalizedPhoneValue, reconciledAt);
+            retainCurrentKey(
+                existing, candidate.getId(), IdentityKind.PHONE, normalizedPhoneValue);
             if (phone != null && !phone.isBlank()) {
-                Optional<String> normalized =
-                    matchingService.normalizeIdentifier(IdentityKind.PHONE, phone);
+                Optional<String> normalized = normalizedPhone;
                 if (normalized.isEmpty()) {
                     invalidPhone++;
                 } else {
@@ -93,13 +123,20 @@ public class IdentityBackfillTransaction {
                         candidate.getId(), IdentityKind.PHONE.getDatabaseValue(), normalized.orElseThrow());
                     if (existing.contains(key)) {
                         alreadyPresent++;
-                    } else if (identityMapper.insertBackfilledPersonPhoneIfAbsent(
-                            workspaceId, candidate.getId(), phone, normalized.orElseThrow()) == 1) {
-                        existing.add(key);
-                        created++;
                     } else {
-                        existing.add(key);
-                        skippedWrites++;
+                        int written = identityMapper.upsertPersonPhoneIdentity(
+                            workspaceId, candidate.getId(), phone, normalized.orElseThrow(),
+                            IdentityAcquisitionSource.BACKFILL.getDatabaseValue(),
+                            "person:" + candidate.getId(), reconciledAt);
+                        if (written == 1) {
+                            existing.add(key);
+                            created++;
+                        } else if (written == 2) {
+                            existing.add(key);
+                            alreadyPresent++;
+                        } else {
+                            skippedWrites++;
+                        }
                     }
                 }
             }
@@ -116,7 +153,7 @@ public class IdentityBackfillTransaction {
     }
 
     /**
-     * Backfills one keyset page of eligible company website domains.
+     * Backfills one keyset page of eligible company website-domain and phone values.
      * @param catalog pinned catalog used for failure context
      * @param workspaceId workspace being backfilled
      * @param afterCompanyId exclusive company cursor
@@ -132,37 +169,91 @@ public class IdentityBackfillTransaction {
         if (candidates.isEmpty()) {
             return IdentityBackfillBatch.empty(afterCompanyId);
         }
-        List<Integer> recordIds = candidates.stream()
+        List<CompanyIdentityBackfillCandidate> lockedCandidates = candidates.stream()
+            .map(candidate ->
+                identityMapper.lockCompanyIdentityParent(workspaceId, candidate.getId()))
+            .filter(Objects::nonNull)
+            .toList();
+        List<Integer> recordIds = lockedCandidates.stream()
             .map(candidate -> Objects.requireNonNull(candidate, "company candidate").getId())
             .toList();
-        Set<IdentityKey> existing = identityKeys(
-            identityMapper.findCompanyIdentityKeys(workspaceId, recordIds));
+        Set<IdentityKey> existing = recordIds.isEmpty()
+            ? new HashSet<>()
+            : identityKeys(identityMapper.findCompanyIdentityKeys(workspaceId, recordIds));
         int created = 0;
         int alreadyPresent = 0;
         int invalidDomain = 0;
-        int skippedWrites = 0;
-        for (CompanyIdentityBackfillCandidate candidate : candidates) {
+        int invalidPhone = 0;
+        int skippedWrites = candidates.size() - lockedCandidates.size();
+        LocalDateTime reconciledAt = utcNow();
+        for (CompanyIdentityBackfillCandidate candidate : lockedCandidates) {
             String website = candidate.getWebsite();
-            if (website == null || website.isBlank()) {
-                continue;
-            }
-            Optional<String> normalized =
+            Optional<String> normalizedDomain =
                 matchingService.normalizeIdentifier(IdentityKind.DOMAIN, website);
-            if (normalized.isEmpty()) {
-                invalidDomain++;
-                continue;
+            String normalizedDomainValue = normalizedDomain.orElse(null);
+            identityMapper.supersedeCompanyDomainIdentities(
+                workspaceId, candidate.getId(), website, normalizedDomainValue, reconciledAt);
+            retainCurrentKey(
+                existing, candidate.getId(), IdentityKind.DOMAIN, normalizedDomainValue);
+            if (website != null && !website.isBlank()) {
+                if (normalizedDomain.isEmpty()) {
+                    invalidDomain++;
+                } else {
+                    IdentityKey key = new IdentityKey(
+                        candidate.getId(), IdentityKind.DOMAIN.getDatabaseValue(),
+                        normalizedDomain.orElseThrow());
+                    if (existing.contains(key)) {
+                        alreadyPresent++;
+                    } else {
+                        int written = identityMapper.upsertCompanyDomainIdentity(
+                            workspaceId, candidate.getId(), website, normalizedDomain.orElseThrow(),
+                            IdentityAcquisitionSource.BACKFILL.getDatabaseValue(),
+                            "company:" + candidate.getId(), reconciledAt);
+                        if (written == 1) {
+                            existing.add(key);
+                            created++;
+                        } else if (written == 2) {
+                            existing.add(key);
+                            alreadyPresent++;
+                        } else {
+                            skippedWrites++;
+                        }
+                    }
+                }
             }
-            IdentityKey key = new IdentityKey(
-                candidate.getId(), IdentityKind.DOMAIN.getDatabaseValue(), normalized.orElseThrow());
-            if (existing.contains(key)) {
-                alreadyPresent++;
-            } else if (identityMapper.insertBackfilledCompanyDomainIfAbsent(
-                    workspaceId, candidate.getId(), website, normalized.orElseThrow()) == 1) {
-                existing.add(key);
-                created++;
-            } else {
-                existing.add(key);
-                skippedWrites++;
+            String phone = candidate.getPhone();
+            Optional<String> normalizedPhone =
+                matchingService.normalizeIdentifier(IdentityKind.PHONE, phone);
+            String normalizedPhoneValue = normalizedPhone.orElse(null);
+            identityMapper.supersedeCompanyPhoneIdentities(
+                workspaceId, candidate.getId(), phone, normalizedPhoneValue, reconciledAt);
+            retainCurrentKey(
+                existing, candidate.getId(), IdentityKind.PHONE, normalizedPhoneValue);
+            if (phone != null && !phone.isBlank()) {
+                if (normalizedPhone.isEmpty()) {
+                    invalidPhone++;
+                } else {
+                    IdentityKey key = new IdentityKey(
+                        candidate.getId(), IdentityKind.PHONE.getDatabaseValue(),
+                        normalizedPhone.orElseThrow());
+                    if (existing.contains(key)) {
+                        alreadyPresent++;
+                    } else {
+                        int written = identityMapper.upsertCompanyPhoneIdentity(
+                            workspaceId, candidate.getId(), phone, normalizedPhone.orElseThrow(),
+                            IdentityAcquisitionSource.BACKFILL.getDatabaseValue(),
+                            "company:" + candidate.getId(), reconciledAt);
+                        if (written == 1) {
+                            existing.add(key);
+                            created++;
+                        } else if (written == 2) {
+                            existing.add(key);
+                            alreadyPresent++;
+                        } else {
+                            skippedWrites++;
+                        }
+                    }
+                }
             }
         }
         return new IdentityBackfillBatch(
@@ -171,7 +262,7 @@ public class IdentityBackfillTransaction {
             created,
             alreadyPresent,
             0,
-            0,
+            invalidPhone,
             invalidDomain,
             skippedWrites);
     }
@@ -180,16 +271,16 @@ public class IdentityBackfillTransaction {
      * Atomically replaces one workspace's collision membership artifact.
      * @param catalog pinned catalog used for failure context
      * @param workspaceId workspace whose report is rebuilt
-     * @return inserted collision membership count
+     * @return collision membership count held by the workspace after the rebuild
      */
     @Transactional
     public int rebuildCollisionReport(String catalog, int workspaceId) {
         requireWorkspace(catalog, workspaceId);
-        LocalDateTime rebuiltAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
+        LocalDateTime rebuiltAt = utcNow();
         identityCollisionMapper.deleteForWorkspace(workspaceId);
-        int people = identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);
-        int companies = identityCollisionMapper.insertCompanyCollisionMembers(workspaceId, rebuiltAt);
-        return Math.addExact(people, companies);
+        identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);
+        identityCollisionMapper.insertCompanyCollisionMembers(workspaceId, rebuiltAt);
+        return Math.toIntExact(identityCollisionMapper.countForWorkspace(workspaceId));
     }
 
     private Set<IdentityKey> identityKeys(List<IdentityKeyRow> rows) {
@@ -204,6 +295,21 @@ public class IdentityBackfillTransaction {
             }
         }
         return keys;
+    }
+
+    private void retainCurrentKey(
+            Set<IdentityKey> keys,
+            int recordId,
+            IdentityKind kind,
+            String normalizedValue) {
+        keys.removeIf(key ->
+            key.recordId() == recordId
+                && kind.getDatabaseValue().equals(key.kind())
+                && !Objects.equals(normalizedValue, key.normalizedValue()));
+    }
+
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0);
     }
 
     private void requirePage(String catalog, int workspaceId, int afterId, int limit) {

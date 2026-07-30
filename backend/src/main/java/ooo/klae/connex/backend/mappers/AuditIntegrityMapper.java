@@ -17,4 +17,6 @@ public interface AuditIntegrityMapper {
         @Param("expectedNextChainIndex") long expectedNextChainIndex,
         @Param("newNextChainIndex") long newNextChainIndex,
         @Param("currentHash") String currentHash);
+
+    boolean appendOnlyGuardInstalled();
 }

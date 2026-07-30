@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
@@ -14,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
@@ -59,7 +62,6 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = {
         "connex.tenant-lifecycle.teardown-settle-delay=0s",
-        "connex.tenant-lifecycle.export-lease-wait-timeout=1s"
     })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
@@ -68,6 +70,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private TenantLifecycleControlMapper controlMapper;
+    @Autowired private TenantLifecycleControlOperations controlOperations;
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
@@ -78,15 +81,29 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private AiOutputCacheMapper aiOutputCacheMapper;
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private AuditIntegrityService auditIntegrityService;
+    @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private Organization drillOrganization;
+    private Organization otherOrganization;
     private Workspace drillWorkspace;
 
     @AfterEach
     void cleanCommittedDrillRoots() {
+        if (otherOrganization != null) {
+            jdbcTemplate.update(
+                "DELETE FROM organization WHERE id = ?",
+                otherOrganization.getId());
+        }
         if (drillOrganization != null) {
+            jdbcTemplate.update(
+                "DELETE FROM tenant_operation_lease WHERE org_id = ?",
+                drillOrganization.getId());
+            jdbcTemplate.update(
+                "UPDATE data_subject_request SET status = 'closed', closed_at = NOW()"
+                    + " WHERE org_id = ? AND status NOT IN ('closed', 'refused')",
+                drillOrganization.getId());
             WorkspaceLifecycleRef remaining = drillWorkspace == null
                 ? null
                 : controlMapper.findWorkspaceInOrg(
@@ -134,7 +151,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
 
         assertTrue(entries.containsKey("manifest.json"));
         assertTrue(entries.containsKey("data/person.jsonl"));
+        assertTrue(entries.containsKey("data/person_identity.jsonl"));
         assertTrue(entries.containsKey("data/company.jsonl"));
+        assertTrue(entries.containsKey("data/company_identity.jsonl"));
+        assertTrue(entries.containsKey("data/identity_collision.jsonl"));
         assertTrue(entries.containsKey("data/deal.jsonl"));
         assertTrue(entries.containsKey("data/activity.jsonl"));
         assertTrue(entries.containsKey("data/note.jsonl"));
@@ -148,6 +168,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(personJsonl.contains(fixture.restrictedPersonName()));
         assertTrue(personJsonl.contains("suspended_at"));
         assertTrue(personJsonl.contains("provision_ceased_at"));
+        assertTrue(text(entries, "data/person_identity.jsonl").contains("backfill"));
         assertArrayEquals(BINARY, entries.get("objects/" + fixture.objectKey()));
         String manifest = text(entries, "manifest.json");
         assertTrue(manifest.contains("\"schemaVersion\":1"));
@@ -239,6 +260,151 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             orgId) > 0);
     }
 
+    @Test
+    void openSubjectRequestBlocksTeardownAndTerminalDeletionClearsTheRetainedLink() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        Person subject = newPerson(newCompany());
+        long requestId = insertOpenSubjectRequest(orgId, workspaceId, subject.getId());
+
+        assertThrows(
+            ConflictException.class,
+            () -> teardownService.teardownWorkspace(
+                orgId,
+                workspaceId,
+                currentUser.getId(),
+                drillWorkspace.getSlug()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workspace WHERE id = ?",
+            Integer.class,
+            workspaceId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person WHERE id = ?",
+            Integer.class,
+            subject.getId()));
+
+        jdbcTemplate.update(
+            "UPDATE data_subject_request SET status = 'closed', closed_at = NOW() WHERE id = ?",
+            requestId);
+        teardownService.teardownWorkspace(
+            orgId,
+            workspaceId,
+            currentUser.getId(),
+            drillWorkspace.getSlug());
+
+        Map<String, Object> retained = jdbcTemplate.queryForMap(
+            "SELECT org_id, subject_workspace_id, subject_person_id"
+                + " FROM data_subject_request WHERE id = ?",
+            requestId);
+        assertEquals(orgId, retained.get("org_id"));
+        assertNull(retained.get("subject_workspace_id"));
+        assertNull(retained.get("subject_person_id"));
+    }
+
+    @Test
+    void aSubjectRequestOpenedAfterTheUnlockedCheckStillRefusesTheLifecycleFence() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        Person subject = newPerson(newCompany());
+        insertOpenSubjectRequest(orgId, workspaceId, subject.getId());
+
+        assertThrows(
+            ConflictException.class,
+            () -> controlOperations.acquireWorkspaceTeardown(
+                orgId,
+                workspaceId,
+                currentUser.getId()));
+        assertEquals("active", jdbcTemplate.queryForObject(
+            "SELECT lifecycle_state FROM workspace WHERE id = ?",
+            String.class,
+            workspaceId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM tenant_operation_lease WHERE workspace_id = ?",
+            Integer.class,
+            workspaceId));
+
+        assertThrows(
+            ConflictException.class,
+            () -> controlOperations.markOrganizationTearingDown(orgId, currentUser.getId()));
+        assertEquals("active", jdbcTemplate.queryForObject(
+            "SELECT lifecycle_state FROM organization WHERE id = ?",
+            String.class,
+            orgId));
+    }
+
+    @Test
+    void persistedExportLeasesNeverAgeOutAndRemainFailClosed() {
+        createDedicatedDrillRoots();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        otherOrganization = new Organization();
+        otherOrganization.setName("Lifecycle Neighbour " + unique());
+        otherOrganization.setSlug("lifecycle-neighbour-" + unique());
+        organizationMapper.insert(otherOrganization);
+        String fresh = insertOperationLease(orgId, workspaceId, "export", 0);
+        String stale = insertOperationLease(orgId, workspaceId, "export", 60);
+        String teardown = insertOperationLease(orgId, workspaceId, "teardown", 60);
+        String neighbour = insertOperationLease(
+            otherOrganization.getId(),
+            workspaceId + 1,
+            "export",
+            0);
+
+        assertEquals(2, controlMapper.countOperationLeases(workspaceId, "export"));
+        assertEquals(3, controlMapper.countOperationLeasesInOrg(orgId));
+        assertEquals(1, controlMapper.countOperationLeasesInOrg(otherOrganization.getId()));
+
+        assertTrue(leaseExists(fresh));
+        assertTrue(leaseExists(stale));
+        assertTrue(leaseExists(teardown));
+        assertTrue(leaseExists(neighbour));
+    }
+
+    private String insertOperationLease(
+            int orgId,
+            int workspaceId,
+            String leaseKind,
+            int ageMinutes) {
+        String token = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+            "INSERT INTO tenant_operation_lease"
+                + " (org_id, workspace_id, lease_kind, lease_token, created_at)"
+                + " VALUES (?, ?, ?, ?, NOW(6) - INTERVAL ? MINUTE)",
+            orgId,
+            workspaceId,
+            leaseKind,
+            token,
+            ageMinutes);
+        return token;
+    }
+
+    private boolean leaseExists(String leaseToken) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM tenant_operation_lease WHERE lease_token = ?",
+            Integer.class,
+            leaseToken);
+        assertNotNull(count);
+        return count == 1;
+    }
+
+    private long insertOpenSubjectRequest(int orgId, int workspaceId, int personId) {
+        jdbcTemplate.update(
+            "INSERT INTO data_subject_request"
+                + " (org_id, request_type, status, requester_name, subject_name,"
+                + " subject_workspace_id, subject_person_id)"
+                + " VALUES (?, 'disclosure', 'received', ?, ?, ?, ?)",
+            orgId,
+            "Requester " + unique(),
+            "Subject " + unique(),
+            workspaceId,
+            personId);
+        Long requestId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        assertNotNull(requestId);
+        return requestId;
+    }
+
     private void createDedicatedDrillRoots() {
         drillOrganization = new Organization();
         drillOrganization.setName("Lifecycle Org " + unique());
@@ -263,6 +429,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     private Fixture seedRepresentativeTenant() {
         Company company = newCompany();
         Person visible = newPerson(company);
+        newPerson(company);
         Person restricted = newPerson(company);
         personMapper.updateProcessingRestrictions(
             drillWorkspace.getId(),
@@ -313,6 +480,15 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         cache.setWarnings(0);
         cache.setGeneratedAt("2026-07-25T00:00:00Z");
         aiOutputCacheMapper.upsert(cache);
+        identityBackfillTransaction.backfillPersonPage(
+            null, drillWorkspace.getId(), 0, 500);
+        identityBackfillTransaction.backfillCompanyPage(
+            null, drillWorkspace.getId(), 0, 500);
+        int collisionMemberships = identityBackfillTransaction.rebuildCollisionReport(
+            null, drillWorkspace.getId());
+        assertTrue(rowCount("person_identity") > 0);
+        assertTrue(rowCount("company_identity") > 0);
+        assertTrue(collisionMemberships > 0);
         StoredBinary binary = storeAttachment(company);
         String token = binary.url().substring("/api/attachments/content/".length());
         String objectKey = "workspaces/" + drillWorkspace.getId()
@@ -320,6 +496,13 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         Path objectPath = objectStorageProperties.filesystemRootPath()
             .resolve(objectKey + ".object");
         return new Fixture(restricted.getName(), objectKey, objectPath);
+    }
+
+    private int rowCount(String table) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM " + table + " WHERE workspace_id = ?",
+            Integer.class,
+            drillWorkspace.getId());
     }
 
     private StoredBinary storeAttachment(Company company) {

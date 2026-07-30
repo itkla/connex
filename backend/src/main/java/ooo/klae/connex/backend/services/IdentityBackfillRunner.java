@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,12 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Rerunnable startup sweep that backfills canonical identities and collision membership.
+ *
+ * <p>Control-plane placement resolution stays fatal: a workspace that cannot be pinned to its
+ * active catalog must never be swept, because writing tenant data into the wrong catalog is a
+ * containment failure. Sweeping one workspace's own tenant data is not fatal. The sweep is
+ * derived, rerunnable state, so a single workspace's failure is logged with its cause and the
+ * remaining workspaces — and the application itself — still start.
  */
 @Component
 @ConditionalOnProperty(
@@ -33,6 +42,7 @@ public class IdentityBackfillRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(IdentityBackfillRunner.class);
     private static final int PAGE_SIZE = 500;
+    private static final int COLLISION_REBUILD_ATTEMPTS = 3;
 
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
@@ -72,13 +82,25 @@ public class IdentityBackfillRunner implements ApplicationRunner {
                             throw new IllegalStateException(
                                 "Workspace " + workspaceId + " is stored outside its active placement");
                         }
-                        backfillWorkspace(resolvedCatalog, workspaceId);
+                        sweepWorkspace(resolvedCatalog, workspaceId);
                         return null;
                     });
                 } catch (ServiceUnavailableException exception) {
                     warnSkipped(workspaceId, exception);
                 }
             }
+        }
+    }
+
+    private void sweepWorkspace(String catalog, int workspaceId) {
+        try {
+            backfillWorkspace(catalog, workspaceId);
+        } catch (RuntimeException exception) {
+            log.error(
+                "Canonical identity backfill failed for workspace {}; the sweep reruns on the "
+                    + "next start and duplicate detection stays degraded for it until then",
+                workspaceId,
+                exception);
         }
     }
 
@@ -116,8 +138,7 @@ public class IdentityBackfillRunner implements ApplicationRunner {
                 break;
             }
         }
-        int collisionMemberships =
-            backfillTransaction.rebuildCollisionReport(catalog, workspaceId);
+        int collisionMemberships = rebuildCollisionReport(catalog, workspaceId);
         log.info(
             "Canonical identity backfill completed workspace {}: scanned={}, created={}, existing={}, "
                 + "invalidEmail={}, invalidPhone={}, invalidDomain={}, skippedWrites={}, collisions={}",
@@ -130,6 +151,28 @@ public class IdentityBackfillRunner implements ApplicationRunner {
             summary.invalidDomains,
             summary.skippedWrites,
             collisionMemberships);
+    }
+
+    private int rebuildCollisionReport(String catalog, int workspaceId) {
+        List<DataAccessException> failures = new ArrayList<>();
+        for (int attempt = 1; attempt <= COLLISION_REBUILD_ATTEMPTS; attempt++) {
+            try {
+                return backfillTransaction.rebuildCollisionReport(catalog, workspaceId);
+            } catch (ConcurrencyFailureException | DuplicateKeyException contended) {
+                failures.add(contended);
+                if (attempt < COLLISION_REBUILD_ATTEMPTS) {
+                    log.warn(
+                        "Canonical identity collision rebuild retrying workspace {} after contended attempt {}",
+                        workspaceId,
+                        attempt);
+                }
+            }
+        }
+        DataAccessException lastFailure = failures.getLast();
+        for (DataAccessException earlier : failures.subList(0, failures.size() - 1)) {
+            lastFailure.addSuppressed(earlier);
+        }
+        throw lastFailure;
     }
 
     private void warnSkipped(int workspaceId, ServiceUnavailableException exception) {

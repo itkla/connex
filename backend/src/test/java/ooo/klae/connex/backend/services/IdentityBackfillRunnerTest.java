@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +33,8 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DuplicateKeyException;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -166,6 +169,27 @@ class IdentityBackfillRunnerTest {
     }
 
     @Test
+    void failedWorkspaceSweepIsLoggedWithoutStoppingStartupOrLaterWork(CapturedOutput output) {
+        stubEnumeration(Arrays.asList((String) null), List.of(3, 7));
+        serveWorkspace(3, null);
+        serveWorkspace(7, null);
+        when(backfillTransaction.backfillPersonPage(null, 3, 0, 500))
+            .thenThrow(new NullPointerException("instant"));
+        when(backfillTransaction.backfillPersonPage(null, 7, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.backfillCompanyPage(null, 7, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.rebuildCollisionReport(null, 7)).thenReturn(0);
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, never()).rebuildCollisionReport(isNull(), eq(3));
+        verify(backfillTransaction).backfillPersonPage(null, 7, 0, 500);
+        assertTrue(output.getOut().contains(
+            "Canonical identity backfill failed for workspace 3"));
+    }
+
+    @Test
     void pageCursorAdvancesWhenEveryValueIsInvalid() {
         stubEnumeration(Arrays.asList((String) null), List.of(7));
         serveWorkspace(7, null);
@@ -204,6 +228,48 @@ class IdentityBackfillRunnerTest {
         assertTrue(output.getOut().contains(
             "workspace 7: scanned=1, created=1, existing=0, invalidEmail=0"));
         assertTrue(!output.getOut().contains("@") && !output.getOut().contains("+8190"));
+    }
+
+    @Test
+    void contendedCollisionRebuildIsRetriedWithinTheSameWorkspace() {
+        stubEnumeration(Arrays.asList((String) null), List.of(7));
+        serveWorkspace(7, null);
+        stubEmptyBackfillPages(7);
+        when(backfillTransaction.rebuildCollisionReport(null, 7))
+            .thenThrow(
+                new DuplicateKeyException("collision membership already rebuilt"),
+                new ConcurrencyFailureException("deadlock found when trying to get lock"))
+            .thenReturn(4);
+
+        runner.run(arguments);
+
+        verify(backfillTransaction, times(3)).rebuildCollisionReport(null, 7);
+    }
+
+    @Test
+    void exhaustedCollisionRebuildRetriesAreLoggedWithoutAbortingStartup(
+            CapturedOutput output) {
+        stubEnumeration(Arrays.asList((String) null), List.of(7));
+        serveWorkspace(7, null);
+        stubEmptyBackfillPages(7);
+        DuplicateKeyException first = new DuplicateKeyException("first");
+        ConcurrencyFailureException second = new ConcurrencyFailureException("second");
+        DuplicateKeyException last = new DuplicateKeyException("last");
+        when(backfillTransaction.rebuildCollisionReport(null, 7)).thenThrow(first, second, last);
+
+        runner.run(arguments);
+
+        assertArrayEquals(new Throwable[] {first, second}, last.getSuppressed());
+        verify(backfillTransaction, times(3)).rebuildCollisionReport(null, 7);
+        assertTrue(output.getOut().contains(
+            "Canonical identity backfill failed for workspace 7"));
+    }
+
+    private void stubEmptyBackfillPages(int workspaceId) {
+        when(backfillTransaction.backfillPersonPage(null, workspaceId, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
+        when(backfillTransaction.backfillCompanyPage(null, workspaceId, 0, 500))
+            .thenReturn(new IdentityBackfillBatch(0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     private void stubEnumeration(List<String> catalogs, List<Integer> workspaceIds) {
