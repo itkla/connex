@@ -26,6 +26,8 @@
     "back": "戻る",
     "next": "次へ",
     "import": "インポート",
+    "refreshReview": "確認内容を更新",
+    "reviewStale": "一致時の操作または行のリンクが変更されました。インポート前に確認内容を更新してください。",
     "done": "完了",
     "mapHint": "{total}列中{mapped}列を対応付け済み。「名前」は必須です。",
     "ignore": "— 取り込まない —",
@@ -86,7 +88,26 @@
     "rowColStatus": "ステータス",
     "rowColDetail": "詳細",
     "rowColLink": "リンク",
-    "reviewLinkHint": "最初の100行を表示しています。「リンク」で行を既存のレコードに紐付けできます。",
+    "reviewLinkHint": "処理対象{total}行のうち{shown}行を表示しています。重複候補がある{candidates}行はすべて含まれます。別のレコードを指定するには「リンク」を使用してください。",
+    "candidateListLabel": "既存レコードの候補",
+    "candidateStrength": {
+      "STRONG": "識別情報が完全一致",
+      "WEAK": "名前が完全一致"
+    },
+    "candidateRecordType": {
+      "person": "連絡先",
+      "company": "会社"
+    },
+    "candidateEvidence": {
+      "EMAIL": "メールが一致",
+      "PHONE": "電話番号が一致",
+      "DOMAIN": "ドメインが一致",
+      "EXTERNAL_ID": "参照元IDが一致",
+      "NAME": "正規化した名前が一致"
+    },
+    "candidateShared": "共有・確認のみ",
+    "candidateUse": "このレコードを使用",
+    "candidateSelected": "選択済み",
     "linkAction": "リンク…",
     "linkSearchPlaceholder": "既存を検索…",
     "linkSearchLabel": "既存レコードを検索",

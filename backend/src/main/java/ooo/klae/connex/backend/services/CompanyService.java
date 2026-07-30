@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
@@ -85,6 +87,8 @@ public class CompanyService {
     private final ManagedObjectService managedObjectService;
     private final IdentityIntakeService identityIntakeService;
     private final MatchingService matchingService;
+    private final DuplicatePreflightService duplicatePreflightService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -343,10 +347,12 @@ public class CompanyService {
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
-        company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
+        company.setWorkspaceId(workspaceId);
         company.setOwnerId(authService.getCurrentUser().getId());
         company.setLogoUrl(null);
         company.setCreatedAt(null);
@@ -360,6 +366,25 @@ public class CompanyService {
             auditService.diff(null, company, AUDIT_FIELDS));
         ruleTriggers.publish(company.getWorkspaceId(), "company", company.getId(), "company.created");
         return company;
+    }
+
+    /**
+     * Rechecks and creates a company from an interactive reviewed request.
+     *
+     * @param company reviewed company values
+     * @param duplicateReviewToken token from the explicitly accepted duplicate review
+     * @return created company
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMPANY_CREATE)
+    public Company createCompanyReviewed(Company company, String duplicateReviewToken) {
+        duplicatePreflightService.requireReviewedCompanyCreation(
+            new CompanyDuplicatePreflightRequest(
+                company.getName(),
+                company.getWebsite() == null ? List.of() : List.of(company.getWebsite()),
+                company.getPhone() == null ? List.of() : List.of(company.getPhone())),
+            duplicateReviewToken);
+        return createCompany(company);
     }
 
     /**
@@ -393,10 +418,11 @@ public class CompanyService {
     /**
      * Updates an existing {@code Company} in the active workspace.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         Company before = requireOwnedCompany(workspaceId, id);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
@@ -464,10 +490,11 @@ public class CompanyService {
     /**
      * Deletes a {@code Company} in the active workspace.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Company not found with id: " + id);
         }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
@@ -30,8 +31,16 @@ public sealed interface BusinessCardCompanyAction {
      * Create and link a new company.
      *
      * @param companyName confirmed company name
+     * @param duplicateReviewToken token from the explicitly accepted company duplicate review
      */
-    record Create(@NotBlank @Size(max = 255) String companyName) implements BusinessCardCompanyAction {
+    record Create(
+            @NotBlank @Size(max = 255) String companyName,
+            @Pattern(regexp = "^[0-9a-f]{64}$") String duplicateReviewToken)
+            implements BusinessCardCompanyAction {
+
+        public Create(String companyName) {
+            this(companyName, null);
+        }
     }
 
     /**

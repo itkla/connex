@@ -17,6 +17,8 @@ export type PendingContact = {
     title: string;
     phone: string;
     imageFile: File | null;
+    duplicateReviewSignature: string | null;
+    duplicateReviewToken: string | null;
 };
 
 /** Fields of a staged contact, before a {@link PendingContact.tempId} is assigned. */

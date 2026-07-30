@@ -54,6 +54,7 @@ public final class TablePlaneRegistry {
         "org_member",
         "org_placement",
         "organization",
+        "organization_duplicate_decision_lock",
         "password_reset_token",
         "registration_verification_token",
         "provider_connection",

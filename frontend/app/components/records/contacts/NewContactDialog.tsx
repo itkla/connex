@@ -42,8 +42,8 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
-import { useDuplicateNameCheck, type DuplicateNameResult } from '@/app/hooks/useDuplicateNameCheck';
-import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
+import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
+import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
@@ -64,10 +64,14 @@ type Props = {
     selectedCompany?: Company | null;
     isCreating: boolean;
     isSuccess?: boolean;
-    createNewContact: (businessCard?: BusinessCardImportDraft) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
+    createNewContact: (
+        businessCard?: BusinessCardImportDraft,
+        duplicateReviewToken?: string | null,
+    ) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
     onRecoveredImport?: (result: BusinessCardImportResult) => void;
     onImportRetryRequiredChange?: (required: boolean) => void;
     onSubmissionPendingChange?: (pending: boolean) => void;
+    requestInit?: RequestInit;
 };
 
 export type ContactCreationOutcome = {
@@ -90,6 +94,7 @@ export default function NewContactDialog({
     onRecoveredImport,
     onImportRetryRequiredChange,
     onSubmissionPendingChange,
+    requestInit,
 }: Props) {
     const t = useTranslations('ContactsNewContactDialog');
     const [importRetryRequired, setImportRetryRequired] = useState(false);
@@ -174,6 +179,7 @@ export default function NewContactDialog({
                     onRecoveredImport={onRecoveredImport}
                     onImportRetryRequiredChange={handleImportRetryRequiredChange}
                     onSubmissionPendingChange={handleSubmissionPendingChange}
+                    requestInit={requestInit}
                 />
             </ResponsiveDialogContent>
         </ResponsiveDialog>
@@ -192,10 +198,14 @@ type NewContactFormProps = {
     selectedCompany?: Company | null;
     isCreating: boolean;
     isSuccess?: boolean;
-    createNewContact: (businessCard?: BusinessCardImportDraft) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
+    createNewContact: (
+        businessCard?: BusinessCardImportDraft,
+        duplicateReviewToken?: string | null,
+    ) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
     onRecoveredImport?: (result: BusinessCardImportResult) => void;
     onImportRetryRequiredChange?: (required: boolean) => void;
     onSubmissionPendingChange?: (pending: boolean) => void;
+    requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
 };
@@ -219,6 +229,7 @@ export function NewContactForm({
     onCancel,
     onImportRetryRequiredChange,
     onSubmissionPendingChange,
+    requestInit,
 }: NewContactFormProps) {
     const t = useTranslations('ContactsNewContactDialog');
     const router = useRouter();
@@ -248,6 +259,18 @@ export function NewContactForm({
         setPayload: setNewContactPayload,
         onImportRetryRequiredChange,
     });
+    const duplicatePreflight = useDuplicatePreflight('person', {
+        name: newContactPayload.name,
+        email: newContactPayload.email,
+        phone: newContactPayload.phone,
+    }, active, requestInit);
+    const companyDuplicatePreflight = useDuplicatePreflight('company', {
+        name: businessCard.companyName,
+    }, active
+        && businessCard.file != null
+        && businessCard.companyMode === 'create'
+        && businessCard.canCreateCompany,
+    requestInit);
     const previousRecoveryStatusRef = useRef(businessCard.recoveryStatus);
     const recoveredImport = businessCard.recoveredImport;
     const recoveredImportToken = recoveredImport
@@ -350,10 +373,34 @@ export function NewContactForm({
         resetFieldErrors();
         let businessCardImport: BusinessCardImportDraft | undefined;
         try {
+            const duplicateDecision = await duplicatePreflight.reviewNow();
+            if (!canCommit() || !duplicateDecision.allowed) return;
+            const companyDuplicateDecision = await companyDuplicatePreflight.reviewNow();
+            if (!canCommit() || !companyDuplicateDecision.allowed) return;
             businessCardImport = await businessCard.prepareImportDraft(imageFile != null);
             if (!canCommit()) return;
             if (businessCard.file && !businessCardImport) return;
-            const outcome = await createNewContact(businessCardImport);
+            if (businessCardImport) {
+                businessCardImport = {
+                    ...businessCardImport,
+                    contact: {
+                        ...businessCardImport.contact,
+                        duplicateReviewToken:
+                            duplicateDecision.duplicateReviewToken ?? undefined,
+                    },
+                    companyAction: businessCardImport.companyAction.type === 'create'
+                        ? {
+                            ...businessCardImport.companyAction,
+                            duplicateReviewToken:
+                                companyDuplicateDecision.duplicateReviewToken ?? undefined,
+                        }
+                        : businessCardImport.companyAction,
+                };
+            }
+            const outcome = await createNewContact(
+                businessCardImport,
+                duplicateDecision.duplicateReviewToken,
+            );
             if (!canCommit()) return;
             if (!outcome) return;
             if (businessCardImport && outcome.avatarUploaded) {
@@ -387,6 +434,8 @@ export function NewContactForm({
             || businessCard.isScanning
             || businessCard.recoveryStatus === 'checking'
             || businessCard.recoveryStatus === 'acknowledging'
+            || duplicatePreflight.blocked
+            || companyDuplicatePreflight.blocked
             || recoveryDecisionRequired) return;
         submissionPendingRef.current = true;
         setSubmissionPending(true);
@@ -508,6 +557,8 @@ export function NewContactForm({
     const hasErrors = Object.keys(fieldErrors).length > 0
         || businessCard.companyValidationError != null
         || businessCard.importError != null
+        || duplicatePreflight.status === 'error'
+        || companyDuplicatePreflight.status === 'error'
         || (!manualRecoveryOverride && businessCard.recoveryStatus === 'error');
     const formPending = submissionPending || isCreating || imageSelectionPending || cardSelectionPending;
     const recoveryBlocked = businessCard.recoveryStatus === 'checking'
@@ -519,7 +570,6 @@ export function NewContactForm({
         && !recoveryBlocked;
     const status = resolveDialogStatus({ isLoading: formPending, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
-    const nameMatches = useDuplicateNameCheck('person', newContactPayload.name);
     const visibleImagePreview = imageFile ? imagePreview : null;
 
     return (
@@ -628,7 +678,8 @@ export function NewContactForm({
                         isCreating={formPending || recoveryBlocked}
                         nameInputRef={nameInputRef}
                         onListWheel={handleListWheel}
-                        nameMatches={nameMatches}
+                        duplicatePreflight={duplicatePreflight}
+                        companyDuplicatePreflight={companyDuplicatePreflight}
                     />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '290ms' }}>
@@ -652,7 +703,12 @@ export function NewContactForm({
                         <Button
                             type="submit"
                             variant="brand"
-                            disabled={formPending || recoveryBlocked || isSuccess || businessCard.isScanning}
+                            disabled={formPending
+                                || recoveryBlocked
+                                || duplicatePreflight.blocked
+                                || companyDuplicatePreflight.blocked
+                                || isSuccess
+                                || businessCard.isScanning}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {formPending ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : businessCard.file ? t('createFromCard') : t('create')}
@@ -742,7 +798,8 @@ type ContactDetailsFieldsProps = {
     isCreating: boolean;
     nameInputRef: RefObject<HTMLInputElement | null>;
     onListWheel: (event: WheelEvent<HTMLDivElement>) => void;
-    nameMatches: DuplicateNameResult;
+    duplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
+    companyDuplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
 };
 
 function ContactDetailsFields({
@@ -756,7 +813,8 @@ function ContactDetailsFields({
     isCreating,
     nameInputRef,
     onListWheel,
-    nameMatches,
+    duplicatePreflight,
+    companyDuplicatePreflight,
 }: ContactDetailsFieldsProps) {
     const t = useTranslations('ContactsNewContactDialog');
     const disabled = isCreating || businessCard.requiresExactImportRetry;
@@ -783,12 +841,23 @@ function ContactDetailsFields({
                         className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
                         placeholder={t('namePlaceholder')}
                         aria-invalid={Boolean(fieldErrors.name)}
-                        aria-describedby={[fieldErrors.name && 'name-error', nameMatches.matches.length > 0 && 'contact-name-duplicate'].filter(Boolean).join(' ') || undefined}
+                        aria-describedby={[
+                            fieldErrors.name && 'name-error',
+                            duplicatePreflight.status !== 'idle' && 'contact-duplicate-preflight',
+                        ].filter(Boolean).join(' ') || undefined}
                         required
                     />
                 </div>
                 {fieldErrors.name && <p id="name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                <DuplicateNameWarning id="contact-name-duplicate" kind="person" matches={nameMatches.matches} total={nameMatches.total} />
+                <DuplicatePreflightWarning
+                    id="contact-duplicate-preflight"
+                    kind="person"
+                    status={duplicatePreflight.status}
+                    response={duplicatePreflight.response}
+                    acknowledged={duplicatePreflight.acknowledged}
+                    onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                    onRetry={duplicatePreflight.retry}
+                />
             </div>
 
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -908,6 +977,17 @@ function ContactDetailsFields({
                         clearError('companyName');
                     }}
                 />
+                {businessCard.companyMode === 'create' && (
+                    <DuplicatePreflightWarning
+                        id="business-card-company-duplicate-preflight"
+                        kind="company"
+                        status={companyDuplicatePreflight.status}
+                        response={companyDuplicatePreflight.response}
+                        acknowledged={companyDuplicatePreflight.acknowledged}
+                        onAcknowledgedChange={companyDuplicatePreflight.setAcknowledged}
+                        onRetry={companyDuplicatePreflight.retry}
+                    />
+                )}
             </div>
         </>
     );

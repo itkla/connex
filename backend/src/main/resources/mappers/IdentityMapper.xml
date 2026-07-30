@@ -79,6 +79,156 @@
     ORDER BY ci.normalized_value, ci.company_id
   </select>
 
+  <sql id="visiblePerson">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = p.workspace_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleCompany">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = c.workspace_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <select id="findVisiblePersonIdentityMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH ranked_matches AS (
+      SELECT p.id AS record_id,
+             p.workspace_id AS record_workspace_id,
+             p.name,
+             c.name AS company_name,
+             p.title,
+             NULL AS website,
+             NULL AS industry,
+             pi.kind,
+             pi.normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY pi.kind, pi.normalized_value
+               ORDER BY CASE WHEN p.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                        p.id
+             ) AS match_rank
+      FROM person_identity pi
+      JOIN person p
+        ON p.workspace_id = pi.workspace_id
+        AND p.id = pi.person_id
+      LEFT JOIN company c
+        ON c.id = p.company_id
+        AND <include refid="visibleCompany"/>
+      WHERE pi.superseded_at IS NULL
+        AND p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+        AND <include refid="visiblePerson"/>
+        AND (
+          <foreach item="key" collection="keys" separator=" OR ">
+            (pi.kind = #{key.kind} AND pi.normalized_value = #{key.normalizedValue})
+          </foreach>
+        )
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY kind, normalized_value, record_id
+  </select>
+
+  <select id="findVisibleCompanyIdentityMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    WITH ranked_matches AS (
+      SELECT c.id AS record_id,
+             c.workspace_id AS record_workspace_id,
+             c.name,
+             NULL AS company_name,
+             NULL AS title,
+             c.website,
+             c.industry,
+             ci.kind,
+             ci.normalized_value,
+             ROW_NUMBER() OVER (
+               PARTITION BY ci.kind, ci.normalized_value
+               ORDER BY CASE WHEN c.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                        c.id
+             ) AS match_rank
+      FROM company_identity ci
+      JOIN company c
+        ON c.workspace_id = ci.workspace_id
+        AND c.id = ci.company_id
+      WHERE ci.superseded_at IS NULL
+        AND <include refid="visibleCompany"/>
+        AND (
+          <foreach item="key" collection="keys" separator=" OR ">
+            (ci.kind = #{key.kind} AND ci.normalized_value = #{key.normalizedValue})
+          </foreach>
+        )
+    )
+    SELECT record_id, record_workspace_id, name, company_name, title, website, industry,
+           kind, normalized_value
+    FROM ranked_matches
+    WHERE match_rank &lt;= #{perKeyLimit}
+    ORDER BY kind, normalized_value, record_id
+  </select>
+
+  <select id="findVisiblePersonNameMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    <foreach item="key" collection="keys" separator=" UNION ALL ">
+      (
+        SELECT p.id AS record_id,
+               p.workspace_id AS record_workspace_id,
+               p.name,
+               c.name AS company_name,
+               p.title,
+               NULL AS website,
+               NULL AS industry,
+               'name' AS kind,
+               #{key.normalizedName} AS normalized_value
+        FROM person p
+        LEFT JOIN company c
+          ON c.id = p.company_id
+          AND <include refid="visibleCompany"/>
+        WHERE p.suspended_at IS NULL
+          AND p.provision_ceased_at IS NULL
+          AND <include refid="visiblePerson"/>
+          AND p.name LIKE #{key.pattern}
+        ORDER BY CASE WHEN p.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                 CASE WHEN LOWER(p.name) = #{key.normalizedName} THEN 0 ELSE 1 END,
+                 CHAR_LENGTH(p.name),
+                 p.id
+        LIMIT #{perKeyLimit}
+      )
+    </foreach>
+    ORDER BY normalized_value, record_id
+  </select>
+
+  <select id="findVisibleCompanyNameMatches"
+          resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
+    <foreach item="key" collection="keys" separator=" UNION ALL ">
+      (
+        SELECT c.id AS record_id,
+               c.workspace_id AS record_workspace_id,
+               c.name,
+               NULL AS company_name,
+               NULL AS title,
+               c.website,
+               c.industry,
+               'name' AS kind,
+               #{key.normalizedName} AS normalized_value
+        FROM company c
+        WHERE <include refid="visibleCompany"/>
+          AND c.name LIKE #{key.pattern}
+        ORDER BY CASE WHEN c.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
+                 CASE WHEN LOWER(c.name) = #{key.normalizedName} THEN 0 ELSE 1 END,
+                 CHAR_LENGTH(c.name),
+                 c.id
+        LIMIT #{perKeyLimit}
+      )
+    </foreach>
+    ORDER BY normalized_value, record_id
+  </select>
+
   <select id="lockCurrentPersonIdentityKeysForRecord" resultType="IdentityKeyRow">
     SELECT pi.person_id AS record_id, pi.kind, pi.normalized_value
     FROM person_identity pi

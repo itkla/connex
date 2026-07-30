@@ -9,6 +9,9 @@ import ooo.klae.connex.backend.beans.CompanyIdentityBackfillCandidate;
 import ooo.klae.connex.backend.beans.IdentityKeyRow;
 import ooo.klae.connex.backend.beans.IdentityMatchRow;
 import ooo.klae.connex.backend.beans.PersonIdentityBackfillCandidate;
+import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
+import ooo.klae.connex.backend.dto.DuplicateIdentityKey;
+import ooo.klae.connex.backend.dto.DuplicateNameKey;
 
 /**
  * Workspace-scoped canonical identity persistence and backfill reads.
@@ -42,6 +45,30 @@ public interface IdentityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("kind") String kind,
         @Param("normalizedValues") List<String> normalizedValues);
+
+    List<DuplicateCandidateRow> findVisiblePersonIdentityMatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("keys") List<DuplicateIdentityKey> keys,
+        @Param("perKeyLimit") int perKeyLimit);
+
+    List<DuplicateCandidateRow> findVisibleCompanyIdentityMatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("keys") List<DuplicateIdentityKey> keys,
+        @Param("perKeyLimit") int perKeyLimit);
+
+    List<DuplicateCandidateRow> findVisiblePersonNameMatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("keys") List<DuplicateNameKey> keys,
+        @Param("perKeyLimit") int perKeyLimit);
+
+    List<DuplicateCandidateRow> findVisibleCompanyNameMatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("keys") List<DuplicateNameKey> keys,
+        @Param("perKeyLimit") int perKeyLimit);
 
     List<IdentityKeyRow> lockCurrentPersonIdentityKeysForRecord(
         @Param("workspaceId") int workspaceId,

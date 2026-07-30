@@ -229,7 +229,8 @@ public class PersonController {
      */
     @PostMapping
     public PersonDto createPerson(@Valid @RequestBody PersonDto dto) {
-        return PersonDto.from(personService.create(dto.toBean()));
+        return PersonDto.from(personService.createReviewed(
+            dto.toBean(), dto.getDuplicateReviewToken()));
     }
 
     /**

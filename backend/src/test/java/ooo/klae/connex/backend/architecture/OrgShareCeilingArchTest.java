@@ -43,6 +43,7 @@ class OrgShareCeilingArchTest {
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
+        "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
@@ -55,6 +56,7 @@ class OrgShareCeilingArchTest {
             String xml = loadMapperText(entry.getKey());
             int shareReads = count(entry.getValue(), xml);
             Pattern ceiling = entry.getKey().equals("mappers/PersonEdgeMapper.xml")
+                    || entry.getKey().equals("mappers/IdentityMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);

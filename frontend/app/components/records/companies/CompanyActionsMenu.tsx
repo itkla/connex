@@ -154,7 +154,10 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+    const createNewContact = async (
+        businessCard?: BusinessCardImportDraft,
+        duplicateReviewToken: string | null = null,
+    ) => {
         invalidatePendingContactClose();
         const operationGeneration = contactCloseGenerationRef.current;
         const isCurrent = () => contactCloseGenerationRef.current === operationGeneration;
@@ -163,7 +166,10 @@ export default function CompanyActionsMenu({
         try {
             const newContact = businessCard
                 ? (await importBusinessCard(businessCard)).contact
-                : await createContact(newContactPayload);
+                : await createContact({
+                    ...newContactPayload,
+                    duplicateReviewToken: duplicateReviewToken ?? undefined,
+                });
             if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {

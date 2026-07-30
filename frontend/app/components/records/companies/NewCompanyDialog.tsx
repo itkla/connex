@@ -7,12 +7,19 @@ import { Autocomplete, AutocompleteContent, AutocompleteList, AutocompleteItem, 
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
 import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
-import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
-import { isFieldError } from '@/app/lib/api';
+import {
+    type Company,
+    type CreateCompanyPayload,
+    type DuplicatePreflightResponse,
+} from '@/app/lib/types';
+import { isFieldError, preflightPersonDuplicates } from '@/app/lib/api';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
-import DuplicateNameWarning from '@/app/components/records/DuplicateNameWarning';
-import { useDuplicateNameCheck } from '@/app/hooks/useDuplicateNameCheck';
+import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
+import {
+    duplicatePreflightResponseSignature,
+    useDuplicatePreflight,
+} from '@/app/hooks/useDuplicatePreflight';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -135,11 +142,15 @@ type Props = {
     isCreating: boolean;
     isSuccess?: boolean;
     existingCompanies?: Company[];
-    createNewCompany: () => void | Promise<void>;
+    createNewCompany: (
+        duplicateReviewToken: string | null,
+        reviewedContacts: PendingContact[],
+    ) => void | Promise<void>;
     pendingContacts: PendingContact[];
     addPendingContact: (draft: PendingContactDraft) => void;
     updatePendingContact: (tempId: string, draft: PendingContactDraft) => void;
     removePendingContact: (tempId: string) => void;
+    requestInit?: RequestInit;
 };
 
 export default function NewCompanyDialog({
@@ -156,6 +167,7 @@ export default function NewCompanyDialog({
     addPendingContact,
     updatePendingContact,
     removePendingContact,
+    requestInit,
 }: Props) {
     const t = useTranslations('CompaniesNewDialog');
     const reduce = useReducedMotion() ?? false;
@@ -165,6 +177,8 @@ export default function NewCompanyDialog({
     const [announcement, setAnnouncement] = useState('');
     const [isDragging, setIsDragging] = useState(false);
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
+    const [submissionPending, setSubmissionPending] = useState(false);
+    const submissionPendingRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const {
         logoPreview,
@@ -202,11 +216,17 @@ export default function NewCompanyDialog({
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
 
-    const nameMatches = useDuplicateNameCheck('company', payload.name);
+    const duplicatePreflight = useDuplicatePreflight('company', {
+        name: payload.name,
+        website: payload.website,
+        phone: payload.phone,
+    }, open, requestInit);
 
-    const hasErrors = Object.keys(fieldErrors).length > 0;
+    const hasErrors = Object.keys(fieldErrors).length > 0
+        || duplicatePreflight.status === 'error';
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
-    const status: 'idle' | 'loading' | 'success' | 'error' = isCreating
+    const formPending = submissionPending || isCreating;
+    const status: 'idle' | 'loading' | 'success' | 'error' = formPending
         ? 'loading'
         : hasErrors
             ? 'error'
@@ -223,6 +243,8 @@ export default function NewCompanyDialog({
             setWebsiteFormatError(null);
             setView('company');
             setEditing({ mode: 'new' });
+            submissionPendingRef.current = false;
+            setSubmissionPending(false);
         }
     }
 
@@ -234,7 +256,7 @@ export default function NewCompanyDialog({
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
-        if (isCreating || logoSelectionPending || isSuccess) return;
+        if (formPending || logoSelectionPending || isSuccess) return;
         void applyFile(e.dataTransfer.files?.[0]);
     };
 
@@ -259,11 +281,11 @@ export default function NewCompanyDialog({
     const guard = useUnsavedChangesGuard({
         isDirty,
         onClose: () => onOpenChange(false),
-        enabled: !isCreating && !isSuccess,
+        enabled: !formPending && !isSuccess,
     });
 
     const handleOpenChange = (next: boolean) => {
-        if (!next && (isCreating || logoSelectionPending)) return;
+        if (!next && (formPending || logoSelectionPending)) return;
         if (next) {
             onOpenChange(true);
             return;
@@ -273,10 +295,23 @@ export default function NewCompanyDialog({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating || logoSelectionPending || websiteBlocked) return;
-        resetFieldErrors();
+        if (submissionPendingRef.current
+                || isCreating
+                || logoSelectionPending
+                || websiteBlocked
+                || duplicatePreflight.blocked) return;
+        submissionPendingRef.current = true;
+        setSubmissionPending(true);
         try {
-            await createNewCompany();
+            const duplicateDecision = await duplicatePreflight.reviewNow();
+            if (!duplicateDecision.allowed) return;
+            const reviewedContacts = await reviewPendingContacts();
+            if (!reviewedContacts) return;
+            resetFieldErrors();
+            await createNewCompany(
+                duplicateDecision.duplicateReviewToken,
+                reviewedContacts,
+            );
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -285,6 +320,9 @@ export default function NewCompanyDialog({
                     requestAnimationFrame(() => document.getElementById(`company-${firstKey}`)?.focus());
                 }
             }
+        } finally {
+            submissionPendingRef.current = false;
+            setSubmissionPending(false);
         }
     };
 
@@ -303,6 +341,39 @@ export default function NewCompanyDialog({
         setEditing({ mode: 'edit', contact });
         setDirection(1);
         setView('contact');
+    };
+
+    const reviewPendingContacts = async (): Promise<PendingContact[] | null> => {
+        const reviewedContacts: PendingContact[] = [];
+        for (const contact of pendingContacts) {
+            let response: DuplicatePreflightResponse;
+            try {
+                response = await preflightPersonDuplicates({
+                    name: contact.name,
+                    emails: contact.email ? [contact.email] : [],
+                    phones: contact.phone ? [contact.phone] : [],
+                }, requestInit);
+            } catch {
+                toastError(t('contactDuplicateReviewChanged'));
+                openEditContact(contact);
+                return null;
+            }
+            const signature = duplicatePreflightResponseSignature(response);
+            if (response.truncated
+                    || (response.candidates.length > 0
+                        && signature !== contact.duplicateReviewSignature)) {
+                toastError(t('contactDuplicateReviewChanged'));
+                openEditContact(contact);
+                return null;
+            }
+            reviewedContacts.push({
+                ...contact,
+                duplicateReviewToken: response.candidates.length > 0
+                    ? response.reviewToken
+                    : null,
+            });
+        }
+        return reviewedContacts;
     };
 
     const returnFocus = useRef(false);
@@ -343,8 +414,18 @@ export default function NewCompanyDialog({
                   title: editing.contact.title,
                   phone: editing.contact.phone,
                   imageFile: editing.contact.imageFile,
+                  duplicateReviewSignature: editing.contact.duplicateReviewSignature,
+                  duplicateReviewToken: editing.contact.duplicateReviewToken,
               }
-            : { name: '', email: '', title: '', phone: '', imageFile: null };
+            : {
+                  name: '',
+                  email: '',
+                  title: '',
+                  phone: '',
+                  imageFile: null,
+                  duplicateReviewSignature: null,
+                  duplicateReviewToken: null,
+              };
 
     const pageVariants = {
         enter: (dir: number) => (reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? '100%' : '-100%' }),
@@ -427,7 +508,7 @@ export default function NewCompanyDialog({
                                 id="company-logo"
                                 type="file"
                                 accept={MANAGED_IMAGE_ACCEPT}
-                                disabled={isCreating || logoSelectionPending || isSuccess}
+                                disabled={formPending || logoSelectionPending || isSuccess}
                                 onChange={handleLogoChange}
                                 className="sr-only"
                             />
@@ -437,8 +518,9 @@ export default function NewCompanyDialog({
                             <button
                                 type="button"
                                 onClick={removeLogo}
+                                disabled={formPending}
                                 aria-label="Remove logo"
-                                className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-popover transition hover:scale-110 active:scale-95"
+                                className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-popover transition hover:scale-110 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                             >
                                 <XMarkIcon className="size-3" />
                             </button>
@@ -454,6 +536,7 @@ export default function NewCompanyDialog({
 
                                 <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
                     <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
+                        <fieldset disabled={formPending} className="contents">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company-name">
                                 {t('labelName')} <span className="text-muted-foreground">*</span>
@@ -471,14 +554,25 @@ export default function NewCompanyDialog({
                                     className={cn(inputBase, 'pl-9 pr-3', fieldErrors.name && inputError)}
                                     placeholder={t('placeholderName')}
                                     aria-invalid={Boolean(fieldErrors.name)}
-                                    aria-describedby={[fieldErrors.name && 'company-name-error', nameMatches.matches.length > 0 && 'company-name-duplicate'].filter(Boolean).join(' ') || undefined}
+                                    aria-describedby={[
+                                        fieldErrors.name && 'company-name-error',
+                                        duplicatePreflight.status !== 'idle' && 'company-duplicate-preflight',
+                                    ].filter(Boolean).join(' ') || undefined}
                                     autoComplete="organization"
                                     autoFocus
                                     required
                                 />
                             </div>
                             {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                            <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
+                            <DuplicatePreflightWarning
+                                id="company-duplicate-preflight"
+                                kind="company"
+                                status={duplicatePreflight.status}
+                                response={duplicatePreflight.response}
+                                acknowledged={duplicatePreflight.acknowledged}
+                                onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                                onRetry={duplicatePreflight.retry}
+                            />
                         </div>
 
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -606,15 +700,16 @@ export default function NewCompanyDialog({
                                 onAdd={openAddContact}
                                 onEdit={openEditContact}
                                 onRemove={removeContact}
-                                disabled={isCreating || isSuccess}
+                                disabled={formPending || isSuccess}
                             />
                         </div>
+                        </fieldset>
                     </form>
                                 </div>
 
                                 <ResponsiveDialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
                                     <ResponsiveDialogClose asChild>
-                                        <Button type="button" variant="outline" disabled={isCreating || logoSelectionPending}>
+                                        <Button type="button" variant="outline" disabled={formPending || logoSelectionPending}>
                                             {t('cancel')}
                                         </Button>
                                     </ResponsiveDialogClose>
@@ -622,10 +717,15 @@ export default function NewCompanyDialog({
                                         type="submit"
                                         form="new-company-form"
                                         variant="brand"
-                                        disabled={isCreating || logoSelectionPending || hasErrors || isSuccess || websiteBlocked}
+                                        disabled={formPending
+                                            || logoSelectionPending
+                                            || hasErrors
+                                            || isSuccess
+                                            || websiteBlocked
+                                            || duplicatePreflight.blocked}
                                         className="min-w-24 shadow-sm transition hover:shadow-md"
                                     >
-                                        {isCreating ? (
+                                        {formPending ? (
                                             <>
                                                 <Loader2Icon className="size-4 animate-spin" />
                                                 {t('create')}
@@ -651,6 +751,8 @@ export default function NewCompanyDialog({
                                     initial={editingInitial}
                                     onDone={handleContactDone}
                                     onBack={backToCompany}
+                                    disabled={formPending}
+                                    requestInit={requestInit}
                                 />
                             </motion.div>
                         )}
@@ -676,7 +778,8 @@ type NewCompanyFormProps = {
     isCreating: boolean;
     isSuccess?: boolean;
     existingCompanies?: Company[];
-    createNewCompany: () => void | Promise<void>;
+    createNewCompany: (duplicateReviewToken: string | null) => void | Promise<void>;
+    requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the surface, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
 };
@@ -698,10 +801,13 @@ export function NewCompanyForm({
     existingCompanies = [],
     createNewCompany,
     onCancel,
+    requestInit,
 }: NewCompanyFormProps) {
     const t = useTranslations('CompaniesNewDialog');
     const [isDragging, setIsDragging] = useState(false);
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
+    const [submissionPending, setSubmissionPending] = useState(false);
+    const submissionPendingRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const {
         logoPreview,
@@ -739,11 +845,17 @@ export function NewCompanyForm({
         return key ? websiteByDomain.get(key) ?? null : null;
     }, [payload.website, websiteByDomain]);
 
-    const nameMatches = useDuplicateNameCheck('company', payload.name);
+    const duplicatePreflight = useDuplicatePreflight('company', {
+        name: payload.name,
+        website: payload.website,
+        phone: payload.phone,
+    }, active, requestInit);
 
-    const hasErrors = Object.keys(fieldErrors).length > 0;
+    const hasErrors = Object.keys(fieldErrors).length > 0
+        || duplicatePreflight.status === 'error';
     const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
-    const status: 'idle' | 'loading' | 'success' | 'error' = isCreating
+    const formPending = submissionPending || isCreating;
+    const status: 'idle' | 'loading' | 'success' | 'error' = formPending
         ? 'loading'
         : hasErrors
             ? 'error'
@@ -759,7 +871,7 @@ export function NewCompanyForm({
     const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         setIsDragging(false);
-        if (isCreating || logoSelectionPending || isSuccess) return;
+        if (formPending || logoSelectionPending || isSuccess) return;
         void applyFile(e.dataTransfer.files?.[0]);
     };
 
@@ -773,10 +885,18 @@ export function NewCompanyForm({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating || logoSelectionPending || websiteBlocked) return;
-        resetFieldErrors();
+        if (submissionPendingRef.current
+                || isCreating
+                || logoSelectionPending
+                || websiteBlocked
+                || duplicatePreflight.blocked) return;
+        submissionPendingRef.current = true;
+        setSubmissionPending(true);
         try {
-            await createNewCompany();
+            const duplicateDecision = await duplicatePreflight.reviewNow();
+            if (!duplicateDecision.allowed) return;
+            resetFieldErrors();
+            await createNewCompany(duplicateDecision.duplicateReviewToken);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -785,6 +905,9 @@ export function NewCompanyForm({
                     requestAnimationFrame(() => document.getElementById(`company-${firstKey}`)?.focus());
                 }
             }
+        } finally {
+            submissionPendingRef.current = false;
+            setSubmissionPending(false);
         }
     };
 
@@ -829,7 +952,7 @@ export function NewCompanyForm({
                             id="company-logo"
                             type="file"
                             accept={MANAGED_IMAGE_ACCEPT}
-                            disabled={isCreating || logoSelectionPending || isSuccess}
+                            disabled={formPending || logoSelectionPending || isSuccess}
                             onChange={handleLogoChange}
                             className="sr-only"
                         />
@@ -839,8 +962,9 @@ export function NewCompanyForm({
                         <button
                             type="button"
                             onClick={removeLogo}
+                            disabled={formPending}
                             aria-label="Remove logo"
-                            className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-popover transition hover:scale-110 active:scale-95"
+                            className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-popover transition hover:scale-110 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                         >
                             <XMarkIcon className="size-3" />
                         </button>
@@ -853,6 +977,7 @@ export function NewCompanyForm({
                 </div>
 
                 <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
+                    <fieldset disabled={formPending} className="contents">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="company-name">
                             {t('labelName')} <span className="text-muted-foreground">*</span>
@@ -870,14 +995,25 @@ export function NewCompanyForm({
                                 className={cn(inputBase, 'pl-9 pr-3', fieldErrors.name && inputError)}
                                 placeholder={t('placeholderName')}
                                 aria-invalid={Boolean(fieldErrors.name)}
-                                aria-describedby={fieldErrors.name ? 'company-name-error' : undefined}
+                                aria-describedby={[
+                                    fieldErrors.name && 'company-name-error',
+                                    duplicatePreflight.status !== 'idle' && 'company-duplicate-preflight',
+                                ].filter(Boolean).join(' ') || undefined}
                                 autoComplete="organization"
                                 autoFocus
                                 required
                             />
                         </div>
                         {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
-                        <DuplicateNameWarning id="company-name-duplicate" kind="company" matches={nameMatches.matches} total={nameMatches.total} />
+                        <DuplicatePreflightWarning
+                            id="company-duplicate-preflight"
+                            kind="company"
+                            status={duplicatePreflight.status}
+                            response={duplicatePreflight.response}
+                            acknowledged={duplicatePreflight.acknowledged}
+                            onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                            onRetry={duplicatePreflight.retry}
+                        />
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
@@ -998,20 +1134,26 @@ export function NewCompanyForm({
                             />
                         </div>
                     </div>
+                    </fieldset>
                 </form>
 
                 <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '290ms' }}>
-                    <Button type="button" variant="outline" disabled={isCreating || logoSelectionPending} onClick={onCancel}>
+                    <Button type="button" variant="outline" disabled={formPending || logoSelectionPending} onClick={onCancel}>
                         {t('cancel')}
                     </Button>
                     <Button
                         type="submit"
                         form="new-company-form"
                         variant="brand"
-                        disabled={isCreating || logoSelectionPending || hasErrors || isSuccess || websiteBlocked}
+                        disabled={formPending
+                            || logoSelectionPending
+                            || hasErrors
+                            || isSuccess
+                            || websiteBlocked
+                            || duplicatePreflight.blocked}
                         className="min-w-24 shadow-sm transition hover:shadow-md"
                     >
-                        {isCreating ? (
+                        {formPending ? (
                             <>
                                 <Loader2Icon className="size-4 animate-spin" />
                                 {t('create')}

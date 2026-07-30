@@ -310,7 +310,10 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         }
     };
 
-    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+    const createNewContact = async (
+        businessCard?: BusinessCardImportDraft,
+        duplicateReviewToken: string | null = null,
+    ) => {
         invalidateNewContactClose();
         const operationGeneration = newContactGenerationRef.current;
         const isCurrent = () => newContactGenerationRef.current === operationGeneration;
@@ -319,7 +322,10 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         try {
             const newContact = businessCard
                 ? (await importBusinessCard(businessCard)).contact
-                : await createContact(newContactPayload);
+                : await createContact({
+                    ...newContactPayload,
+                    duplicateReviewToken: duplicateReviewToken ?? undefined,
+                });
             if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {

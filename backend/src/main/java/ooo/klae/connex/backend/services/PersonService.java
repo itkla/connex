@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -68,6 +70,8 @@ public class PersonService {
     private final RuleTriggerPublisher ruleTriggers;
     private final ManagedObjectService managedObjectService;
     private final IdentityIntakeService identityIntakeService;
+    private final DuplicatePreflightService duplicatePreflightService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -182,9 +186,29 @@ public class PersonService {
      * Creates a new {@code Person} in the active workspace. The ID is auto-generated. When the
      * contact is created with a company, an opening employment-history row is recorded.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
+        return createWithSource(
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
+    }
+
+    /**
+     * Rechecks and creates a person from an interactive reviewed request.
+     *
+     * @param person reviewed person values
+     * @param duplicateReviewToken token from the explicitly accepted duplicate review
+     * @return created person
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_CREATE)
+    public Person createReviewed(Person person, String duplicateReviewToken) {
+        duplicatePreflightService.requireReviewedPersonCreation(
+            new PersonDuplicatePreflightRequest(
+                person.getName(),
+                person.getEmail() == null ? List.of() : List.of(person.getEmail()),
+                person.getPhone() == null ? List.of() : List.of(person.getPhone())),
+            duplicateReviewToken);
         return createWithSource(
             person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
     }
@@ -194,11 +218,35 @@ public class PersonService {
      *
      * @param person reviewed contact
      * @param sourceRowRef durable business-card request reference
+     * @param duplicateReviewToken token from the explicitly accepted duplicate review
      * @return created contact
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
-    public Person createFromBusinessCard(Person person, String sourceRowRef) {
+    public Person createFromBusinessCard(
+            Person person,
+            String sourceRowRef,
+            String duplicateReviewToken) {
+        duplicatePreflightService.requireReviewedPersonCreation(
+            new PersonDuplicatePreflightRequest(
+                person.getName(),
+                person.getEmail() == null ? List.of() : List.of(person.getEmail()),
+                person.getPhone() == null ? List.of() : List.of(person.getPhone())),
+            duplicateReviewToken);
+        return createWithSource(
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef);
+    }
+
+    /**
+     * Creates a business-card contact for trusted internal callers that own duplicate review.
+     *
+     * @param person reviewed contact
+     * @param sourceRowRef durable business-card request reference
+     * @return created contact
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_CREATE)
+    Person createFromBusinessCard(Person person, String sourceRowRef) {
         return createWithSource(
             person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef);
     }
@@ -208,6 +256,7 @@ public class PersonService {
             IdentityAcquisitionSource source,
             String sourceRowRef) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(authService.getCurrentUser().getId());
@@ -230,10 +279,11 @@ public class PersonService {
      * the employment history is updated: the current stint is closed and (if they moved to a new
      * company) a new current stint is opened.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         Person before = requireOwnedPerson(workspaceId, id);
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
@@ -329,10 +379,11 @@ public class PersonService {
      * third-party provision also revokes every standing cross-workspace share of the contact —
      * the restriction must stop provision already in flight, not just new grants.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
@@ -391,10 +442,11 @@ public class PersonService {
     /**
      * Deletes a {@code Person} in the active workspace.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }

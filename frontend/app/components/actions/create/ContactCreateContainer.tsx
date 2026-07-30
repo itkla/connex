@@ -103,7 +103,10 @@ export default function ContactCreateContainer({
         emitDismissLock();
     };
 
-    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+    const createNewContact = async (
+        businessCard?: BusinessCardImportDraft,
+        duplicateReviewToken: string | null = null,
+    ) => {
         invalidatePendingClose();
         const operationGeneration = closeGenerationRef.current;
         const isCurrent = () => closeGenerationRef.current === operationGeneration && !requestInit?.signal?.aborted;
@@ -114,7 +117,10 @@ export default function ContactCreateContainer({
         try {
             const imported = businessCard ? await importBusinessCard(businessCard, requestInit) : null;
             if (!isCurrent()) return;
-            const newContact = imported?.contact ?? await createContact(payload, requestInit);
+            const newContact = imported?.contact ?? await createContact({
+                ...payload,
+                duplicateReviewToken: duplicateReviewToken ?? undefined,
+            }, requestInit);
             if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {
@@ -182,6 +188,7 @@ export default function ContactCreateContainer({
                 }}
                 onImportRetryRequiredChange={handleImportRetryRequiredChange}
                 onSubmissionPendingChange={handleSubmissionPendingChange}
+                requestInit={requestInit}
             />
         );
     }
@@ -204,6 +211,7 @@ export default function ContactCreateContainer({
             }}
             onImportRetryRequiredChange={handleImportRetryRequiredChange}
             onSubmissionPendingChange={handleSubmissionPendingChange}
+            requestInit={requestInit}
         />
     );
 }

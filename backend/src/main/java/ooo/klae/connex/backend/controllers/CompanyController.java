@@ -227,7 +227,8 @@ public class CompanyController {
      */
     @PostMapping
     public CompanyDto createCompany(@Valid @RequestBody CompanyDto dto) {
-        return CompanyDto.from(companyService.createCompany(dto.toBean()));
+        return CompanyDto.from(companyService.createCompanyReviewed(
+            dto.toBean(), dto.getDuplicateReviewToken()));
     }
 
     /**

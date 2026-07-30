@@ -26,6 +26,8 @@
     "back": "Back",
     "next": "Next",
     "import": "Import",
+    "refreshReview": "Refresh review",
+    "reviewStale": "Your match action or row links changed. Refresh the review before importing.",
     "done": "Done",
     "mapHint": "{mapped} of {total} columns mapped. Name is required.",
     "ignore": "— Ignore —",
@@ -86,7 +88,26 @@
     "rowColStatus": "Status",
     "rowColDetail": "Detail",
     "rowColLink": "Link",
-    "reviewLinkHint": "Showing the first 100 rows. Use Link to match a row to an existing record.",
+    "reviewLinkHint": "Showing {shown} of {total} actionable rows, including all {candidates} rows with possible matches. Use Link to resolve another record.",
+    "candidateListLabel": "Possible existing records",
+    "candidateStrength": {
+      "STRONG": "Exact identity",
+      "WEAK": "Exact name"
+    },
+    "candidateRecordType": {
+      "person": "Contact",
+      "company": "Company"
+    },
+    "candidateEvidence": {
+      "EMAIL": "Same email",
+      "PHONE": "Same phone",
+      "DOMAIN": "Same domain",
+      "EXTERNAL_ID": "Same source ID",
+      "NAME": "Same normalized name"
+    },
+    "candidateShared": "Shared · review only",
+    "candidateUse": "Use record",
+    "candidateSelected": "Selected",
     "linkAction": "Link…",
     "linkSearchPlaceholder": "Search existing…",
     "linkSearchLabel": "Search existing records",

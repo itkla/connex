@@ -466,7 +466,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             mock(IdentityIntakeService.class),
-            mock(MatchingService.class));
+            mock(MatchingService.class),
+            mock(DuplicatePreflightService.class),
+            mock(DuplicateDecisionLockService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -507,7 +509,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(SegmentService.class), referenceService, Clock.systemUTC(),
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             mock(IdentityIntakeService.class),
-            mock(MatchingService.class));
+            mock(MatchingService.class),
+            mock(DuplicatePreflightService.class),
+            mock(DuplicateDecisionLockService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -540,7 +544,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             Clock.systemUTC(),
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             mock(IdentityIntakeService.class),
-            matchingService()
+            matchingService(),
+            mock(DuplicatePreflightService.class),
+            mock(DuplicateDecisionLockService.class)
         );
     }
 

@@ -5,6 +5,7 @@ import java.util.Arrays;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import org.hibernate.validator.constraints.URL;
@@ -47,6 +48,10 @@ public class CompanyDto {
 
     @Size(max = 512)
     private String address;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Pattern(regexp = "^[0-9a-f]{64}$")
+    private String duplicateReviewToken;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String logoUrl;
