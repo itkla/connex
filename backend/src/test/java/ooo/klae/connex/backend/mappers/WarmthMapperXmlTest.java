@@ -65,7 +65,8 @@ class WarmthMapperXmlTest {
                 "workspaceId", 7,
                 "personId", 11,
                 "currentUserId", 17,
-                "reference", reference
+                "reference", reference,
+                "sourceLimit", 100_001
             )
         );
         String companyPrivateNotes = sql(
@@ -76,7 +77,8 @@ class WarmthMapperXmlTest {
                 "workspaceId", 7,
                 "companyId", 13,
                 "currentUserId", 17,
-                "reference", reference
+                "reference", reference,
+                "sourceLimit", 100_001
             )
         );
 
@@ -94,8 +96,14 @@ class WarmthMapperXmlTest {
         assertTrue(companyEvidenceTotals.contains("n.visibility = 'workspace'"));
         assertTrue(personPrivateNotes.contains("n.author_id = ?"));
         assertTrue(personPrivateNotes.contains("n.visibility = 'private'"));
+        assertTrue(personPrivateNotes.contains("LIMIT ?"));
         assertTrue(companyPrivateNotes.contains("n.author_id = ?"));
         assertTrue(companyPrivateNotes.contains("n.visibility = 'private'"));
+        assertTrue(companyPrivateNotes.contains("LIMIT ?"));
+        assertEquals(10, timeout(
+            configuration, NoteMapper.class, "countOwnPrivateNotesForPersonEvidence"));
+        assertEquals(10, timeout(
+            configuration, NoteMapper.class, "countOwnPrivateNotesForCompanyEvidence"));
     }
 
     @Test

@@ -513,7 +513,8 @@ class ScoringServiceTest {
         when(personMapper.getRelationshipEvidenceContributors(
             WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20
         )).thenReturn(rows);
-        when(noteMapper.countOwnPrivateNotesForPersonEvidence(WS, 7, 42, reference)).thenReturn(2);
+        when(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001)).thenReturn(2);
         ScoringService service = new ScoringService(
             personMapper,
             companyMapper,
@@ -551,7 +552,8 @@ class ScoringServiceTest {
             WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
         verify(personMapper).getRelationshipEvidenceContributors(
             WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20);
-        verify(noteMapper).countOwnPrivateNotesForPersonEvidence(WS, 7, 42, reference);
+        verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001);
     }
 
     @Test
@@ -579,7 +581,37 @@ class ScoringServiceTest {
         verify(personMapper, never()).getRelationshipEvidenceContributors(
             anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper, never()).countOwnPrivateNotesForPersonEvidence(
-            anyInt(), anyInt(), anyInt(), any());
+            anyInt(), anyInt(), anyInt(), any(), anyInt());
+    }
+
+    @Test
+    void contactEvidenceRefusesARecordWhoseExcludedPrivateNotesExceedTheServerBound() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(
+            0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
+        when(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001)).thenReturn(100_001);
+        ScoringService service = new ScoringService(
+            personMapper,
+            mock(CompanyMapper.class),
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
+
+        verify(personMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+        verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001);
     }
 
     @Test
@@ -593,7 +625,8 @@ class ScoringServiceTest {
         when(companyMapper.getRelationshipEvidenceTotals(
             WS, 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
         )).thenReturn(new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
-        when(noteMapper.countOwnPrivateNotesForCompanyEvidence(WS, 10, 42, reference)).thenReturn(3);
+        when(noteMapper.countOwnPrivateNotesForCompanyEvidence(
+            WS, 10, 42, reference, 100_001)).thenReturn(3);
         ScoringService service = new ScoringService(
             mock(PersonMapper.class),
             companyMapper,
@@ -637,7 +670,7 @@ class ScoringServiceTest {
         verify(companyMapper, never()).getRelationshipEvidenceContributors(
             anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper, never()).countOwnPrivateNotesForCompanyEvidence(
-            anyInt(), anyInt(), anyInt(), any());
+            anyInt(), anyInt(), anyInt(), any(), anyInt());
     }
 
     @Test

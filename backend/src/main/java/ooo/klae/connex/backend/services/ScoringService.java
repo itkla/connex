@@ -177,8 +177,8 @@ public class ScoringService {
                 MAX_EVIDENCE_SOURCES + 1,
                 MAX_EVIDENCE_CONTRIBUTORS
             );
-        int privateNotes = noteMapper.countOwnPrivateNotesForPersonEvidence(
-            workspaceId, personId, currentUserId, reference);
+        int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            workspaceId, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.PERSON,
             personId,
@@ -454,8 +454,8 @@ public class ScoringService {
                 MAX_EVIDENCE_SOURCES + 1,
                 MAX_EVIDENCE_CONTRIBUTORS
             );
-        int privateNotes = noteMapper.countOwnPrivateNotesForCompanyEvidence(
-            workspaceId, companyId, currentUserId, reference);
+        int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForCompanyEvidence(
+            workspaceId, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.COMPANY,
             companyId,
@@ -734,6 +734,15 @@ public class ScoringService {
                     + " attributed sources for one record");
         }
         return totals;
+    }
+
+    private static int boundedPrivateNoteCount(int count) {
+        if (count > MAX_EVIDENCE_SOURCES) {
+            throw new BadRequestException(
+                "Relationship evidence supports at most " + MAX_EVIDENCE_SOURCES
+                    + " excluded private notes for one caller and record");
+        }
+        return count;
     }
 
     private RelationshipEvidenceDto evidence(

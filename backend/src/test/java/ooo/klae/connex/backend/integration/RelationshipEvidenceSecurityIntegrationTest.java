@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
@@ -45,6 +46,8 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -55,6 +58,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -337,6 +341,58 @@ class RelationshipEvidenceSecurityIntegrationTest {
         assertEquals(ordinaryTemperature.get("band"), evidenceTemperature.get("band"));
         assertEquals(ordinaryTemperature.get("touchCount"), evidenceTemperature.get("touchCount"));
         assertEquals(ordinaryTemperature.get("modelVersion"), evidenceTemperature.get("modelVersion"));
+    }
+
+    @Test
+    void evidenceMappersCapBeforeAggregationAndDeduplicateCompanyAttribution() {
+        Workspace workspace = newWorkspace();
+        User user = newMember(workspace);
+        Company company = newCompany(workspace);
+        Person person = newPerson(workspace, company);
+        Pipeline pipeline = pipeline(workspace);
+        Stage stage = stage(workspace, pipeline);
+        Deal deal = deal(workspace, pipeline, stage, company);
+        activity(workspace, user, person, null, 5);
+        activity(workspace, user, null, deal, 4);
+        Activity dualAttributed = activity(workspace, user, person, deal, 3);
+        note(workspace, user, person, "workspace");
+        task(workspace, user, person);
+        LocalDateTime reference = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(1);
+
+        RelationshipEvidenceTotalsDto exactTotals = companyMapper.getRelationshipEvidenceTotals(
+            workspace.getId(),
+            company.getId(),
+            reference,
+            RelationshipWarmthModel.current().sqlParameters(),
+            10
+        );
+        RelationshipEvidenceTotalsDto cappedTotals = companyMapper.getRelationshipEvidenceTotals(
+            workspace.getId(),
+            company.getId(),
+            reference,
+            RelationshipWarmthModel.current().sqlParameters(),
+            3
+        );
+        List<RelationshipEvidenceRowDto> contributors =
+            companyMapper.getRelationshipEvidenceContributors(
+                workspace.getId(),
+                company.getId(),
+                reference,
+                RelationshipWarmthModel.current().sqlParameters(),
+                10,
+                10
+            );
+
+        assertEquals(5, exactTotals.contributorCount());
+        assertEquals(3, exactTotals.activityCount());
+        assertEquals(1, exactTotals.noteCount());
+        assertEquals(1, exactTotals.taskCount());
+        assertEquals(3, cappedTotals.contributorCount());
+        assertEquals(5, contributors.size());
+        assertEquals(1, contributors.stream()
+            .filter(row -> "activity".equals(row.sourceType())
+                && row.sourceId() == dualAttributed.getId())
+            .count());
     }
 
     @Test
