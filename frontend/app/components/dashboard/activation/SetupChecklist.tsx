@@ -13,13 +13,13 @@ import { cn } from '@/lib/utils';
 
 function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolean }) {
     const t = useTranslations('DashboardActivation');
-    const { run, pendingIds, getAction } = useActions();
+    const { run, pendingIds, getAction, openOverlay } = useActions();
     const label = t(`steps.${step.id}.cta`);
     const variant = emphasis ? 'brand' : 'outline';
 
     if (step.href) {
         return (
-            <Button asChild size="sm" variant={variant} className="shrink-0">
+            <Button asChild size="sm" variant={variant} className="w-full sm:w-auto sm:shrink-0">
                 <Link href={step.href}>{label}</Link>
             </Button>
         );
@@ -29,6 +29,13 @@ function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolea
 
     const actionId = step.actionId;
     const pending = pendingIds.has(actionId);
+    const handleAction = () => {
+        if (step.requireRelationshipTarget) {
+            openOverlay({ kind: 'create-activity', requireRelationshipTarget: true });
+            return;
+        }
+        void run(actionId, { source: 'empty-state' });
+    };
 
     return (
         <Button
@@ -36,10 +43,8 @@ function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolea
             size="sm"
             variant={variant}
             disabled={pending}
-            className="shrink-0"
-            onClick={() => {
-                void run(actionId, { source: 'empty-state' });
-            }}
+            className="w-full sm:w-auto sm:shrink-0"
+            onClick={handleAction}
         >
             {pending ? <Loader2Icon className="size-3.5 animate-spin" aria-hidden /> : null}
             {label}
@@ -68,32 +73,34 @@ export default function SetupChecklist({ steps }: { steps: ActivationStep[] }) {
             </div>
             <ul className="flex-1 divide-y divide-border">
                 {steps.map((step) => (
-                    <li key={step.id} className="flex items-start gap-3 px-5 py-3.5">
-                        {step.done ? (
-                            <CheckCircleSolidIcon className="mt-0.5 size-5 shrink-0 text-brand-dark" aria-hidden />
-                        ) : (
-                            <CheckCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground/40" aria-hidden />
-                        )}
-                        <div className="min-w-0 flex-1">
-                            <p
-                                className={cn(
-                                    'text-sm font-medium',
-                                    step.done ? 'text-muted-foreground' : 'text-foreground',
-                                )}
-                            >
-                                {step.done ? <span className="sr-only">{t('doneLabel')} </span> : null}
-                                {t(`steps.${step.id}.title`)}
-                                {!step.done && !step.required ? (
-                                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                                        {t('optionalLabel')}
-                                    </span>
-                                ) : null}
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                                {step.done
-                                    ? t(`steps.${step.id}.done`, { count: step.count ?? 0 })
-                                    : t(`steps.${step.id}.body`)}
-                            </p>
+                    <li key={step.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-start">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                            {step.done ? (
+                                <CheckCircleSolidIcon className="mt-0.5 size-5 shrink-0 text-brand-dark" aria-hidden />
+                            ) : (
+                                <CheckCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground/40" aria-hidden />
+                            )}
+                            <div className="min-w-0 flex-1">
+                                <p
+                                    className={cn(
+                                        'text-sm font-medium',
+                                        step.done ? 'text-muted-foreground' : 'text-foreground',
+                                    )}
+                                >
+                                    {step.done ? <span className="sr-only">{t('doneLabel')} </span> : null}
+                                    {t(`steps.${step.id}.title`)}
+                                    {!step.done && !step.required ? (
+                                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                            {t('optionalLabel')}
+                                        </span>
+                                    ) : null}
+                                </p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                    {step.done
+                                        ? t(`steps.${step.id}.done`, { count: step.count ?? 0 })
+                                        : t(`steps.${step.id}.body`)}
+                                </p>
+                            </div>
                         </div>
                         {step.done ? null : (
                             <StepAction step={step} emphasis={step.id === firstOutstanding?.id} />

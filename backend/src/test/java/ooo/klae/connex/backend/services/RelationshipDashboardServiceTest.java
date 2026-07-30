@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -17,6 +19,9 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -24,6 +29,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RelationshipDashboardServiceTest {
+    @Test
+    void dashboardUsesOneRepeatableReadSnapshot() throws NoSuchMethodException {
+        Transactional transaction = RelationshipDashboardService.class
+            .getMethod("getDashboard", int.class)
+            .getAnnotation(Transactional.class);
+
+        assertNotNull(transaction);
+        assertTrue(transaction.readOnly());
+        assertEquals(Isolation.REPEATABLE_READ, transaction.isolation());
+    }
+
     @Test
     void dashboardReusesOneWarmthSnapshotAndBatchHydratesBoundedRecords() {
         int workspaceId = 7;
@@ -74,13 +90,39 @@ class RelationshipDashboardServiceTest {
         assertEquals(1, dashboard.coolingContacts().size());
         assertEquals(1, dashboard.coolingCompanies().size());
         assertEquals(1, dashboard.dealRisks().size());
-        assertEquals(true, dashboard.dealRisksTruncated());
+        assertTrue(dashboard.hasRelationshipEvidence());
+        assertTrue(dashboard.dealRisksTruncated());
         assertEquals("At-risk deal", dashboard.dealRisks().getFirst().deal().getName());
         verify(scoring, times(1)).scoreWorkspace(workspaceId);
         verify(riskService, times(1)).assessDashboard(
             org.mockito.ArgumentMatchers.eq(workspaceId),
             org.mockito.ArgumentMatchers.anyMap(),
             org.mockito.ArgumentMatchers.eq(6));
+    }
+
+    @Test
+    void dashboardReportsWhenTheScoringSnapshotHasNoRelationshipEvidence() {
+        int workspaceId = 8;
+        ScoringService scoring = mock(ScoringService.class);
+        DealRiskService riskService = mock(DealRiskService.class);
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        RelationshipTemperatureDto untouched = new RelationshipTemperatureDto(
+            1, 0, "cold", "steady", null, null, 0, null, null, "test-model", Instant.EPOCH);
+        when(scoring.scoreWorkspace(workspaceId)).thenReturn(
+            new ScoringService.WorkspaceScores(List.of(untouched), List.of()));
+        when(riskService.assessDashboard(
+            org.mockito.ArgumentMatchers.eq(workspaceId),
+            org.mockito.ArgumentMatchers.anyMap(),
+            org.mockito.ArgumentMatchers.eq(6)))
+            .thenReturn(new DashboardDealRiskResult(List.of(), false));
+        RelationshipDashboardService service = new RelationshipDashboardService(
+            scoring, riskService, personMapper, companyMapper, dealMapper);
+
+        RelationshipDashboardDto dashboard = service.getDashboard(workspaceId);
+
+        assertFalse(dashboard.hasRelationshipEvidence());
     }
 
     private static RelationshipTemperatureDto temperature(int id, String trend, int daysSinceTouch) {

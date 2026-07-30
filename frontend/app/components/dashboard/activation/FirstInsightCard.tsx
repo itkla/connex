@@ -44,7 +44,13 @@ function evidenceKey(evidence: ActivationEvidence, index: number): string {
  * behind it. The evidence list is the point of the card: the claim in the header is only ever as
  * strong as the rows underneath it, which are read straight from stored interactions.
  */
-export default function FirstInsightCard({ insight }: { insight: ActivationInsight }) {
+export default function FirstInsightCard({
+    insight,
+    canCreateFollowUp,
+}: {
+    insight: ActivationInsight;
+    canCreateFollowUp: boolean;
+}) {
     const t = useTranslations('DashboardActivation');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
@@ -68,7 +74,8 @@ export default function FirstInsightCard({ insight }: { insight: ActivationInsig
         }
     };
 
-    const followUpAvailable = insight.record != null && getAction(FOLLOW_UP_ACTION) != null;
+    const followUpAvailable =
+        canCreateFollowUp && insight.record != null && getAction(FOLLOW_UP_ACTION) != null;
     const followUpPending = pendingIds.has(FOLLOW_UP_ACTION);
 
     return (
@@ -102,8 +109,8 @@ export default function FirstInsightCard({ insight }: { insight: ActivationInsig
                             return (
                                 <motion.li
                                     key={evidenceKey(evidence, index)}
-                                    initial={reduce ? false : { opacity: 0, y: 6 }}
-                                    animate={{ opacity: 1, y: 0 }}
+                                    initial={reduce ? false : { opacity: 0, transform: 'translateY(6px)' }}
+                                    animate={{ opacity: 1, transform: 'translateY(0)' }}
                                     transition={
                                         reduce
                                             ? instant

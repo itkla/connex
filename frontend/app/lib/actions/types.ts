@@ -95,7 +95,13 @@ export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 export type OverlayRequest =
     | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraftGeneration?: number }
     | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft; restoredDraftGeneration?: number }
-    | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft; restoredDraftGeneration?: number }
+    | {
+        kind: "create-activity";
+        defaults?: CreateDefaults;
+        draft?: ActivityDraft;
+        restoredDraftGeneration?: number;
+        requireRelationshipTarget?: boolean;
+    }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
     | { kind: "create-deal"; defaults?: CreateDefaults }

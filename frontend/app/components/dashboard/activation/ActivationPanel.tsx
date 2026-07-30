@@ -15,19 +15,28 @@ export default function ActivationPanel({
     steps,
     insight,
     gaps,
+    canCreateFollowUp,
 }: {
-    steps: ActivationStep[];
+    steps: ActivationStep[] | null;
     insight: ActivationInsight | null;
     gaps: ActivationGap[];
+    canCreateFollowUp: boolean;
 }) {
     const t = useTranslations('DashboardActivation');
+    const unavailable = gaps.includes('unavailable');
+    const paired = insight != null && (steps != null || unavailable);
 
     return (
         <section aria-label={t('sectionTitle')}>
             <SectionHeader title={t('sectionTitle')} />
-            <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
-                <SetupChecklist steps={steps} />
-                {insight ? <FirstInsightCard insight={insight} /> : <MissingEvidence gaps={gaps} />}
+            <div className={paired || steps ? 'grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2' : 'grid'}>
+                {steps ? <SetupChecklist steps={steps} /> : null}
+                {!steps && unavailable ? <MissingEvidence gaps={gaps} /> : null}
+                {insight ? (
+                    <FirstInsightCard insight={insight} canCreateFollowUp={canCreateFollowUp} />
+                ) : !unavailable ? (
+                    <MissingEvidence gaps={gaps} />
+                ) : null}
             </div>
         </section>
     );

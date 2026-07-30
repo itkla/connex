@@ -21,22 +21,36 @@ const EMPTY_COUNTS: ActivationCounts = {
     contacts: 0,
     companies: 0,
     hasInteractions: false,
+    hasRelationshipTargets: false,
     pipelines: 0,
     stages: 0,
     members: 1,
     connectedAccounts: 0,
     connectedAccountsAvailable: false,
+    canImportContacts: true,
+    canImportCompanies: true,
+    canCreateActivities: true,
+    canManagePipelines: true,
+    canManageMembers: true,
+    canCreateTasks: true,
 };
 
 const FULL_COUNTS: ActivationCounts = {
     contacts: 12,
     companies: 4,
     hasInteractions: true,
+    hasRelationshipTargets: true,
     pipelines: 1,
     stages: 5,
     members: 2,
     connectedAccounts: 0,
     connectedAccountsAvailable: false,
+    canImportContacts: true,
+    canImportCompanies: true,
+    canCreateActivities: true,
+    canManagePipelines: true,
+    canManageMembers: true,
+    canCreateTasks: true,
 };
 
 const NO_CANDIDATES: ActivationCandidates = {
@@ -154,7 +168,17 @@ describe("buildActivationSteps", () => {
 
     it("leaves the interaction step without a count because none can be counted exactly", () => {
         const steps = buildActivationSteps(FULL_COUNTS);
-        expect(steps.find((step) => step.id === "interactions")?.count).toBeNull();
+        const interaction = steps.find((step) => step.id === "interactions");
+        expect(interaction?.count).toBeNull();
+        expect(interaction?.requireRelationshipTarget).toBe(true);
+    });
+
+    it("hides the interaction action until a contact or deal can receive the evidence", () => {
+        const steps = buildActivationSteps({
+            ...EMPTY_COUNTS,
+            canImportContacts: false,
+        });
+        expect(steps.some((step) => step.id === "interactions")).toBe(false);
     });
 
     it("treats a pipeline with no stages as unfinished", () => {
@@ -167,6 +191,57 @@ describe("buildActivationSteps", () => {
         const steps = buildActivationSteps({ ...FULL_COUNTS, members: 1 });
         expect(steps.find((step) => step.id === "team")?.done).toBe(false);
         expect(isActivated(steps)).toBe(true);
+    });
+
+    it("hides the team step when the member cannot invite teammates", () => {
+        const steps = buildActivationSteps({
+            ...FULL_COUNTS,
+            members: 1,
+            canManageMembers: false,
+        });
+        expect(steps.some((step) => step.id === "team")).toBe(false);
+    });
+
+    it("hides unfinished setup actions the member cannot perform", () => {
+        const steps = buildActivationSteps({
+            ...EMPTY_COUNTS,
+            canImportContacts: false,
+            canImportCompanies: false,
+            canCreateActivities: false,
+            canManagePipelines: false,
+            canManageMembers: false,
+        });
+        expect(steps).toEqual([]);
+    });
+
+    it("treats permission-inaccessible pipeline setup as non-blocking", () => {
+        const steps = buildActivationSteps({
+            ...FULL_COUNTS,
+            pipelines: 0,
+            stages: 0,
+            canManagePipelines: false,
+        });
+        expect(steps.some((step) => step.id === "pipeline")).toBe(false);
+        expect(isActivated(steps)).toBe(true);
+    });
+
+    it("keeps completed steps visible without their mutation permission", () => {
+        const steps = buildActivationSteps({
+            ...FULL_COUNTS,
+            canImportContacts: false,
+            canImportCompanies: false,
+            canCreateActivities: false,
+            canManagePipelines: false,
+            canManageMembers: false,
+        });
+        expect(steps.map((step) => step.id)).toEqual([
+            "contacts",
+            "companies",
+            "interactions",
+            "pipeline",
+            "team",
+        ]);
+        expect(steps.every((step) => step.done)).toBe(true);
     });
 
     it("hides the mailbox step when the instance offers no provider", () => {
@@ -305,5 +380,13 @@ describe("activationGaps", () => {
 
     it("reports no gaps once a signal exists", () => {
         expect(activationGaps(EMPTY_COUNTS, true)).toEqual([]);
+    });
+
+    it("reports unavailable instead of inventing a gap when signal loading fails", () => {
+        expect(activationGaps(FULL_COUNTS, false, false)).toEqual(["unavailable"]);
+    });
+
+    it("reports unavailable when checklist inputs fail even if one signal loaded", () => {
+        expect(activationGaps(FULL_COUNTS, true, false)).toEqual(["unavailable"]);
     });
 });

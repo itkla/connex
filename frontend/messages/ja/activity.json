@@ -49,6 +49,7 @@
     "dealLabel": "案件",
     "dealPlaceholder": "案件を関連付け",
     "noDealFound": "該当する案件がありません。",
+    "relationshipTargetRequired": "このアクティビティを関係の根拠にするには、コンタクトまたは案件を関連付けてください。",
     "cancel": "キャンセル",
     "create": "作成",
     "toastSubjectRequired": "件名は必須です",

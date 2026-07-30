@@ -83,7 +83,7 @@
       },
       "interactions": {
         "title": "Log an interaction",
-        "body": "Calls, emails and meetings are the only input relationship warmth is computed from.",
+        "body": "Activities, shared notes and linked tasks give Connex the evidence it uses to read relationship warmth.",
         "cta": "Log an activity",
         "done": "Interactions logged"
       },
@@ -130,6 +130,11 @@
     "missing": {
       "title": "Not enough evidence yet",
       "body": "Connex works relationship warmth out from the interactions you log. There is nothing here to work from, and a score without evidence would be a fabricated judgement, so there is no score.",
+      "noSignalTitle": "No relationship signal yet",
+      "noSignalBody": "Your relationship evidence is in, but nothing currently needs attention or supports a useful introduction.",
+      "unavailableTitle": "Relationship signals could not load",
+      "unavailableBody": "The checklist and insight are temporarily unavailable. Your workspace data is unchanged.",
+      "retry": "Try again",
       "gapsTitle": "What is missing",
       "gap": {
         "contacts": "No contacts yet",

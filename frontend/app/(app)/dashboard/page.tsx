@@ -10,32 +10,33 @@ import {
 } from '@heroicons/react/24/outline';
 
 import {
-    DEFAULT_CAPABILITIES,
     getActiveWorkspaceMembersResultFromCookie,
     getActivitiesPage,
     getActivityVolumeFromCookie,
-    getAllStagesFromCookie,
-    getCapabilities,
+    getAllStagesResultFromCookie,
+    getCapabilitiesResultFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
-    getCompaniesPage,
+    getCompaniesPageResultFromCookie,
     getContactsPage,
+    getContactsPageResultFromCookie,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
     getDealClosingSoonFromCookie,
     getDealClosingSoonCountFromCookie,
     getDealKpisFromCookie,
-    getDealMetricsFromCookie,
+    getDealMetricsResultFromCookie,
     getDealPipelineValueFromCookie,
     getDealRevenueTimeseries,
     getDealStageDistribution,
     getDealsPage,
-    getIntroSuggestionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
+    getIntroSuggestionsResultFromCookie,
     getNotesPage,
     getNotifications,
-    getPipelinesFromCookie,
-    getProviderConnections,
+    getPipelinesResultFromCookie,
+    getProviderConnectionsResultFromCookie,
     getRecentMovesFromCookie,
     getTaskSummaryFromCookie,
     getTasksPage,
@@ -43,7 +44,7 @@ import {
     getTeamLeaderboardFromCookie,
     getUpcomingActivityCountFromCookie,
     getUsers,
-    getRelationshipDashboardFromCookie,
+    getRelationshipDashboardResultFromCookie,
 } from '@/app/lib/api';
 import type {
     ActivityVolumeBucket,
@@ -61,7 +62,6 @@ import type {
     DealStageDistribution,
     NotificationPage,
     Page,
-    ProviderConnection,
     RelationshipDashboard,
     Task,
     TaskSummary as TaskSummaryCounts,
@@ -101,7 +101,6 @@ import ActivationPanel from '@/app/components/dashboard/activation/ActivationPan
 import {
     activationGaps,
     buildActivationSteps,
-    isActivated,
     selectFirstInsight,
     type ActivationCounts,
 } from '@/app/lib/activation';
@@ -151,6 +150,7 @@ const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
 
 const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
     warmthSummary: EMPTY_WARMTH_SUMMARY,
+    hasRelationshipEvidence: false,
     coolingContacts: [],
     coolingCompanies: [],
     dealRisks: [],
@@ -184,27 +184,57 @@ function present<T>(value: T | null): value is T {
 /**
  * Loads the workspace-membership and connected-account inputs the setup checklist needs. It runs
  * only while a required setup step is still outstanding, so an established workspace pays nothing
- * for it. Every fetch degrades to the value that leaves its step undone rather than claiming done.
+ * for it. Any failed input returns an explicit unavailable result rather than fabricating a gap.
  */
 async function loadActivationExtras(cookie: string | null): Promise<{
-    members: number;
-    connectedAccounts: number;
-    connectedAccountsAvailable: boolean;
+    ok: true;
+    data: {
+        members: number;
+        connectedAccounts: number;
+        connectedAccountsAvailable: boolean;
+        canImportContacts: boolean;
+        canImportCompanies: boolean;
+        canCreateActivities: boolean;
+        canManagePipelines: boolean;
+        canManageMembers: boolean;
+        canCreateTasks: boolean;
+    };
+} | {
+    ok: false;
 }> {
-    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' } as const;
-    const [membersResult, capabilities] = await Promise.all([
+    const [membersResult, capabilitiesResult, effectivePermissionsResult] = await Promise.all([
         getActiveWorkspaceMembersResultFromCookie(cookie),
-        getCapabilities(init).catch(() => DEFAULT_CAPABILITIES),
+        getCapabilitiesResultFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
+    if (!membersResult.ok || !capabilitiesResult.ok || !effectivePermissionsResult.ok) {
+        return { ok: false };
+    }
+    const capabilities = capabilitiesResult.data;
+    const effectivePermissions = effectivePermissionsResult.data;
     const connectedAccountsAvailable =
         capabilities.connectedAccounts.google || capabilities.connectedAccounts.microsoft;
-    const connections = connectedAccountsAvailable
-        ? await getProviderConnections(init).catch(() => [] as ProviderConnection[])
-        : [];
+    const connectionsResult = connectedAccountsAvailable
+        ? await getProviderConnectionsResultFromCookie(cookie)
+        : { ok: true as const, data: [] };
+    if (!connectionsResult.ok) {
+        return { ok: false };
+    }
     return {
-        members: membersResult.ok ? membersResult.data.length : 1,
-        connectedAccounts: connections.filter((connection) => connection.status === 'connected').length,
-        connectedAccountsAvailable,
+        ok: true,
+        data: {
+            members: membersResult.data.length,
+            connectedAccounts: connectionsResult.data.filter(
+                (connection) => connection.status === 'connected',
+            ).length,
+            connectedAccountsAvailable,
+            canImportContacts: effectivePermissions.includes('PERSON_CREATE'),
+            canImportCompanies: effectivePermissions.includes('COMPANY_CREATE'),
+            canCreateActivities: effectivePermissions.includes('ACTIVITY_CREATE'),
+            canManagePipelines: effectivePermissions.includes('PIPELINE_MANAGE'),
+            canManageMembers: effectivePermissions.includes('MEMBER_MANAGE'),
+            canCreateTasks: effectivePermissions.includes('TASK_CREATE'),
+        },
     };
 }
 
@@ -219,12 +249,12 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contacts, deals, pipelines, stages, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
+    const [contacts, deals, pipelinesResult, stagesResult, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
         await Promise.all([
             getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
-            getPipelinesFromCookie(cookie),
-            getAllStagesFromCookie(cookie),
+            getPipelinesResultFromCookie(cookie),
+            getAllStagesResultFromCookie(cookie),
             getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
             getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
@@ -235,14 +265,14 @@ export default async function Dashboard() {
             ),
             getAttachmentFacets(init).catch(() => EMPTY_ATTACHMENT_FACETS),
             getRecentMovesFromCookie(cookie),
-            getIntroSuggestionsFromCookie(cookie, 4),
-            getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
+            getIntroSuggestionsResultFromCookie(cookie, 4),
+            getRelationshipDashboardResultFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
             getNotifications({ status: 'unread', page: 1, size: 6 }, init)
                 .catch(() => ({ items: [], total: 0, stateVersion: 0, asOf: '1970-01-01T00:00:00Z' }) as NotificationPage),
-            getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
-            getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),
-            getContactsPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Contact>),
+            getDealMetricsResultFromCookie(cookie),
+            getCompaniesPageResultFromCookie(cookie, { size: 1 }),
+            getContactsPageResultFromCookie(cookie, { size: 1 }),
             getActivityVolumeFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as ActivityVolumeBucket[]),
             getTeamLeaderboardFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as TeamLeaderboardEntry[]),
             getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
@@ -250,6 +280,22 @@ export default async function Dashboard() {
             getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
         ]);
+
+    const introSuggestions = introSuggestionsResult.ok ? introSuggestionsResult.data : [];
+    const relationshipDashboard = relationshipDashboardResult.ok
+        ? relationshipDashboardResult.data
+        : EMPTY_RELATIONSHIP_DASHBOARD;
+    const dealMetrics = dealMetricsResult.ok
+        ? dealMetricsResult.data
+        : { byCurrency: [], totalCount: 0 };
+    const pipelines = pipelinesResult.ok ? pipelinesResult.data : [];
+    const stages = stagesResult.ok ? stagesResult.data : [];
+    const companiesPage = companiesPageResult.ok
+        ? companiesPageResult.data
+        : { items: [], total: 0 };
+    const contactsPage = contactsPageResult.ok
+        ? contactsPageResult.data
+        : { items: [], total: 0 };
 
     const relatedCompanyIds = new Set(
         closingSoonDeals.flatMap((deal) => deal.company == null ? [] : [deal.company]),
@@ -288,17 +334,25 @@ export default async function Dashboard() {
     const setupCounts = {
         contacts: contactsPage.total,
         companies: companiesPage.total,
-        hasInteractions: activities.length > 0,
+        hasInteractions: relationshipDashboard.hasRelationshipEvidence,
+        hasRelationshipTargets: contactsPage.total > 0 || dealMetrics.totalCount > 0,
         pipelines: pipelines.length,
         stages: stages.length,
     };
-    const requiredStepsOnly = buildActivationSteps({
-        ...setupCounts,
-        members: 1,
-        connectedAccounts: 0,
-        connectedAccountsAvailable: false,
-    });
-    const activationExtrasPromise = isActivated(requiredStepsOnly) ? null : loadActivationExtras(cookie);
+    const activationCoreInputsAvailable =
+        companiesPageResult.ok
+        && contactsPageResult.ok
+        && dealMetricsResult.ok
+        && pipelinesResult.ok
+        && stagesResult.ok
+        && relationshipDashboardResult.ok;
+    const activationNeedsEvaluation =
+        !activationCoreInputsAvailable
+        || setupCounts.contacts === 0
+        || !setupCounts.hasInteractions
+        || setupCounts.pipelines === 0
+        || setupCounts.stages === 0;
+    const activationExtrasPromise = activationNeedsEvaluation ? loadActivationExtras(cookie) : null;
 
     const currency = dominantCurrency(dealMetrics);
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
@@ -317,18 +371,44 @@ export default async function Dashboard() {
     const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
 
-    const activationExtras = activationExtrasPromise ? await activationExtrasPromise : null;
-    const activationCounts: ActivationCounts | null = activationExtras
+    const activationExtrasResult = activationExtrasPromise ? await activationExtrasPromise : null;
+    const activationExtras = activationExtrasResult?.ok
+        ? activationExtrasResult.data
+        : {
+            members: 0,
+            connectedAccounts: 0,
+            connectedAccountsAvailable: false,
+            canImportContacts: false,
+            canImportCompanies: false,
+            canCreateActivities: false,
+            canManagePipelines: false,
+            canManageMembers: false,
+            canCreateTasks: false,
+        };
+    const activationCounts: ActivationCounts | null = activationNeedsEvaluation
         ? { ...setupCounts, ...activationExtras }
         : null;
-    const activationSteps = activationCounts ? buildActivationSteps(activationCounts) : null;
-    const activationInsight = activationCounts
+    const activationInputsAvailable =
+        activationCoreInputsAvailable && activationExtrasResult?.ok === true;
+    const resolvedActivationSteps = activationCounts && activationInputsAvailable
+        ? buildActivationSteps(activationCounts)
+        : null;
+    const activationSteps = resolvedActivationSteps && resolvedActivationSteps.length > 0
+        ? resolvedActivationSteps
+        : null;
+    const activationVisible = activationCounts != null && (
+        !activationInputsAvailable
+        || resolvedActivationSteps?.some((step) => step.required && !step.done) === true
+    );
+    const activationInsight = activationCounts && relationshipDashboardResult.ok
         ? selectFirstInsight({
             dealRisks: relationshipDashboard.dealRisks,
             coolingContacts: relationshipDashboard.coolingContacts,
             introSuggestions,
         })
         : null;
+    const activationSignalsAvailable = activationInputsAvailable
+        && (activationInsight != null || introSuggestionsResult.ok);
 
     const chartCard = (child: ReactNode) => (
         <div className="h-full rounded-2xl border border-border bg-card p-6">{child}</div>
@@ -409,16 +489,21 @@ export default async function Dashboard() {
                         upcomingActivities={upcomingActivities}
                     />
                 </Rise>
-                {activationSteps && activationCounts ? (
+                {activationCounts && activationVisible ? (
                     <Rise delay={0.09}>
                         <ActivationPanel
                             steps={activationSteps}
                             insight={activationInsight}
-                            gaps={activationGaps(activationCounts, activationInsight != null)}
+                            gaps={activationGaps(
+                                activationCounts,
+                                activationInsight != null,
+                                activationSignalsAvailable,
+                            )}
+                            canCreateFollowUp={activationCounts.canCreateTasks}
                         />
                     </Rise>
                 ) : null}
-                <Rise delay={0.18}>
+                <Rise delay={activationVisible ? 0.18 : 0.09}>
                     <DashboardGrid
                         initialWidgets={initialWidgets}
                         nodes={widgetNodes}

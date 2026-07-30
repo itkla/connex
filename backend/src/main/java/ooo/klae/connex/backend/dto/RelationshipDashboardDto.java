@@ -5,6 +5,7 @@ import java.util.List;
 /** One coherent relationship-insights snapshot for the dashboard. */
 public record RelationshipDashboardDto(
     WarmthSummaryDto warmthSummary,
+    boolean hasRelationshipEvidence,
     List<DashboardContactTemperatureDto> coolingContacts,
     List<DashboardCompanyTemperatureDto> coolingCompanies,
     List<DashboardDealRiskDto> dealRisks,

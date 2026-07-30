@@ -33,6 +33,8 @@ export type ActivationStep = {
     href: string | null;
     /** Exact count backing a completed step. Null whenever no exact count is available. */
     count: number | null;
+    /** Whether the launched activity must link a contact or deal to create relationship evidence. */
+    requireRelationshipTarget: boolean;
 };
 
 /** The counts the checklist is derived from. Every field is an exact server-side count. */
@@ -41,12 +43,21 @@ export type ActivationCounts = {
     companies: number;
     /** Whether any interaction has been logged. Deliberately a flag: no bounded page can count them. */
     hasInteractions: boolean;
+    /** Whether an activity can be linked to at least one current contact or deal. */
+    hasRelationshipTargets: boolean;
     pipelines: number;
     stages: number;
     members: number;
     connectedAccounts: number;
     /** Whether the instance offers mailbox connections at all; the step is hidden when it does not. */
     connectedAccountsAvailable: boolean;
+    canImportContacts: boolean;
+    canImportCompanies: boolean;
+    canCreateActivities: boolean;
+    canManagePipelines: boolean;
+    /** Whether the current member can invite teammates; the step is hidden when they cannot. */
+    canManageMembers: boolean;
+    canCreateTasks: boolean;
 };
 
 /** A single piece of recorded proof behind an insight. Each variant maps to one real stored field. */
@@ -86,7 +97,7 @@ export type ActivationCandidates = {
 };
 
 /** A missing precondition that stops the workspace from producing an evidence-backed signal. */
-export type ActivationGap = 'contacts' | 'interactions' | 'noSignal';
+export type ActivationGap = 'contacts' | 'interactions' | 'noSignal' | 'unavailable';
 
 function riskEvidence(risk: DealRisk): ActivationEvidence[] {
     return risk.factors.map((factor) => ({ kind: 'riskFactor', factor }) as const);
@@ -184,48 +195,67 @@ export function selectFirstInsight(candidates: ActivationCandidates): Activation
  * @returns the ordered checklist steps
  */
 export function buildActivationSteps(counts: ActivationCounts): ActivationStep[] {
-    const steps: ActivationStep[] = [
-        {
+    const steps: ActivationStep[] = [];
+
+    if (counts.contacts > 0 || counts.canImportContacts) {
+        steps.push({
             id: 'contacts',
             done: counts.contacts > 0,
             required: true,
             actionId: 'utility.import-contacts',
             href: null,
             count: counts.contacts,
-        },
-        {
+            requireRelationshipTarget: false,
+        });
+    }
+
+    if (counts.companies > 0 || counts.canImportCompanies) {
+        steps.push({
             id: 'companies',
             done: counts.companies > 0,
             required: false,
             actionId: 'utility.import-companies',
             href: null,
             count: counts.companies,
-        },
-        {
+            requireRelationshipTarget: false,
+        });
+    }
+
+    if (counts.hasInteractions || (counts.canCreateActivities && counts.hasRelationshipTargets)) {
+        steps.push({
             id: 'interactions',
             done: counts.hasInteractions,
             required: true,
             actionId: 'create.activity',
             href: null,
             count: null,
-        },
-        {
+            requireRelationshipTarget: true,
+        });
+    }
+
+    if ((counts.pipelines > 0 && counts.stages > 0) || counts.canManagePipelines) {
+        steps.push({
             id: 'pipeline',
             done: counts.pipelines > 0 && counts.stages > 0,
             required: true,
             actionId: null,
             href: '/records/pipelines',
             count: counts.pipelines > 0 && counts.stages > 0 ? counts.pipelines : null,
-        },
-        {
+            requireRelationshipTarget: false,
+        });
+    }
+
+    if (counts.members > 1 || counts.canManageMembers) {
+        steps.push({
             id: 'team',
             done: counts.members > 1,
             required: false,
             actionId: null,
             href: '/settings/members',
             count: counts.members,
-        },
-    ];
+            requireRelationshipTarget: false,
+        });
+    }
 
     if (counts.connectedAccountsAvailable) {
         steps.push({
@@ -235,6 +265,7 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
             actionId: null,
             href: '/account/connections',
             count: null,
+            requireRelationshipTarget: false,
         });
     }
 
@@ -258,9 +289,15 @@ export function isActivated(steps: ActivationStep[]): boolean {
  *
  * @param counts - exact workspace counts
  * @param hasInsight - whether {@link selectFirstInsight} found a provable signal
+ * @param signalsAvailable - whether every signal source needed to decide this state loaded
  * @returns the outstanding gaps, most fundamental first
  */
-export function activationGaps(counts: ActivationCounts, hasInsight: boolean): ActivationGap[] {
+export function activationGaps(
+    counts: ActivationCounts,
+    hasInsight: boolean,
+    signalsAvailable = true,
+): ActivationGap[] {
+    if (!signalsAvailable) return ['unavailable'];
     if (hasInsight) return [];
     const gaps: ActivationGap[] = [];
     if (counts.contacts === 0) gaps.push('contacts');
