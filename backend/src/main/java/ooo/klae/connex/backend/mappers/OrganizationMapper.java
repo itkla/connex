@@ -12,6 +12,8 @@ public interface OrganizationMapper {
     int insert(Organization organization);
     Organization getById(int id);
     Integer lockById(int id);
+    Integer lockActiveById(int id);
+    int lockDuplicateDecision(int id);
     Integer lockByIdForShare(int id);
     Integer lockActiveByIdForShare(int id);
 }

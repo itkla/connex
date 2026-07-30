@@ -178,8 +178,26 @@
     "sorted": "sorted"
   },
   "DuplicateWarning": {
-    "heading": "You may already have:",
-    "more": "+{count} more"
+    "heading": "Possible duplicates",
+    "description": "Review these exact matches before creating a new record.",
+    "checking": "Checking for duplicates...",
+    "failed": "Duplicate check failed. Try again before creating this record.",
+    "retry": "Retry",
+    "more": "+{count} more",
+    "truncated": "More visible matches were omitted. Refine the details before continuing.",
+    "shared": "Shared · review only",
+    "acknowledge": "I reviewed these matches and still want to create a new record.",
+    "strength": {
+      "STRONG": "Exact identity",
+      "WEAK": "Exact name"
+    },
+    "evidence": {
+      "EMAIL": "Same email",
+      "PHONE": "Same phone",
+      "DOMAIN": "Same domain",
+      "EXTERNAL_ID": "Same external ID",
+      "NAME": "Same normalized name"
+    }
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",

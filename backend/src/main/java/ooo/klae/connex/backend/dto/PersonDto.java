@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import lombok.AllArgsConstructor;
@@ -52,6 +53,10 @@ public class PersonDto {
 
     @Size(max = 128)
     private String title;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Pattern(regexp = "^[0-9a-f]{64}$")
+    private String duplicateReviewToken;
 
     private int[] tagIds;
     private int[] dealIds;

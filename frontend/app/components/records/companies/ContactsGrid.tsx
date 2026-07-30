@@ -105,7 +105,10 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 selectedCompany={company}
                 isCreating={isCreating}
                 isSuccess={creationSucceeded}
-                createNewContact={async (businessCard?: BusinessCardImportDraft) => {
+                createNewContact={async (
+                    businessCard?: BusinessCardImportDraft,
+                    duplicateReviewToken: string | null = null,
+                ) => {
                     invalidatePendingClose();
                     const operationGeneration = closeGenerationRef.current;
                     const isCurrent = () => closeGenerationRef.current === operationGeneration;
@@ -114,7 +117,10 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                     try {
                         const newContact = businessCard
                             ? (await importBusinessCard(businessCard)).contact
-                            : await createContact(newContactPayload);
+                            : await createContact({
+                                ...newContactPayload,
+                                duplicateReviewToken: duplicateReviewToken ?? undefined,
+                            });
                         if (!isCurrent()) return;
                         let avatarUploadFailed = false;
                         if (imageFile) {

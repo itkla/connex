@@ -169,6 +169,7 @@
     "contactPhotoLabel": "Profile photo",
     "contactPhotoHint": "Add a JPEG, PNG, or WebP profile photo (optional)",
     "contactPhotoUnsupported": "Choose a JPEG, PNG, or WebP profile photo.",
+    "contactDuplicateReviewChanged": "A staged contact’s possible duplicates changed. Review that contact again.",
     "logoUnsupported": "Choose a JPEG, PNG, or WebP logo.",
     "contactAddedAnnounce": "{name} added",
     "contactUpdatedAnnounce": "{name} updated",

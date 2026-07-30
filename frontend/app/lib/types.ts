@@ -77,9 +77,51 @@ export type ImportRequest = {
     mapping: ImportColumnMapping[];
     onDuplicate?: ImportDuplicateAction;
     links?: Record<number, number>;
+    duplicateReviewProof?: string;
 };
 
 export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
+
+export type DuplicateMatchKind = 'EMAIL' | 'PHONE' | 'DOMAIN' | 'EXTERNAL_ID' | 'NAME';
+export type DuplicateMatchStrength = 'STRONG' | 'WEAK';
+
+export type DuplicateMatchEvidence = {
+    kind: DuplicateMatchKind;
+    normalizedValue: string;
+    strength: DuplicateMatchStrength;
+};
+
+export type DuplicateCandidate = {
+    recordId: number;
+    recordType: 'person' | 'company';
+    name: string;
+    companyName?: string | null;
+    title?: string | null;
+    website?: string | null;
+    industry?: string | null;
+    ownedByActiveWorkspace: boolean;
+    strength: DuplicateMatchStrength;
+    matches: DuplicateMatchEvidence[];
+};
+
+export type DuplicatePreflightResponse = {
+    recordType: 'person' | 'company';
+    candidates: DuplicateCandidate[];
+    truncated: boolean;
+    reviewToken: string;
+};
+
+export type PersonDuplicatePreflightRequest = {
+    name?: string | null;
+    emails: string[];
+    phones: string[];
+};
+
+export type CompanyDuplicatePreflightRequest = {
+    name?: string | null;
+    websites: string[];
+    phones: string[];
+};
 
 export type ImportRowAnalysis = {
     rowIndex: number;
@@ -87,6 +129,7 @@ export type ImportRowAnalysis = {
     matchedId?: number | null;
     matchedLabel?: string | null;
     errors?: string[] | null;
+    candidates?: DuplicateCandidate[] | null;
 };
 
 export type ImportPreviewResult = {
@@ -96,6 +139,7 @@ export type ImportPreviewResult = {
     toSkip: number;
     invalid: number;
     rows: ImportRowAnalysis[];
+    duplicateReviewProof?: string | null;
 };
 
 export type ImportRowError = {
@@ -532,6 +576,7 @@ export type CreateContactPayload = {
     phone: string;
     title: string;
     companyId?: number;
+    duplicateReviewToken?: string;
 };
 
 export type BusinessCardDetectedField = {
@@ -554,7 +599,7 @@ export type BusinessCardScanResult = {
 
 export type BusinessCardCompanyAction =
     | { type: 'existing'; companyId: number }
-    | { type: 'create'; companyName: string }
+    | { type: 'create'; companyName: string; duplicateReviewToken?: string }
     | { type: 'none' };
 
 export type BusinessCardRecoveryContext = {
@@ -788,6 +833,7 @@ export type CreateCompanyPayload = {
     phone?: string;
     address?: string;
     logoUrl?: string;
+    duplicateReviewToken?: string;
 };
 
 // payload to update a company

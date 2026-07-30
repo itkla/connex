@@ -288,6 +288,8 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#sessionToken",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#serviceAccountJson",
+        "ooo/klae/connex/backend/dto/BusinessCardCompanyAction.java#duplicateReviewToken",
+        "ooo/klae/connex/backend/dto/BusinessCardContactRequest.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/ConnectorConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
@@ -305,11 +307,14 @@ class EncryptionGuardrailArchTest {
 
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
         "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
+        "ooo/klae/connex/backend/dto/CompanyDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/DeliveryWebhookTokenDto.java#token",
+        "ooo/klae/connex/backend/dto/DuplicatePreflightResponse.java#reviewToken",
         "ooo/klae/connex/backend/dto/InviteDto.java#token",
         "ooo/klae/connex/backend/dto/InviteLinkDto.java#token",
         "ooo/klae/connex/backend/dto/MailConfigDto.java#hasPassword",
         "ooo/klae/connex/backend/dto/PasskeyRegistrationRequirementsDto.java#currentPasswordRequired",
+        "ooo/klae/connex/backend/dto/PersonDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/SecretStoreSecretDiagnosticDto.java#secretId",
         "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret");
 

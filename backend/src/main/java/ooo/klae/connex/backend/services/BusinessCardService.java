@@ -77,6 +77,7 @@ public class BusinessCardService {
     private final BusinessCardImportRequestMapper importRequestMapper;
     private final BusinessCardRateLimiter rateLimiter;
     private final CapabilityEntitlement capabilityEntitlement;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final Clock clock;
 
     public BusinessCardService(
@@ -94,6 +95,7 @@ public class BusinessCardService {
             BusinessCardImportRequestMapper importRequestMapper,
             BusinessCardRateLimiter rateLimiter,
             CapabilityEntitlement capabilityEntitlement,
+            DuplicateDecisionLockService duplicateDecisionLockService,
             Clock clock) {
         this.properties = properties;
         this.imageValidator = imageValidator;
@@ -109,6 +111,7 @@ public class BusinessCardService {
         this.importRequestMapper = importRequestMapper;
         this.rateLimiter = rateLimiter;
         this.capabilityEntitlement = capabilityEntitlement;
+        this.duplicateDecisionLockService = duplicateDecisionLockService;
         this.clock = clock;
     }
 
@@ -193,7 +196,7 @@ public class BusinessCardService {
      * @param idempotencyKey caller-generated UUID retained across retries
      * @return created records
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importCard(
             MultipartFile image,
@@ -207,6 +210,7 @@ public class BusinessCardService {
         rateLimiter.requireImportAllowed();
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         int userId = currentUserId();
         BusinessCardImportRecord snapshot = importRequestMapper.get(workspaceId, requestId);
         if (snapshot == null) {
@@ -244,7 +248,9 @@ public class BusinessCardService {
         requireStored(stored, content.length);
         Company company = resolveCompany(reviewed);
         Person person = personService.createFromBusinessCard(
-            toPerson(reviewed, company), "business-card:" + requestId);
+            toPerson(reviewed, company),
+            "business-card:" + requestId,
+            reviewed.duplicateReviewToken());
         Attachment attachment = attachment(validated, stored, fileName, person.getId());
         Attachment createdAttachment = attachmentService.createManaged(attachment);
         int completed = importRequestMapper.complete(
@@ -405,7 +411,8 @@ public class BusinessCardService {
             case BusinessCardCompanyAction.Create create -> {
                 Company company = new Company();
                 company.setName(create.companyName());
-                yield companyService.createCompany(company);
+                yield companyService.createCompanyReviewed(
+                    company, create.duplicateReviewToken());
             }
             case BusinessCardCompanyAction.None ignored -> null;
         };
@@ -505,14 +512,22 @@ public class BusinessCardService {
             case BusinessCardCompanyAction.Create create -> {
                 rejectConflictingCompanyId(contact);
                 yield new BusinessCardCompanyAction.Create(
-                        requiredText(create.companyName(), 255, "companyName"));
+                        requiredText(create.companyName(), 255, "companyName"),
+                        create.duplicateReviewToken());
             }
             case BusinessCardCompanyAction.None ignored -> {
                 rejectConflictingCompanyId(contact);
                 yield new BusinessCardCompanyAction.None();
             }
         };
-        return new ReviewedImport(name, email, phone, title, contact.companyId(), normalizedAction);
+        return new ReviewedImport(
+            name,
+            email,
+            phone,
+            title,
+            contact.companyId(),
+            contact.duplicateReviewToken(),
+            normalizedAction);
     }
 
     private static void rejectConflictingCompanyId(BusinessCardContactRequest contact) {
@@ -629,6 +644,7 @@ public class BusinessCardService {
             updateDigest(digest, reviewed.phone());
             updateDigest(digest, reviewed.title());
             updateDigest(digest, reviewed.contactCompanyId());
+            updateDigest(digest, reviewed.duplicateReviewToken());
             switch (reviewed.companyAction()) {
                 case BusinessCardCompanyAction.Existing existing -> {
                     updateDigest(digest, "existing");
@@ -637,6 +653,7 @@ public class BusinessCardService {
                 case BusinessCardCompanyAction.Create create -> {
                     updateDigest(digest, "create");
                     updateDigest(digest, create.companyName());
+                    updateDigest(digest, create.duplicateReviewToken());
                 }
                 case BusinessCardCompanyAction.None ignored -> updateDigest(digest, "none");
             }
@@ -668,6 +685,7 @@ public class BusinessCardService {
             String phone,
             String title,
             Integer contactCompanyId,
+            String duplicateReviewToken,
             BusinessCardCompanyAction companyAction) {
     }
 }

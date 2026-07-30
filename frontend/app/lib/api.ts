@@ -1459,6 +1459,18 @@ export function createCompany(payload: Types.CreateCompanyPayload, init: Request
     return postJson<Types.Company>(`/api/companies`, payload, init);
 }
 
+/** Checks proposed company values against visible canonical identities and exact names. */
+export function preflightCompanyDuplicates(
+    payload: Types.CompanyDuplicatePreflightRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.DuplicatePreflightResponse>(
+        `/api/duplicate-preflight/companies`,
+        payload,
+        init,
+    );
+}
+
 export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
     return putJson<Types.Company>(`/api/companies/${id}`, payload);
 }
@@ -1895,6 +1907,18 @@ export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestIni
 
 export function createContact(payload: Types.CreateContactPayload, init: RequestInit = {}) {
     return postJson<Types.Contact>(`/api/persons`, payload, init);
+}
+
+/** Checks proposed contact values against visible canonical identities and exact names. */
+export function preflightPersonDuplicates(
+    payload: Types.PersonDuplicatePreflightRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.DuplicatePreflightResponse>(
+        `/api/duplicate-preflight/persons`,
+        payload,
+        init,
+    );
 }
 
 /** Reads business-card readiness for the authorized active workspace. */

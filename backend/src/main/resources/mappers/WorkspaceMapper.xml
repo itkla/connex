@@ -169,6 +169,13 @@
     SELECT id FROM workspace WHERE id = #{workspaceId} FOR SHARE
   </select>
 
+  <select id="lockActiveWorkspaceForShare" resultType="java.lang.Integer">
+    SELECT org_id
+    FROM workspace
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+    FOR SHARE
+  </select>
+
   <select id="lockOwnerIds" resultType="int">
     SELECT user_id FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'

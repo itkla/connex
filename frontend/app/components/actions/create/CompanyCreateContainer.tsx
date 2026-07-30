@@ -84,6 +84,7 @@ export default function CompanyCreateContainer({
             phone: c.phone.trim(),
             title: c.title.trim(),
             companyId,
+            duplicateReviewToken: c.duplicateReviewToken ?? undefined,
         };
         const newContact = await createContact(contactPayload, requestInit);
         if (requestInit?.signal?.aborted) return newContact;
@@ -132,11 +133,17 @@ export default function CompanyCreateContainer({
         onOpenChange(next);
     };
 
-    const createNewCompany = async () => {
+    const createNewCompany = async (
+        duplicateReviewToken: string | null,
+        reviewedContacts: PendingContact[] = pendingContacts,
+    ) => {
         setSucceeded(false);
         setCreating(true);
         try {
-            const companyPayload = cleanCompanyPayload(payload);
+            const companyPayload = {
+                ...cleanCompanyPayload(payload),
+                duplicateReviewToken: duplicateReviewToken ?? undefined,
+            };
             const created = await createCompany(companyPayload, requestInit);
             if (requestInit?.signal?.aborted) return;
             let logoUploadFailed = false;
@@ -149,17 +156,23 @@ export default function CompanyCreateContainer({
                 }
                 if (requestInit?.signal?.aborted) return;
             }
-            if (pendingContacts.length > 0) {
-                const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
-                if (requestInit?.signal?.aborted) return;
-                const failed = results.filter((r) => r.status === 'rejected').length;
-                if (failed === pendingContacts.length) {
+            if (reviewedContacts.length > 0) {
+                let failed = 0;
+                for (const contact of reviewedContacts) {
+                    try {
+                        await createPendingContact(contact, created.id);
+                    } catch {
+                        failed += 1;
+                    }
+                    if (requestInit?.signal?.aborted) return;
+                }
+                if (failed === reviewedContacts.length) {
                     toastError(t('feedback.companyContactsAllFailed', { count: failed }));
                 } else if (failed > 0) {
                     toastError(
                         t('feedback.companyContactsPartial', {
-                            succeeded: pendingContacts.length - failed,
-                            total: pendingContacts.length,
+                            succeeded: reviewedContacts.length - failed,
+                            total: reviewedContacts.length,
                         }),
                     );
                 }
@@ -201,6 +214,7 @@ export default function CompanyCreateContainer({
                 isSuccess={succeeded}
                 existingCompanies={existingCompanies}
                 createNewCompany={createNewCompany}
+                requestInit={requestInit}
             />
         );
     }
@@ -221,6 +235,7 @@ export default function CompanyCreateContainer({
             addPendingContact={addPendingContact}
             updatePendingContact={updatePendingContact}
             removePendingContact={removePendingContact}
+            requestInit={requestInit}
         />
     );
 }

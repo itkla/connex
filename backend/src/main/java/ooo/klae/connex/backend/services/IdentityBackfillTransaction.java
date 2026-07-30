@@ -35,6 +35,7 @@ public class IdentityBackfillTransaction {
     private final IdentityMapper identityMapper;
     private final IdentityCollisionMapper identityCollisionMapper;
     private final MatchingService matchingService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final Clock clock;
 
     /**
@@ -49,6 +50,7 @@ public class IdentityBackfillTransaction {
     public IdentityBackfillBatch backfillPersonPage(
             String catalog, int workspaceId, int afterPersonId, int limit) {
         requirePage(catalog, workspaceId, afterPersonId, limit);
+        duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
         List<PersonIdentityBackfillCandidate> candidates =
             identityMapper.findPersonBackfillCandidates(workspaceId, afterPersonId, limit);
         if (candidates.isEmpty()) {
@@ -164,6 +166,7 @@ public class IdentityBackfillTransaction {
     public IdentityBackfillBatch backfillCompanyPage(
             String catalog, int workspaceId, int afterCompanyId, int limit) {
         requirePage(catalog, workspaceId, afterCompanyId, limit);
+        duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
         List<CompanyIdentityBackfillCandidate> candidates =
             identityMapper.findCompanyBackfillCandidates(workspaceId, afterCompanyId, limit);
         if (candidates.isEmpty()) {
@@ -276,6 +279,7 @@ public class IdentityBackfillTransaction {
     @Transactional
     public int rebuildCollisionReport(String catalog, int workspaceId) {
         requireWorkspace(catalog, workspaceId);
+        duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
         LocalDateTime rebuiltAt = utcNow();
         identityCollisionMapper.deleteForWorkspace(workspaceId);
         identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);

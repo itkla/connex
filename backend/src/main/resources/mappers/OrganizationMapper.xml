@@ -15,6 +15,19 @@
     SELECT id FROM organization WHERE id = #{id} FOR UPDATE
   </select>
 
+  <select id="lockActiveById" resultType="java.lang.Integer">
+    SELECT id
+    FROM organization
+    WHERE id = #{id} AND lifecycle_state = 'active'
+    FOR UPDATE
+  </select>
+
+  <insert id="lockDuplicateDecision">
+    INSERT INTO organization_duplicate_decision_lock (organization_id)
+    VALUES (#{id})
+    ON DUPLICATE KEY UPDATE organization_id = #{id}
+  </insert>
+
   <select id="lockByIdForShare" resultType="java.lang.Integer">
     SELECT id FROM organization WHERE id = #{id} FOR SHARE
   </select>

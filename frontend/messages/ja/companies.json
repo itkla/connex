@@ -169,6 +169,7 @@
     "contactPhotoLabel": "プロフィール写真",
     "contactPhotoHint": "JPEG・PNG・WebPのプロフィール写真を追加（任意）",
     "contactPhotoUnsupported": "JPEG、PNG、またはWebPのプロフィール写真を選択してください。",
+    "contactDuplicateReviewChanged": "保留中の連絡先の重複候補が変更されました。もう一度確認してください。",
     "logoUnsupported": "JPEG、PNG、またはWebPのロゴを選択してください。",
     "contactAddedAnnounce": "{name} を追加しました",
     "contactUpdatedAnnounce": "{name} を更新しました",

@@ -639,7 +639,9 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(ReferenceService.class),
             mock(RuleTriggerPublisher.class),
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
-            mock(IdentityIntakeService.class)
+            mock(IdentityIntakeService.class),
+            mock(DuplicatePreflightService.class),
+            mock(DuplicateDecisionLockService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(

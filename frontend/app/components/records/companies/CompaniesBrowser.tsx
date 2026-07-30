@@ -350,6 +350,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             phone: c.phone.trim(),
             title: c.title.trim(),
             companyId,
+            duplicateReviewToken: c.duplicateReviewToken ?? undefined,
         };
         const newContact = await createContact(payload);
         if (c.imageFile) {
@@ -417,11 +418,17 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         setNewDialogOpen(open);
     };
 
-    const createNewCompany = async () => {
+    const createNewCompany = async (
+        duplicateReviewToken: string | null,
+        reviewedContacts: PendingContact[],
+    ) => {
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const companyPayload = cleanCompanyPayload(newPayload);
+            const companyPayload = {
+                ...cleanCompanyPayload(newPayload),
+                duplicateReviewToken: duplicateReviewToken ?? undefined,
+            };
             const created = await createCompany(companyPayload);
             let logoUploadFailed = false;
             if (logoFile) {
@@ -431,13 +438,19 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                     logoUploadFailed = true;
                 }
             }
-            if (pendingContacts.length > 0) {
-                const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
-                const failed = results.filter((r) => r.status === 'rejected').length;
-                if (failed === pendingContacts.length) {
+            if (reviewedContacts.length > 0) {
+                let failed = 0;
+                for (const contact of reviewedContacts) {
+                    try {
+                        await createPendingContact(contact, created.id);
+                    } catch {
+                        failed += 1;
+                    }
+                }
+                if (failed === reviewedContacts.length) {
                     toastError(t('toastContactsAllFailed', { count: failed }));
                 } else if (failed > 0) {
-                    toastError(t('toastContactsPartial', { succeeded: pendingContacts.length - failed, total: pendingContacts.length }));
+                    toastError(t('toastContactsPartial', { succeeded: reviewedContacts.length - failed, total: reviewedContacts.length }));
                 }
             }
             toastSuccess(t('toastCompanyCreated'));

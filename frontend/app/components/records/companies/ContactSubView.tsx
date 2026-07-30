@@ -10,6 +10,8 @@ import { QuickEditMediaUpload } from '@/app/components/records/quick-edit/QuickE
 import { ArrowLeftIcon, BriefcaseIcon, EnvelopeIcon, PhoneIcon, UserIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import type { PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
+import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
 import { toastError } from '@/app/lib/toast';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -22,6 +24,7 @@ type Props = {
     onDone: (draft: PendingContactDraft) => void;
     onBack: () => void;
     disabled?: boolean;
+    requestInit?: RequestInit;
 };
 
 /**
@@ -29,7 +32,14 @@ type Props = {
  * Collects name (required), email, title, phone, and an optional profile photo, then returns the
  * draft to the dialog on Done. Back discards.
  */
-export default function ContactSubView({ mode, initial, onDone, onBack, disabled = false }: Props) {
+export default function ContactSubView({
+    mode,
+    initial,
+    onDone,
+    onBack,
+    disabled = false,
+    requestInit,
+}: Props) {
     const t = useTranslations('CompaniesNewDialog');
     const [name, setName] = useState(initial.name);
     const [email, setEmail] = useState(initial.email);
@@ -38,15 +48,22 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
     const [imageFile, setImageFile] = useState<File | null>(initial.imageFile);
     const [errors, setErrors] = useState<FieldErrors>({});
     const [imageSelectionPending, setImageSelectionPending] = useState(false);
+    const [submissionPending, setSubmissionPending] = useState(false);
+    const submissionPendingRef = useRef(false);
     const nameRef = useRef<HTMLInputElement>(null);
+    const duplicatePreflight = useDuplicatePreflight('person', {
+        name,
+        email,
+        phone,
+    }, !disabled, requestInit);
 
     useEffect(() => {
         const id = requestAnimationFrame(() => nameRef.current?.focus());
         return () => cancelAnimationFrame(id);
     }, []);
 
-    const submit = () => {
-        if (disabled || imageSelectionPending) return;
+    const submit = async () => {
+        if (disabled || imageSelectionPending || submissionPendingRef.current) return;
         const next: FieldErrors = {};
         if (!name.trim()) next.name = t('contactNameRequired');
         else if (email.trim() && !EMAIL_PATTERN.test(email.trim())) next.email = t('contactEmailInvalid');
@@ -54,13 +71,30 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
             setErrors(next);
             return;
         }
-        onDone({ name: name.trim(), email: email.trim(), title: title.trim(), phone: phone.trim(), imageFile });
+        submissionPendingRef.current = true;
+        setSubmissionPending(true);
+        try {
+            const duplicateDecision = await duplicatePreflight.reviewNow();
+            if (!duplicateDecision.allowed) return;
+            onDone({
+                name: name.trim(),
+                email: email.trim(),
+                title: title.trim(),
+                phone: phone.trim(),
+                imageFile,
+                duplicateReviewSignature: duplicateDecision.reviewSignature,
+                duplicateReviewToken: duplicateDecision.duplicateReviewToken,
+            });
+        } finally {
+            submissionPendingRef.current = false;
+            setSubmissionPending(false);
+        }
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter') {
             event.preventDefault();
-            submit();
+            void submit();
         } else if (event.key === 'Escape') {
             event.preventDefault();
             if (!imageSelectionPending) onBack();
@@ -68,6 +102,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
     };
 
     const fallbackInitials = initials(name || '');
+    const formPending = disabled || imageSelectionPending || submissionPending;
 
     return (
         <div className="flex max-h-[85dvh] flex-col">
@@ -75,7 +110,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 <button
                     type="button"
                     onClick={onBack}
-                    disabled={disabled || imageSelectionPending}
+                    disabled={formPending}
                     aria-label={t('contactBack')}
                     className="-ml-1.5 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                 >
@@ -86,6 +121,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 </h2>
             </div>
 
+            <fieldset disabled={formPending} className="contents">
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 py-4">
             <div className="flex items-center gap-4">
                 <QuickEditMediaUpload
@@ -104,7 +140,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                     onSelect={setImageFile}
                     onInvalidSelect={() => toastError(t('contactPhotoUnsupported'))}
                     onPendingChange={setImageSelectionPending}
-                    disabled={disabled}
+                    disabled={formPending}
                 />
                 <p className="text-sm text-muted-foreground">{t('contactPhotoHint')}</p>
             </div>
@@ -130,7 +166,10 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                             placeholder={t('contactNamePlaceholder')}
                             aria-required
                             aria-invalid={Boolean(errors.name)}
-                            aria-describedby={errors.name ? 'pending-contact-name-error' : undefined}
+                            aria-describedby={[
+                                errors.name && 'pending-contact-name-error',
+                                duplicatePreflight.status !== 'idle' && 'pending-contact-duplicate-preflight',
+                            ].filter(Boolean).join(' ') || undefined}
                         />
                     </div>
                     {errors.name && (
@@ -138,6 +177,15 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                             {errors.name}
                         </p>
                     )}
+                    <DuplicatePreflightWarning
+                        id="pending-contact-duplicate-preflight"
+                        kind="person"
+                        status={duplicatePreflight.status}
+                        response={duplicatePreflight.response}
+                        acknowledged={duplicatePreflight.acknowledged}
+                        onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                        onRetry={duplicatePreflight.retry}
+                    />
                 </div>
 
                 <div className="grid gap-1.5">
@@ -200,13 +248,14 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 </div>
             </div>
             </div>
+            </fieldset>
 
             <div className="flex shrink-0 items-center justify-end border-t border-border/60 bg-popover px-6 py-4">
                 <Button
                     type="button"
-                    onClick={submit}
+                    onClick={() => void submit()}
                     variant="brand"
-                    disabled={disabled || imageSelectionPending}
+                    disabled={formPending || duplicatePreflight.blocked}
                     className="min-w-24 shadow-sm transition hover:shadow-md active:scale-[0.98]"
                 >
                     {t('contactDone')}

@@ -178,8 +178,26 @@
     "sorted": "並べ替え中"
   },
   "DuplicateWarning": {
-    "heading": "既に登録されている可能性があります:",
-    "more": "他{count}件"
+    "heading": "重複の可能性があります",
+    "description": "新しいレコードを作成する前に、完全一致した候補を確認してください。",
+    "checking": "重複を確認しています...",
+    "failed": "重複を確認できませんでした。レコードを作成する前に再試行してください。",
+    "retry": "再試行",
+    "more": "他{count}件",
+    "truncated": "表示可能な候補がほかにもあります。続行する前に情報を絞り込んでください。",
+    "shared": "共有中・確認のみ",
+    "acknowledge": "候補を確認したうえで、新しいレコードを作成します。",
+    "strength": {
+      "STRONG": "識別情報が完全一致",
+      "WEAK": "名前が完全一致"
+    },
+    "evidence": {
+      "EMAIL": "メールが一致",
+      "PHONE": "電話番号が一致",
+      "DOMAIN": "ドメインが一致",
+      "EXTERNAL_ID": "外部IDが一致",
+      "NAME": "正規化した名前が一致"
+    }
   },
   "CommonSearchBar": {
     "placeholder": "何でも検索",

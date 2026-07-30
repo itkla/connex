@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Person;
@@ -31,6 +33,7 @@ public class ShareService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
 
     public List<ShareDto> listShares(String typeRaw, int entityId) {
         Type type = parseType(typeRaw);
@@ -45,11 +48,16 @@ public class ShareService {
         };
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void share(String typeRaw, int entityId, int targetWorkspaceId, boolean canEdit) {
         Type type = parseType(typeRaw);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
+        if (type != Type.PIPELINE) {
+            duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
+                targetWorkspaceId);
+        }
         requireOwned(type, workspaceId, entityId);
         if (type == Type.PERSON) {
             requirePersonProvisionAllowed(workspaceId, entityId);
@@ -57,9 +65,13 @@ public class ShareService {
         if (targetWorkspaceId == workspaceId) {
             throw new BadRequestException("A record cannot be shared with its own workspace");
         }
-        workspaceService.requireMember(targetWorkspaceId, actorId);
-        if (workspaceService.getOrgId(targetWorkspaceId) != workspaceService.getOrgId(workspaceId)) {
-            throw new ForbiddenException("A record cannot be shared across organizations");
+        if (type == Type.PIPELINE) {
+            workspaceService.requireMember(targetWorkspaceId, actorId);
+            if (workspaceService.getOrgId(targetWorkspaceId)
+                    != workspaceService.getOrgId(workspaceId)) {
+                throw new ForbiddenException(
+                    "A record cannot be shared across organizations");
+            }
         }
         int granted = switch (type) {
             case COMPANY -> shareMapper.shareCompany(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
@@ -76,11 +88,16 @@ public class ShareService {
                 "Shared with workspace " + targetWorkspaceId, null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void unshare(String typeRaw, int entityId, int targetWorkspaceId) {
         Type type = parseType(typeRaw);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
+        if (type != Type.PIPELINE) {
+            duplicateDecisionLockService.lockCurrentOrganizationWithWorkspace(
+                targetWorkspaceId);
+        }
         requireOwned(type, workspaceId, entityId);
         switch (type) {
             case COMPANY -> shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);

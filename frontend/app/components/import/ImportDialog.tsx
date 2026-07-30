@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { commitImport, isFieldError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
     columnSamples,
     inferColumnType,
@@ -31,6 +32,7 @@ import {
     type ParsedCsv,
 } from '@/app/lib/import';
 import type {
+    DuplicateCandidate,
     ImportColumnMapping,
     ImportDuplicateAction,
     ImportEntity,
@@ -56,6 +58,24 @@ type RowLinkSearchState =
     | { key: string; status: 'success'; results: RowLinkOption[] }
     | { key: string; status: 'error' }
     | null;
+
+function reviewInputKey(
+    workspaceKey: string,
+    entity: ImportEntity,
+    rows: ParsedCsv['rows'],
+    mapping: ImportColumnMapping[],
+    onDuplicate: ImportDuplicateAction,
+    links: Record<number, number>,
+): string {
+    return JSON.stringify([
+        workspaceKey,
+        entity,
+        rows,
+        mapping,
+        onDuplicate,
+        Object.entries(links).sort(([left], [right]) => Number(left) - Number(right)),
+    ]);
+}
 
 function createScopedRequest(requestInit?: RequestInit) {
     const controller = new AbortController();
@@ -100,6 +120,9 @@ export type ImportDialogProps = {
 export default function ImportDialog({ entity, open, onOpenChange, onImported, requestInit }: ImportDialogProps) {
     const t = useTranslations('importExport');
     const reduceMotion = useReducedMotion();
+    const { activeWorkspaceId } = useWorkspace();
+    const workspaceKey =
+        requestWorkspaceKey(requestInit) || activeWorkspaceId?.toString() || '';
     const [step, setStep] = useState<Step>('upload');
     const [parsed, setParsed] = useState<ParsedCsv | null>(null);
     const [fileName, setFileName] = useState<string>('');
@@ -112,9 +135,12 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const [result, setResult] = useState<ImportResult | null>(null);
     const [busy, setBusy] = useState(false);
     const [previewing, setPreviewing] = useState(false);
+    const [reviewedInputKey, setReviewedInputKey] = useState<string | null>(null);
+    const [reviewedProof, setReviewedProof] = useState<string | null>(null);
     const [links, setLinks] = useState<Record<number, number>>({});
     const [linkLabels, setLinkLabels] = useState<Record<number, string>>({});
     const previewControllerRef = useRef<AbortController | null>(null);
+    const previousWorkspaceKeyRef = useRef(workspaceKey);
     const previewGenerationRef = useRef(0);
 
     function reset() {
@@ -131,6 +157,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         setResult(null);
         setBusy(false);
         setPreviewing(false);
+        setReviewedInputKey(null);
+        setReviewedProof(null);
         setLinks({});
         setLinkLabels({});
     }
@@ -207,9 +235,34 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         () => Object.entries(columns).find(([, c]) => c.target === 'name')?.[0] ?? null,
         [columns],
     );
+    const currentReviewInputKey = parsed
+        ? reviewInputKey(
+            workspaceKey,
+            entity,
+            parsed.rows,
+            buildMapping(),
+            onDuplicate,
+            links,
+        )
+        : null;
+    const reviewStale = currentReviewInputKey !== reviewedInputKey
+        || reviewedProof === null;
+
+    useEffect(() => {
+        if (previousWorkspaceKeyRef.current === workspaceKey) return;
+        previousWorkspaceKeyRef.current = workspaceKey;
+        previewGenerationRef.current += 1;
+        previewControllerRef.current?.abort();
+        previewControllerRef.current = null;
+        setBusy(false);
+        setPreviewing(false);
+        setReviewedInputKey(null);
+        setReviewedProof(null);
+    }, [workspaceKey]);
 
     async function goToReview() {
-        if (!parsed) return;
+        if (!parsed || !currentReviewInputKey) return;
+        const inputKey = currentReviewInputKey;
         const generation = previewGenerationRef.current + 1;
         previewGenerationRef.current = generation;
         previewControllerRef.current?.abort();
@@ -223,7 +276,12 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
+            if (!data.duplicateReviewProof) {
+                throw new Error('Duplicate review proof is missing');
+            }
             setPreview(data);
+            setReviewedInputKey(inputKey);
+            setReviewedProof(data.duplicateReviewProof ?? null);
             setStep('review');
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
@@ -237,8 +295,9 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         }
     }
 
-    async function runPreview(action: ImportDuplicateAction, nextLinks: Record<number, number>) {
-        if (!parsed) return;
+    async function runPreview() {
+        if (!parsed || !currentReviewInputKey) return;
+        const inputKey = currentReviewInputKey;
         const generation = previewGenerationRef.current + 1;
         previewGenerationRef.current = generation;
         previewControllerRef.current?.abort();
@@ -248,11 +307,16 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         try {
             const data = await previewImport(
                 entity,
-                { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action, links: nextLinks },
+                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
+            if (!data.duplicateReviewProof) {
+                throw new Error('Duplicate review proof is missing');
+            }
             setPreview(data);
+            setReviewedInputKey(inputKey);
+            setReviewedProof(data.duplicateReviewProof ?? null);
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             toastError(firstFieldError(error, t('errorPreview')));
@@ -267,7 +331,6 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
 
     function selectAction(action: ImportDuplicateAction) {
         setOnDuplicate(action);
-        void runPreview(action, links);
     }
 
     function returnToStep(nextStep: 'upload' | 'map') {
@@ -283,7 +346,6 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         const nextLinks = { ...links, [rowIndex]: recordId };
         setLinks(nextLinks);
         setLinkLabels((prev) => ({ ...prev, [rowIndex]: label }));
-        void runPreview(onDuplicate, nextLinks);
     }
 
     function unlinkRow(rowIndex: number) {
@@ -295,16 +357,24 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             delete next[rowIndex];
             return next;
         });
-        void runPreview(onDuplicate, nextLinks);
     }
 
     async function commit() {
-        if (!parsed) return;
+        if (!parsed
+                || !currentReviewInputKey
+                || currentReviewInputKey !== reviewedInputKey
+                || reviewedProof === null) return;
         setBusy(true);
         try {
             const data = await commitImport(
                 entity,
-                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
+                {
+                    rows: parsed.rows,
+                    mapping: buildMapping(),
+                    onDuplicate,
+                    links,
+                    duplicateReviewProof: reviewedProof ?? undefined,
+                },
                 requestInit,
             );
             if (requestInit?.signal?.aborted) return;
@@ -314,6 +384,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             onImported();
         } catch (error) {
             if (requestInit?.signal?.aborted) return;
+            setReviewedProof(null);
+            setReviewedInputKey(null);
             toastError(firstFieldError(error, t('errorImport')));
         } finally {
             if (!requestInit?.signal?.aborted) setBusy(false);
@@ -355,7 +427,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                         <MapStep parsed={parsed} entity={entity} columns={columns} setColumns={setColumns} mappedCount={mappedCount} />
                     )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
+                        <ReviewStep preview={preview} stale={reviewStale} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
                     </motion.div>
@@ -376,7 +448,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                         {step === 'review' && preview && (
                             <>
                                 <Button variant="ghost" onClick={() => returnToStep('map')}>{t('back')}</Button>
-                                <Button onClick={commit} disabled={busy || previewing || preview.toCreate + preview.toUpdate === 0}>
+                                {reviewStale && (
+                                    <Button variant="outline" onClick={runPreview} disabled={previewing}>
+                                        {previewing && <LoaderCircle className="size-4 animate-spin" />}
+                                        {t('refreshReview')}
+                                    </Button>
+                                )}
+                                <Button onClick={commit} disabled={busy || previewing || reviewStale || preview.toCreate + preview.toUpdate === 0}>
                                     {busy && <LoaderCircle className="size-4 animate-spin" />}
                                     {t('import')}
                                 </Button>
@@ -550,6 +628,7 @@ function MapStep({
 
 function ReviewStep({
     preview,
+    stale,
     onDuplicate,
     onSelectAction,
     previewing,
@@ -563,6 +642,7 @@ function ReviewStep({
     requestInit,
 }: {
     preview: ImportPreviewResult;
+    stale: boolean;
     onDuplicate: ImportDuplicateAction;
     onSelectAction: (action: ImportDuplicateAction) => void;
     previewing: boolean;
@@ -576,9 +656,20 @@ function ReviewStep({
     requestInit?: RequestInit;
 }) {
     const t = useTranslations('importExport');
-    const shown = preview.rows.filter((r) => r.status !== 'skip').slice(0, 100);
+    const reviewable = preview.rows.filter((row) => row.status !== 'skip');
+    const candidateRows = reviewable.filter((row) => (row.candidates?.length ?? 0) > 0);
+    const ordinaryRows = reviewable.filter((row) => (row.candidates?.length ?? 0) === 0);
+    const shown = [
+        ...candidateRows,
+        ...ordinaryRows.slice(0, Math.max(0, 100 - candidateRows.length)),
+    ].sort((left, right) => left.rowIndex - right.rowIndex);
     return (
         <div className="space-y-5">
+            {stale && (
+                <div className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-foreground" role="status">
+                    {t('reviewStale')}
+                </div>
+            )}
             <div className="space-y-2">
                 <p className="text-sm font-medium">{t('onMatch')}</p>
                 <div className="flex flex-wrap gap-2">
@@ -605,7 +696,13 @@ function ReviewStep({
 
             {shown.length > 0 && (
                 <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">{t('reviewLinkHint')}</p>
+                    <p className="text-xs text-muted-foreground">
+                        {t('reviewLinkHint', {
+                            shown: shown.length,
+                            total: reviewable.length,
+                            candidates: candidateRows.length,
+                        })}
+                    </p>
                     <div className="overflow-hidden rounded-lg border border-border">
                         <table className="w-full text-sm">
                             <caption className="sr-only">{t('reviewTableCaption')}</caption>
@@ -626,10 +723,29 @@ function ReviewStep({
                                                 {t(`rowStatus.${row.status}`)}
                                             </Badge>
                                         </td>
-                                        <td className="max-w-0 truncate px-3 py-2 align-middle text-muted-foreground">
-                                            {row.errors?.length
-                                                ? row.errors.join('; ')
-                                                : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
+                                        <td className="max-w-0 px-3 py-2 align-middle">
+                                            <div className="min-w-0 space-y-2">
+                                                <p className={cn(
+                                                    'truncate text-sm',
+                                                    row.errors?.length ? 'text-destructive' : 'text-muted-foreground',
+                                                )}>
+                                                    {row.errors?.length
+                                                        ? row.errors.join('; ')
+                                                        : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
+                                                </p>
+                                                {row.candidates && row.candidates.length > 0 && (
+                                                    <DuplicateCandidates
+                                                        entity={entity}
+                                                        candidates={row.candidates}
+                                                        linkedId={links[row.rowIndex]}
+                                                        onLink={(candidate) => onLink(
+                                                            row.rowIndex,
+                                                            candidate.recordId,
+                                                            candidate.name,
+                                                        )}
+                                                    />
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="w-56 px-3 py-2 text-right align-middle">
                                             <RowLinker
@@ -647,6 +763,84 @@ function ReviewStep({
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+function DuplicateCandidates({
+    entity,
+    candidates,
+    linkedId,
+    onLink,
+}: {
+    entity: ImportEntity;
+    candidates: DuplicateCandidate[];
+    linkedId?: number;
+    onLink: (candidate: DuplicateCandidate) => void;
+}) {
+    const t = useTranslations('importExport');
+    return (
+        <div className="space-y-1.5" aria-label={t('candidateListLabel')}>
+            {candidates.map((candidate) => {
+                const context = [
+                    candidate.title,
+                    candidate.companyName,
+                    candidate.industry,
+                    candidate.website,
+                ].filter((value): value is string => Boolean(value));
+                const selected = linkedId === candidate.recordId;
+                return (
+                    <div
+                        key={`${candidate.recordType}-${candidate.recordId}`}
+                        className="flex min-w-0 items-start justify-between gap-3 rounded-md border border-border bg-muted/40 px-2.5 py-2"
+                    >
+                        <div className="min-w-0 space-y-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className="truncate text-xs font-medium text-foreground">
+                                    {candidate.name}
+                                </span>
+                                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                    {t(`candidateRecordType.${candidate.recordType}`)}
+                                </Badge>
+                                <Badge
+                                    variant={candidate.strength === 'STRONG' ? 'secondary' : 'outline'}
+                                    className="h-5 px-1.5 text-[10px]"
+                                >
+                                    {t(`candidateStrength.${candidate.strength}`)}
+                                </Badge>
+                                {!candidate.ownedByActiveWorkspace && (
+                                    <span className="text-[11px] text-muted-foreground">
+                                        {t('candidateShared')}
+                                    </span>
+                                )}
+                            </div>
+                            {context.length > 0 && (
+                                <p className="truncate text-[11px] text-muted-foreground">
+                                    {context.join(' · ')}
+                                </p>
+                            )}
+                            <p className="text-[11px] text-muted-foreground">
+                                {candidate.matches
+                                    .map((match) => t(`candidateEvidence.${match.kind}`))
+                                    .join(' · ')}
+                            </p>
+                        </div>
+                        {candidate.ownedByActiveWorkspace
+                                && candidate.recordType === (
+                                    entity === 'companies' ? 'company' : entity === 'persons' ? 'person' : ''
+                                ) && (
+                            <button
+                                type="button"
+                                disabled={selected}
+                                onClick={() => onLink(candidate)}
+                                className="shrink-0 rounded-sm px-1.5 py-0.5 text-xs font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline disabled:text-muted-foreground disabled:no-underline"
+                            >
+                                {selected ? t('candidateSelected') : t('candidateUse')}
+                            </button>
+                        )}
+                    </div>
+                );
+            })}
         </div>
     );
 }
