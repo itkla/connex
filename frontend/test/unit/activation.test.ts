@@ -63,7 +63,18 @@ function deal(overrides: Partial<Deal> = {}): Deal {
 }
 
 function company(overrides: Partial<Company> = {}): Company {
-    return { id: 7, name: "Kaisha", ...overrides } as Company;
+    return {
+        id: 7,
+        name: "Kaisha",
+        website: "",
+        industry: "",
+        phone: "",
+        address: "",
+        logoUrl: "",
+        createdAt: "2026-01-01 00:00:00",
+        updatedAt: "2026-01-01 00:00:00",
+        ...overrides,
+    };
 }
 
 function contact(overrides: Partial<Contact> = {}): Contact {
