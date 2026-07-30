@@ -2,7 +2,14 @@
 
 import { Fragment, forwardRef, type ComponentProps, type ComponentType, type ReactNode, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { EllipsisHorizontalIcon, EyeIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
+import {
+    ArchiveBoxArrowDownIcon,
+    ArchiveBoxIcon,
+    EllipsisHorizontalIcon,
+    EyeIcon,
+    PencilSquareIcon,
+    TrashIcon,
+} from '@heroicons/react/24/outline';
 
 import {
     ContextMenu,
@@ -21,17 +28,21 @@ import {
 import { cn } from '@/lib/utils';
 import { useActions } from '@/app/hooks/useActions';
 import type { ActionId, ActiveRecordRef } from '@/app/lib/actions/types';
+import type { RecordRemoveIntent } from '@/app/components/records/types';
 
 /**
  * The record a row/card menu acts on, whether related-create actions fit that surface, and the
- * browser-local actions the shell owns (peek, quick edit, delete).
+ * browser-local actions the shell owns (peek, quick edit, remove). `removeIntent` says what
+ * `onRemove` really does so the menu never offers to delete a record type that is archived instead.
  */
 export type RecordMenuModel = {
     record: ActiveRecordRef;
     includeCreateActions?: boolean;
+    includeRecordActions?: boolean;
     onPeek?: () => void;
     onQuickEdit?: () => void;
-    onDelete?: () => void;
+    onRemove?: () => void;
+    removeIntent?: RecordRemoveIntent;
 };
 
 type MenuItemDescriptor = {
@@ -47,8 +58,18 @@ const REGISTRY_VIEW = ['record.open', 'record.open-new-tab'] as const;
 const REGISTRY_CREATE = ['create.task', 'create.note', 'create.activity'] as const;
 
 /**
+ * The removal item per intent. Archiving and restoring are reversible, so they are ordinary items
+ * with the archive icons rather than destructive ones; only a real delete stays destructive.
+ */
+const REMOVE_ITEM: Record<RecordRemoveIntent, Omit<MenuItemDescriptor, 'label' | 'onSelect'>> = {
+    delete: { key: 'delete', icon: <TrashIcon className="size-4 text-destructive" />, destructive: true },
+    archive: { key: 'archive', icon: <ArchiveBoxArrowDownIcon className="size-4 text-muted-foreground" /> },
+    restore: { key: 'restore', icon: <ArchiveBoxIcon className="size-4 text-muted-foreground" /> },
+};
+
+/**
  * Resolves the record menu into ordered groups of items — browser-local peek/open at the top, the
- * create actions, then quick-edit/copy-link, then a destructive delete. Registry items are resolved
+ * create actions, then quick-edit/copy-link, then the removal item the surface asked for. Registry items are resolved
  * against the row's record via {@link useActions}'s per-record override so availability reflects the
  * row, not the page. Returns empty until `enabled` (the row's menu has been opened at least once),
  * so rows never interacted with — nearly all of them — pay nothing on a parent re-render; once opened
@@ -62,10 +83,19 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
     const tr = useTranslations('RecordActionMenu');
 
     return useMemo(() => {
-        if (!enabled || actions.length === 0) return [];
-        const { record, includeCreateActions = true, onPeek, onQuickEdit, onDelete } = model;
+        if (!enabled) return [];
+        const {
+            record,
+            includeCreateActions = true,
+            includeRecordActions = true,
+            onPeek,
+            onQuickEdit,
+            onRemove,
+            removeIntent = 'delete',
+        } = model;
 
         const registry = (id: ActionId): MenuItemDescriptor | null => {
+            if (!actions.some((action) => action.id === id)) return null;
             const action = getAction(id);
             if (!action || !isAvailableForRecord(id, record)) return null;
             const Icon = action.icon;
@@ -82,14 +112,14 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
         const quickEdit: MenuItemDescriptor | null = onQuickEdit
             ? { key: 'quick-edit', label: tr('quickEdit'), icon: <PencilSquareIcon className="size-4 text-muted-foreground" />, onSelect: onQuickEdit }
             : null;
-        const remove: MenuItemDescriptor | null = onDelete
-            ? { key: 'delete', label: tr('delete'), icon: <TrashIcon className="size-4 text-destructive" />, destructive: true, onSelect: onDelete }
+        const remove: MenuItemDescriptor | null = onRemove
+            ? { ...REMOVE_ITEM[removeIntent], label: tr(removeIntent), onSelect: onRemove }
             : null;
 
         const groups: (MenuItemDescriptor | null)[][] = [
-            [peek, ...REGISTRY_VIEW.map(registry)],
-            includeCreateActions ? REGISTRY_CREATE.map(registry) : [],
-            [quickEdit, registry('record.copy-link')],
+            includeRecordActions ? [peek, ...REGISTRY_VIEW.map(registry)] : [],
+            includeRecordActions && includeCreateActions ? REGISTRY_CREATE.map(registry) : [],
+            includeRecordActions ? [quickEdit, registry('record.copy-link')] : [],
             [remove],
         ];
         return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);
@@ -130,7 +160,7 @@ export const RecordActionsTriggerButton = forwardRef<HTMLButtonElement, { ariaLa
                 type="button"
                 aria-label={ariaLabel}
                 className={cn(
-                    'flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
+                    'flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-100 transition hover:bg-muted/70 hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100',
                     className,
                 )}
                 {...props}

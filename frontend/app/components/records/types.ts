@@ -3,6 +3,13 @@ import type { ReactNode } from 'react';
 // test code - move to lib/types.ts or elsewhere later
 
 export type SelectionId = string | number;
+
+/**
+ * What a record row's or card's removal affordance actually does. Contacts and companies are
+ * archived rather than deleted (#854), and the archived scope restores instead, so the label and
+ * icon are chosen from this rather than always saying delete.
+ */
+export type RecordRemoveIntent = 'delete' | 'archive' | 'restore';
 export type DisplayMode = 'grid' | 'table' | 'kanban';
 export type SortValue = string | number | null;
 

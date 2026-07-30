@@ -47,14 +47,17 @@ public interface CompanyMapper {
             @Param("model") SqlParameters model,
             @Param("sourceLimit") int sourceLimit,
             @Param("limit") int limit);
+    /** One page of the browser list; {@code archived} selects the archived set instead of the active one. */
     List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived,
             @Param("limit") int limit, @Param("offset") int offset);
     long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived);
     CompanyEngagementCountsDto getCompanyEngagementCounts(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId);
@@ -86,17 +89,26 @@ public interface CompanyMapper {
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived,
             @Param("limit") int limit, @Param("offset") int offset);
-    /** CSV export using the browser filters and member scope, mirroring the visible list. */
+    /**
+     * CSV export using the browser filters and member scope, mirroring the visible list.
+     * Callers pass {@code archived = false}: an export is defined as the active working set.
+     */
     List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope);
+            @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
+            @Param("archived") boolean archived);
     List<String> distinctIndustries(int workspaceId);
     boolean hasCompanyWithoutIndustry(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    /** How many companies the workspace currently holds archived; drives the browser's archived toggle. */
+    long countArchivedCompanies(@Param("workspaceId") int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Company getOwnedCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** The owned company only when it is archived; the restore path's pre-image read. */
+    Company getOwnedArchivedCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);
     /** id + name + website for every company in the workspace; for import dedup (normalized in the service). */
     List<Company> getCompaniesForDedup(int workspaceId);
@@ -104,8 +116,13 @@ public interface CompanyMapper {
     List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    /** True only when the workspace OWNS the company (excludes records merely shared in); for write scoping. */
+    /**
+     * True only when the workspace OWNS an ACTIVE company (excludes records merely shared in and
+     * records that have been archived); for write scoping.
+     */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** True only when the workspace owns the company AND it is archived; for restore write scoping. */
+    boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
@@ -120,7 +137,21 @@ public interface CompanyMapper {
         @Param("id") int id,
         @Param("currentLogoUrl") String currentLogoUrl,
         @Param("logoUrl") String logoUrl);
-    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Archives an active company. There is deliberately no hard-delete statement: archiving replaced
+     * it in #854 so no cascade can destroy tags, shares, or identities and no {@code SET NULL} can
+     * orphan its people and deals. Whole-workspace erasure remains {@code TenantLifecycleMapper}'s job.
+     *
+     * @return 1 when an active owned row was archived, 0 otherwise
+     */
+    int archive(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /**
+     * Clears the archive tombstone, returning the company to the active working set.
+     *
+     * @return 1 when an archived owned row was restored, 0 otherwise
+     */
+    int restore(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /** Clears company ownership held by one member within one workspace. */
     void clearMemberOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

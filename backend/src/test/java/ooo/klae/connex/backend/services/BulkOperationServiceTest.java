@@ -53,11 +53,11 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deletePersons_reportsPartialFailureForUnknownIdAndStillDeletesTheRest() {
+    void archivePersons_reportsPartialFailureForUnknownIdAndStillArchivesTheRest() {
         Person p1 = newPerson(newCompany());
         Person p2 = newPerson(newCompany());
 
-        BulkOperationResult result = bulkOperationService.deletePersons(List.of(p1.getId(), p2.getId(), 999_999));
+        BulkOperationResult result = bulkOperationService.archivePersons(List.of(p1.getId(), p2.getId(), 999_999));
 
         assertEquals(2, result.getSucceeded());
         assertEquals(1, result.getFailed());
@@ -68,12 +68,12 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deletePersons_skipsForeignWorkspaceRecordsAndNeverMutatesThem() {
+    void archivePersons_skipsForeignWorkspaceRecordsAndNeverMutatesThem() {
         Person local = newPerson(newCompany());
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
 
-        BulkOperationResult result = bulkOperationService.deletePersons(List.of(local.getId(), foreign.getId()));
+        BulkOperationResult result = bulkOperationService.archivePersons(List.of(local.getId(), foreign.getId()));
 
         assertEquals(1, result.getSucceeded());
         assertEquals(1, result.getFailed());
@@ -83,7 +83,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deletePersons_skipsRecordsMerelySharedIntoTheWorkspace() {
+    void archivePersons_skipsRecordsMerelySharedIntoTheWorkspace() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
         shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
@@ -93,7 +93,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()),
             "but it is not owned by the workspace");
 
-        BulkOperationResult result = bulkOperationService.deletePersons(List.of(foreign.getId()));
+        BulkOperationResult result = bulkOperationService.archivePersons(List.of(foreign.getId()));
 
         assertEquals(0, result.getSucceeded());
         assertEquals(1, result.getFailed());
@@ -102,10 +102,10 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deletePersons_deduplicatesRepeatedIds() {
+    void archivePersons_deduplicatesRepeatedIds() {
         Person person = newPerson(newCompany());
 
-        BulkOperationResult result = bulkOperationService.deletePersons(List.of(person.getId(), person.getId()));
+        BulkOperationResult result = bulkOperationService.archivePersons(List.of(person.getId(), person.getId()));
 
         assertEquals(1, result.getSucceeded());
         assertEquals(0, result.getFailed());

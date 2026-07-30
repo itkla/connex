@@ -124,8 +124,12 @@
   <select id="getCompanyTasks" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/> FROM task t
     WHERE t.workspace_id = #{workspaceId}
+      AND (t.person_id IS NULL OR EXISTS (SELECT 1 FROM person linked_person
+          WHERE linked_person.workspace_id = #{workspaceId}
+            AND linked_person.id = t.person_id AND linked_person.archived_at IS NULL))
       AND (EXISTS (SELECT 1 FROM person p
-          WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+          WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
+            AND p.company_id = #{companyId} AND p.archived_at IS NULL)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
     ORDER BY t.updated_at DESC, t.id DESC

@@ -9,8 +9,8 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
-import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, UsersIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
     TableCellsIcon,
@@ -30,26 +30,35 @@ import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColum
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
-import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
-import { type ColumnDef, type ColumnFilterFacet, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 
 const NO_ITEMS: Contact[] = [];
+const ARCHIVED_FILTER_KEY = 'archived';
+const ARCHIVED_FILTER_VALUE = '1';
+
+/** The facet filters only, with the archived-scope key the browser owns separately removed. */
+function withoutArchived(state: FilterState): FilterState {
+    return Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== ARCHIVED_FILTER_KEY),
+    );
+}
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 const EMPTY_CONTACT_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
@@ -89,19 +98,28 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
 
+    const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
+    const setShowArchived = useCallback((next: boolean) => {
+        setFilterState((current) => {
+            const rest = withoutArchived(current);
+            return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
+        });
+    }, [setFilterState]);
+
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo(() => {
         const company = filterState.company ?? [];
         const titles = filterState.title ?? [];
         const companies = company.filter((k) => k !== FILTER_EMPTY);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[] } = {};
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean } = {};
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
         if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
+        if (showArchived) params.archived = true;
         return params;
-    }, [filterState, ownerScope]);
+    }, [filterState, ownerScope, showArchived]);
 
     const {
         items: contacts,
@@ -209,8 +227,12 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         setFilterState({ ...filterState, owner: values });
     }, [filterState, setFilterState]);
 
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
-    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0;
+    const clearAll = useCallback(() => {
+        setQuery('');
+        setFilterState(showArchived ? { [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : {});
+    }, [setQuery, setFilterState, showArchived]);
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -269,6 +291,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
+        if (showArchived) return;
         let cancelled = false;
         getContactTemperatures(contacts.map((contact) => contact.id))
             .then((temps) => {
@@ -280,7 +303,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         return () => {
             cancelled = true;
         };
-    }, [contacts]);
+    }, [contacts, showArchived]);
 
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
@@ -458,21 +481,25 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
-    const deleteOne = useCallback((contact: Contact) => {
+    const archiveOne = useCallback((contact: Contact) => {
         setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
 
-    const confirmDelete = async () => {
+    const confirmArchive = async () => {
         if (selectedContactIds.length === 0) return;
         setIsDeleting(true);
         try {
-            const result = await bulkDeleteContacts(selectedContactIds);
+            const result = showArchived
+                ? await bulkRestoreContacts(selectedContactIds)
+                : await bulkArchiveContacts(selectedContactIds);
             const anySucceeded = notifyBulkResult(result, {
-                success: (count) => count === 1 ? t('toastContactDeleted') : t('toastContactsDeleted', { count }),
-                partial: (succeeded, total) => t('toastContactsDeletedPartial', { succeeded, total }),
-                failure: (failed) => t('toastContactsDeleteFailed', { failed }),
+                success: (count) => count === 1
+                    ? t(showArchived ? 'toastContactRestored' : 'toastContactArchived')
+                    : t(showArchived ? 'toastContactsRestored' : 'toastContactsArchived', { count }),
+                partial: (succeeded, total) => t(showArchived ? 'toastContactsRestoredPartial' : 'toastContactsArchivedPartial', { succeeded, total }),
+                failure: (failed) => t(showArchived ? 'toastContactsRestoreFailed' : 'toastContactsArchiveFailed', { failed }),
             });
             setDeleteDialogOpen(false);
             if (anySucceeded) {
@@ -480,7 +507,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                 refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
+            toastError(err instanceof Error ? err.message : t(showArchived ? 'toastFailedRestore' : 'toastFailedArchive'));
         } finally {
             setIsDeleting(false);
         }
@@ -520,9 +547,9 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         {
             key: 'warmth',
             label: t('columnWarmth'),
-            getSortValue: (c) => tempByContactId.get(c.id)?.score ?? null,
+            getSortValue: (c) => showArchived ? null : tempByContactId.get(c.id)?.score ?? null,
             sortable: false,
-            render: (c) => <TemperaturePill temp={tempByContactId.get(c.id)} />,
+            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
         },
         {
             key: 'email',
@@ -567,11 +594,16 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId, memberById, inlineEdit, saveContact]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
-    const selectionActions = (
+    const selectionActions = showArchived ? (
+        <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+            <ArchiveBoxIcon className="size-4" />
+            {t('restore')}
+        </Button>
+    ) : (
         <ButtonGroup className="rounded-full bg-muted">
             {!allMatchingActive && (
                 <>
@@ -621,9 +653,9 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                         </>
                     )}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
-                        <TrashIcon />
-                        {t('delete')}
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
+                        <ArchiveBoxArrowDownIcon />
+                        {t('archive')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -660,14 +692,16 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
                         <div className="flex items-center gap-2">
-                            <RecordsActions
-                                entity="persons"
-                                onNew={openNewContactDialog}
-                                newLabel={t('new')}
-                                newAriaLabel={t('newAria')}
-                                onImported={refresh}
-                                onExport={exportContacts}
-                            />
+                            {!showArchived && (
+                                <RecordsActions
+                                    entity="persons"
+                                    onNew={openNewContactDialog}
+                                    newLabel={t('new')}
+                                    newAriaLabel={t('newAria')}
+                                    onImported={refresh}
+                                    onExport={exportContacts}
+                                />
+                            )}
                         </div>
                     </div>
                 </Rise>
@@ -730,6 +764,17 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                             </div>
                         }
                     >
+                        {(showArchived || (personFacets?.archivedCount ?? 0) > 0) && (
+                            <SegmentedToggle
+                                ariaLabel={t('archivedScopeAria')}
+                                value={showArchived ? 'archived' : 'active'}
+                                onChange={(next) => setShowArchived(next === 'archived')}
+                                options={[
+                                    { value: 'active', label: t('scopeActive'), icon: <UsersIcon className="size-4" /> },
+                                    { value: 'archived', label: t('scopeArchived', { count: personFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                ]}
+                            />
+                        )}
                         <MemberScopeFilter
                             values={filterState.owner}
                             onChange={changeOwnerScope}
@@ -792,19 +837,23 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
+                                readOnly={showArchived}
+                                removeIntent={showArchived ? 'restore' : 'archive'}
                             />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
-                        detailPath={(item) => `/records/contacts/${item.id}`}
-                        onRowClick={(item) => peek.openPeek(item.id)}
+                        detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}
+                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
                         displayMode={displayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={quickEditOne}
-                        onDelete={deleteOne}
+                        onQuickEdit={showArchived ? undefined : quickEditOne}
+                        onDelete={archiveOne}
+                        readOnly={showArchived}
+                        removeIntent={showArchived ? 'restore' : 'archive'}
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}
@@ -839,15 +888,17 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                     onRecoveredImport={refresh}
                 />
 
-                <DeleteRecordDialog
+                <ArchiveRecordDialog
                     open={deleteDialogOpen}
                     onOpenChange={setDeleteDialogOpen}
+                    mode={showArchived ? 'restore' : 'archive'}
                     selectedIds={selectedIds}
                     selectedItems={selectedContacts}
-                    entityLabel="contact"
+                    entityLabel={t('entityLabel')}
+                    entityLabelPlural={t('entityLabelPlural')}
                     getDisplayName={(c) => c.name}
-                    isDeleting={isDeleting}
-                    confirmDelete={confirmDelete}
+                    isPending={isDeleting}
+                    onConfirm={confirmArchive}
                 />
 
                 <ChangeCompanyDialog

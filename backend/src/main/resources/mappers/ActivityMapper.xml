@@ -232,8 +232,12 @@
   <select id="getCompanyActivities" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity a
     WHERE a.workspace_id = #{workspaceId}
+      AND (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person linked_person
+          WHERE linked_person.workspace_id = #{workspaceId}
+            AND linked_person.id = a.person_id AND linked_person.archived_at IS NULL))
       AND (EXISTS (SELECT 1 FROM person p
-          WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+          WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id
+            AND p.company_id = #{companyId} AND p.archived_at IS NULL)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
     ORDER BY a.timestamp DESC, a.id DESC

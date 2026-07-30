@@ -1,6 +1,6 @@
 'use client';
 
-import { EllipsisHorizontalIcon, EyeIcon, PencilIcon, EnvelopeIcon, PhoneIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ArchiveBoxArrowDownIcon, ArchiveBoxIcon, EllipsisHorizontalIcon, EyeIcon, PencilIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
@@ -18,10 +18,10 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
-// import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
-import { BuildingOffice2Icon, NoSymbolIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import type { RecordRemoveIntent } from '@/app/components/records/types';
+import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
 
 function initialsOf(name: string): string {
@@ -44,7 +44,6 @@ const AVATAR_TINTS = [
 
 function tintFor(seed: string): string {
     let h = 0;
-    // use the contact name as seed so that the tint is consistent for the same name
     for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
     return AVATAR_TINTS[h % AVATAR_TINTS.length];
 }
@@ -62,6 +61,9 @@ interface ContactCardProps {
     tags?: Tag[];
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    readOnly?: boolean;
+    /** What `onDelete` really does; contacts are archived rather than deleted (#854). */
+    removeIntent?: RecordRemoveIntent;
 }
 
 export default function ContactCard({
@@ -77,6 +79,8 @@ export default function ContactCard({
     tags = [],
     onQuickEdit,
     onDelete,
+    readOnly = false,
+    removeIntent = 'archive',
 }: ContactCardProps) {
     const router = useRouter();
     const t = useTranslations('ContactsCard');
@@ -85,7 +89,6 @@ export default function ContactCard({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
-    const [removeFromCompanyOpen, setRemoveFromCompanyOpen] = useState(false);
 
     function openContactPage() {
         router.push(`/records/contacts/${id}`);
@@ -105,9 +108,6 @@ export default function ContactCard({
     function openChangeCompanyDialog() {
         setChangeCompanyOpen(true);
     }
-
-    // insert function like from /records/contacts to change the company of the contact
-
 
     async function saveInternalEdits() {
         const trimmedName = draft.name.trim();
@@ -156,8 +156,11 @@ export default function ContactCard({
     return (
         <>
         <div
-            className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)]"
-            onClick={openContactPage}
+            className={cn(
+                'group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition duration-200',
+                !readOnly && 'cursor-pointer hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)]',
+            )}
+            onClick={readOnly ? undefined : openContactPage}
         >
             <div className="relative aspect-square w-full overflow-hidden">
                 {imageUrl ? (
@@ -178,60 +181,63 @@ export default function ContactCard({
                             type="button"
                             aria-label={t('actionsAria')}
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-card/85 text-foreground opacity-0 ring-1 ring-border backdrop-blur transition group-hover:opacity-100 hover:bg-card focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                            className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-card/85 text-foreground opacity-100 ring-1 ring-border backdrop-blur transition hover:bg-card sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                         >
                             <EllipsisHorizontalIcon className="size-5" />
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" side="bottom" className="w-48" onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenuItem onSelect={() => router.push(`/records/contacts/${id}`)}>
-                            <EyeIcon className="size-4 text-muted-foreground" />
-                            {t('view')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                if (onQuickEdit) onQuickEdit();
-                                else openInternalQuickEdit();
-                            }}
-                        >
-                            <PencilIcon className="size-4 text-muted-foreground" />
-                            {t('quickEdit')}
-                        </DropdownMenuItem>
-                        {email && (
-                            <DropdownMenuItem onSelect={() => { window.location.href = `mailto:${email}`; }}>
-                                <EnvelopeIcon className="size-4 text-muted-foreground" />
-                                {t('sendEmail')}
+                        {!readOnly && (
+                            <>
+                                <DropdownMenuItem onSelect={() => router.push(`/records/contacts/${id}`)}>
+                                    <EyeIcon className="size-4 text-muted-foreground" />
+                                    {t('view')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onSelect={(event) => {
+                                        event.preventDefault();
+                                        if (onQuickEdit) onQuickEdit();
+                                        else openInternalQuickEdit();
+                                    }}
+                                >
+                                    <PencilIcon className="size-4 text-muted-foreground" />
+                                    {t('quickEdit')}
+                                </DropdownMenuItem>
+                                {email && (
+                                    <DropdownMenuItem onSelect={() => { window.location.href = `mailto:${email}`; }}>
+                                        <EnvelopeIcon className="size-4 text-muted-foreground" />
+                                        {t('sendEmail')}
+                                    </DropdownMenuItem>
+                                )}
+                                {phone && (
+                                    <DropdownMenuItem onSelect={() =>
+                                        copyToClipboard(phone, 'Phone') ? toast.success(t('toastPhoneCopied')) : toast.error(t('toastFailedCopyPhone'))
+                                    }>
+                                        <PhoneIcon className="size-4 text-muted-foreground" />
+                                        {t('copyPhone')}
+                                    </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => openChangeCompanyDialog()}>
+                                    <BuildingOffice2Icon className="size-4 text-muted-foreground" />
+                                    {t('changeCompany')}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                            </>
+                        )}
+                        {onDelete && (
+                            <DropdownMenuItem
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    onDelete();
+                                }}
+                            >
+                                {removeIntent === 'restore'
+                                    ? <ArchiveBoxIcon className="size-4 text-muted-foreground" />
+                                    : <ArchiveBoxArrowDownIcon className="size-4 text-muted-foreground" />}
+                                {t(removeIntent === 'restore' ? 'restore' : 'archive')}
                             </DropdownMenuItem>
                         )}
-                        {phone && (
-                            <DropdownMenuItem onSelect={() =>
-                                copyToClipboard(phone, 'Phone') ? toast.success(t('toastPhoneCopied')) : toast.error(t('toastFailedCopyPhone'))
-                            }>
-                                <PhoneIcon className="size-4 text-muted-foreground" />
-                                {t('copyPhone')}
-                            </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => openChangeCompanyDialog()}>
-                            <BuildingOffice2Icon className="size-4 text-muted-foreground" />
-                            {t('changeCompany')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setRemoveFromCompanyOpen(true)}>
-                            <NoSymbolIcon className="size-4 text-muted-foreground" />
-                            {t('removeFromCompany')}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                            className="text-destructive hover:bg-destructive/10"
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                onDelete?.();
-                            }}
-                        >
-                            <TrashIcon className="size-4 text-destructive" />
-                            {t('delete')}
-                        </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
@@ -256,7 +262,6 @@ export default function ContactCard({
                     </span>
                 )}
 
-                {/* // TODO: fix this bug (not showing) */}
                 {tags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                         {tags.map((tag) => (

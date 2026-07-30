@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -18,14 +18,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
-import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import EditCompanySheet from '@/app/components/records/companies/EditCompanySheet';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
@@ -62,7 +62,7 @@ export default function CompanyActionsMenu({
     const { activeWorkspaceId } = useWorkspace();
     const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
-    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [archiveOpen, setArchiveOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
@@ -70,7 +70,7 @@ export default function CompanyActionsMenu({
         if (!assignOwnerOpen || members.length > 0) return;
         getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
     }, [assignOwnerOpen, members.length]);
-    const [isDeleting, setIsDeleting] = useState(false);
+    const [isArchiving, setIsArchiving] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [newDealDialogOpen, setNewDealDialogOpen] = useState(false);
@@ -141,16 +141,26 @@ export default function CompanyActionsMenu({
         setNewDealDialogOpen(true);
     };
 
-    const confirmDelete = async () => {
-        setIsDeleting(true);
+    const archived = company.archivedAt != null;
+
+    const confirmArchive = async () => {
+        setIsArchiving(true);
         try {
-            await deleteCompany(company.id);
-            toastSuccess(t('toastCompanyDeleted'));
-            router.push('/records/companies');
-            router.refresh();
+            if (archived) {
+                await restoreCompany(company.id);
+                toastSuccess(t('toastCompanyRestored'));
+                setArchiveOpen(false);
+                router.refresh();
+            } else {
+                await archiveCompany(company.id);
+                toastSuccess(t('toastCompanyArchived'));
+                router.push('/records/companies');
+                router.refresh();
+            }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
-            setIsDeleting(false);
+            toastError(err instanceof Error ? err.message : t(archived ? 'toastRestoreFailed' : 'toastArchiveFailed'));
+        } finally {
+            setIsArchiving(false);
         }
     };
 
@@ -328,14 +338,15 @@ export default function CompanyActionsMenu({
                             </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
-                            variant="destructive"
                             onSelect={(e) => {
                                 e.preventDefault();
-                                setDeleteOpen(true);
+                                setArchiveOpen(true);
                             }}
                         >
-                            <TrashIcon className="size-4" />
-                            <span>{t('delete')}</span>
+                            {archived
+                                ? <ArchiveBoxIcon className="size-4" />
+                                : <ArchiveBoxArrowDownIcon className="size-4" />}
+                            <span>{t(archived ? 'restore' : 'archive')}</span>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -376,15 +387,17 @@ export default function CompanyActionsMenu({
                 onOpenChange={setShareOpen}
             />
 
-            <DeleteRecordDialog
-                open={deleteOpen}
-                onOpenChange={setDeleteOpen}
+            <ArchiveRecordDialog
+                open={archiveOpen}
+                onOpenChange={setArchiveOpen}
+                mode={archived ? 'restore' : 'archive'}
                 selectedIds={new Set([company.id])}
                 selectedItems={[company]}
                 entityLabel={t('entityLabel')}
+                entityLabelPlural={t('entityLabelPlural')}
                 getDisplayName={(c) => c.name}
-                isDeleting={isDeleting}
-                confirmDelete={confirmDelete}
+                isPending={isArchiving}
+                onConfirm={confirmArchive}
             />
 
             <NewContactDialog

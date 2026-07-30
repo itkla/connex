@@ -419,6 +419,23 @@
     "menuAria": "{name}のアクション",
     "peek": "プレビュー",
     "quickEdit": "クイック編集",
-    "delete": "削除"
+    "delete": "削除",
+    "archive": "アーカイブ",
+    "restore": "復元"
+  },
+  "RecordsArchiveDialog": {
+    "archiveTitleSingle": "{entityLabel} をアーカイブ",
+    "archiveTitleMultiple": "{count} 件の {entityLabel} をアーカイブ",
+    "archiveDescriptionNamed": "「{name}」をアーカイブしますか？一覧には表示されなくなりますが、削除はされません。いつでも復元できます。",
+    "archiveDescriptionSingle": "この {entityLabel} をアーカイブしますか？一覧には表示されなくなりますが、削除はされません。いつでも復元できます。",
+    "archiveDescriptionMultiple": "これら {count} 件の {entityLabel} をアーカイブしますか？一覧には表示されなくなりますが、削除はされません。いつでも復元できます。",
+    "restoreTitleSingle": "{entityLabel} を復元",
+    "restoreTitleMultiple": "{count} 件の {entityLabel} を復元",
+    "restoreDescriptionNamed": "「{name}」をアーカイブ時の内容のまま、有効なレコードに戻します。",
+    "restoreDescriptionSingle": "この {entityLabel} をアーカイブ時の内容のまま、有効なレコードに戻します。",
+    "restoreDescriptionMultiple": "これら {count} 件の {entityLabel} をアーカイブ時の内容のまま、有効なレコードに戻します。",
+    "cancel": "キャンセル",
+    "archive": "アーカイブ",
+    "restore": "復元"
   }
 }

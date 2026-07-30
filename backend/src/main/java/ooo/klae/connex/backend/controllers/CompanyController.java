@@ -94,16 +94,18 @@ public class CompanyController {
         @RequestParam(defaultValue = "false") boolean noIndustry,
         @RequestParam(required = false) List<Integer> ids,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(defaultValue = "false") boolean archived
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<CompanyDto> items = companyService.getCompaniesPage(
-            query, sort, dir, industry, noIndustry, ids, memberScope, bounds.size(), bounds.offset())
+            query, sort, dir, industry, noIndustry, ids, memberScope, archived,
+            bounds.size(), bounds.offset())
             .stream().map(CompanyDto::from).toList();
         return new PageResponse<>(items,
-            companyService.countCompanies(query, industry, noIndustry, ids, memberScope));
+            companyService.countCompanies(query, industry, noIndustry, ids, memberScope, archived));
     }
 
     /** Returns bounded company-scoped engagement aggregates for one expanded company card. */
@@ -152,18 +154,20 @@ public class CompanyController {
         @RequestParam(defaultValue = "false") boolean noIndustry,
         @RequestParam(required = false) List<Integer> ids,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        if (query == null
+        if (!archived
+            && query == null
             && (industry == null || industry.isEmpty())
             && !noIndustry
             && (ids == null || ids.isEmpty())
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
-        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids, memberScope);
+        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids, memberScope, archived);
     }
 
     /**
@@ -186,7 +190,8 @@ public class CompanyController {
         return new CompanyFacets(
             companyService.distinctIndustries(),
             companyService.hasCompanyWithoutIndustry(),
-            companyService.countsByOwner()
+            companyService.countsByOwner(),
+            companyService.countArchivedCompanies()
         );
     }
 
@@ -248,12 +253,24 @@ public class CompanyController {
     }
 
     /**
-     * DELETE Deletes a company by ID.
-     * @param id
+     * POST archives a company, the reversible replacement for deletion (#854). There is
+     * deliberately no delete endpoint: nothing in the product may destroy a company record.
+     * @param id company id
+     * @return the archived company
      */
-    @DeleteMapping("/{id}")
-    public void deleteCompany(@PathVariable int id) {
-        companyService.deleteCompany(id);
+    @PostMapping("/{id}/archive")
+    public CompanyDto archiveCompany(@PathVariable int id) {
+        return CompanyDto.from(companyService.archiveCompany(id));
+    }
+
+    /**
+     * POST returns an archived company to the active working set.
+     * @param id company id
+     * @return the restored company
+     */
+    @PostMapping("/{id}/restore")
+    public CompanyDto restoreCompany(@PathVariable int id) {
+        return CompanyDto.from(companyService.restoreCompany(id));
     }
 
     /**
@@ -318,13 +335,23 @@ public class CompanyController {
     }
 
     /**
-     * POST endpoint to delete many companies in a single request.
+     * POST endpoint to archive many companies in a single request.
      * @param request the target company ids
      * @return per-record success/failure counts
      */
-    @PostMapping("/bulk/delete")
-    public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
-        return bulkOperationService.deleteCompanies(request.getIds());
+    @PostMapping("/bulk/archive")
+    public BulkOperationResult bulkArchive(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.archiveCompanies(request.getIds());
+    }
+
+    /**
+     * POST endpoint to restore many archived companies in a single request.
+     * @param request the target company ids
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/restore")
+    public BulkOperationResult bulkRestore(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.restoreCompanies(request.getIds());
     }
 
     @PostMapping("/bulk/owner")

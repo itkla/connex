@@ -201,16 +201,20 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void companyService_updateFieldThenDeleteCleansUp() {
+    void companyService_updateFieldThenArchiveRetainsValuesForRestore() {
         CustomFieldDefinition def = companyField("tier", "text", null);
         Company company = newCompany();
 
         companyService.updateCustomField(company.getId(), def.getId(), "Gold");
         assertEquals("Gold", value(companyService.getCustomFields(company.getId()), def.getId()));
 
-        companyService.deleteCompany(company.getId());
+        companyService.archiveCompany(company.getId());
         assertTrue(valueMapper.getForEntity(workspace.getId(), "company", company.getId()).stream()
-            .noneMatch(v -> v.getValueText() != null));
+            .anyMatch(v -> "Gold".equals(v.getValueText())),
+            "archiving must retain custom field values so restore returns the record intact");
+
+        companyService.restoreCompany(company.getId());
+        assertEquals("Gold", value(companyService.getCustomFields(company.getId()), def.getId()));
     }
 
     @Test

@@ -56,6 +56,7 @@
         JOIN workspace vws ON vws.id = cs.workspace_id
         JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+    AND c.archived_at IS NULL
   </sql>
 
   <sql id="visiblePersonJoin">
@@ -64,6 +65,7 @@
         JOIN workspace vws ON vws.id = ps.workspace_id
         JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+    AND p.archived_at IS NULL
   </sql>
 
   <sql id="visiblePipelineJoin">
@@ -167,7 +169,7 @@
           </if>
           <if test="noCompany">
             <if test="companyIds != null and companyIds.size() > 0">OR</if>
-            d.company_id IS NULL
+            c.id IS NULL
           </if>
         )
       </if>
@@ -886,8 +888,9 @@
     UNION ALL
     SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId}
-      AND d.company_id IS NULL
+      AND c.id IS NULL
     HAVING COUNT(*) &gt; 0
   </select>
 

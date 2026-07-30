@@ -129,7 +129,8 @@ public class PersonController {
         @RequestParam(required = false) List<String> titles,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(defaultValue = "false") boolean archived
     ) {
         if (WARMTH_SORT.equalsIgnoreCase(sort)) {
             throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
@@ -138,10 +139,10 @@ public class PersonController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            memberScope, bounds.size(), bounds.offset())
+            memberScope, archived, bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items,
-            personService.countPersons(query, companies, titles, noCompany, memberScope));
+            personService.countPersons(query, companies, titles, noCompany, memberScope, archived));
     }
 
     /**
@@ -161,18 +162,20 @@ public class PersonController {
         @RequestParam(required = false) List<String> titles,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        if (query == null
+        if (!archived
+            && query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
             && !noCompany
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
-        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope);
+        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope, archived);
     }
 
     /**
@@ -186,7 +189,8 @@ public class PersonController {
             personService.distinctCompanies(),
             personService.distinctTitles(),
             personService.hasPersonWithoutCompany(),
-            personService.countsByOwner()
+            personService.countsByOwner(),
+            personService.countArchivedPersons()
         );
     }
 
@@ -274,12 +278,24 @@ public class PersonController {
     }
 
     /**
-     * DELETE endpoint to delete a person by ID.
-     * @param id
+     * POST endpoint to archive a contact, the reversible replacement for deletion (#854). There is
+     * deliberately no delete endpoint: nothing in the product may destroy a contact record.
+     * @param id contact id
+     * @return the archived contact
      */
-    @DeleteMapping("/{id}")
-    public void deletePerson(@PathVariable int id) {
-        personService.delete(id);
+    @PostMapping("/{id}/archive")
+    public PersonDto archivePerson(@PathVariable int id) {
+        return PersonDto.from(personService.archive(id));
+    }
+
+    /**
+     * POST endpoint to return an archived contact to the active working set.
+     * @param id contact id
+     * @return the restored contact
+     */
+    @PostMapping("/{id}/restore")
+    public PersonDto restorePerson(@PathVariable int id) {
+        return PersonDto.from(personService.restore(id));
     }
 
     /**
@@ -344,13 +360,23 @@ public class PersonController {
     }
 
     /**
-     * POST endpoint to delete many contacts in a single request.
+     * POST endpoint to archive many contacts in a single request.
      * @param request the target contact ids
      * @return per-record success/failure counts
      */
-    @PostMapping("/bulk/delete")
-    public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
-        return bulkOperationService.deletePersons(request.getIds());
+    @PostMapping("/bulk/archive")
+    public BulkOperationResult bulkArchive(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.archivePersons(request.getIds());
+    }
+
+    /**
+     * POST endpoint to restore many archived contacts in a single request.
+     * @param request the target contact ids
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/restore")
+    public BulkOperationResult bulkRestore(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.restorePersons(request.getIds());
     }
 
     @PostMapping("/bulk/owner")

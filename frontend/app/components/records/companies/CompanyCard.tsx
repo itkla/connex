@@ -13,6 +13,9 @@ import { useMemo, useState } from 'react';
 import { Area, AreaChart, LabelList, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis } from 'recharts';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { RecordActionMenuTrigger } from '@/app/components/records/RecordActionMenu';
+import type { RecordRemoveIntent } from '@/app/components/records/types';
+import { cn } from '@/lib/utils';
 
 interface CompanyCardProps {
     company: Company;
@@ -22,9 +25,21 @@ interface CompanyCardProps {
     onFirstExpand?: () => void;
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    readOnly?: boolean;
+    removeIntent?: RecordRemoveIntent;
 }
 
-export default function CompanyCard({ company, ownerName, metrics, metricsStatus, onFirstExpand }: CompanyCardProps) {
+export default function CompanyCard({
+    company,
+    ownerName,
+    metrics,
+    metricsStatus,
+    onFirstExpand,
+    onQuickEdit,
+    onDelete,
+    readOnly = false,
+    removeIntent = 'archive',
+}: CompanyCardProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const router = useRouter();
     const t = useTranslations('CompaniesCard');
@@ -38,8 +53,11 @@ export default function CompanyCard({ company, ownerName, metrics, metricsStatus
     return (
         <div className="group rounded-2xl border border-border bg-card transition duration-200 hover:shadow-lg dark:hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.5)]">
             <div
-                className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 transition-colors hover:bg-muted"
-                onClick={toggleExpand}
+                className={cn(
+                    'flex items-center gap-4 rounded-2xl p-4 transition-colors',
+                    !readOnly && 'cursor-pointer hover:bg-muted',
+                )}
+                onClick={readOnly ? undefined : toggleExpand}
             >
                 <CompanyAvatar company={company} type="large" />
 
@@ -60,18 +78,36 @@ export default function CompanyCard({ company, ownerName, metrics, metricsStatus
                     )}
                 </div>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        open();
-                    }}
-                    aria-label={t('openCompanyAriaLabel')}
-                    className="size-10 shrink-0 border-none bg-muted text-muted-foreground shadow-none outline-none hover:bg-muted hover:text-foreground"
-                >
-                    <ChevronRightIcon className="size-4" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                    {!readOnly && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                open();
+                            }}
+                            aria-label={t('openCompanyAriaLabel')}
+                            className="size-10 shrink-0 border-none bg-muted text-muted-foreground shadow-none outline-none hover:bg-muted hover:text-foreground"
+                        >
+                            <ChevronRightIcon className="size-4" />
+                        </Button>
+                    )}
+                    {onDelete && (
+                        <div onClick={(event) => event.stopPropagation()}>
+                            <RecordActionMenuTrigger
+                                model={{
+                                    record: { type: 'company', id: company.id, label: company.name },
+                                    includeRecordActions: !readOnly,
+                                    onQuickEdit: !readOnly ? onQuickEdit : undefined,
+                                    onRemove: onDelete,
+                                    removeIntent,
+                                }}
+                                triggerClassName="size-10 opacity-100"
+                            />
+                        </div>
+                    )}
+                </div>
             </div>
 
             {isExpanded && (

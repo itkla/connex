@@ -15,6 +15,10 @@ export type RunFixture = {
         edit: SeededRecord;
         activity: SeededRecord;
         search: SeededRecord;
+        archive: SeededRecord;
+    };
+    companies: {
+        archive: SeededRecord;
     };
     companyName: string;
 };

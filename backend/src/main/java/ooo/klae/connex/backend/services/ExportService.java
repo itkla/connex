@@ -45,12 +45,14 @@ public class ExportService {
     private final CustomFieldValueService customFieldValueService;
 
     /**
-     * CSV of contacts matching the given list filters and member scope (all contacts when unfiltered).
+     * CSV of contacts matching the given list filters and member scope (all contacts when
+     * unfiltered). Archived contacts are never exported: an export is the active working set.
      */
     public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
             MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Person> people = personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany, memberScope);
+        List<Person> people = personMapper.getPersonsFiltered(
+            workspaceId, query, companies, titles, noCompany, memberScope, false);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -79,8 +81,8 @@ public class ExportService {
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Company> companies =
-            companyMapper.getCompaniesFiltered(workspaceId, query, industry, noIndustry, ids, memberScope);
+        List<Company> companies = companyMapper.getCompaniesFiltered(
+            workspaceId, query, industry, noIndustry, ids, memberScope, false);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());

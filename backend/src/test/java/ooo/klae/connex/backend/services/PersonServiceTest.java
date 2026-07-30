@@ -515,7 +515,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class,
             () -> personService.updateOwner(shared.getId(), currentUser.getId()));
         assertThrows(ResourceNotFoundException.class,
-            () -> personService.delete(shared.getId()));
+            () -> personService.archive(shared.getId()));
 
         assertTrue(personMapper.existsOwned(ownerWorkspace.getId(), shared.getId()));
         assertEquals(employmentBefore, jdbcTemplate.queryForObject(
@@ -645,13 +645,13 @@ class PersonServiceTest extends AbstractServiceTest {
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
-            7, "Security", null, null, false, MemberScope.allTeam())).thenReturn(1001L);
+            7, "Security", null, null, false, MemberScope.allTeam(), false)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
-            () -> service.getMatchingPersonIds("Security", null, null, false, MemberScope.allTeam()));
+            () -> service.getMatchingPersonIds("Security", null, null, false, MemberScope.allTeam(), false));
 
         verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), 1000);
+            7, "Security", null, null, false, MemberScope.allTeam(), false, 1000);
     }
 
     @Test

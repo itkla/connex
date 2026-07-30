@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
+import java.time.LocalDateTime;
+
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
@@ -30,6 +32,7 @@ public class Company {
     private String logoUrl;
     private String createdAt;
     private String updatedAt;
+    private LocalDateTime archivedAt;
 
     public int getId() {
         return id;

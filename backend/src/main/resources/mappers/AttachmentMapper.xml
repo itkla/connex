@@ -143,7 +143,9 @@
   <sql id="tenantAttachJoins">
     FROM attachment a
     LEFT JOIN company  c  ON a.entity_type = 'company' AND c.id  = a.entity_id AND c.workspace_id = a.workspace_id
+      AND c.archived_at IS NULL
     LEFT JOIN person   p  ON a.entity_type = 'person'  AND p.id  = a.entity_id AND p.workspace_id = a.workspace_id
+      AND p.archived_at IS NULL
     LEFT JOIN deal     d  ON a.entity_type = 'deal'    AND d.id  = a.entity_id AND d.workspace_id = a.workspace_id
   </sql>
 

@@ -76,10 +76,12 @@ class IntroductionPlaneRoutingIntegrationTest {
             statement.execute("CREATE DATABASE " + scratchCatalog);
             scratchCatalogCreated = true;
             statement.execute("CREATE TABLE " + scratchCatalog + ".company ("
-                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL)");
+                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
+                + "archived_at DATETIME NULL)");
             statement.execute("CREATE TABLE " + scratchCatalog + ".person ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, company_id INT NULL, "
-                + "name VARCHAR(255) NOT NULL, image_url VARCHAR(2048) NULL)");
+                + "name VARCHAR(255) NOT NULL, image_url VARCHAR(2048) NULL, "
+                + "archived_at DATETIME NULL)");
             statement.execute("CREATE TABLE " + scratchCatalog + ".introduction ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, introducer_user_id INT NULL, "
                 + "person_a_id INT NOT NULL, person_b_id INT NOT NULL, status VARCHAR(32) NOT NULL, "

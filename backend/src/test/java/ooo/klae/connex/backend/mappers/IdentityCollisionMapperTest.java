@@ -163,6 +163,51 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void liveReadsSuppressGroupsAfterArchivingWithoutNeedingARebuild() {
+        Company company = newCompany();
+        Person first = newPerson(workspace, company, "archived@example.com", "090-1111-1111");
+        Person second = newPerson(workspace, company, "archived@example.com", "090-2222-2222");
+        insertPersonIdentity(first, "email", "archived@example.com");
+        insertPersonIdentity(second, "email", "archived@example.com");
+        Company firstCompany = newCompany(workspace, "archived-first.example.com");
+        Company secondCompany = newCompany(workspace, "archived-second.example.com");
+        insertCompanyIdentity(firstCompany, "domain", "archived.example.com");
+        insertCompanyIdentity(secondCompany, "domain", "archived.example.com");
+        assertEquals(4, rebuild(workspace.getId()));
+
+        assertEquals(1, personMapper.archive(workspace.getId(), first.getId()));
+        assertEquals(1, companyMapper.archive(workspace.getId(), firstCompany.getId()));
+
+        assertEquals(
+            0L,
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "person", "email", 100, 0)));
+        assertEquals(
+            0L,
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "company", "domain", 100, 0)));
+        assertEquals(List.of(), visibleGroups(workspace.getId(), null, null, 100, 0));
+        assertEquals(
+            4,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_collision WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        assertEquals(1, personMapper.restore(workspace.getId(), first.getId()));
+        assertEquals(1, companyMapper.restore(workspace.getId(), firstCompany.getId()));
+
+        assertEquals(
+            1L,
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "person", "email", 100, 0)));
+        assertEquals(
+            1L,
+            totalOf(collisionMapper.findVisibleGroupPage(
+                workspace.getId(), "company", "domain", 100, 0)));
+    }
+
+    @Test
     void rebuildDeletesStaleMembershipBeforeReinsertion() {
         Company company = newCompany();
         Person first = newPerson(workspace, company, "stale@example.com", "090-1111-1111");

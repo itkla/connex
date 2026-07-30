@@ -84,7 +84,7 @@
     FROM person_tag pt
     JOIN person p ON p.id = pt.person_id
     JOIN tag t ON t.id = pt.tag_id
-    WHERE p.workspace_id = #{workspaceId}
+    WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
     ORDER BY t.name
   </select>
 
@@ -93,7 +93,7 @@
     FROM company_tag ct
     JOIN company c ON c.id = ct.company_id
     JOIN tag t ON t.id = ct.tag_id
-    WHERE c.workspace_id = #{workspaceId}
+    WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
     ORDER BY t.name
   </select>
 

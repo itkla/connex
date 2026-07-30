@@ -232,7 +232,8 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         Person subject = newPerson(subjectWorkspace.getId());
         DataSubjectRequestDto linked = dataSubjectRequestService.create(
             org.getId(), currentUser.getId(), linkedRequest(subjectWorkspace.getId(), subject.getId()));
-        personMapper.delete(subjectWorkspace.getId(), subject.getId());
+        jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ? AND id = ?",
+            subjectWorkspace.getId(), subject.getId());
 
         assertThrows(ResourceNotFoundException.class,
             () -> dataSubjectRequestService.disclosure(org.getId(), linked.getId(), currentUser.getId()));

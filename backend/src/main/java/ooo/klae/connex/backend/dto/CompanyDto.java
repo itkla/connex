@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -64,6 +65,9 @@ public class CompanyDto {
     private String createdAt;
     private String updatedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime archivedAt;
+
     public static CompanyDto from(Company c) {
         if (c == null) return null;
         CompanyDto dto = new CompanyDto();
@@ -81,6 +85,7 @@ public class CompanyDto {
         dto.createdAt = c.getCreatedAt();
         dto.updatedAt = c.getUpdatedAt();
         dto.logoUrl = c.getLogoUrl();
+        dto.archivedAt = c.getArchivedAt();
         return dto;
     }
 

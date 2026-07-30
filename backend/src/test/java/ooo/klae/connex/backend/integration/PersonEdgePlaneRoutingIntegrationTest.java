@@ -186,11 +186,13 @@ class PersonEdgePlaneRoutingIntegrationTest {
     private static void createTenantTables(Statement statement) throws SQLException {
         statement.execute("CREATE TABLE " + scratchCatalog + ".person ("
             + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
-            + "company_id INT NULL, suspended_at DATETIME NULL, provision_ceased_at DATETIME NULL)");
+            + "company_id INT NULL, suspended_at DATETIME NULL, provision_ceased_at DATETIME NULL, "
+            + "archived_at DATETIME NULL)");
         statement.execute("CREATE TABLE " + scratchCatalog + ".person_share ("
             + "person_id INT NOT NULL, workspace_id INT NOT NULL, PRIMARY KEY (person_id, workspace_id))");
         statement.execute("CREATE TABLE " + scratchCatalog + ".company ("
-            + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL)");
+            + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
+            + "archived_at DATETIME NULL)");
         statement.execute("CREATE TABLE " + scratchCatalog + ".company_share ("
             + "company_id INT NOT NULL, workspace_id INT NOT NULL, PRIMARY KEY (company_id, workspace_id))");
         statement.execute("CREATE TABLE " + scratchCatalog + ".person_edge ("
