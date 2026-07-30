@@ -11,19 +11,22 @@ function isSeededRecord(value: unknown): value is SeededRecord {
 }
 
 function isRunFixture(value: unknown): value is RunFixture {
-    if (!isRecord(value)
-        || typeof value.username !== "string"
+    if (!isRecord(value)) {
+        return false;
+    }
+    const { contacts, companies } = value;
+    if (typeof value.username !== "string"
         || typeof value.password !== "string"
         || typeof value.email !== "string"
         || typeof value.workspaceId !== "number"
         || typeof value.companyName !== "string"
-        || !isRecord(value.contacts)
-        || !isRecord(value.companies)) {
+        || !isRecord(contacts)
+        || !isRecord(companies)) {
         return false;
     }
     return ["peek", "edit", "activity", "search", "archive"]
-        .every((key) => isSeededRecord(value.contacts[key]))
-        && isSeededRecord(value.companies.archive);
+        .every((key) => isSeededRecord(contacts[key]))
+        && isSeededRecord(companies.archive);
 }
 
 /** Loads and validates the fixture owned by the current browser project. */
