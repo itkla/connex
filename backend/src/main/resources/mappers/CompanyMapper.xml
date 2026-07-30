@@ -13,12 +13,6 @@
     c.created_at, c.updated_at, c.logo_url, c.archived_at
   </sql>
 
-  <!-- Owned-or-shared visibility WITHOUT the archive predicate. Only the deliberate archive-aware
-       browser statements (which offer an explicit archived toggle) may include this fragment; every
-       ordinary read must include `visible` instead. The share branch carries the same-org
-       ceiling the write path enforces (owner and grantee workspaces must share an organization),
-       so a share row that spans an org boundary grants no read visibility. Writes stay
-       owned-only. Requires the table aliased `c`. -->
   <sql id="visibleAny">
     (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
@@ -27,9 +21,6 @@
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
-  <!-- The ordinary read predicate (#854): owned-or-shared AND not archived. Archiving replaced the
-       hard delete, so every statement that used to be unable to observe a deleted row must now be
-       unable to observe an archived one. Enrolled in ArchiveVisibilityRegistry. -->
   <sql id="visible">
     <include refid="visibleAny"/> AND c.archived_at IS NULL
   </sql>
@@ -388,10 +379,9 @@
 
   <sql id="pageWhere">
     <where>
-      AND <include refid="visibleAny"/>
       <choose>
-        <when test="archived">AND c.archived_at IS NOT NULL</when>
-        <otherwise>AND c.archived_at IS NULL</otherwise>
+        <when test="archived">AND c.workspace_id = #{workspaceId} AND c.archived_at IS NOT NULL</when>
+        <otherwise>AND <include refid="visible"/></otherwise>
       </choose>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
@@ -494,28 +484,32 @@
       (SELECT COUNT(*) FROM activity a
        WHERE a.workspace_id = #{workspaceId}
          AND (EXISTS (SELECT 1 FROM person p
-             WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+             WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+               AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
                WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId})))
         AS num_activities,
       (SELECT COUNT(*) FROM task t
        WHERE t.workspace_id = #{workspaceId}
          AND (EXISTS (SELECT 1 FROM person p
-             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+               AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
                WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
         AS num_tasks,
       (SELECT COUNT(*) FROM task t
        WHERE t.workspace_id = #{workspaceId} AND t.completed = FALSE
          AND (EXISTS (SELECT 1 FROM person p
-             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+               AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
                WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
         AS open_tasks,
       (SELECT COUNT(*) FROM note n
        WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
          AND (EXISTS (SELECT 1 FROM person p
-             WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+             WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+               AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
                WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId})))
         AS num_notes
@@ -531,7 +525,8 @@
         FROM activity a
         WHERE a.workspace_id = #{workspaceId}
           AND (EXISTS (SELECT 1 FROM person p
-              WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+              WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+                AND p.archived_at IS NULL)
             OR EXISTS (SELECT 1 FROM deal d
                 WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
         UNION ALL
@@ -539,7 +534,8 @@
         FROM task t
         WHERE t.workspace_id = #{workspaceId}
           AND (EXISTS (SELECT 1 FROM person p
-              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+                AND p.archived_at IS NULL)
             OR EXISTS (SELECT 1 FROM deal d
                 WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
         UNION ALL
@@ -547,7 +543,8 @@
         FROM note n
         WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
           AND (EXISTS (SELECT 1 FROM person p
-              WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+              WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+                AND p.archived_at IS NULL)
             OR EXISTS (SELECT 1 FROM deal d
                 WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
       ) touch
@@ -570,7 +567,8 @@
       WHERE a.workspace_id = #{workspaceId}
         AND a.timestamp &gt;= #{windowStart} AND a.timestamp &lt;= #{windowEnd}
         AND (EXISTS (SELECT 1 FROM person p
-            WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+            WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+              AND p.archived_at IS NULL)
           OR EXISTS (SELECT 1 FROM deal d
               WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
       UNION ALL
@@ -579,7 +577,8 @@
       WHERE t.workspace_id = #{workspaceId}
         AND t.created_at &gt;= #{windowStart} AND t.created_at &lt;= #{windowEnd}
         AND (EXISTS (SELECT 1 FROM person p
-            WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+            WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+              AND p.archived_at IS NULL)
           OR EXISTS (SELECT 1 FROM deal d
               WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
       UNION ALL
@@ -588,7 +587,8 @@
       WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
         AND n.created_at &gt;= #{windowStart} AND n.created_at &lt;= #{windowEnd}
         AND (EXISTS (SELECT 1 FROM person p
-            WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+            WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+              AND p.archived_at IS NULL)
           OR EXISTS (SELECT 1 FROM deal d
               WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
     ) touch
@@ -808,8 +808,6 @@
     UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
-  <!-- Archive replaces the former hard DELETE (#854). Nothing cascades, so company tags, shares and
-       identities survive, and the people and deals that pointed at it keep their company_id. -->
   <update id="archive">
     UPDATE company SET archived_at = CURRENT_TIMESTAMP
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL

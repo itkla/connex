@@ -83,7 +83,7 @@
     SELECT <include refid="qualifiedNoteColumns"/>
     FROM note n
     LEFT JOIN app_user u ON u.id = n.author_id
-    LEFT JOIN person   p ON p.id = n.person_id
+    LEFT JOIN person   p ON p.id = n.person_id AND p.archived_at IS NULL
     LEFT JOIN deal     d ON d.id = n.deal_id
     WHERE n.workspace_id = #{workspaceId}
       AND (n.content LIKE #{query}
@@ -154,8 +154,12 @@
     SELECT <include refid="noteColumns"/> FROM note n
     WHERE n.workspace_id = #{workspaceId}
       AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND (n.person_id IS NULL OR EXISTS (SELECT 1 FROM person linked_person
+          WHERE linked_person.workspace_id = #{workspaceId}
+            AND linked_person.id = n.person_id AND linked_person.archived_at IS NULL))
       AND (EXISTS (SELECT 1 FROM person p
-          WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+          WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id
+            AND p.company_id = #{companyId} AND p.archived_at IS NULL)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
     ORDER BY n.updated_at DESC, n.id DESC
@@ -271,7 +275,7 @@
     SELECT <include refid="qualifiedNoteColumns"/>
     FROM note n
     LEFT JOIN app_user u ON u.id = n.author_id
-    LEFT JOIN person   p ON p.id = n.person_id
+    LEFT JOIN person   p ON p.id = n.person_id AND p.archived_at IS NULL
     LEFT JOIN deal     d ON d.id = n.deal_id
     WHERE n.workspace_id = #{workspaceId}
       AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})

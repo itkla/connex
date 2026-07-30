@@ -534,10 +534,11 @@ public class CompanyService {
      * already owns, so gating it on the permission that could archive it is the conservative
      * choice and opens no path an actor did not already have.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_DELETE)
     public Company restoreCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Company not found with id: " + id);
         }
@@ -546,6 +547,9 @@ public class CompanyService {
             throw new ResourceNotFoundException("Company not found with id: " + id);
         }
         Company after = requireOwnedCompany(workspaceId, id);
+        identityIntakeService.recordCompany(
+            workspaceId, id, after.getWebsite(), after.getPhone(),
+            IdentityAcquisitionSource.BACKFILL, null);
         auditService.record("company.restore", "company", id, after.getName(),
             "Restored company " + after.getName(),
             auditService.singleChange("archivedAt", before.getArchivedAt(), null));

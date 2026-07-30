@@ -419,7 +419,9 @@
     "menuAria": "{name}のアクション",
     "peek": "プレビュー",
     "quickEdit": "クイック編集",
-    "delete": "削除"
+    "delete": "削除",
+    "archive": "アーカイブ",
+    "restore": "復元"
   },
   "RecordsArchiveDialog": {
     "archiveTitleSingle": "{entityLabel} をアーカイブ",

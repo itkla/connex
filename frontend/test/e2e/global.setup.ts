@@ -27,6 +27,7 @@ setup("provision tenant and seed records", async () => {
         edit: `Edit Target ${runId}`,
         activity: `Activity Target ${runId}`,
         search: `Searchable Sable ${runId}`,
+        archive: `Archive Target ${runId}`,
     } as const;
     const fixture: RunFixture = {
         username: `e2e_${runId}`,
@@ -38,6 +39,10 @@ setup("provision tenant and seed records", async () => {
             edit: { id: 0, name: contactNames.edit },
             activity: { id: 0, name: contactNames.activity },
             search: { id: 0, name: contactNames.search },
+            archive: { id: 0, name: contactNames.archive },
+        },
+        companies: {
+            archive: { id: 0, name: `Archive Company ${runId}` },
         },
         companyName: `Acme Rocket Co ${runId}`,
     };
@@ -53,6 +58,12 @@ setup("provision tenant and seed records", async () => {
         website: "https://acme-rocket.example.com",
         industry: "Aerospace",
     });
+    const archiveCompany = await seed.post("/api/companies", {
+        name: fixture.companies.archive.name,
+        website: `https://archive-${runId}.example.com`,
+        industry: "Manufacturing",
+    });
+    fixture.companies.archive.id = Number(archiveCompany.id);
 
     for (const key of Object.keys(contactNames) as (keyof typeof contactNames)[]) {
         const name = contactNames[key];

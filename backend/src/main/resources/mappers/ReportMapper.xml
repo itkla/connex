@@ -594,6 +594,7 @@
       LEFT JOIN person gap_person ON gap_person.company_id = c.id
         AND gap_person.created_at &lt; #{query.endUtc}
         AND gap_person.suspended_at IS NULL
+        AND gap_person.archived_at IS NULL
         AND (
           gap_person.workspace_id = #{query.workspaceId}
           OR EXISTS (
@@ -668,6 +669,7 @@
               AND gap_company_share.created_at &lt; #{query.endUtc}
           )
         )
+        AND c.archived_at IS NULL
       <if test="query.tagIds != null and !query.tagIds.isEmpty()">
         AND EXISTS (
           SELECT 1
@@ -718,12 +720,12 @@
           CONCAT(single_deal.currency, ':',
             <choose>
               <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
-              <when test="query.groupBy == 'company'">COALESCE(CAST(single_deal.company_id AS CHAR), 'unassigned')</when>
+              <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
               <otherwise>'total'</otherwise>
             </choose>)
         </when>
         <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
-        <when test="query.groupBy == 'company'">COALESCE(CAST(single_deal.company_id AS CHAR), 'unassigned')</when>
+        <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
         <otherwise>'total'</otherwise>
       </choose> AS group_key,
       <choose>
@@ -753,6 +755,7 @@
       JOIN deal_person single_link ON single_link.deal_id = d.id
       JOIN person single_person ON single_person.id = single_link.person_id
         AND single_person.suspended_at IS NULL
+        AND single_person.archived_at IS NULL
       WHERE d.workspace_id = #{query.workspaceId}
         AND d.won IS NULL
         AND d.risk_excluded = FALSE
@@ -776,6 +779,7 @@
             AND single_company_share.workspace_id = #{query.workspaceId}
         )
       )
+      AND single_company.archived_at IS NULL
     GROUP BY group_key, group_label, unit
     ORDER BY value DESC, group_label, group_key
   </select>
@@ -801,6 +805,7 @@
             AND network_company_share.workspace_id = #{query.workspaceId}
         )
       )
+      AND network_company.archived_at IS NULL
     WHERE network_deal.workspace_id = #{query.workspaceId}
       AND network_deal.won IS NULL
     <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">

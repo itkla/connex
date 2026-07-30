@@ -8,6 +8,7 @@
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.id &gt; #{afterId}
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
     ORDER BY p.id
@@ -19,6 +20,7 @@
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.id &gt; #{afterId}
+      AND c.archived_at IS NULL
     ORDER BY c.id
     LIMIT #{limit}
   </select>
@@ -28,6 +30,7 @@
     FROM person_identity pi
     JOIN person p ON p.workspace_id = pi.workspace_id AND p.id = pi.person_id
     WHERE pi.workspace_id = #{workspaceId}
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
       AND pi.superseded_at IS NULL
@@ -42,6 +45,7 @@
     FROM company_identity ci
     JOIN company c ON c.workspace_id = ci.workspace_id AND c.id = ci.company_id
     WHERE ci.workspace_id = #{workspaceId}
+      AND c.archived_at IS NULL
       AND ci.superseded_at IS NULL
       AND ci.company_id IN
       <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">
@@ -56,6 +60,7 @@
     WHERE pi.workspace_id = #{workspaceId}
       AND pi.kind = #{kind}
       AND pi.superseded_at IS NULL
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
       AND pi.normalized_value IN
@@ -72,6 +77,7 @@
     WHERE ci.workspace_id = #{workspaceId}
       AND ci.kind = #{kind}
       AND ci.superseded_at IS NULL
+      AND c.archived_at IS NULL
       AND ci.normalized_value IN
       <foreach item="normalizedValue" collection="normalizedValues" open="(" separator="," close=")">
         #{normalizedValue}
@@ -118,8 +124,10 @@
         AND p.id = pi.person_id
       LEFT JOIN company c
         ON c.id = p.company_id
+        AND c.archived_at IS NULL
         AND <include refid="visibleCompany"/>
       WHERE pi.superseded_at IS NULL
+        AND p.archived_at IS NULL
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
         AND <include refid="visiblePerson"/>
@@ -158,6 +166,7 @@
         ON c.workspace_id = ci.workspace_id
         AND c.id = ci.company_id
       WHERE ci.superseded_at IS NULL
+        AND c.archived_at IS NULL
         AND <include refid="visibleCompany"/>
         AND (
           <foreach item="key" collection="keys" separator=" OR ">
@@ -188,8 +197,10 @@
         FROM person p
         LEFT JOIN company c
           ON c.id = p.company_id
+          AND c.archived_at IS NULL
           AND <include refid="visibleCompany"/>
-        WHERE p.suspended_at IS NULL
+        WHERE p.archived_at IS NULL
+          AND p.suspended_at IS NULL
           AND p.provision_ceased_at IS NULL
           AND <include refid="visiblePerson"/>
           AND p.name LIKE #{key.pattern}
@@ -217,7 +228,8 @@
                'name' AS kind,
                #{key.normalizedName} AS normalized_value
         FROM company c
-        WHERE <include refid="visibleCompany"/>
+        WHERE c.archived_at IS NULL
+          AND <include refid="visibleCompany"/>
           AND c.name LIKE #{key.pattern}
         ORDER BY CASE WHEN c.workspace_id = #{workspaceId} THEN 0 ELSE 1 END,
                  CASE WHEN LOWER(c.name) = #{key.normalizedName} THEN 0 ELSE 1 END,
@@ -274,14 +286,18 @@
   <select id="lockPersonIdentityParent" resultType="PersonIdentityBackfillCandidate">
     SELECT id, email, phone, created_at
     FROM person
-    WHERE workspace_id = #{workspaceId} AND id = #{personId}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{personId}
+      AND archived_at IS NULL
     FOR UPDATE
   </select>
 
   <select id="lockCompanyIdentityParent" resultType="CompanyIdentityBackfillCandidate">
     SELECT id, website, phone, created_at
     FROM company
-    WHERE workspace_id = #{workspaceId} AND id = #{companyId}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{companyId}
+      AND archived_at IS NULL
     FOR UPDATE
   </select>
 
@@ -295,6 +311,7 @@
       AND pi.person_id = #{personId}
       AND pi.kind = 'email'
       AND pi.superseded_at IS NULL
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
       AND (
@@ -316,6 +333,7 @@
       AND pi.person_id = #{personId}
       AND pi.kind = 'phone'
       AND pi.superseded_at IS NULL
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
       AND (
@@ -337,6 +355,7 @@
       AND ci.company_id = #{companyId}
       AND ci.kind = 'domain'
       AND ci.superseded_at IS NULL
+      AND c.archived_at IS NULL
       AND (
         (c.website IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
         OR CAST(c.website AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
@@ -356,6 +375,7 @@
       AND ci.company_id = #{companyId}
       AND ci.kind = 'phone'
       AND ci.superseded_at IS NULL
+      AND c.archived_at IS NULL
       AND (
         (c.phone IS NULL AND #{rawValue,jdbcType=VARCHAR} IS NULL)
         OR CAST(c.phone AS BINARY) = CAST(#{rawValue,jdbcType=VARCHAR} AS BINARY)
@@ -378,6 +398,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.email AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
     ON DUPLICATE KEY UPDATE superseded_at = NULL
@@ -396,6 +417,7 @@
     WHERE p.workspace_id = #{workspaceId}
       AND p.id = #{personId}
       AND CAST(p.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND p.archived_at IS NULL
       AND p.suspended_at IS NULL
       AND p.provision_ceased_at IS NULL
     ON DUPLICATE KEY UPDATE superseded_at = NULL
@@ -414,6 +436,7 @@
     WHERE c.workspace_id = #{workspaceId}
       AND c.id = #{companyId}
       AND CAST(c.website AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND c.archived_at IS NULL
     ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 
@@ -430,6 +453,7 @@
     WHERE c.workspace_id = #{workspaceId}
       AND c.id = #{companyId}
       AND CAST(c.phone AS BINARY) = CAST(#{rawValue} AS BINARY)
+      AND c.archived_at IS NULL
     ON DUPLICATE KEY UPDATE superseded_at = NULL
   </insert>
 

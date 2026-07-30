@@ -45,7 +45,7 @@ import {
     type RecordMenuModel,
 } from './RecordActionMenu';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
+import { type ColumnDef, type CardCallbacks, type DisplayMode, type RecordRemoveIntent, type SelectionId } from './types';
 import EditableCell from './EditableCell';
 
 type SortDirection = 'asc' | 'desc';
@@ -83,6 +83,9 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
     onQuickEdit?: (item: T) => void;
     onDelete?: (item: T) => void;
+    readOnly?: boolean;
+    /** What `onDelete` really does, so the row menu says archive or restore where it should. */
+    removeIntent?: RecordRemoveIntent;
     recordRef?: (item: T) => ActiveRecordRef | null;
     gridClassName?: string;
     entityLabel: string;
@@ -117,6 +120,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
+    readOnly = false,
+    removeIntent = 'delete',
     recordRef,
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
@@ -228,12 +233,14 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
             if (!record) return null;
             return {
                 record,
-                onPeek: onRowClick ? () => onRowClick(item) : undefined,
-                onQuickEdit: onQuickEdit ? () => onQuickEdit(item) : undefined,
-                onDelete: onDelete ? () => onDelete(item) : undefined,
+                includeRecordActions: !readOnly,
+                onPeek: !readOnly && onRowClick ? () => onRowClick(item) : undefined,
+                onQuickEdit: !readOnly && onQuickEdit ? () => onQuickEdit(item) : undefined,
+                onRemove: onDelete ? () => onDelete(item) : undefined,
+                removeIntent,
             };
         },
-        [recordRef, onRowClick, onQuickEdit, onDelete],
+        [recordRef, onRowClick, onQuickEdit, onDelete, removeIntent, readOnly],
     );
 
     const rowRefs = useRef(new Map<SelectionId, HTMLTableRowElement>());
@@ -515,7 +522,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     <AnimatePresence initial={false}>
                         {pagedData.map((item) => {
                             const menuModel = buildRecordMenu(item);
-                            const card = renderCard(item, { onQuickEdit, onDelete });
+                            const card = renderCard(item, {
+                                onQuickEdit: readOnly ? undefined : onQuickEdit,
+                                onDelete,
+                            });
                             return (
                                 <motion.div
                                     key={item.id}
@@ -660,7 +670,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
-                                            if (col.editable) {
+                                            if (!readOnly && col.editable) {
                                                 const editable = col.editable;
                                                 return (
                                                     <td

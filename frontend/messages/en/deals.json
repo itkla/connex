@@ -134,8 +134,7 @@
     "due": "Due {date}",
     "edit": "Edit",
     "markAsComplete": "Mark as complete",
-    "delete": "Delete",
-    "taskEntityLabel": "task"
+    "delete": "Delete"
   },
   "DealsAging": {
     "bucketFresh": "0-7d",

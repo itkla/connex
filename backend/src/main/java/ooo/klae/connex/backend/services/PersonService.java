@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
@@ -267,7 +268,7 @@ public class PersonService {
             String sourceRowRef) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
-        validateCompanyVisible(workspaceId, null, person);
+        preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
@@ -294,8 +295,12 @@ public class PersonService {
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
-        Person before = requireOwnedPerson(workspaceId, id);
-        validateCompanyVisible(workspaceId, companyIdOf(before), person);
+        Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
+        preserveHiddenCompanyAndValidateRequestedCompany(
+            workspaceId, companyIdOf(before), person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(before.getOwnerId());
@@ -438,13 +443,21 @@ public class PersonService {
      * contact whose employer was archived stays editable instead of failing every save; only a
      * newly requested company must be visible (and therefore not archived).
      */
-    private void validateCompanyVisible(int workspaceId, Integer currentCompanyId, Person person) {
-        Integer companyId = companyIdOf(person);
-        if (companyId == null || Objects.equals(companyId, currentCompanyId)) {
+    private void preserveHiddenCompanyAndValidateRequestedCompany(
+            int workspaceId, Integer currentCompanyId, Person person) {
+        Integer requestedCompanyId = companyIdOf(person);
+        if (requestedCompanyId == null && currentCompanyId != null
+                && !companyMapper.exists(workspaceId, currentCompanyId)) {
+            Company retainedCompany = new Company();
+            retainedCompany.setId(currentCompanyId);
+            person.setCompany(retainedCompany);
             return;
         }
-        if (!companyMapper.exists(workspaceId, companyId)) {
-            throw new BadRequestException("Company not found with id: " + companyId);
+        if (requestedCompanyId == null || Objects.equals(requestedCompanyId, currentCompanyId)) {
+            return;
+        }
+        if (!companyMapper.exists(workspaceId, requestedCompanyId)) {
+            throw new BadRequestException("Company not found with id: " + requestedCompanyId);
         }
     }
 
@@ -495,10 +508,11 @@ public class PersonService {
      * already owns, so gating it on the permission that could archive it is the conservative
      * choice and opens no path an actor did not already have.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_DELETE)
     public Person restore(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
@@ -507,6 +521,9 @@ public class PersonService {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
         Person after = requireOwnedPerson(workspaceId, id);
+        identityIntakeService.recordPerson(
+            workspaceId, id, after.getEmail(), after.getPhone(),
+            IdentityAcquisitionSource.BACKFILL, null);
         auditService.record("person.restore", "person", id, after.getName(),
             "Restored person " + after.getName(),
             auditService.singleChange("archivedAt", before.getArchivedAt(), null));

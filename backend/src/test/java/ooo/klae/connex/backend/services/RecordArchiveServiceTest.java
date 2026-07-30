@@ -147,6 +147,57 @@ class RecordArchiveServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void editingAContactWhileItsEmployerIsArchivedPreservesTheEmployerLink() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        companyService.archiveCompany(company.getId());
+        Person edit = personService.getPersonById(person.getId());
+        assertNull(edit.getCompany());
+        edit.setTitle("Updated while employer archived");
+
+        Person updated = personService.update(person.getId(), edit);
+
+        assertNull(updated.getCompany());
+        assertEquals(company.getId(), companyIdOf(person.getId()));
+
+        companyService.restoreCompany(company.getId());
+        Person restored = personService.getPersonById(person.getId());
+        assertNotNull(restored.getCompany());
+        assertEquals(company.getId(), restored.getCompany().getId());
+        assertEquals(company.getName(), restored.getCompany().getName());
+        assertEquals("Updated while employer archived", restored.getTitle());
+    }
+
+    @Test
+    void restoringAContactReconcilesMissingCanonicalIdentities() {
+        Person draft = newPersonDraft();
+        draft.setEmail(unique() + ".restore@example.com");
+        draft.setPhone("+1 808 555 0101");
+        Person person = personService.create(draft);
+        deletePersonIdentities(person.getId());
+        personService.archive(person.getId());
+
+        personService.restore(person.getId());
+
+        assertEquals(2, countCurrentPersonIdentities(person.getId()));
+    }
+
+    @Test
+    void restoringACompanyReconcilesMissingCanonicalIdentities() {
+        Company draft = new Company();
+        draft.setName("Restore Identity " + unique());
+        draft.setWebsite("https://" + unique() + ".example.com");
+        draft.setPhone("+1 808 555 0102");
+        Company company = companyService.createCompany(draft);
+        deleteCompanyIdentities(company.getId());
+        companyService.archiveCompany(company.getId());
+
+        companyService.restoreCompany(company.getId());
+
+        assertEquals(2, countCurrentCompanyIdentities(company.getId()));
+    }
+
+    @Test
     void archiveAndRestoreRejectAnotherWorkspacesRecords() {
         Workspace other = newForeignWorkspace();
         Person foreignPerson = personIn(other);
@@ -268,6 +319,34 @@ class RecordArchiveServiceTest extends AbstractServiceTest {
         return jdbcTemplate.queryForObject(
             "SELECT company_id FROM person WHERE workspace_id = ? AND id = ?",
             Integer.class, workspace.getId(), personId);
+    }
+
+    private void deletePersonIdentities(int personId) {
+        jdbcTemplate.update(
+            "DELETE FROM person_identity WHERE workspace_id = ? AND person_id = ?",
+            workspace.getId(), personId);
+    }
+
+    private void deleteCompanyIdentities(int companyId) {
+        jdbcTemplate.update(
+            "DELETE FROM company_identity WHERE workspace_id = ? AND company_id = ?",
+            workspace.getId(), companyId);
+    }
+
+    private int countCurrentPersonIdentities(int personId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_identity "
+                + "WHERE workspace_id = ? AND person_id = ? AND superseded_at IS NULL",
+            Integer.class, workspace.getId(), personId);
+        return count == null ? 0 : count;
+    }
+
+    private int countCurrentCompanyIdentities(int companyId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM company_identity "
+                + "WHERE workspace_id = ? AND company_id = ? AND superseded_at IS NULL",
+            Integer.class, workspace.getId(), companyId);
+        return count == null ? 0 : count;
     }
 
     private java.sql.Timestamp archivedAt(String table, int id) {

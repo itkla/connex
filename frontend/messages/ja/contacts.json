@@ -128,7 +128,6 @@
     "copyPhone": "電話番号をコピー",
     "changeCompany": "会社を変更",
     "removeFromCompany": "会社から削除",
-    "delete": "削除",
     "toastNameRequired": "名前は必須です",
     "toastContactUpdated": "コンタクトを更新しました",
     "toastPartiallySaved": "コンタクトの詳細は保存されましたが、写真のアップロードに失敗しました。現在の内容を確認して、もう一度お試しください。",
@@ -138,7 +137,9 @@
     "toastPhoneCopied": "電話番号をコピーしました",
     "toastFailedCopyPhone": "電話番号をコピーできませんでした",
     "toastCompanyChanged": "会社を変更しました",
-    "ownerLabel": "担当者: {name}"
+    "ownerLabel": "担当者: {name}",
+    "archive": "アーカイブ",
+    "restore": "復元"
   },
   "ContactsActionsMenu": {
     "edit": "編集",

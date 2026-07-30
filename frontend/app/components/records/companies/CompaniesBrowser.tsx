@@ -160,6 +160,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
 
     const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
     const setShowArchived = useCallback((next: boolean) => {
+        if (next) setDefinition(EMPTY_DEFINITION);
         setFilterState((current) => {
             const rest = withoutArchived(current);
             return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
@@ -180,7 +181,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     }, [filterState, ownerScope, showArchived]);
 
     const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
-        if (!hasSegments) {
+        if (showArchived || !hasSegments) {
             failedSegmentKeyRef.current = null;
             return getCompaniesPage(params);
         }
@@ -197,7 +198,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             setSegmentErrorKey(segmentsKey);
             throw error;
         }
-    }, [evaluable, hasSegments, segmentsKey, tSeg]);
+    }, [evaluable, hasSegments, segmentsKey, showArchived, tSeg]);
 
     const {
         items: companies,
@@ -223,8 +224,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const filterSignature = useMemo(
-        () => JSON.stringify([filterParams, query, hasSegments ? segmentsKey : null, segmentErrorKey === segmentsKey]),
-        [filterParams, query, hasSegments, segmentsKey, segmentErrorKey],
+        () => JSON.stringify([filterParams, query, !showArchived && hasSegments ? segmentsKey : null, segmentErrorKey === segmentsKey]),
+        [filterParams, query, hasSegments, segmentsKey, segmentErrorKey, showArchived],
     );
     const filterSignatureRef = useRef(filterSignature);
     useEffect(() => {
@@ -301,7 +302,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         setSelectingAll(true);
         try {
             const params = { ...filterParams, q: query || undefined };
-            const ids = hasSegments
+            const ids = !showArchived && hasSegments
                 ? await getCompanySegmentIds({ ...params, definition: evaluable })
                 : await getCompanyIds(params);
             if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
@@ -309,7 +310,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             setMatchedSignature(requestSignature);
         } catch (err) {
             if (requestId !== selectAllRequestRef.current) return;
-            if (hasSegments) {
+            if (!showArchived && hasSegments) {
                 if (failedSegmentKeyRef.current !== segmentsKey) toastError(tSeg('evaluateFailed'));
                 failedSegmentKeyRef.current = segmentsKey;
                 setSegmentErrorKey(segmentsKey);
@@ -319,12 +320,12 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
+    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, showArchived, t, tSeg]);
 
     const exportCompanies = useCallback(async (signal: AbortSignal, workspaceId: number) => {
         const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
         const params = { ...filterParams, q: query.trim() || undefined };
-        if (!hasSegments) {
+        if (showArchived || !hasSegments) {
             await exportCompaniesCsv(params, init);
             return;
         }
@@ -333,7 +334,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             { ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] },
             init,
         );
-    }, [filterParams, query, hasSegments, evaluable]);
+    }, [filterParams, query, hasSegments, evaluable, showArchived]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -380,6 +381,10 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
+        if (showArchived) {
+            setTempByCompanyId(new Map());
+            return;
+        }
         let cancelled = false;
         getCompanyTemperatures(companies.map((company) => company.id))
             .then((temps) => {
@@ -391,7 +396,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         return () => {
             cancelled = true;
         };
-    }, [companies]);
+    }, [companies, showArchived]);
 
     const ensureMetricsLoaded = useCallback((companyId: number) => {
         const status = metricsStatusByCompanyId.get(companyId);
@@ -642,9 +647,9 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         {
             key: 'warmth',
             label: t('columnWarmth'),
-            getSortValue: (c) => tempByCompanyId.get(c.id)?.score ?? null,
+            getSortValue: (c) => showArchived ? null : tempByCompanyId.get(c.id)?.score ?? null,
             sortable: false,
-            render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
+            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
         },
         {
             key: 'owner',
@@ -688,7 +693,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
@@ -699,7 +704,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
     }, [companyFacets, t]);
     const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || hasSegments;
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || (!showArchived && hasSegments);
     const clearAll = useCallback(() => {
         setQuery('');
         setFilterState(showArchived ? { [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : {});
@@ -734,14 +739,19 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...ownerChips,
         ...facetChips(facets, filterState, setFilterState),
-        ...segmentConditionEntries(definition).map(({ condition, groupPath, conditionIndex }) => ({
+        ...(!showArchived ? segmentConditionEntries(definition) : []).map(({ condition, groupPath, conditionIndex }) => ({
             id: `segment:${[...groupPath, conditionIndex].join(':')}`,
             label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
             onRemove: () => setDefinition((current) => removeSegmentCondition(current, groupPath, conditionIndex)),
         })),
     ];
 
-    const selectionActions = (
+    const selectionActions = showArchived ? (
+        <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+            <ArchiveBoxIcon className="size-4" />
+            {t('restore')}
+        </Button>
+    ) : (
         <ButtonGroup className="rounded-full bg-muted">
             {!allMatchingActive && (
                 <>
@@ -776,8 +786,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
-                        {showArchived ? <ArchiveBoxIcon /> : <ArchiveBoxArrowDownIcon />}
-                        {t(showArchived ? 'restore' : 'archive')}
+                        <ArchiveBoxArrowDownIcon />
+                        {t('archive')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -785,15 +795,17 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: evaluable }),
-        [filterState, query, sortKey, sortDirection, evaluable],
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: showArchived ? EMPTY_DEFINITION : evaluable }),
+        [filterState, query, sortKey, sortDirection, evaluable, showArchived],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
-            setFilterState(config.filters ?? {});
+            const filters = config.filters ?? {};
+            const archived = filters[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
+            setFilterState(filters);
             applyQuery(config.query ?? '');
             applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
-            setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
         },
         [setFilterState, applyQuery, applySort],
     );
@@ -818,14 +830,16 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                         <div className="flex items-center gap-2">
-                            <RecordsActions
-                                entity="companies"
-                                onNew={openNewDialog}
-                                newLabel={t('new')}
-                                newAriaLabel={t('addCompanyAriaLabel')}
-                                onImported={refresh}
-                                onExport={exportCompanies}
-                            />
+                            {!showArchived && (
+                                <RecordsActions
+                                    entity="companies"
+                                    onNew={openNewDialog}
+                                    newLabel={t('new')}
+                                    newAriaLabel={t('addCompanyAriaLabel')}
+                                    onImported={refresh}
+                                    onExport={exportCompanies}
+                                />
+                            )}
                         </div>
                     </div>
                 </Rise>
@@ -859,13 +873,15 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                <SegmentBuilder
-                                    definition={definition}
-                                    fields={segmentFields}
-                                    options={segmentOptions}
-                                    allowGroups
-                                    onChange={setDefinition}
-                                />
+                                {!showArchived && (
+                                    <SegmentBuilder
+                                        definition={definition}
+                                        fields={segmentFields}
+                                        options={segmentOptions}
+                                        allowGroups
+                                        onChange={setDefinition}
+                                    />
+                                )}
                                 {displayMode === 'grid' && (
                                     <RecordsSortMenu
                                         columns={columns}
@@ -966,6 +982,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 onFirstExpand={() => ensureMetricsLoaded(item.id)}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
+                                readOnly={showArchived}
+                                removeIntent={showArchived ? 'restore' : 'archive'}
                             />
                         )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
@@ -979,6 +997,8 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={showArchived ? undefined : quickEditOne}
                         onDelete={archiveOne}
+                        readOnly={showArchived}
+                        removeIntent={showArchived ? 'restore' : 'archive'}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}

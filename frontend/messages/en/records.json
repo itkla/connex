@@ -419,7 +419,9 @@
     "menuAria": "Actions for {name}",
     "peek": "Peek",
     "quickEdit": "Quick edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "archive": "Archive",
+    "restore": "Restore"
   },
   "RecordsArchiveDialog": {
     "archiveTitleSingle": "Archive {entityLabel}",

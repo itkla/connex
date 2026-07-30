@@ -113,8 +113,10 @@ class IdentityMapperTest extends AbstractMapperTest {
         Person third = newPerson(workspace, company, "third@example.com", "090-3333-3333");
         Person suspended = newPerson(workspace, company, "suspended@example.com", "090-4444-4444");
         Person ceased = newPerson(workspace, company, "ceased@example.com", "090-5555-5555");
+        Person archived = newPerson(workspace, company, "archived@example.com", "090-6666-6666");
         personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
         personMapper.updateProcessingRestrictions(workspace.getId(), ceased.getId(), false, true);
+        personMapper.archive(workspace.getId(), archived.getId());
 
         List<Integer> firstPage = identityMapper
             .findPersonBackfillCandidates(workspace.getId(), 0, 2)
@@ -141,9 +143,11 @@ class IdentityMapperTest extends AbstractMapperTest {
             "manual");
         insertPersonIdentity(
             workspace.getId(), ceased.getId(), "email", ceased.getEmail(), "ceased@example.com", "manual");
+        insertPersonIdentity(
+            workspace.getId(), archived.getId(), "email", archived.getEmail(), "archived@example.com", "manual");
         List<IdentityKeyRow> keys = identityMapper.findPersonIdentityKeys(
             workspace.getId(),
-            List.of(first.getId(), suspended.getId(), ceased.getId()));
+            List.of(first.getId(), suspended.getId(), ceased.getId(), archived.getId()));
 
         assertEquals(1, keys.size());
         assertEquals(first.getId(), keys.getFirst().getRecordId());
@@ -393,6 +397,8 @@ class IdentityMapperTest extends AbstractMapperTest {
             workspace, company, "old@example.com", "090-2222-2222");
         Person restricted = newPerson(
             workspace, company, "restricted@example.com", "090-3333-3333");
+        Person archived = newPerson(
+            workspace, company, "archived@example.com", "090-4444-4444");
         insertPersonIdentity(
             workspace.getId(), current.getId(), "email",
             current.getEmail(), "shared@example.com", "manual");
@@ -402,6 +408,9 @@ class IdentityMapperTest extends AbstractMapperTest {
         insertPersonIdentity(
             workspace.getId(), restricted.getId(), "email",
             restricted.getEmail(), "shared@example.com", "manual");
+        insertPersonIdentity(
+            workspace.getId(), archived.getId(), "email",
+            archived.getEmail(), "shared@example.com", "manual");
         jdbcTemplate.update(
             """
             UPDATE person_identity
@@ -412,6 +421,7 @@ class IdentityMapperTest extends AbstractMapperTest {
             superseded.getId());
         personMapper.updateProcessingRestrictions(
             workspace.getId(), restricted.getId(), true, false);
+        personMapper.archive(workspace.getId(), archived.getId());
 
         var matches = identityMapper.findCurrentPersonIdentityMatches(
             workspace.getId(), "email", List.of("shared@example.com"));
@@ -422,12 +432,17 @@ class IdentityMapperTest extends AbstractMapperTest {
         Company currentCompany = newCompany(workspace, "current-" + unique() + ".example.com");
         Company supersededCompany =
             newCompany(workspace, "superseded-" + unique() + ".example.com");
+        Company archivedCompany =
+            newCompany(workspace, "archived-" + unique() + ".example.com");
         insertCompanyIdentity(
             workspace.getId(), currentCompany.getId(), "domain",
             currentCompany.getWebsite(), "shared.example.com", "manual");
         insertCompanyIdentity(
             workspace.getId(), supersededCompany.getId(), "domain",
             supersededCompany.getWebsite(), "shared.example.com", "manual");
+        insertCompanyIdentity(
+            workspace.getId(), archivedCompany.getId(), "domain",
+            archivedCompany.getWebsite(), "shared.example.com", "manual");
         jdbcTemplate.update(
             """
             UPDATE company_identity
@@ -436,6 +451,7 @@ class IdentityMapperTest extends AbstractMapperTest {
             """,
             workspace.getId(),
             supersededCompany.getId());
+        companyMapper.archive(workspace.getId(), archivedCompany.getId());
 
         var companyMatches = identityMapper.findCurrentCompanyIdentityMatches(
             workspace.getId(), "domain", List.of("shared.example.com"));

@@ -169,7 +169,7 @@
           </if>
           <if test="noCompany">
             <if test="companyIds != null and companyIds.size() > 0">OR</if>
-            d.company_id IS NULL
+            c.id IS NULL
           </if>
         )
       </if>
@@ -888,8 +888,9 @@
     UNION ALL
     SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId}
-      AND d.company_id IS NULL
+      AND c.id IS NULL
     HAVING COUNT(*) &gt; 0
   </select>
 

@@ -291,6 +291,10 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
+        if (showArchived) {
+            setTempByContactId(new Map());
+            return;
+        }
         let cancelled = false;
         getContactTemperatures(contacts.map((contact) => contact.id))
             .then((temps) => {
@@ -302,7 +306,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         return () => {
             cancelled = true;
         };
-    }, [contacts]);
+    }, [contacts, showArchived]);
 
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
@@ -546,9 +550,9 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         {
             key: 'warmth',
             label: t('columnWarmth'),
-            getSortValue: (c) => tempByContactId.get(c.id)?.score ?? null,
+            getSortValue: (c) => showArchived ? null : tempByContactId.get(c.id)?.score ?? null,
             sortable: false,
-            render: (c) => <TemperaturePill temp={tempByContactId.get(c.id)} />,
+            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
         },
         {
             key: 'email',
@@ -593,11 +597,16 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId, memberById, inlineEdit, saveContact]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
-    const selectionActions = (
+    const selectionActions = showArchived ? (
+        <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+            <ArchiveBoxIcon className="size-4" />
+            {t('restore')}
+        </Button>
+    ) : (
         <ButtonGroup className="rounded-full bg-muted">
             {!allMatchingActive && (
                 <>
@@ -648,8 +657,8 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
-                        {showArchived ? <ArchiveBoxIcon /> : <ArchiveBoxArrowDownIcon />}
-                        {t(showArchived ? 'restore' : 'archive')}
+                        <ArchiveBoxArrowDownIcon />
+                        {t('archive')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -686,14 +695,16 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
                         <div className="flex items-center gap-2">
-                            <RecordsActions
-                                entity="persons"
-                                onNew={openNewContactDialog}
-                                newLabel={t('new')}
-                                newAriaLabel={t('newAria')}
-                                onImported={refresh}
-                                onExport={exportContacts}
-                            />
+                            {!showArchived && (
+                                <RecordsActions
+                                    entity="persons"
+                                    onNew={openNewContactDialog}
+                                    newLabel={t('new')}
+                                    newAriaLabel={t('newAria')}
+                                    onImported={refresh}
+                                    onExport={exportContacts}
+                                />
+                            )}
                         </div>
                     </div>
                 </Rise>
@@ -829,6 +840,8 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
+                                readOnly={showArchived}
+                                removeIntent={showArchived ? 'restore' : 'archive'}
                             />
                         )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
@@ -842,6 +855,8 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                         onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={showArchived ? undefined : quickEditOne}
                         onDelete={archiveOne}
+                        readOnly={showArchived}
+                        removeIntent={showArchived ? 'restore' : 'archive'}
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}

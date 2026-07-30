@@ -134,8 +134,7 @@
     "due": "期限 {date}",
     "edit": "編集",
     "markAsComplete": "完了にする",
-    "delete": "削除",
-    "taskEntityLabel": "タスク"
+    "delete": "削除"
   },
   "DealsAging": {
     "bucketFresh": "0-7日",

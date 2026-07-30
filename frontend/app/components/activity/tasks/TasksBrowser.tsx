@@ -690,7 +690,7 @@ export default function TasksBrowser({
         const menuModel: RecordMenuModel = {
             record: { type: 'task', id: task.id, label },
             includeCreateActions: false,
-            onDelete: canDeleteTasks && pageCurrent && taskInOriginWorkspace && !taskMutationPending
+            onRemove: canDeleteTasks && pageCurrent && taskInOriginWorkspace && !taskMutationPending
                 ? () => setDeletingTask(task)
                 : undefined,
         };

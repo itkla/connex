@@ -17,13 +17,16 @@ import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
+import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
 
 class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
 
     @Autowired private DuplicatePreflightService duplicatePreflightService;
     @Autowired private PersonService personService;
     @Autowired private CompanyService companyService;
+    @Autowired private IdentityCollisionMapper identityCollisionMapper;
 
     @Test
     void personPreflightCombinesStrongCanonicalEvidenceAndWeakExactName() {
@@ -120,6 +123,73 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
             response.candidates().getFirst().matches().stream()
                 .map(match -> match.kind())
                 .collect(Collectors.toSet()));
+    }
+
+    @Test
+    void archivedRecordsLeavePreflightAndReturnAfterRestoreEvenWhenTheirKeysWereReused() {
+        Person firstPerson = createPerson(
+            "Archived person", "reused-person@example.com", null);
+        personService.archive(firstPerson.getId());
+        Person secondPerson = createPerson(
+            "Active person", "reused-person@example.com", null);
+
+        DuplicatePreflightResponse activePersons = duplicatePreflightService.preflightPerson(
+            new PersonDuplicatePreflightRequest(
+                null, List.of("reused-person@example.com"), List.of()));
+        assertEquals(List.of(secondPerson.getId()), activePersons.candidates().stream()
+            .map(candidate -> candidate.recordId())
+            .toList());
+        assertTrue(visibleCollisionGroups("person", "email").isEmpty());
+
+        personService.restore(firstPerson.getId());
+        DuplicatePreflightResponse restoredPersons = duplicatePreflightService.preflightPerson(
+            new PersonDuplicatePreflightRequest(
+                null, List.of("reused-person@example.com"), List.of()));
+        assertEquals(
+            Set.of(firstPerson.getId(), secondPerson.getId()),
+            restoredPersons.candidates().stream()
+                .map(candidate -> candidate.recordId())
+                .collect(Collectors.toSet()));
+        assertEquals(2, visibleCollisionGroups("person", "email").getFirst().getCollisionSize());
+
+        Company firstCompany = new Company();
+        firstCompany.setName("Archived company");
+        firstCompany.setWebsite("https://reused-company.example.com");
+        firstCompany = companyService.createCompany(firstCompany);
+        companyService.archiveCompany(firstCompany.getId());
+
+        Company secondCompany = new Company();
+        secondCompany.setName("Active company");
+        secondCompany.setWebsite("https://reused-company.example.com");
+        secondCompany = companyService.createCompany(secondCompany);
+
+        DuplicatePreflightResponse activeCompanies = duplicatePreflightService.preflightCompany(
+            new CompanyDuplicatePreflightRequest(
+                null, List.of("https://reused-company.example.com"), List.of()));
+        assertEquals(List.of(secondCompany.getId()), activeCompanies.candidates().stream()
+            .map(candidate -> candidate.recordId())
+            .toList());
+        assertTrue(visibleCollisionGroups("company", "domain").isEmpty());
+
+        companyService.restoreCompany(firstCompany.getId());
+        DuplicatePreflightResponse restoredCompanies = duplicatePreflightService.preflightCompany(
+            new CompanyDuplicatePreflightRequest(
+                null, List.of("https://reused-company.example.com"), List.of()));
+        assertEquals(
+            Set.of(firstCompany.getId(), secondCompany.getId()),
+            restoredCompanies.candidates().stream()
+                .map(candidate -> candidate.recordId())
+                .collect(Collectors.toSet()));
+        assertEquals(2, visibleCollisionGroups("company", "domain").getFirst().getCollisionSize());
+    }
+
+    private List<IdentityCollisionGroupPageRow> visibleCollisionGroups(
+            String recordType, String kind) {
+        return identityCollisionMapper.findVisibleGroupPage(
+                workspace.getId(), recordType, kind, 100, 0)
+            .stream()
+            .filter(row -> row.getRecordType() != null)
+            .toList();
     }
 
     private Person createPerson(String name, String email, String phone) {

@@ -128,7 +128,6 @@
     "copyPhone": "Copy phone",
     "changeCompany": "Change company",
     "removeFromCompany": "Remove from company",
-    "delete": "Delete",
     "toastNameRequired": "Name is required",
     "toastContactUpdated": "Contact updated",
     "toastPartiallySaved": "Contact details were saved, but the photo upload failed. Review the current values and try again.",
@@ -138,7 +137,9 @@
     "toastPhoneCopied": "Phone copied",
     "toastFailedCopyPhone": "Failed to copy phone",
     "toastCompanyChanged": "Company changed",
-    "ownerLabel": "Owner: {name}"
+    "ownerLabel": "Owner: {name}",
+    "archive": "Archive",
+    "restore": "Restore"
   },
   "ContactsActionsMenu": {
     "edit": "Edit",

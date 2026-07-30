@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
-import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -64,8 +63,6 @@ export default function TimelineRow({
     const locale = useLocale();
     const router = useRouter();
     const [editOpen, setEditOpen] = useState(false);
-    const [deleteOpen, setDeleteOpen] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
     const rowRef = useRef<HTMLLIElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
@@ -77,12 +74,7 @@ export default function TimelineRow({
         }
     }, [isHighlighted, reduceMotion]);
 
-    const entryId = entry.kind === 'task'
-        ? entry.task.id
-        : entry.kind === 'activity' ? entry.activity.id : entry.note.id;
-
     const handleDelete = async () => {
-        setIsDeleting(true);
         try {
             if (entry.kind === 'task') {
                 await deleteTask(entry.task.id);
@@ -94,12 +86,9 @@ export default function TimelineRow({
                 await deleteNote(entry.note.id);
                 toastSuccess(t('noteDeleted'));
             }
-            setDeleteOpen(false);
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('deleteFailed'));
-        } finally {
-            setIsDeleting(false);
         }
     };
 
@@ -197,7 +186,7 @@ export default function TimelineRow({
                         {t('edit')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+                    <DropdownMenuItem variant="destructive" onClick={handleDelete}>
                         <TrashIcon className="size-4" />
                         {t('delete')}
                     </DropdownMenuItem>
@@ -225,16 +214,6 @@ export default function TimelineRow({
                     originWorkspaceId={originWorkspaceId}
                 />
             )}
-            <DeleteRecordDialog
-                open={deleteOpen}
-                onOpenChange={setDeleteOpen}
-                selectedIds={new Set([entryId])}
-                selectedItems={[entry]}
-                entityLabel={chipLabel}
-                isDeleting={isDeleting}
-                confirmDelete={handleDelete}
-            />
-
             {entry.kind === 'note' && currentUserId != null && (
                 <NoteDialog
                     key={entry.note.id}

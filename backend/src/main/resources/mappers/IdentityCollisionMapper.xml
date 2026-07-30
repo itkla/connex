@@ -6,6 +6,7 @@
   <sql id="visiblePersonRestriction">
     AND p.suspended_at IS NULL
     AND p.provision_ceased_at IS NULL
+    AND p.archived_at IS NULL
   </sql>
 
   <sql id="visiblePersonCollisionGroups">
@@ -41,8 +42,12 @@
     JOIN identity_collision ic
       ON ic.workspace_id = ci.workspace_id
       AND ic.company_identity_id = ci.id
+    JOIN company c
+      ON c.workspace_id = ci.workspace_id
+      AND c.id = ci.company_id
     WHERE ci.workspace_id = #{workspaceId}
       AND ci.superseded_at IS NULL
+      AND c.archived_at IS NULL
       <if test="kind != null">
         AND ci.kind = #{kind}
       </if>
@@ -273,6 +278,7 @@
                AND ci.kind = #{group.kind}
                AND ci.normalized_value = #{group.normalizedValue}
                AND ci.company_id &gt; #{afterRecordId}
+               AND c.archived_at IS NULL
              ORDER BY ci.company_id
              LIMIT #{memberLimit})
           </otherwise>
