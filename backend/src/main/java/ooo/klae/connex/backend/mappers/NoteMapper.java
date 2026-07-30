@@ -5,6 +5,8 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.HistoryImportProvenance;
+import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.beans.Note;
 
 /**
@@ -53,6 +55,11 @@ public interface NoteMapper {
     List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType, @Param("refId") int refId, @Param("currentUserId") int currentUserId);
     List<Integer> getVisibleNoteIdsIn(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids, @Param("currentUserId") int currentUserId);
     int insert(Note note);
+    List<HistoryImportProvenance> findHistoryImports(
+        @Param("workspaceId") int workspaceId,
+        @Param("historyImportKeys") List<String> historyImportKeys
+    );
+    int insertHistoryBatch(@Param("rows") List<HistoryImportWrite> rows);
     int update(Note note);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

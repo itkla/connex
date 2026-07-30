@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.HistoryImportProvenance;
+import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -48,6 +50,11 @@ public interface TaskMapper {
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Task task);
+    List<HistoryImportProvenance> findHistoryImports(
+        @Param("workspaceId") int workspaceId,
+        @Param("historyImportKeys") List<String> historyImportKeys
+    );
+    int insertHistoryBatch(@Param("rows") List<HistoryImportWrite> rows);
     int update(Task task);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int complete(

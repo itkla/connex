@@ -1588,6 +1588,26 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
     return postJson<Types.ImportResult>(`/api/imports/${entity}`, body, init);
 }
 
+export function previewInteractionHistoryImport(
+    kind: Types.HistoryImportKind,
+    body: Types.HistoryImportRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.HistoryImportPreviewResult>(
+        `/api/imports/history/${kind}/preview`,
+        body,
+        init,
+    );
+}
+
+export function commitInteractionHistoryImport(
+    kind: Types.HistoryImportKind,
+    body: Types.HistoryImportRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.HistoryImportResult>(`/api/imports/history/${kind}`, body, init);
+}
+
 /**
  * Streams a CSV from the backend with locale and workspace headers (a plain anchor would not carry
  * the workspace context) and triggers a browser download. Callers may pin a workspace header for an

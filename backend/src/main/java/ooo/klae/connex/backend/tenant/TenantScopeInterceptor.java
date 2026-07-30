@@ -199,6 +199,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.lockRecipientMemberships",
         MAPPERS + "NotificationMapper.findRecipientIdsByActor",
         MAPPERS + "NotificationMapper.lockRecipientIdsByActor",
+        MAPPERS + "NotificationMapper.deleteHistoricalNotificationBaselinesForRecipient",
+        MAPPERS + "NotificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere",
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",

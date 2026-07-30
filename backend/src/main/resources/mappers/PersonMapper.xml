@@ -130,6 +130,54 @@
     WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
   </sql>
 
+  <sql id="relationshipTouchSourcesExcludingHistoryImports">
+    SELECT a.person_id AS entity_id,
+           'activity' AS source_type,
+           a.id AS source_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId} AND a.person_id IS NOT NULL
+    <if test="!excludedActivityIds.isEmpty()">
+      AND a.id NOT IN
+      <foreach collection="excludedActivityIds" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    </if>
+    UNION ALL
+    SELECT n.person_id AS entity_id,
+           'note' AS source_type,
+           n.id AS source_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND n.person_id IS NOT NULL
+    <if test="!excludedNoteIds.isEmpty()">
+      AND n.id NOT IN
+      <foreach collection="excludedNoteIds" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    </if>
+    UNION ALL
+    SELECT t.person_id AS entity_id,
+           'task' AS source_type,
+           t.id AS source_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+    <if test="!excludedTaskIds.isEmpty()">
+      AND t.id NOT IN
+      <foreach collection="excludedTaskIds" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    </if>
+  </sql>
+
   <!-- Sources attributed to one contact, filtered inside every branch so the union stays
        index-driven on that contact and can be capped by row count. A source links to at most one
        contact, so the branches cannot produce the same source twice. -->
@@ -212,6 +260,37 @@
                  / #{model.microsecondsPerDay}) AS age_days
       FROM (
         <include refid="relationshipTouchSources"/>
+      ) source
+      WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+    ) touch ON touch.entity_id = p.id
+    WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
+    GROUP BY p.id
+    ORDER BY p.id
+  </select>
+
+  <select id="getRelationshipScoreAggregatesExcludingHistoryImports"
+          resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+    SELECT p.id,
+           COALESCE(SUM(touch.weight
+             * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0)
+             AS recent_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                               AND touch.age_days &lt;= #{model.priorWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                    THEN 1 ELSE 0 END) AS recent_touch_count
+    FROM person p
+    LEFT JOIN (
+      SELECT source.entity_id, source.touched_at, source.weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      FROM (
+        <include refid="relationshipTouchSourcesExcludingHistoryImports"/>
       ) source
       WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
     ) touch ON touch.entity_id = p.id

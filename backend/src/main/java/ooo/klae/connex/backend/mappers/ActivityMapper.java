@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.HistoryImportProvenance;
+import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
@@ -68,6 +70,11 @@ public interface ActivityMapper {
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Activity> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Activity activity);
+    List<HistoryImportProvenance> findHistoryImports(
+        @Param("workspaceId") int workspaceId,
+        @Param("historyImportKeys") List<String> historyImportKeys
+    );
+    int insertHistoryBatch(@Param("rows") List<HistoryImportWrite> rows);
     int update(Activity activity);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

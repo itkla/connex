@@ -120,6 +120,100 @@
     "linkRetry": "Retry",
     "linkResults": "{count, plural, one {# match} other {# matches}}",
     "linkedTo": "Linked: {name}",
-    "linkClear": "Remove link to {name}"
+    "linkClear": "Remove link to {name}",
+    "history": {
+      "title": "Import interaction history",
+      "description": "Bring past activities, notes, or tasks into the relationship timeline.",
+      "steps": {
+        "label": "Import progress",
+        "upload": "Upload",
+        "map": "Map",
+        "review": "Review",
+        "done": "Done"
+      },
+      "kindLabel": "History type",
+      "kinds": {
+        "activities": "Activities",
+        "notes": "Notes",
+        "tasks": "Tasks"
+      },
+      "dropPrompt": "Drop a CSV here, or click to browse",
+      "uploadHint": "Up to 5,000 rows · 5MB · .csv",
+      "errors": {
+        "tooLarge": "This file is larger than 5MB.",
+        "noColumns": "No columns were found in this file.",
+        "noRows": "No data rows were found in this file.",
+        "tooManyRows": "This file has {count} rows. Split it into files of 5,000 rows or fewer.",
+        "parse": "This CSV could not be read.",
+        "preview": "The history import could not be analyzed.",
+        "commit": "The history import could not be completed."
+      },
+      "mapReady": "Required fields are mapped. Every row will still be validated on the server.",
+      "mapRequired": "Map the required fields and at least one participant identity.",
+      "emptySample": "No sample value",
+      "mapColumn": "Map {column}",
+      "ignore": "— Ignore —",
+      "required": "required",
+      "fields": {
+        "occurredAt": "Occurred at",
+        "participantEmail": "Participant email",
+        "participantPhone": "Participant phone",
+        "sourceId": "Source ID",
+        "subject": "Subject",
+        "type": "Activity type",
+        "notes": "Activity notes",
+        "content": "Note content",
+        "title": "Note title",
+        "description": "Task description",
+        "dueDate": "Due date",
+        "completed": "Completed"
+      },
+      "back": "Back",
+      "review": "Review",
+      "refresh": "Refresh review",
+      "import": "Import ready rows",
+      "done": "Done",
+      "stale": "A participant link changed. Refresh the review before importing.",
+      "counts": {
+        "ready": "Ready",
+        "imported": "Already imported",
+        "review": "Needs review",
+        "invalid": "Invalid"
+      },
+      "statuses": {
+        "ready": "Ready",
+        "already_imported": "Already imported",
+        "needs_review": "Needs review",
+        "invalid": "Invalid"
+      },
+      "reviewRows": "Showing {shown} of {total} reviewed rows.",
+      "matchedContact": "Matched to {name}",
+      "candidateLabel": "Exact participant matches",
+      "evidence": {
+        "EMAIL": "Same email",
+        "PHONE": "Same phone",
+        "DOMAIN": "Same domain",
+        "EXTERNAL_ID": "Same source ID",
+        "NAME": "Same normalized name"
+      },
+      "shared": "Shared · review only",
+      "selected": "Selected",
+      "useContact": "Use contact",
+      "findContact": "Find contact",
+      "clearLink": "Remove link to {name}",
+      "searchPlaceholder": "Search contacts…",
+      "searchLabel": "Search contacts",
+      "searchPrompt": "Type at least 2 characters",
+      "searching": "Searching…",
+      "searchError": "Search failed.",
+      "searchEmpty": "No contacts found",
+      "searchRetry": "Retry",
+      "searchResults": "{count, plural, one {# contact} other {# contacts}}",
+      "toast": "Imported {count} history rows",
+      "doneTitle": "History import complete",
+      "doneSummary": "{created} imported · {skipped} skipped",
+      "failed": "{count, plural, one {# row needs attention} other {# rows need attention}}",
+      "downloadErrors": "Download errors"
+    }
   }
 }

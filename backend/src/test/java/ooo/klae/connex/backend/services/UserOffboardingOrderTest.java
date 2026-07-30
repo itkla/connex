@@ -79,6 +79,8 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
+        order.verify(notificationMapper)
+            .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
     }
@@ -100,6 +102,8 @@ class UserOffboardingOrderTest {
         order.verify(dealMapper).clearMemberDealOwnership(7, 9);
         order.verify(campaignMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
+        order.verify(notificationMapper)
+            .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         verifyNoInteractions(stateVersionService);
     }
@@ -131,6 +135,8 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
+        order.verify(notificationMapper)
+            .deleteHistoricalNotificationBaselinesForRecipientAnywhere(9);
         order.verify(notificationMapper).deleteAllForRecipientAnywhere(9);
         order.verify(notificationMapper).clearActorAnywhere(9);
         order.verify(stateVersionService).markChanged(3);

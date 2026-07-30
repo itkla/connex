@@ -5,6 +5,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
+import ooo.klae.connex.backend.beans.HistoricalNotificationBaseline;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
@@ -239,6 +240,28 @@ public interface NotificationMapper {
     );
 
     List<Notification> findWorkspaceReminderNotifications(@Param("workspaceId") int workspaceId);
+
+    List<HistoricalNotificationBaseline> findHistoricalNotificationBaselines(
+        @Param("workspaceId") int workspaceId
+    );
+
+    int insertHistoricalNotificationBaselines(
+        @Param("baselines") List<HistoricalNotificationBaseline> baselines
+    );
+
+    int deleteHistoricalNotificationBaselines(
+        @Param("workspaceId") int workspaceId,
+        @Param("baselines") List<HistoricalNotificationBaseline> baselines
+    );
+
+    int deleteHistoricalNotificationBaselinesForRecipient(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId
+    );
+
+    int deleteHistoricalNotificationBaselinesForRecipientAnywhere(
+        @Param("recipientId") int recipientId
+    );
 
     int resolveReminder(
         @Param("workspaceId") int workspaceId,

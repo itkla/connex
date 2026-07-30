@@ -310,6 +310,35 @@
     )
   </insert>
 
+  <select id="findHistoryImports" resultType="ooo.klae.connex.backend.beans.HistoryImportProvenance">
+    SELECT id AS entity_id,
+           LOWER(HEX(history_import_key)) AS history_import_key,
+           LOWER(HEX(history_payload_hash)) AS history_payload_hash
+    FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND history_import_key IN
+      <foreach collection="historyImportKeys" item="historyImportKey" open="(" separator="," close=")">
+        UNHEX(#{historyImportKey})
+      </foreach>
+  </select>
+
+  <insert id="insertHistoryBatch">
+    INSERT INTO note (
+      workspace_id, content, title, visibility, author_id, person_id, deal_id,
+      created_at, updated_at, history_import_key, history_payload_hash,
+      history_source_system, history_source_id, history_source_row_ref, history_imported_at
+    )
+    VALUES
+    <foreach collection="rows" item="row" separator=",">
+      (
+        #{row.workspaceId}, #{row.content}, #{row.title}, 'workspace', #{row.actorId},
+        #{row.personId}, NULL, #{row.occurredAt}, #{row.occurredAt},
+        UNHEX(#{row.historyImportKey}), UNHEX(#{row.historyPayloadHash}), 'csv',
+        #{row.historySourceId}, #{row.historySourceRowRef}, UTC_TIMESTAMP(6)
+      )
+    </foreach>
+  </insert>
+
   <update id="update">
     UPDATE note
     SET content = #{content},

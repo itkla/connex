@@ -120,6 +120,100 @@
     "linkRetry": "再試行",
     "linkResults": "{count}件見つかりました",
     "linkedTo": "リンク済み: {name}",
-    "linkClear": "{name}へのリンクを解除"
+    "linkClear": "{name}へのリンクを解除",
+    "history": {
+      "title": "やり取り履歴をインポート",
+      "description": "過去のアクティビティ、メモ、タスクを関係履歴に取り込みます。",
+      "steps": {
+        "label": "インポートの進捗",
+        "upload": "アップロード",
+        "map": "割り当て",
+        "review": "確認",
+        "done": "完了"
+      },
+      "kindLabel": "履歴の種類",
+      "kinds": {
+        "activities": "アクティビティ",
+        "notes": "メモ",
+        "tasks": "タスク"
+      },
+      "dropPrompt": "CSVをドロップするか、クリックして選択",
+      "uploadHint": "最大5,000行・5MB・.csv",
+      "errors": {
+        "tooLarge": "ファイルサイズが5MBを超えています。",
+        "noColumns": "列が見つかりませんでした。",
+        "noRows": "データ行が見つかりませんでした。",
+        "tooManyRows": "{count}行あります。5,000行以下のファイルに分割してください。",
+        "parse": "CSVを読み込めませんでした。",
+        "preview": "履歴インポートを解析できませんでした。",
+        "commit": "履歴インポートを完了できませんでした。"
+      },
+      "mapReady": "必須項目が割り当てられました。各行はサーバーでも検証されます。",
+      "mapRequired": "必須項目と参加者の識別情報を1つ以上割り当ててください。",
+      "emptySample": "サンプル値なし",
+      "mapColumn": "{column}を割り当て",
+      "ignore": "— 無視 —",
+      "required": "必須",
+      "fields": {
+        "occurredAt": "発生日時",
+        "participantEmail": "参加者のメール",
+        "participantPhone": "参加者の電話番号",
+        "sourceId": "参照元ID",
+        "subject": "件名",
+        "type": "アクティビティ種別",
+        "notes": "アクティビティのメモ",
+        "content": "メモの内容",
+        "title": "メモのタイトル",
+        "description": "タスクの説明",
+        "dueDate": "期限",
+        "completed": "完了済み"
+      },
+      "back": "戻る",
+      "review": "確認",
+      "refresh": "確認を更新",
+      "import": "準備済みの行をインポート",
+      "done": "完了",
+      "stale": "参加者のリンクが変更されました。インポート前に確認を更新してください。",
+      "counts": {
+        "ready": "準備済み",
+        "imported": "インポート済み",
+        "review": "要確認",
+        "invalid": "無効"
+      },
+      "statuses": {
+        "ready": "準備済み",
+        "already_imported": "インポート済み",
+        "needs_review": "要確認",
+        "invalid": "無効"
+      },
+      "reviewRows": "確認した{total}行のうち{shown}行を表示しています。",
+      "matchedContact": "{name}に一致",
+      "candidateLabel": "参加者の完全一致候補",
+      "evidence": {
+        "EMAIL": "メールが一致",
+        "PHONE": "電話番号が一致",
+        "DOMAIN": "ドメインが一致",
+        "EXTERNAL_ID": "参照元IDが一致",
+        "NAME": "正規化した名前が一致"
+      },
+      "shared": "共有・確認のみ",
+      "selected": "選択済み",
+      "useContact": "この連絡先を使用",
+      "findContact": "連絡先を検索",
+      "clearLink": "{name}へのリンクを解除",
+      "searchPlaceholder": "連絡先を検索…",
+      "searchLabel": "連絡先を検索",
+      "searchPrompt": "2文字以上入力してください",
+      "searching": "検索中…",
+      "searchError": "検索できませんでした。",
+      "searchEmpty": "連絡先が見つかりません",
+      "searchRetry": "再試行",
+      "searchResults": "{count}件の連絡先",
+      "toast": "{count}件の履歴をインポートしました",
+      "doneTitle": "履歴のインポートが完了しました",
+      "doneSummary": "{created}件インポート・{skipped}件スキップ",
+      "failed": "{count}件の行を確認してください",
+      "downloadErrors": "エラーをダウンロード"
+    }
   }
 }

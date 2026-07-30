@@ -143,6 +143,26 @@ public class ScoringService {
         return computeContactScores(workspaceId, reference, reference);
     }
 
+    List<RelationshipTemperatureDto> scoreContactsExcludingHistoryImports(
+            int workspaceId,
+            Instant asOf,
+            Set<Integer> excludedActivityIds,
+            Set<Integer> excludedNoteIds,
+            Set<Integer> excludedTaskIds) {
+        Instant reference = scoringInstant(asOf);
+        LocalDateTime referenceDateTime =
+            LocalDateTime.ofInstant(reference, ZoneOffset.UTC);
+        return temperatures(
+            personMapper.getRelationshipScoreAggregatesExcludingHistoryImports(
+                workspaceId,
+                referenceDateTime,
+                WARMTH_MODEL.sqlParameters(),
+                List.copyOf(excludedActivityIds),
+                List.copyOf(excludedNoteIds),
+                List.copyOf(excludedTaskIds)),
+            reference);
+    }
+
     /**
      * Returns bounded, source-level evidence for one visible, processable contact.
      *

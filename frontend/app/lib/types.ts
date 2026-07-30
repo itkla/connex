@@ -160,6 +160,47 @@ export type ImportResult = {
     failed: ImportRowError[];
 };
 
+export type HistoryImportKind = 'activities' | 'notes' | 'tasks';
+
+export type HistoryImportColumnMapping = {
+    column: string;
+    field: string;
+};
+
+export type HistoryImportRequest = {
+    rows: Record<string, string>[];
+    mapping: HistoryImportColumnMapping[];
+    links?: Record<number, number>;
+    duplicateReviewProof?: string;
+};
+
+export type HistoryImportRowStatus = 'ready' | 'already_imported' | 'needs_review' | 'invalid';
+
+export type HistoryImportRowAnalysis = {
+    rowIndex: number;
+    status: HistoryImportRowStatus;
+    participantId?: number | null;
+    participantLabel?: string | null;
+    candidates?: DuplicateCandidate[] | null;
+    errors?: string[] | null;
+};
+
+export type HistoryImportPreviewResult = {
+    total: number;
+    toCreate: number;
+    alreadyImported: number;
+    needsReview: number;
+    invalid: number;
+    rows: HistoryImportRowAnalysis[];
+    duplicateReviewProof?: string | null;
+};
+
+export type HistoryImportResult = {
+    created: number;
+    skipped: number;
+    failed: ImportRowError[];
+};
+
 export type PersonFacets = {
     companies: string[];
     titles: string[];

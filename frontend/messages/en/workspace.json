@@ -66,8 +66,16 @@
     "tabMembers": "Members",
     "tabRoles": "Roles",
     "tabCustomFields": "Custom fields",
+    "tabData": "Data",
     "tabEmail": "Email",
     "tabDelivery": "Delivery"
+  },
+  "WorkspaceData": {
+    "title": "Data",
+    "subtitle": "Bring existing relationship history into this workspace without triggering automation or alert noise.",
+    "historyTitle": "Interaction history",
+    "historyDescription": "Import historical activities, notes, and tasks from a CSV. Exact participant matches are reviewed before anything is written.",
+    "historyAction": "Import history"
   },
   "WorkspaceMembers": {
     "title": "Members",
