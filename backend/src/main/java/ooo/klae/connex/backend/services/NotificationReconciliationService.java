@@ -268,6 +268,7 @@ public class NotificationReconciliationService {
         }
         for (int offset = 0; offset < baselines.size(); offset += BASELINE_BATCH_SIZE) {
             notificationMapper.insertHistoricalNotificationBaselines(
+                workspaceId,
                 baselines.subList(
                     offset,
                     Math.min(offset + BASELINE_BATCH_SIZE, baselines.size())));

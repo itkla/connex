@@ -199,7 +199,7 @@ public class InteractionHistoryImportService {
         }
         List<HistoryImportWrite> writes =
             writes(kind, workspaceId, actorId, creates);
-        insertBatches(kind, writes);
+        insertBatches(kind, workspaceId, writes);
         if (!writes.isEmpty()) {
             NotificationReconciliationService.HistoricalBaselineScope scope =
                 baselineScope(kind, workspaceId, writes);
@@ -783,14 +783,15 @@ public class InteractionHistoryImportService {
 
     private void insertBatches(
             Kind kind,
+            int workspaceId,
             List<HistoryImportWrite> writes) {
         for (int offset = 0; offset < writes.size(); offset += BATCH_SIZE) {
             List<HistoryImportWrite> batch = writes.subList(
                 offset, Math.min(offset + BATCH_SIZE, writes.size()));
             switch (kind) {
-                case ACTIVITY -> activityMapper.insertHistoryBatch(batch);
-                case NOTE -> noteMapper.insertHistoryBatch(batch);
-                case TASK -> taskMapper.insertHistoryBatch(batch);
+                case ACTIVITY -> activityMapper.insertHistoryBatch(workspaceId, batch);
+                case NOTE -> noteMapper.insertHistoryBatch(workspaceId, batch);
+                case TASK -> taskMapper.insertHistoryBatch(workspaceId, batch);
             }
         }
     }

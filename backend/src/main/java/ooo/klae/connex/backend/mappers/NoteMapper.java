@@ -59,7 +59,10 @@ public interface NoteMapper {
         @Param("workspaceId") int workspaceId,
         @Param("historyImportKeys") List<String> historyImportKeys
     );
-    int insertHistoryBatch(@Param("rows") List<HistoryImportWrite> rows);
+    int insertHistoryBatch(
+        @Param("workspaceId") int workspaceId,
+        @Param("rows") List<HistoryImportWrite> rows
+    );
     int update(Note note);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

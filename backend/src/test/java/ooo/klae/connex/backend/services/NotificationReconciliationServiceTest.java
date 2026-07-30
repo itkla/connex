@@ -177,7 +177,7 @@ class NotificationReconciliationServiceTest {
 
         RelationshipNudgeCandidate candidate = nudgeCandidate();
         when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(candidate));
-        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+        when(scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(
             new RelationshipTemperatureDto(9, 28, "cool", "cooling", "2026-05-10 09:00:00",
                 44, 1, null, null, "test-model", Instant.EPOCH)
         ));
@@ -257,7 +257,7 @@ class NotificationReconciliationServiceTest {
         RelationshipNudgeCandidate candidate = nudgeCandidate();
         candidate.setExpectedCloseDate("2026-06-30");
         when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(candidate));
-        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+        when(scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(
             new RelationshipTemperatureDto(9, 28, "cool", "cooling", "2026-05-10 09:00:00",
                 44, 1, null, null, "test-model", Instant.EPOCH)
         ));
@@ -282,7 +282,7 @@ class NotificationReconciliationServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
         when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
-        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+        when(scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(
             new RelationshipTemperatureDto(9, 4, "cold", "steady", "2025-06-01 09:00:00",
                 365, 0, null, null, "test-model", Instant.EPOCH)
         ));
@@ -310,7 +310,7 @@ class NotificationReconciliationServiceTest {
 
         when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of(optOut));
         when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
-        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+        when(scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(
             new RelationshipTemperatureDto(9, 28, "cool", "cooling", "2026-05-10 09:00:00",
                 44, 1, null, null, "test-model", Instant.EPOCH)
         ));
@@ -335,7 +335,7 @@ class NotificationReconciliationServiceTest {
 
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
         when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
-        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+        when(scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(
             new RelationshipTemperatureDto(9, 72, "hot", "rising", "2026-06-22 09:00:00",
                 1, 6, null, null, "test-model", Instant.EPOCH)
         ));
@@ -731,7 +731,8 @@ class NotificationReconciliationServiceTest {
 
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(nudge, intro));
-        when(scoringService.scoreContacts(7)).thenThrow(new IllegalStateException("scoring down"));
+        when(scoringService.scoreContacts(eq(7), any(Instant.class)))
+            .thenThrow(new IllegalStateException("scoring down"));
         DealRiskService dealRiskService = noRiskService();
 
         NotificationReconciliationService service = new NotificationReconciliationService(
@@ -1070,6 +1071,7 @@ class NotificationReconciliationServiceTest {
             "f".repeat(64));
 
         verify(notificationMapper).insertHistoricalNotificationBaselines(
+            eq(7),
             org.mockito.ArgumentMatchers.argThat(baselines ->
                 baselines.size() == 1
                     && baselines.stream().noneMatch(

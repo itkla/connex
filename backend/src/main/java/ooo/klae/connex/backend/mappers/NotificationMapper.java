@@ -246,6 +246,7 @@ public interface NotificationMapper {
     );
 
     int insertHistoricalNotificationBaselines(
+        @Param("workspaceId") int workspaceId,
         @Param("baselines") List<HistoricalNotificationBaseline> baselines
     );
 

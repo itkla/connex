@@ -633,7 +633,7 @@
     VALUES
     <foreach collection="baselines" item="baseline" separator=",">
       (
-        #{baseline.workspaceId}, #{baseline.recipientId}, #{baseline.dedupeKey},
+        #{workspaceId}, #{baseline.recipientId}, #{baseline.dedupeKey},
         #{baseline.notificationType}, #{baseline.baselineSeverity},
         UNHEX(#{baseline.sourceStateHash}), UNHEX(#{baseline.importRunId}),
         UTC_TIMESTAMP(6)

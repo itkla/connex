@@ -1,6 +1,6 @@
 ALTER TABLE activity
-    ADD COLUMN history_import_key BINARY(32) NULL,
-    ADD COLUMN history_payload_hash BINARY(32) NULL,
+    ADD COLUMN history_import_key CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ADD COLUMN history_payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     ADD COLUMN history_source_system VARCHAR(64) NULL,
     ADD COLUMN history_source_id VARCHAR(512) NULL,
     ADD COLUMN history_source_row_ref VARCHAR(64) NULL,

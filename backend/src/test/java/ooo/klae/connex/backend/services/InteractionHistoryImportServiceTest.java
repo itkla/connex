@@ -131,19 +131,19 @@ class InteractionHistoryImportServiceTest {
         lenient().when(notificationReconciliationService.historicalExpectationSnapshot(
                 eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any()))
             .thenReturn(emptySnapshot);
-        lenient().when(activityMapper.insertHistoryBatch(anyList()))
+        lenient().when(activityMapper.insertHistoryBatch(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
-                activityWrites.addAll(invocation.getArgument(0));
+                activityWrites.addAll(invocation.getArgument(1));
                 return 1;
             });
-        lenient().when(noteMapper.insertHistoryBatch(anyList()))
+        lenient().when(noteMapper.insertHistoryBatch(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
-                noteWrites.addAll(invocation.getArgument(0));
+                noteWrites.addAll(invocation.getArgument(1));
                 return 1;
             });
-        lenient().when(taskMapper.insertHistoryBatch(anyList()))
+        lenient().when(taskMapper.insertHistoryBatch(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
-                taskWrites.addAll(invocation.getArgument(0));
+                taskWrites.addAll(invocation.getArgument(1));
                 return 1;
             });
         lenient().when(activityMapper.findHistoryImports(eq(WORKSPACE_ID), anyList()))
@@ -322,8 +322,8 @@ class InteractionHistoryImportServiceTest {
             .anyMatch(error -> error.contains("dueDate")));
         assertTrue(preview.rows().getFirst().errors().stream()
             .anyMatch(error -> error.contains("completed")));
-        verify(activityMapper, never()).insertHistoryBatch(anyList());
-        verify(taskMapper, never()).insertHistoryBatch(anyList());
+        verify(activityMapper, never()).insertHistoryBatch(anyInt(), anyList());
+        verify(taskMapper, never()).insertHistoryBatch(anyInt(), anyList());
     }
 
     @Test
@@ -451,7 +451,7 @@ class InteractionHistoryImportServiceTest {
             IllegalStateException.class,
             () -> service.commitActivities(request));
 
-        verify(activityMapper).insertHistoryBatch(anyList());
+        verify(activityMapper).insertHistoryBatch(eq(WORKSPACE_ID), anyList());
         verify(auditService, never()).record(
             anyString(), anyString(), any(), anyString(), anyString(), any());
     }
@@ -482,7 +482,7 @@ class InteractionHistoryImportServiceTest {
             ConflictException.class,
             () -> service.commitActivities(request));
 
-        verify(activityMapper).insertHistoryBatch(anyList());
+        verify(activityMapper).insertHistoryBatch(eq(WORKSPACE_ID), anyList());
         verify(notificationReconciliationService, never())
             .persistHistoricalBaselines(
                 eq(WORKSPACE_ID), any(), any(), any(), anyString());

@@ -74,7 +74,10 @@ public interface ActivityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("historyImportKeys") List<String> historyImportKeys
     );
-    int insertHistoryBatch(@Param("rows") List<HistoryImportWrite> rows);
+    int insertHistoryBatch(
+        @Param("workspaceId") int workspaceId,
+        @Param("rows") List<HistoryImportWrite> rows
+    );
     int update(Activity activity);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

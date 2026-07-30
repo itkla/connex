@@ -284,13 +284,13 @@
 
   <select id="findHistoryImports" resultType="ooo.klae.connex.backend.beans.HistoryImportProvenance">
     SELECT id AS entity_id,
-           LOWER(HEX(history_import_key)) AS history_import_key,
-           LOWER(HEX(history_payload_hash)) AS history_payload_hash
+           history_import_key,
+           history_payload_hash
     FROM activity
     WHERE workspace_id = #{workspaceId}
       AND history_import_key IN
       <foreach collection="historyImportKeys" item="historyImportKey" open="(" separator="," close=")">
-        UNHEX(#{historyImportKey})
+        #{historyImportKey}
       </foreach>
   </select>
 
@@ -303,9 +303,9 @@
     VALUES
     <foreach collection="rows" item="row" separator=",">
       (
-        #{row.workspaceId}, #{row.type}, #{row.subject}, #{row.notes}, #{row.personId}, NULL,
-        #{row.actorId}, #{row.occurredAt}, UNHEX(#{row.historyImportKey}),
-        UNHEX(#{row.historyPayloadHash}), 'csv', #{row.historySourceId},
+        #{workspaceId}, #{row.type}, #{row.subject}, #{row.notes}, #{row.personId}, NULL,
+        #{row.actorId}, #{row.occurredAt}, #{row.historyImportKey},
+        #{row.historyPayloadHash}, 'csv', #{row.historySourceId},
         #{row.historySourceRowRef}, UTC_TIMESTAMP(6)
       )
     </foreach>
