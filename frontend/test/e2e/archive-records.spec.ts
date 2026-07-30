@@ -61,9 +61,9 @@ test.describe("record archive and restore", () => {
             await page.goto(listUrl);
             await expect(page.locator("html")).toHaveAttribute("lang", "ja");
 
-            const card = page.locator("div.group").filter({ hasText: company.name }).first();
-            await expect(card).toBeVisible();
-            await card.getByRole("button", { name: `${company.name}のアクション` }).click();
+            const row = page.getByRole("listitem").filter({ hasText: company.name }).first();
+            await expect(row).toBeVisible();
+            await row.getByRole("button", { name: `${company.name}のアクション` }).click();
             await expect(page.getByRole("menuitem", { name: "削除", exact: true })).toHaveCount(0);
             await page.getByRole("menuitem", { name: "アーカイブ", exact: true }).click();
 
@@ -73,15 +73,18 @@ test.describe("record archive and restore", () => {
             await archiveDialog.getByRole("button", { name: "アーカイブ", exact: true }).click();
 
             await expect(page.getByText("企業をアーカイブしました")).toBeVisible();
-            await expect(card).toBeHidden();
+            await expect(row).toBeHidden();
 
-            const scope = page.getByRole("group", {
+            await page.getByRole("button", { name: "レコードを絞り込んで並び替える" }).click();
+            const filterSheet = page.getByRole("dialog", { name: "絞り込みと並び替え" });
+            const scope = filterSheet.getByRole("group", {
                 name: "有効な企業とアーカイブ済みの企業を切り替える",
             });
             await scope.getByRole("button", { name: /^アーカイブ済み/ }).click();
-            const archivedCard = page.locator("div.group").filter({ hasText: company.name }).first();
-            await expect(archivedCard).toBeVisible();
-            await archivedCard.getByRole("button", { name: `${company.name}のアクション` }).click();
+            await filterSheet.getByRole("button", { name: "完了", exact: true }).click();
+            const archivedRow = page.getByRole("listitem").filter({ hasText: company.name }).first();
+            await expect(archivedRow).toBeVisible();
+            await archivedRow.getByRole("button", { name: `${company.name}のアクション` }).click();
             await expect(page.getByRole("menuitem", { name: "削除", exact: true })).toHaveCount(0);
             await expect(page.getByRole("menuitem", { name: "クイック編集", exact: true })).toHaveCount(0);
             await page.getByRole("menuitem", { name: "復元", exact: true }).click();
@@ -91,9 +94,11 @@ test.describe("record archive and restore", () => {
             await restoreDialog.getByRole("button", { name: "復元", exact: true }).click();
 
             await expect(page.getByText("企業を復元しました")).toBeVisible();
-            await expect(archivedCard).toBeHidden();
+            await expect(archivedRow).toBeHidden();
+            await page.getByRole("button", { name: "レコードを絞り込んで並び替える" }).click();
             await scope.getByRole("button", { name: "有効", exact: true }).click();
-            await expect(page.locator("div.group").filter({ hasText: company.name }).first()).toBeVisible();
+            await filterSheet.getByRole("button", { name: "完了", exact: true }).click();
+            await expect(page.getByRole("listitem").filter({ hasText: company.name }).first()).toBeVisible();
         } finally {
             await ensureActive(page, `/api/companies/${company.id}/restore`, fixture.workspaceId);
         }

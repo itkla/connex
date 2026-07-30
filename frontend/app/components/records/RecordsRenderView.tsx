@@ -348,6 +348,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     const gridSortOptions = sortOptions ?? sortOptionsFromColumns(columns);
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
+    const fallbackListColumns = columns.slice(1, 3).flatMap((column) => (
+        column.render ? [{ key: column.key, render: column.render }] : []
+    ));
     const sortBar =
         !controlled && (displayMode === 'grid' || displayMode === 'list') && gridSortOptions.length > 0 ? (
             <div className="mb-3 flex justify-end">
@@ -577,13 +580,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 <span className="block truncate text-sm font-medium text-foreground">
                                                     {item.name ?? entityLabel}
                                                 </span>
-                                                {columns.slice(1, 3).some((col) => col.render) && (
+                                                {fallbackListColumns.length > 0 && (
                                                     <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                                                        {columns.slice(1, 3).map((col) => (
-                                                            <span key={col.key} className="truncate">
-                                                                {col.render
-                                                                    ? col.render(item)
-                                                                    : (item as unknown as Record<string, ReactNode>)[col.key]}
+                                                        {fallbackListColumns.map((column) => (
+                                                            <span key={column.key} className="truncate">
+                                                                {column.render(item)}
                                                             </span>
                                                         ))}
                                                     </span>
