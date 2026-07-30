@@ -235,6 +235,12 @@ export default function NewCompanyDialog({
                 : 'idle';
 
     const [wasOpen, setWasOpen] = useState(open);
+    useEffect(() => {
+        if (open) {
+            submissionPendingRef.current = false;
+        }
+    }, [open]);
+
     if (open !== wasOpen) {
         setWasOpen(open);
         if (open) {
@@ -243,7 +249,6 @@ export default function NewCompanyDialog({
             setWebsiteFormatError(null);
             setView('company');
             setEditing({ mode: 'new' });
-            submissionPendingRef.current = false;
             setSubmissionPending(false);
         }
     }
