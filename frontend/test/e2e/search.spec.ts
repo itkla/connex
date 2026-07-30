@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { runFixture } from "./support/fixtures";
 
 test.describe("global search", () => {
-    test("the toolbar search finds a seeded contact and opens its record", async ({ page }) => {
-        const contact = runFixture().contacts.search;
+    test("the toolbar search finds a seeded contact and opens its record", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.search;
         await page.goto("/dashboard");
 
         const searchInput = page.getByRole("combobox", { name: /search/i })

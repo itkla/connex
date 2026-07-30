@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { runFixture } from "./support/fixtures";
 
 test.describe("activity composer", () => {
-    test("logging an activity on a contact shows it in the timeline", async ({ page }) => {
-        const contact = runFixture().contacts.activity;
+    test("logging an activity on a contact shows it in the timeline", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.activity;
         const subject = `Kickoff sync ${Date.now().toString(36)}`;
         await page.goto(`/records/contacts/${contact.id}`);
         await expect(page.getByRole("heading", { name: contact.name }).first()).toBeVisible();

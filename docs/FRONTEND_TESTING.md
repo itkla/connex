@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving ten critical flows through a real browser against a running full stack, at desktop and phone viewports and in English or Japanese.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving ten critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -36,29 +36,30 @@ Useful selections: `playwright test --project=mobile-chromium` (phone viewport o
 
 ## How auth bootstrap works
 
-There are no seeded credentials. The `setup` project (`frontend/test/e2e/global.setup.ts`) provisions an isolated tenant per run:
+The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` and `setup-mobile` projects (`frontend/test/e2e/global.setup.ts`) each provision an isolated tenant:
 
 1. `POST /api/auth/register` with a unique per-run username. Under the dev profile this single call **registers, logs in, creates a default workspace, and marks the email verified**, returning `JSESSIONID` (HttpOnly session) and `connex_workspace` (tenant selector) cookies.
-2. The API request context's cookies are persisted as Playwright **storage state** (`test/e2e/.artifacts/storage-state.json`, gitignored); every browser context in the `chromium` project starts from it — no UI login per test.
-3. Seed data (a company, four contacts, a pipeline/stage, three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
-4. Seeded ids/names go into `test/e2e/.artifacts/run.json`, which specs read via `test/e2e/support/fixtures.ts`.
+2. The API request context's cookies are persisted as project-scoped Playwright **storage state** (`test/e2e/.artifacts/{desktop,mobile}/storage-state.json`, gitignored), so desktop and phone runs never share an authenticated tenant.
+3. Seed data (a company, five contacts, a pipeline/stage, three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
+4. Seeded ids/names go into `test/e2e/.artifacts/{desktop,mobile}/run.json`, which specs select from `testInfo.project.name` via `test/e2e/support/fixtures.ts`.
 
-Because every run registers a **fresh user and workspace**, runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
+Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
 
 ## Projects and viewports
 
-`playwright.config.ts` defines three projects:
+`playwright.config.ts` defines four projects:
 
 | Project | Device | Runs |
 | --- | --- | --- |
-| `setup` | — | `global.setup.ts` only; the other two depend on it and reuse its storage state |
-| `chromium` | Desktop Chrome | every test **except** those tagged `@mobile-only` |
-| `mobile-chromium` | Pixel 7 (412×839, `isMobile`, `hasTouch`, Chromium) | only tests tagged `@mobile` |
+| `setup-desktop` | — | `global.setup.ts` only; provisions the desktop tenant and artifacts |
+| `setup-mobile` | — | `global.setup.ts` only; provisions the phone tenant and artifacts |
+| `chromium` | Desktop Chrome | every test **except** those tagged `@mobile-only`; depends on `setup-desktop` |
+| `mobile-chromium` | Pixel 7 (412×839, `isMobile`, `hasTouch`, Chromium) | only tests tagged `@mobile`; depends on `setup-mobile` |
 
 Opt in by putting a tag in the **test title**:
 
 - **no tag** — desktop only. This is the default, so none of the pre-existing specs were duplicated onto the phone viewport.
-- **`@mobile`** — runs on desktop *and* the phone viewport. Use it for a flow that must hold at both widths.
+- **`@mobile`** — runs on desktop *and* the phone viewport against separate project-owned tenants. Use it for a flow that must hold at both widths.
 - **`@mobile-only`** — runs on the phone viewport *only*. Use it for surfaces that do not exist on desktop (the bottom bar, mobile drawers). `@mobile-only` contains `@mobile`, so one `grep` on the mobile project and one `grepInvert` on the desktop project express both rules.
 
 The phone project is deliberately **Chromium, not Mobile Safari**: CI installs a single browser (`playwright install --with-deps chromium`), and adding WebKit would download and boot a second engine on every run of a required check for no coverage we can act on — Connex ships no WebKit-specific code paths. A Chromium device descriptor still gives the real mobile viewport, touch, and `isMobile` media behaviour that the responsive shell branches on.
@@ -135,7 +136,7 @@ Known scope cut: the notifications flow asserts the inbox/read-state surface but
 ## Flake policy
 
 - **No sleeps.** Waits are Playwright auto-retrying assertions (`toBeVisible`, `toHaveURL`, …). Animations are neutralized with `reducedMotion: "reduce"`; locale/timezone are pinned (`en-US`/UTC).
-- Specs only touch **records seeded for that spec** (distinct contacts per flow), so the default 2 workers never race each other.
+- Specs only touch **records seeded for that spec** (distinct contacts per flow), and desktop/phone projects own separate tenants and fixture files, so the default 2 workers never race each other.
 - CI runs with `retries: 2` and uploads **traces + screenshots + the HTML report** on failure; locally retries are 0 so flake is visible, not hidden.
 - A test that flakes repeatedly gets fixed or quarantined with `test.fixme()` plus a linked issue — never a lengthened timeout as a "fix", and never deleted silently.
 - The CI job (`Frontend — unit & e2e` in `.github/workflows/ci.yml`) is a **required check** on `main` (#853, graduated in 735d885a). A failure there blocks merges, so every step in that job has to stay deterministic.

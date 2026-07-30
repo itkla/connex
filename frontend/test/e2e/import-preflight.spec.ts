@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { runFixture } from "./support/fixtures";
 
 test.describe("CSV duplicate review", () => {
-    test("shows exact candidates and explicitly links an owned contact", async ({ page }) => {
-        const fixture = runFixture();
+    test("shows exact candidates and explicitly links an owned contact", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.peek;
         const email = `${contact.name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@acme-rocket.example.com`;
 
@@ -39,8 +39,8 @@ test.describe("CSV duplicate review", () => {
         await expect(page.getByText("Match", { exact: true })).toBeVisible();
     });
 
-    test("includes an exact company dependency in contact import review", async ({ page }) => {
-        const fixture = runFixture();
+    test("includes an exact company dependency in contact import review", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         const contactName = `Company dependency ${Date.now()}`;
 
         await page.goto("/records/contacts?view=table");
@@ -67,8 +67,8 @@ test.describe("CSV duplicate review", () => {
 });
 
 test.describe("manual duplicate review", () => {
-    test("requires acknowledgement before creating a contact with an exact identity", async ({ page }) => {
-        const fixture = runFixture();
+    test("requires acknowledgement before creating a contact with an exact identity", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.peek;
         const email = `${contact.name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@acme-rocket.example.com`;
 
@@ -89,8 +89,8 @@ test.describe("manual duplicate review", () => {
         await expect(page.getByRole("button", { name: "Create", exact: true })).toBeEnabled();
     });
 
-    test("runs the same exact-identity gate on OCR-populated contact fields", async ({ page }) => {
-        const fixture = runFixture();
+    test("runs the same exact-identity gate on OCR-populated contact fields", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.peek;
         const email = `${contact.name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@acme-rocket.example.com`;
 
@@ -138,8 +138,8 @@ test.describe("manual duplicate review", () => {
         await expect(page.getByRole("button", { name: "Create from card" })).toBeDisabled();
     });
 
-    test("reviews an OCR-created company before business-card import", async ({ page }) => {
-        const fixture = runFixture();
+    test("reviews an OCR-created company before business-card import", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
 
         await page.route("**/api/business-cards/availability", async (route) => {
             await route.fulfill({

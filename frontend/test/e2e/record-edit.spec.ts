@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { runFixture } from "./support/fixtures";
 
 test.describe("record inline edit", () => {
-    test("editing a field in the table persists across a reload", async ({ page }) => {
-        const contact = runFixture().contacts.edit;
+    test("editing a field in the table persists across a reload", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.edit;
         const newTitle = `Staff Engineer ${Date.now().toString(36)}`;
         const listUrl = `/records/contacts?view=table&q=${encodeURIComponent(contact.name)}`;
         await page.goto(listUrl);
