@@ -123,6 +123,8 @@ Rules for any new AI-powered feature:
 
 Follow the root risk tiers and dispatch budgets. Backend depth must come from exact contracts, tests, and targeted independent review rather than a fleet of agents repeating the same mapper/service search.
 
+The root execution-discipline rules control backend work: targeted local checks are the default, required CI owns the exhaustive suite, slow local execution without a failure signal is abandoned rather than diagnosed, and no side investigation begins without mapping it to an active acceptance or exit criterion.
+
 Any implementation agent, including Codex, receives an approved plan before editing: scope/approach, exact REST contract (paths, DTOs, error cases, RBAC + tenant scoping), migration DDL with the orchestrator-assigned Flyway version, files per layer (controller/service/mapper/XML/tests), and a test plan.
 
 - The orchestrator writes the plan for Tier 1 and most Tier 2 work. Do not run a separate read-only planning agent merely to echo it.
@@ -135,9 +137,9 @@ Any implementation agent, including Codex, receives an approved plan before edit
 
 1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`). For business-card scanning, also start the optional private sidecar with `docker compose --profile ocr up -d ocr`, use the same 32+ character `CONNEX_OCR_SERVICE_TOKEN` in both processes, set `CONNEX_OCR_BASE_URL=http://127.0.0.1:8090`, and enable the feature explicitly.
 2. **Curl every changed `*Controller` endpoint** at `http://localhost:8080/api/...`. Confirm status, body, and — critically — auth, tenant isolation, and RBAC behavior with real requests. Protected endpoints need a session: `POST /api/auth/login` to obtain the `JSESSIONID` cookie, `GET /api/auth/csrf` for a CSRF token, then send both on mutating calls. Exercise an unauthorized and an other-tenant caller too — prove the request is *rejected*, not just that the happy path works.
-3. **Write automated tests and make them pass:** `./gradlew test`. Cover services and mappers for new behavior; keep arch tests green.
+3. **Write automated tests and run targeted verification locally.** Run every test added or changed by the diff and the directly implicated guard or integration tests with `./gradlew test --tests '<fully.qualified.TestClass>'`. Add more `--tests` selectors only when they protect an invariant touched by the change. Do not run bare `./gradlew test` on the shared development host; the required `Backend — build & test` CI job runs the complete corpus except under the root execution-discipline exceptions.
 4. **Scrutinize intensely** for bugs and future failure modes: tenant leakage, RBAC gaps, null/edge cases, N+1 queries, transaction boundaries, migration safety and reversibility.
-5. **Independent backend review (required).** For standard work, use one fresh **gpt-5.6** Codex context at **high** reasoning effort from `backend/`:
+5. **Independent backend review — once per material diff (required).** For standard work, use one fresh **gpt-5.6** Codex context at **high** reasoning effort from `backend/`:
 
    ```bash
    codex exec -m gpt-5.6 -c model_reasoning_effort=high --sandbox read-only \
@@ -145,13 +147,16 @@ Any implementation agent, including Codex, receives an approved plan before edit
    ```
 
    This is the standard independent adversarial review; do not automatically add a second generic `/code-review` run. Triage every finding rather than accepting it blindly.
+
+   Do not repeat a completed review unless the reviewed diff changes materially. If the command or provider fails before producing a review, make one fallback attempt with another available fresh read-only context; do not debug reviewer tooling during product work.
 6. **Tier 3 escalation only.** For auth/WebAuthn, tenant routing, RBAC/sharing, secrets/crypto, provider egress/sync, destructive data movement, money/approvals, concurrency/locking, or release-critical work, use `/security-review` for the security/tenant slot and one fresh **gpt-5.6/xhigh** Codex review focused on correctness/concurrency/migration safety. Do not add further reviewers unless the two disagree or a concrete high-risk question remains unresolved.
 
 ## Commands
 
 - Run (local): load `CONNEX_DB_*` from your untracked `backend/.env`, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` — the `dev` profile (`application-dev.yml`) turns the session and workspace cookie `Secure` flags off so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret. Without it the fail-closed default (`Secure=true`) drops `JSESSIONID` over HTTP and non-dev startup requires `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with `sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`. The systemd-controlled local staging checkout at `/opt/connex-staging/backend` is special-cased for `localhost:3001` auth defaults and explicit loopback MySQL with `sslMode=DISABLED`; do not copy that shape to production.
-- Test: load `CONNEX_DB_*` from your untracked `backend/.env`, then run `./gradlew test`
-- Build: `./gradlew build`
+- Targeted test: load `CONNEX_DB_*` from your untracked `backend/.env`, then run `./gradlew test --tests '<fully.qualified.TestClass>'`. Add selectors for directly affected guard or integration tests.
+- Compile/package without the exhaustive suite: `./gradlew assemble testClasses`
+- Full backend suite: CI-owned through `Backend — build & test`. Do not run bare `./gradlew test` or `./gradlew build` on the shared development host except under the root execution-discipline exceptions.
 - Seed fixture: run `./gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederAnchorDate=2026-01-15` only against a fresh disposable schema whose catalog starts with `connex_seed` or `cnx_seeder_`. The task uses the production runtime classpath, excludes DevTools and its home-directory overrides, protects both `connexdb` and `connex_pub`, requires a numeric loopback address for local use, always refuses textual `localhost`, requires explicit confirmation for any other host, refuses auto-configuration exclusions, revalidates after every environment post-processor, checks the server-reported current database, and requires Flyway to report the complete current migration set before fixture writes; see [`../docs/VOLUME_SEEDER.md`](../docs/VOLUME_SEEDER.md)
 - DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
 - Private uploads (local): the default root is `~/.connex/object-storage`; override it with `CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT` when tests or parallel worktrees need isolation.
