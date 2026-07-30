@@ -56,10 +56,11 @@ test.describe("CSV duplicate review", () => {
         });
         await page.getByRole("button", { name: "Next" }).click();
 
-        await expect(page.getByText(fixture.companyName).last()).toBeVisible();
-        await expect(page.getByText("Company", { exact: true })).toBeVisible();
-        await expect(page.getByText("Exact name")).toBeVisible();
-        await expect(page.getByText("Same normalized name")).toBeVisible();
+        const candidates = page.getByLabel("Possible existing records");
+        await expect(candidates.getByText(fixture.companyName)).toBeVisible();
+        await expect(candidates.getByText("Company", { exact: true })).toBeVisible();
+        await expect(candidates.getByText("Exact name")).toBeVisible();
+        await expect(candidates.getByText("Same normalized name")).toBeVisible();
         await expect(page.getByRole("button", { name: "Use record" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Import", exact: true })).toBeEnabled();
     });
