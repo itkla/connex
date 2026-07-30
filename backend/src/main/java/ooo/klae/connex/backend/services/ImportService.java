@@ -887,7 +887,10 @@ public class ImportService {
                     && row.companyDependencyKey != null
                     && !row.companyDependencyCandidates.isEmpty()
                     && displayedDependencies.add(row.companyDependencyKey)) {
-                row.duplicateCandidates.addAll(
+                PlanRow previewRow = row.sourceRows.isEmpty()
+                    ? row
+                    : row.sourceRows.getFirst();
+                previewRow.duplicateCandidates.addAll(
                     row.companyDependencyCandidates);
             }
         }
