@@ -151,7 +151,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   `TenantContext`-install, switches at checkout,
   and resets on return with belt (service reset + evict-on-failure) and braces (armed HikariCP dirty-bit —
   which only fires when the pool `catalog` property is set); adversarial tests prove the same physical
-  connection cannot be recycled dirty. Direct reads remove per-JVM TTL divergence for newly installed scopes;
+  connection cannot be recycled dirty. Physically control-only mapper statements temporarily switch that same
+  transaction-bound connection back to the default catalog and restore the tenant catalog in every success or
+  failure path; the routing registry includes control namespaces plus the control-only `AuditLogMapper` and
+  `RoleMapper` scope-enforcement exceptions and exact control-only statements embedded in mixed-plane mappers,
+  fails closed for MyBatis batch executors, and is architecture-checked against tenant-table references. Direct
+  reads remove per-JVM TTL divergence for newly installed scopes;
   each request or same-workspace background operation keeps one immutable catalog snapshot. Phase 4 still needs a
   write fence, fleet drain, final sync, and activation protocol before a live shared→dedicated cutover. The
   control-plane wall is structural: V65 dropped all 39 org-data →

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,9 +13,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.tenant.ControlCatalogRoutingInterceptor;
 import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 
@@ -84,6 +88,55 @@ class MapperPlaneArchTest {
                 + "instead, or add to the baseline with a reviewed rationale: " + newCrossings);
     }
 
+    @Test
+    void controlCatalogRoutingRegistryIsExactAndPhysicallyControlOnly() throws IOException {
+        Set<String> expectedNamespaces = Stream.concat(
+            TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.stream(),
+            Stream.of(
+                "ooo.klae.connex.backend.mappers.AuditLogMapper",
+                "ooo.klae.connex.backend.mappers.RoleMapper"))
+            .collect(Collectors.toUnmodifiableSet());
+        assertEquals(
+            expectedNamespaces,
+            ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES);
+        Set<String> expectedStatements = Set.of(
+            "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientMemberships",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceRecipientIds");
+        assertEquals(
+            expectedStatements,
+            ControlCatalogRoutingInterceptor.CONTROL_CATALOG_STATEMENTS);
+
+        List<String> tenantReferences = new ArrayList<>();
+        for (String namespace : ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES) {
+            String mapper = namespace.substring(namespace.lastIndexOf('.') + 1);
+            for (String table : crossPlaneReferences(mapper, TablePlaneRegistry.ORG_DATA_TABLES)) {
+                tenantReferences.add(mapper + " -> " + table);
+            }
+        }
+        for (String statementId : ControlCatalogRoutingInterceptor.CONTROL_CATALOG_STATEMENTS) {
+            int statementSeparator = statementId.lastIndexOf('.');
+            String mapper = statementId.substring(
+                statementId.lastIndexOf('.', statementSeparator - 1) + 1,
+                statementSeparator);
+            String statement = statementId.substring(statementSeparator + 1);
+            String statementXml = statementXml(mapper, statement);
+            assertFalse(
+                statementXml.contains("<include"),
+                "Explicitly routed control statement must not contain unexpanded SQL fragments: "
+                    + statementId);
+            for (String table : tableReferences(
+                    statementXml,
+                    TablePlaneRegistry.ORG_DATA_TABLES)) {
+                tenantReferences.add(mapper + "." + statement + " -> " + table);
+            }
+        }
+        assertTrue(tenantReferences.isEmpty(),
+            "Control-catalog routing may contain only physically control-plane SQL: "
+                + tenantReferences);
+    }
+
     private void recordNew(String mapper, Set<String> crossings, List<String> newCrossings) {
         Set<String> baseline = BASELINE_CROSSINGS.getOrDefault(mapper, Set.of());
         for (String table : crossings) {
@@ -95,15 +148,32 @@ class MapperPlaneArchTest {
 
     private Set<String> crossPlaneReferences(String mapper, Set<String> otherPlane) throws IOException {
         String xml = mapperXml(mapper).replaceAll("(?s)<!--.*?-->", "");
+        return tableReferences(xml, otherPlane);
+    }
+
+    private Set<String> tableReferences(String xml, Set<String> tables) {
         Set<String> crossings = new java.util.TreeSet<>();
         Matcher matcher = TABLE_TOKEN.matcher(xml);
         while (matcher.find()) {
             String table = matcher.group(1);
-            if (otherPlane.contains(table)) {
+            if (tables.contains(table)) {
                 crossings.add(table);
             }
         }
         return crossings;
+    }
+
+    private String statementXml(String mapper, String statement) throws IOException {
+        String xml = mapperXml(mapper).replaceAll("(?s)<!--.*?-->", "");
+        Pattern pattern = Pattern.compile(
+            "(?s)<(select|insert|update|delete)\\b"
+                + "(?=[^>]*\\bid\\s*=\\s*\"" + Pattern.quote(statement) + "\")"
+                + "[^>]*>.*?</\\1>");
+        Matcher matcher = pattern.matcher(xml);
+        assertTrue(
+            matcher.find(),
+            "Mapped statement not found: " + mapper + "." + statement);
+        return matcher.group();
     }
 
     private String mapperXml(String mapper) throws IOException {
