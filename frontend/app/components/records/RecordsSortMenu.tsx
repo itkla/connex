@@ -9,7 +9,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { type ColumnDef } from './types';
+import { sortOptionsFromColumns, type ColumnDef } from './types';
 
 type SortDirection = 'asc' | 'desc';
 
@@ -25,11 +25,7 @@ export default function RecordsSortMenu<T>({
     onSortChange: (key: string) => void;
 }) {
     const t = useTranslations('RecordsRenderView');
-    const options = columns.flatMap((column) =>
-        column.sortable !== false && column.getSortValue
-            ? [{ key: column.key, label: column.label }]
-            : [],
-    );
+    const options = sortOptionsFromColumns(columns);
     if (options.length === 0) return null;
     const active = options.find((o) => o.key === sortKey);
 

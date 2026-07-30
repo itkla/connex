@@ -29,6 +29,7 @@ import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
@@ -39,6 +40,7 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
+import ContactListRow from '@/app/components/records/contacts/ContactListRow';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
@@ -89,6 +91,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
 
     const {
         displayMode,
+        effectiveDisplayMode,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -678,7 +681,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('person', contacts, displayMode === 'table');
+    const peek = useRecordPeekController('person', contacts, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (contact: Contact): ActiveRecordRef => ({ type: 'person', id: contact.id, label: contact.name }),
@@ -731,11 +734,46 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Contact>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                                facets={facets}
+                                filterState={filterState}
+                                countedFilterState={facetFilterState}
+                                onFilterStateChange={setFilterState}
+                                ownerScope={{
+                                    values: filterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                mobileControls={
+                                    (showArchived || (personFacets?.archivedCount ?? 0) > 0) ? (
+                                        <SegmentedToggle
+                                            ariaLabel={t('archivedScopeAria')}
+                                            value={showArchived ? 'archived' : 'active'}
+                                            onChange={(next) => setShowArchived(next === 'archived')}
+                                            options={[
+                                                { value: 'active', label: t('scopeActive'), icon: <UsersIcon className="size-4" /> },
+                                                { value: 'archived', label: t('scopeArchived', { count: personFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                            ]}
+                                        />
+                                    ) : undefined
+                                }
+                                hasAdditionalFilters={showArchived}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                                {displayMode === 'grid' && (
+                                {effectiveDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -751,9 +789,10 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                         { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
                                     ]}
+                                    className="hidden md:inline-flex"
                                 />
-                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {displayMode === 'table' && (
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -841,12 +880,18 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 removeIntent={showArchived ? 'restore' : 'archive'}
                             />
                         )}
+                        renderListRow={(item) => (
+                            <ContactListRow
+                                contact={item}
+                                temperature={showArchived ? undefined : tempByContactId.get(item.id)}
+                            />
+                        )}
                         renderAvatar={(item) => <ContactAvatar contact={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}
                         onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
-                        displayMode={displayMode}
+                        displayMode={effectiveDisplayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}

@@ -11,7 +11,17 @@
     "creator": "Creator",
     "contact": "Contact",
     "deal": "Deal",
-    "company": "Company"
+    "company": "Company",
+    "filterSort": "Filter & sort",
+    "filterSortAria": "Filter and sort records",
+    "filterSortDescription": "Choose how the list is ordered and which records it shows.",
+    "sortBy": "Sort",
+    "sortAscending": "Ascending",
+    "sortDescending": "Descending",
+    "done": "Done",
+    "filter": "Filters",
+    "filterAria": "Filter tasks",
+    "filterDescription": "Choose which tasks the list shows."
   },
   "MemberScope": {
     "label": "Owner",

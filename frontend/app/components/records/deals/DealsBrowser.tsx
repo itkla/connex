@@ -26,6 +26,7 @@ import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
+import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 import { useRecordPeekController } from '@/app/components/records/useRecordPeekController';
@@ -36,6 +37,7 @@ import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/c
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
@@ -44,6 +46,7 @@ import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import DealListRow from '@/app/components/records/deals/DealListRow';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
@@ -446,6 +449,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const {
         displayMode,
+        effectiveDisplayMode,
         setDisplayMode,
         query,
         setQuery,
@@ -1062,7 +1066,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const visibleDeals = deals;
 
     const { density, setDensity } = useRecordDensity();
-    const peek = useRecordPeekController('deal', visibleDeals, displayMode === 'table');
+    const peek = useRecordPeekController('deal', visibleDeals, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (deal: Deal): ActiveRecordRef => ({ type: 'deal', id: deal.id, label: deal.name }),
@@ -1363,60 +1367,99 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Deal>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDir}
+                                onSortChange={handleSortChange}
+                                facets={facets}
+                                filterState={activeFilterState}
+                                onFilterStateChange={changeFilters}
+                                ownerScope={{
+                                    values: activeFilterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                mobileControls={
+                                    <SegmentBuilder
+                                        definition={definition}
+                                        fields={segmentFields}
+                                        options={segmentOptions}
+                                        recordType="deal"
+                                        allowGroups
+                                        onChange={changeDefinition}
+                                    />
+                                }
+                                hasAdditionalFilters={hasSegments}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
                             <div className="flex items-center gap-2">
-                            <SegmentBuilder
-                                definition={definition}
-                                fields={segmentFields}
-                                options={segmentOptions}
-                                recordType="deal"
-                                allowGroups
-                                onChange={changeDefinition}
-                            />
-                            <div
-                                role="group"
-                                aria-label={t('displayMode')}
-                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('grid')}
-                                    aria-label={t('gridView')}
-                                    aria-pressed={displayMode === 'grid'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <Squares2X2Icon className="size-4" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('table')}
-                                    aria-label={t('tableView')}
-                                    aria-pressed={displayMode === 'table'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <TableCellsIcon className="size-4" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('kanban')}
-                                    aria-label={t('kanbanView')}
-                                    aria-pressed={displayMode === 'kanban'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <ViewColumnsIcon className="size-4" />
-                                </button>
-                            </div>
-                            {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                            {displayMode === 'table' && (
-                                <ColumnVisibilityMenu
-                                    toggles={toggles}
-                                    onColumnVisibleChange={setColumnVisible}
-                                    onReset={resetColumns}
-                                    hiddenCount={hiddenCount}
+                                <SegmentBuilder
+                                    definition={definition}
+                                    fields={segmentFields}
+                                    options={segmentOptions}
+                                    recordType="deal"
+                                    allowGroups
+                                    onChange={changeDefinition}
                                 />
-                            )}
+                                {effectiveDisplayMode !== 'table' && (
+                                    <RecordsSortMenu
+                                        columns={columns}
+                                        sortKey={sortKey}
+                                        sortDirection={sortDir}
+                                        onSortChange={handleSortChange}
+                                    />
+                                )}
+                                <div
+                                    role="group"
+                                    aria-label={t('displayMode')}
+                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('grid')}
+                                        aria-label={t('gridView')}
+                                        aria-pressed={displayMode === 'grid'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <Squares2X2Icon className="size-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('table')}
+                                        aria-label={t('tableView')}
+                                        aria-pressed={displayMode === 'table'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <TableCellsIcon className="size-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDisplayMode('kanban')}
+                                        aria-label={t('kanbanView')}
+                                        aria-pressed={displayMode === 'kanban'}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        <ViewColumnsIcon className="size-4" />
+                                    </button>
+                                </div>
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
+                                    <ColumnVisibilityMenu
+                                        toggles={toggles}
+                                        onColumnVisibleChange={setColumnVisible}
+                                        onReset={resetColumns}
+                                        hiddenCount={hiddenCount}
+                                    />
+                                )}
                             </div>
                         }
                     >
@@ -1480,7 +1523,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 )}
 
                 <Rise delay={0.3}>
-                    {displayMode === 'kanban' ? (
+                    {effectiveDisplayMode === 'kanban' ? (
                         <DealsKanban
                             deals={visibleDeals}
                             pipelines={pipelines}
@@ -1521,14 +1564,23 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     onDelete={onDelete ? () => onDelete(item) : undefined}
                                 />
                             )}
+                            renderListRow={(item) => (
+                                <DealListRow
+                                    deal={item}
+                                    company={item.company != null ? companyById.get(item.company) : undefined}
+                                    stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                                    risk={riskByDealId.get(item.id)}
+                                />
+                            )}
                             renderAvatar={(item) => {
+                                const avatarSize = effectiveDisplayMode === 'list' ? 'small' : 'large';
                                 const company = item.company != null ? companyById.get(item.company) : undefined;
-                                if (company) return <CompanyAvatar company={company} type="large" />;
+                                if (company) return <CompanyAvatar company={company} type={avatarSize} />;
                                 const contact = contactByDealId.get(item.id);
                                 return (
                                     <ContactAvatar
                                         contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
-                                        type="large"
+                                        type={avatarSize}
                                     />
                                 );
                             }}
@@ -1536,7 +1588,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
                             recordRef={recordRef}
-                            displayMode={displayMode}
+                            displayMode={effectiveDisplayMode}
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}

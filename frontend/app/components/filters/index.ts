@@ -10,6 +10,9 @@ export {
 export {
     default as MemberScopeFilter,
     interpretMemberScope,
+    toggleMemberScopeMember,
+    toggleMemberScopeSentinel,
+    MEMBER_SCOPE_MAX_MEMBERS,
     MEMBER_SCOPE_ME,
     MEMBER_SCOPE_UNASSIGNED,
 } from "./MemberScopeFilter";

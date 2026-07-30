@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving ten critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving eleven critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -108,7 +108,7 @@ bash gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=
 
 Then boot the backend against that same schema. Every seeded user's password is `seeder-password`; treat any schema the seeder touched as compromised for authentication.
 
-## The ten flows
+## The eleven flows
 
 | Spec | Flow |
 | --- | --- |
@@ -122,6 +122,7 @@ Then boot the backend against that same schema. Every seeded user's password is 
 | `search.spec.ts` | toolbar search finds a seeded contact and opens its record |
 | `import-preflight.spec.ts` | CSV preview exposes exact and ambiguous duplicate-review decisions before commit |
 | `archive-records.spec.ts` | contact/company archive visibility and restore round trips through the record browser |
+| `mobile-record-lists.spec.ts` | Pixel-width contacts/companies/deals/tasks use list rows, mobile sheets filter/sort, and the stored desktop mode survives the forced phone presentation |
 
 Three further specs exist to keep the harness itself honest rather than to cover a product flow:
 

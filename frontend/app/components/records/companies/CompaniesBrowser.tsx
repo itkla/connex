@@ -33,12 +33,14 @@ import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
+import CompanyListRow from '@/app/components/records/companies/CompanyListRow';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
@@ -138,6 +140,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
 
     const {
         displayMode,
+        effectiveDisplayMode,
         setDisplayMode,
         filterState,
         setFilterState,
@@ -813,7 +816,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         [columns, customColumns],
     );
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('company', companies, displayMode === 'table');
+    const peek = useRecordPeekController('company', companies, effectiveDisplayMode !== 'grid');
 
     const recordRef = useCallback(
         (company: Company): ActiveRecordRef => ({ type: 'company', id: company.id, label: company.name }),
@@ -866,6 +869,52 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 placeholder={t('searchPlaceholder')}
                                 searchAria={tf('searchAria')}
                                 clearAria={tf('clearSearchAria')}
+                                className="min-w-0 flex-1 md:flex-initial"
+                            />
+                        }
+                        collapsed={
+                            <RecordsFilterSheet<Company>
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                                facets={facets}
+                                filterState={filterState}
+                                countedFilterState={facetFilterState}
+                                onFilterStateChange={setFilterState}
+                                ownerScope={{
+                                    values: filterState.owner,
+                                    onChange: changeOwnerScope,
+                                    members: activeMembers,
+                                    counts: ownerCounts,
+                                }}
+                                mobileControls={
+                                    <>
+                                        {(showArchived || (companyFacets?.archivedCount ?? 0) > 0) && (
+                                            <SegmentedToggle
+                                                ariaLabel={t('archivedScopeAria')}
+                                                value={showArchived ? 'archived' : 'active'}
+                                                onChange={(next) => setShowArchived(next === 'archived')}
+                                                options={[
+                                                    { value: 'active', label: t('scopeActive'), icon: <BuildingOffice2Icon className="size-4" /> },
+                                                    { value: 'archived', label: t('scopeArchived', { count: companyFacets?.archivedCount ?? 0 }), icon: <ArchiveBoxIcon className="size-4" /> },
+                                                ]}
+                                            />
+                                        )}
+                                        {!showArchived && (
+                                            <SegmentBuilder
+                                                definition={definition}
+                                                fields={segmentFields}
+                                                options={segmentOptions}
+                                                allowGroups
+                                                onChange={setDefinition}
+                                            />
+                                        )}
+                                    </>
+                                }
+                                hasAdditionalFilters={showArchived || hasSegments}
+                                hasActiveFilters={hasActiveFilters}
+                                onClearAll={clearAll}
                             />
                         }
                         trailing={
@@ -879,7 +928,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                         onChange={setDefinition}
                                     />
                                 )}
-                                {displayMode === 'grid' && (
+                                {effectiveDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -895,9 +944,10 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                         { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
                                     ]}
+                                    className="hidden md:inline-flex"
                                 />
-                                {displayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {displayMode === 'table' && (
+                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -983,12 +1033,18 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 removeIntent={showArchived ? 'restore' : 'archive'}
                             />
                         )}
+                        renderListRow={(item) => (
+                            <CompanyListRow
+                                company={item}
+                                temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
+                            />
+                        )}
                         renderAvatar={(item) => <CompanyAvatar company={item} />}
                         detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
                         onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
                         activeId={peek.activeId}
                         recordRef={recordRef}
-                        displayMode={displayMode}
+                        displayMode={effectiveDisplayMode}
                         density={density}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={handleSelectedIdsChange}
