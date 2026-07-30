@@ -632,8 +632,10 @@ class ScoringServiceTest {
 
         assertThrows(ResourceNotFoundException.class, () -> service.companyEvidence(WS, 10, 42));
 
-        verify(companyMapper, never()).getRelationshipEvidence(
+        verify(companyMapper, never()).getRelationshipEvidenceTotals(
             anyInt(), anyInt(), any(), any(), anyInt());
+        verify(companyMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper, never()).countOwnPrivateNotesForCompanyEvidence(
             anyInt(), anyInt(), anyInt(), any());
     }
