@@ -110,8 +110,9 @@ class IdentityCollisionMapperXmlTest {
         assertFalse(companySql.contains("person_identity"));
         assertFalse(domainSql.contains("person_identity"));
         assertTrue(domainSql.contains("ci.kind = ?"));
-        assertFalse(Pattern.compile("\\bJOIN\\s+company\\s", Pattern.CASE_INSENSITIVE)
+        assertTrue(Pattern.compile("\\bJOIN\\s+company\\s", Pattern.CASE_INSENSITIVE)
             .matcher(companySql).find());
+        assertTrue(companySql.contains("c.archived_at IS NULL"));
 
         assertTrue(combinedSql.contains("FROM person_identity pi"));
         assertTrue(combinedSql.contains("FROM company_identity ci"));

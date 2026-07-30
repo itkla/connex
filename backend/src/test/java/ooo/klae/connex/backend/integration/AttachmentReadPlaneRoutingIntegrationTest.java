@@ -81,9 +81,11 @@ class AttachmentReadPlaneRoutingIntegrationTest {
             statement.execute("CREATE DATABASE " + scratchCatalog);
             scratchCatalogCreated = true;
             statement.execute("CREATE TABLE " + scratchCatalog + ".company ("
-                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL)");
+                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
+                + "archived_at DATETIME NULL)");
             statement.execute("CREATE TABLE " + scratchCatalog + ".person ("
-                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL)");
+                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
+                + "archived_at DATETIME NULL)");
             statement.execute("CREATE TABLE " + scratchCatalog + ".deal ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL)");
             statement.execute("CREATE TABLE " + scratchCatalog + ".tag ("

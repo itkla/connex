@@ -106,7 +106,6 @@ class RecordArchiveServiceTest extends AbstractServiceTest {
         draft.setCompany(company);
         Person person = personService.create(draft);
         insertConsentWithHistory(person);
-        insertPersonIdentity(person);
 
         personService.archive(person.getId());
 
@@ -383,14 +382,6 @@ class RecordArchiveServiceTest extends AbstractServiceTest {
                 + "(workspace_id, consent_id, person_id, channel, purpose, status, source) "
                 + "VALUES (?, ?, ?, 'email', 'marketing', 'granted', 'test')",
             workspace.getId(), consentId, person.getId());
-    }
-
-    private void insertPersonIdentity(Person person) {
-        jdbcTemplate.update(
-            "INSERT INTO person_identity "
-                + "(workspace_id, person_id, kind, `value`, normalized_value, source_system, acquired_at) "
-                + "VALUES (?, ?, 'email', ?, ?, 'manual', NOW())",
-            workspace.getId(), person.getId(), person.getEmail(), person.getEmail());
     }
 
     private Workspace newForeignWorkspace() {
