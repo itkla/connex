@@ -643,6 +643,12 @@ class ImportServiceTest extends AbstractServiceTest {
         Tag firstTag = newTag();
         Tag secondTag = newTag();
         CustomFieldDefinition custom = customDefinition("company");
+        User secondActor = memberWithPermissions(
+            "COMPANY_CREATE", "COMPANY_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
+        User thirdActor = memberWithPermissions(
+            "COMPANY_CREATE", "COMPANY_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
         String website = "https://company-coalesced-" + unique() + ".test";
         ImportRequest request = req(
             List.of(
@@ -708,10 +714,12 @@ class ImportServiceTest extends AbstractServiceTest {
                 imported.getId());
         int auditCountAfterFirst = rowCount(
             "SELECT COUNT(*) FROM audit_log "
-                + "WHERE action = 'import.company' AND actor_id = ?",
-            currentUser.getId());
+                + "WHERE workspace_id = ? AND action = 'import.company'",
+            workspace.getId());
 
+        authenticateAs(secondActor, workspace.getId());
         ImportResult second = reviewAndCommitCompanies(request);
+        authenticateAs(thirdActor, workspace.getId());
         ImportResult third = reviewAndCommitCompanies(request);
 
         assertEquals(1, preview.getToCreate());
@@ -794,8 +802,8 @@ class ImportServiceTest extends AbstractServiceTest {
             auditCountAfterFirst,
             rowCount(
                 "SELECT COUNT(*) FROM audit_log "
-                    + "WHERE action = 'import.company' AND actor_id = ?",
-                currentUser.getId()));
+                    + "WHERE workspace_id = ? AND action = 'import.company'",
+                workspace.getId()));
     }
 
     @Test
@@ -999,7 +1007,13 @@ class ImportServiceTest extends AbstractServiceTest {
     void personImportThreeIdenticalReplaysKeepCanonicalStateStable() {
         Company company = newCompany();
         Tag tag = newTag();
-        CustomFieldDefinition custom = customDefinition("person");
+        CustomFieldDefinition custom = customDefinition("person", "number");
+        User secondActor = memberWithPermissions(
+            "PERSON_CREATE", "PERSON_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
+        User thirdActor = memberWithPermissions(
+            "PERSON_CREATE", "PERSON_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
         String email = "stable-replay-" + unique() + "@example.test";
         ImportRequest request = req(
             List.of(
@@ -1015,8 +1029,8 @@ class ImportServiceTest extends AbstractServiceTest {
                 "Phone", "+1 202 555 0105",
                 "Company", company.getName(),
                 "Tags", tag.getName(),
-                "Custom", "stable")),
-            "fill_empty");
+                "Custom", "1.23456")),
+            "overwrite");
 
         ImportResult first = reviewAndCommitPersons(request);
         Person imported = personMapper.getPersonById(
@@ -1069,10 +1083,12 @@ class ImportServiceTest extends AbstractServiceTest {
                 imported.getId());
         int auditCountAfterFirst = rowCount(
             "SELECT COUNT(*) FROM audit_log "
-                + "WHERE action = 'import.person' AND actor_id = ?",
-            currentUser.getId());
+                + "WHERE workspace_id = ? AND action = 'import.person'",
+            workspace.getId());
 
+        authenticateAs(secondActor, workspace.getId());
         ImportResult second = reviewAndCommitPersons(request);
+        authenticateAs(thirdActor, workspace.getId());
         ImportResult third = reviewAndCommitPersons(request);
 
         assertEquals(1, first.getCreated());
@@ -1082,8 +1098,8 @@ class ImportServiceTest extends AbstractServiceTest {
             auditCountAfterFirst,
             rowCount(
                 "SELECT COUNT(*) FROM audit_log "
-                    + "WHERE action = 'import.person' AND actor_id = ?",
-                currentUser.getId()));
+                    + "WHERE workspace_id = ? AND action = 'import.person'",
+                workspace.getId()));
         assertEquals(
             recordAfterFirst,
             personSnapshot(workspace.getId(), imported.getId()));
@@ -1170,12 +1186,12 @@ class ImportServiceTest extends AbstractServiceTest {
         Company selectedDraft = new Company();
         selectedDraft.setName("Selected company " + unique());
         selectedDraft.setWebsite(
-            "https://selected-" + unique() + ".example.test");
+            "https://selected-" + unique() + ".test");
         Company selected = companyService.createCompany(selectedDraft);
         Company ownerDraft = new Company();
         ownerDraft.setName("Identity owner " + unique());
         ownerDraft.setWebsite(
-            "https://identity-owner-" + unique() + ".example.test");
+            "https://identity-owner-" + unique() + ".test");
         Company owner = companyService.createCompany(ownerDraft);
         ImportRequest request = req(
             List.of(
@@ -1200,7 +1216,88 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void manualImportsRejectIdentitiesOwnedBySharedRecords() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        workspaceMapper.addMember(
+            ownerWorkspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, ownerWorkspace.getId());
+        Person sharedPersonDraft = new Person();
+        sharedPersonDraft.setName("Shared identity person " + unique());
+        sharedPersonDraft.setEmail(
+            "shared-identity-" + unique() + "@example.test");
+        Person sharedPerson = personService.create(sharedPersonDraft);
+        Company sharedCompanyDraft = new Company();
+        sharedCompanyDraft.setName("Shared identity company " + unique());
+        sharedCompanyDraft.setWebsite(
+            "https://shared-identity-" + unique() + ".test");
+        Company sharedCompany =
+            companyService.createCompany(sharedCompanyDraft);
+        authenticateAs(currentUser, workspace.getId());
+        assertEquals(1, shareMapper.sharePerson(
+            sharedPerson.getId(),
+            ownerWorkspace.getId(),
+            workspace.getId(),
+            currentUser.getId(),
+            false));
+        assertEquals(1, shareMapper.shareCompany(
+            sharedCompany.getId(),
+            ownerWorkspace.getId(),
+            workspace.getId(),
+            currentUser.getId(),
+            false));
+        Person selectedPersonDraft = new Person();
+        selectedPersonDraft.setName("Selected identity person " + unique());
+        selectedPersonDraft.setEmail(
+            "selected-identity-" + unique() + "@example.test");
+        Person selectedPerson = personService.create(selectedPersonDraft);
+        Company selectedCompanyDraft = new Company();
+        selectedCompanyDraft.setName("Selected identity company " + unique());
+        selectedCompanyDraft.setWebsite(
+            "https://selected-identity-" + unique() + ".test");
+        Company selectedCompany =
+            companyService.createCompany(selectedCompanyDraft);
+
+        ImportResult personResult = reviewAndCommitPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of(
+                "Name", "Rejected shared identity person",
+                "Email", sharedPerson.getEmail())),
+            "overwrite",
+            Map.of(0, selectedPerson.getId())));
+        ImportResult companyResult = reviewAndCommitCompanies(req(
+            List.of(
+                map("Name", "name"),
+                map("Website", "website")),
+            List.of(Map.of(
+                "Name", "Rejected shared identity company",
+                "Website", sharedCompany.getWebsite())),
+            "overwrite",
+            Map.of(0, selectedCompany.getId())));
+
+        assertEquals(0, personResult.getUpdated());
+        assertEquals(1, personResult.getFailed().size());
+        assertTrue(personResult.getFailed().getFirst().getReason()
+            .contains("belongs to another contact"));
+        assertEquals(0, companyResult.getUpdated());
+        assertEquals(1, companyResult.getFailed().size());
+        assertTrue(companyResult.getFailed().getFirst().getReason()
+            .contains("belongs to another company"));
+        assertFalse(sharedPerson.getEmail().equals(
+            personMapper.getPersonById(
+                workspace.getId(), selectedPerson.getId()).getEmail()));
+        assertFalse(sharedCompany.getWebsite().equals(
+            companyMapper.getCompanyById(
+                workspace.getId(), selectedCompany.getId()).getWebsite()));
+    }
+
+    @Test
     void manualImportsRepairMissingCanonicalIdentitiesOnce() {
+        User replayActor = memberWithPermissions(
+            "PERSON_CREATE",
+            "PERSON_UPDATE",
+            "COMPANY_CREATE",
+            "COMPANY_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
         Person personDraft = new Person();
         personDraft.setName("Identity repair person " + unique());
         personDraft.setEmail(
@@ -1242,6 +1339,7 @@ class ImportServiceTest extends AbstractServiceTest {
             reviewAndCommitPersons(personRequest);
         ImportResult firstCompany =
             reviewAndCommitCompanies(companyRequest);
+        authenticateAs(replayActor, workspace.getId());
         ImportResult replayedPerson =
             reviewAndCommitPersons(personRequest);
         ImportResult replayedCompany =
@@ -1883,18 +1981,24 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void dealImportFailsClosedOnAmbiguousCompositeMatches() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
         String dealName = "Ambiguous composite " + unique();
         Deal first = new Deal();
         first.setWorkspaceId(workspace.getId());
         first.setOwnerId(currentUser.getId());
         first.setName(dealName);
         first.setCurrency("USD");
+        first.setPipelineId(pipeline.getId());
+        first.setStageId(stage.getId());
         dealMapper.insert(first);
         Deal second = new Deal();
         second.setWorkspaceId(workspace.getId());
         second.setOwnerId(currentUser.getId());
         second.setName(dealName);
         second.setCurrency("USD");
+        second.setPipelineId(pipeline.getId());
+        second.setStageId(stage.getId());
         dealMapper.insert(second);
 
         ImportPreviewResult preview = importService.previewDeals(req(
@@ -1905,6 +2009,50 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, preview.getInvalid());
         assertTrue(preview.getRows().getFirst().getErrors().getFirst()
             .contains("Multiple owned deals"));
+    }
+
+    @Test
+    void dealImportReplayUsesPersistedMoneyPrecision() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        User replayActor = memberWithPermissions(
+            "DEAL_CREATE", "DEAL_UPDATE");
+        authenticateAs(currentUser, workspace.getId());
+        String dealName = "Rounded replay " + unique();
+        ImportRequest request = req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Pipeline", "pipeline"),
+                map("Stage", "stage")),
+            List.of(Map.of(
+                "Deal", dealName,
+                "Value", "1.005",
+                "Pipeline", pipeline.getName(),
+                "Stage", stage.getName())),
+            "overwrite");
+
+        ImportResult first = reviewAndCommitDeals(request);
+        int auditCountAfterFirst = rowCount(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE workspace_id = ? AND action = 'import.deal'",
+            workspace.getId());
+        authenticateAs(replayActor, workspace.getId());
+        ImportResult replayed = reviewAndCommitDeals(request);
+        Deal imported = dealMapper.getAllDeals(workspace.getId()).stream()
+            .filter(deal -> dealName.equals(deal.getName()))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals(1, first.getCreated());
+        assertEquals(0, replayed.getUpdated());
+        assertEquals(1.01d, imported.getValue());
+        assertEquals(
+            auditCountAfterFirst,
+            rowCount(
+                "SELECT COUNT(*) FROM audit_log "
+                    + "WHERE workspace_id = ? AND action = 'import.deal'",
+                workspace.getId()));
     }
 
     @Test
@@ -2354,12 +2502,18 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     private CustomFieldDefinition customDefinition(String entityType) {
+        return customDefinition(entityType, "text");
+    }
+
+    private CustomFieldDefinition customDefinition(
+            String entityType,
+            String fieldType) {
         CustomFieldDefinition definition = new CustomFieldDefinition();
         definition.setWorkspaceId(workspace.getId());
         definition.setEntityType(entityType);
         definition.setFieldKey("import_guard_" + unique());
         definition.setLabel("Import guard " + unique());
-        definition.setFieldType("text");
+        definition.setFieldType(fieldType);
         customFieldDefinitionMapper.insert(definition);
         return definition;
     }

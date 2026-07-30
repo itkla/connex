@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -110,6 +111,8 @@ public class ImportService {
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
+    private static final int DEAL_VALUE_SCALE = 2;
+    private static final int CUSTOM_NUMBER_SCALE = 4;
 
     private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company");
     private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address");
@@ -351,6 +354,10 @@ public class ImportService {
                     }
                     if (!personIsProcessable(existing)) {
                         fail(row, "Linked contact #" + linked + " is unavailable");
+                        continue;
+                    }
+                    if (manualLinkConflicts(
+                            row, linked, "person", "contact")) {
                         continue;
                     }
                     markMatch(row, existing.getId(), existing.getName());
@@ -681,6 +688,10 @@ public class ImportService {
                         fail(row, "Linked company #" + linked + " not found");
                         continue;
                     }
+                    if (manualLinkConflicts(
+                            row, linked, "company", "company")) {
+                        continue;
+                    }
                     markMatch(row, existing.getId(), existing.getName());
                     continue;
                 }
@@ -916,6 +927,24 @@ public class ImportService {
         }
         markMatch(row, candidate.recordId(), candidate.name());
         row.automaticIdentityMatch = true;
+    }
+
+    private static boolean manualLinkConflicts(
+            PlanRow row,
+            int linkedId,
+            String recordType,
+            String entityLabel) {
+        boolean conflicts = row.duplicateCandidates.stream()
+            .filter(candidate -> recordType.equals(candidate.recordType()))
+            .filter(candidate ->
+                candidate.strength() == DuplicateMatchStrength.STRONG)
+            .anyMatch(candidate -> candidate.recordId() != linkedId);
+        if (conflicts) {
+            fail(
+                row,
+                "Supplied identity belongs to another " + entityLabel);
+        }
+        return conflicts;
     }
 
     private record CompanyDependencyReview(
@@ -1476,7 +1505,10 @@ public class ImportService {
         if (raw == null) return 0d;
         String cleaned = raw.replaceAll("[,\\s]", "");
         try {
-            return Double.parseDouble(cleaned);
+            double parsed = Double.parseDouble(cleaned);
+            return BigDecimal.valueOf(parsed)
+                .setScale(DEAL_VALUE_SCALE, RoundingMode.HALF_UP)
+                .doubleValue();
         } catch (NumberFormatException e) {
             return 0d;
         }
@@ -2032,7 +2064,9 @@ public class ImportService {
         }
         if (existing instanceof BigDecimal number) {
             try {
-                return number.compareTo(new BigDecimal(incoming)) == 0;
+                BigDecimal canonicalIncoming = new BigDecimal(incoming)
+                    .setScale(CUSTOM_NUMBER_SCALE, RoundingMode.HALF_UP);
+                return number.compareTo(canonicalIncoming) == 0;
             } catch (NumberFormatException exception) {
                 return false;
             }
