@@ -40,7 +40,7 @@ class InteractionHistoryImportMapperXmlTest {
             String sql = compact(boundSql.getSql());
 
             assertTrue(sql.contains("WHERE workspace_id = ?"));
-            assertTrue(sql.contains("history_import_key IN ( UNHEX(?) , UNHEX(?) )"));
+            assertTrue(sql.contains("history_import_key IN ( ? , ? )"));
             assertEquals(3, boundSql.getParameterMappings().size());
             assertFalse(resource(mapper).contains("${"));
         }
