@@ -131,4 +131,77 @@ class TenantRoutingDataSourceTest {
         routed.getAutoCommit();
         verify(connection).getAutoCommit();
     }
+
+    @Test
+    void controlCatalogScopeSwitchesAndRestoresTheTenantCatalog() throws SQLException {
+        tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
+        when(connection.getCatalog()).thenReturn(TENANT_CATALOG, DEFAULT_CATALOG);
+        ControlCatalogConnection routed =
+            (ControlCatalogConnection) dataSource.getConnection();
+
+        String previous = routed.enterControlCatalog();
+        routed.restoreCatalog(previous);
+
+        InOrder order = inOrder(connection);
+        order.verify(connection).setCatalog(TENANT_CATALOG);
+        order.verify(connection).getCatalog();
+        order.verify(connection).setCatalog(DEFAULT_CATALOG);
+        order.verify(connection).getCatalog();
+        order.verify(connection).setCatalog(TENANT_CATALOG);
+        verify(evictor, never()).accept(any());
+    }
+
+    @Test
+    void nestedControlCatalogScopesRestoreInStackOrder() throws SQLException {
+        tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
+        when(connection.getCatalog()).thenReturn(
+            TENANT_CATALOG,
+            DEFAULT_CATALOG,
+            DEFAULT_CATALOG,
+            DEFAULT_CATALOG);
+        ControlCatalogConnection routed =
+            (ControlCatalogConnection) dataSource.getConnection();
+
+        String outer = routed.enterControlCatalog();
+        String inner = routed.enterControlCatalog();
+        routed.restoreCatalog(inner);
+        routed.restoreCatalog(outer);
+
+        assertSame(TENANT_CATALOG, outer);
+        assertSame(DEFAULT_CATALOG, inner);
+        verify(connection, times(1)).setCatalog(DEFAULT_CATALOG);
+        verify(connection, times(2)).setCatalog(TENANT_CATALOG);
+        verify(evictor, never()).accept(any());
+    }
+
+    @Test
+    void controlCatalogSwitchFailureEvictsClosesAndPropagates() throws SQLException {
+        tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
+        when(connection.getCatalog()).thenReturn(TENANT_CATALOG);
+        ControlCatalogConnection routed =
+            (ControlCatalogConnection) dataSource.getConnection();
+        doThrow(new SQLException("control switch failed"))
+            .when(connection).setCatalog(DEFAULT_CATALOG);
+
+        assertThrows(SQLException.class, routed::enterControlCatalog);
+        InOrder order = inOrder(evictor, connection);
+        order.verify(evictor).accept(connection);
+        order.verify(connection).close();
+    }
+
+    @Test
+    void tenantCatalogRestoreFailureEvictsClosesAndPropagates() throws SQLException {
+        tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
+        when(connection.getCatalog()).thenReturn(TENANT_CATALOG, DEFAULT_CATALOG);
+        ControlCatalogConnection routed =
+            (ControlCatalogConnection) dataSource.getConnection();
+        String previous = routed.enterControlCatalog();
+        doThrow(new SQLException("tenant restore failed"))
+            .when(connection).setCatalog(TENANT_CATALOG);
+
+        assertThrows(SQLException.class, () -> routed.restoreCatalog(previous));
+        InOrder order = inOrder(evictor, connection);
+        order.verify(evictor).accept(connection);
+        order.verify(connection).close();
+    }
 }
