@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SourceType;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SubjectType;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.Totals;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
@@ -83,10 +84,14 @@ public class ScoringService {
     private static final int MAX_BATCH_CONTACTS = 1_000;
     private static final int MAX_BATCH_COMPANIES = 2_000;
     private static final int MAX_EVIDENCE_CONTRIBUTORS = 20;
+    private static final int MAX_EVIDENCE_SOURCES = 100_000;
     private static final int MINIMUM_CONFIDENT_CONTRIBUTORS = 3;
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private static final RelationshipEvidenceTotalsDto EMPTY_EVIDENCE_TOTALS =
+        new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0);
 
     /** A single timestamped, intent-weighted interaction. */
     private record Touch(long epochMillis, double weight) {}
@@ -143,6 +148,10 @@ public class ScoringService {
      *
      * <p>Only active-workspace activities, workspace-visible notes, and tasks are eligible.
      * Private-note disclosure is restricted to the current caller's own excluded notes.
+     *
+     * <p>Totals and the ranked contributors are two reads of the same capped source set inside one
+     * read-only transaction, so they share a snapshot and the returned rows always reconcile with
+     * the totals the score is derived from.
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto contactEvidence(int workspaceId, int personId, int currentUserId) {
@@ -151,13 +160,23 @@ public class ScoringService {
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
-        List<RelationshipEvidenceRowDto> rows = personMapper.getRelationshipEvidence(
+        RelationshipEvidenceTotalsDto totals = boundedTotals(personMapper.getRelationshipEvidenceTotals(
             workspaceId,
             personId,
             reference,
             WARMTH_MODEL.sqlParameters(),
-            MAX_EVIDENCE_CONTRIBUTORS
-        );
+            MAX_EVIDENCE_SOURCES + 1
+        ));
+        List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
+            ? List.of()
+            : personMapper.getRelationshipEvidenceContributors(
+                workspaceId,
+                personId,
+                reference,
+                WARMTH_MODEL.sqlParameters(),
+                MAX_EVIDENCE_SOURCES + 1,
+                MAX_EVIDENCE_CONTRIBUTORS
+            );
         int privateNotes = noteMapper.countOwnPrivateNotesForPersonEvidence(
             workspaceId, personId, currentUserId, reference);
         return evidence(
@@ -165,6 +184,7 @@ public class ScoringService {
             personId,
             asOf,
             AttributionRule.DIRECT_PERSON_TOUCHES,
+            totals,
             rows,
             privateNotes
         );
@@ -404,6 +424,10 @@ public class ScoringService {
      *
      * <p>Live company attribution uses each contact's present-day company plus the current company
      * of a linked deal, deduplicating a source when both links resolve to this company.
+     *
+     * <p>Totals and the ranked contributors are two reads of the same capped source set inside one
+     * read-only transaction, so they share a snapshot and the returned rows always reconcile with
+     * the totals the score is derived from.
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
@@ -413,13 +437,23 @@ public class ScoringService {
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
-        List<RelationshipEvidenceRowDto> rows = companyMapper.getRelationshipEvidence(
+        RelationshipEvidenceTotalsDto totals = boundedTotals(companyMapper.getRelationshipEvidenceTotals(
             workspaceId,
             companyId,
             reference,
             WARMTH_MODEL.sqlParameters(),
-            MAX_EVIDENCE_CONTRIBUTORS
-        );
+            MAX_EVIDENCE_SOURCES + 1
+        ));
+        List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
+            ? List.of()
+            : companyMapper.getRelationshipEvidenceContributors(
+                workspaceId,
+                companyId,
+                reference,
+                WARMTH_MODEL.sqlParameters(),
+                MAX_EVIDENCE_SOURCES + 1,
+                MAX_EVIDENCE_CONTRIBUTORS
+            );
         int privateNotes = noteMapper.countOwnPrivateNotesForCompanyEvidence(
             workspaceId, companyId, currentUserId, reference);
         return evidence(
@@ -427,6 +461,7 @@ public class ScoringService {
             companyId,
             asOf,
             AttributionRule.PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY,
+            totals,
             rows,
             privateNotes
         );
@@ -683,14 +718,33 @@ public class ScoringService {
         return did == null ? null : dealCompany.get(did);
     }
 
+    /**
+     * Rejects a record whose eligible source set exceeds {@link #MAX_EVIDENCE_SOURCES}, so one
+     * pathological history degrades into a fast, predictable refusal instead of an unbounded scan
+     * that holds a pooled connection. The statements bind the same ceiling, so a set at the ceiling
+     * is reported as one row over the limit and never as a silently truncated total.
+     */
+    private static RelationshipEvidenceTotalsDto boundedTotals(RelationshipEvidenceTotalsDto totals) {
+        if (totals == null) {
+            return EMPTY_EVIDENCE_TOTALS;
+        }
+        if (totals.contributorCount() > MAX_EVIDENCE_SOURCES) {
+            throw new BadRequestException(
+                "Relationship evidence supports at most " + MAX_EVIDENCE_SOURCES
+                    + " attributed sources for one record");
+        }
+        return totals;
+    }
+
     private RelationshipEvidenceDto evidence(
             SubjectType subjectType,
             int subjectId,
             Instant asOf,
             AttributionRule attributionRule,
+            RelationshipEvidenceTotalsDto total,
             List<RelationshipEvidenceRowDto> rows,
             int callerPrivateNotesExcluded) {
-        if (rows.isEmpty()) {
+        if (total.contributorCount() == 0) {
             return new RelationshipEvidenceDto(
                 subjectType,
                 subjectId,
@@ -708,7 +762,6 @@ public class ScoringService {
             );
         }
 
-        RelationshipEvidenceRowDto total = rows.getFirst();
         RelationshipScoreAggregateDto aggregate = new RelationshipScoreAggregateDto(
             subjectId,
             total.totalDecayedContribution(),
@@ -731,11 +784,11 @@ public class ScoringService {
         double returnedContribution = contributors.stream()
             .mapToDouble(Contributor::decayedContribution)
             .sum();
-        int omittedCount = Math.max(0, total.totalContributorCount() - contributors.size());
+        int omittedCount = Math.max(0, total.contributorCount() - contributors.size());
         double omittedContribution = Math.max(
             0.0, total.totalDecayedContribution() - returnedContribution);
         Totals totals = new Totals(
-            total.totalContributorCount(),
+            total.contributorCount(),
             contributors.size(),
             omittedCount,
             total.totalDecayedContribution(),
@@ -744,7 +797,7 @@ public class ScoringService {
             new SourceCounts(total.activityCount(), total.noteCount(), total.taskCount())
         );
         Coverage coverage = new Coverage(
-            total.totalContributorCount() < MINIMUM_CONFIDENT_CONTRIBUTORS,
+            total.contributorCount() < MINIMUM_CONFIDENT_CONTRIBUTORS,
             MINIMUM_CONFIDENT_CONTRIBUTORS,
             callerPrivateNotesExcluded,
             PrivateNoteCountScope.CURRENT_CALLER_ONLY

@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
 /**
- * Internal aggregate and ranked-source row used to assemble relationship evidence.
+ * One ranked source row backing a relationship score, bounded by the server's contributor limit.
  */
 public record RelationshipEvidenceRowDto(
     String sourceType,
@@ -9,14 +9,5 @@ public record RelationshipEvidenceRowDto(
     String interactionType,
     String occurredAt,
     double baseWeight,
-    double decayedContribution,
-    int totalContributorCount,
-    double totalDecayedContribution,
-    int activityCount,
-    int noteCount,
-    int taskCount,
-    double recentWeight,
-    double priorWeight,
-    String lastTouchAt,
-    int recentTouchCount
+    double decayedContribution
 ) {}

@@ -78,23 +78,34 @@
     ORDER BY p.name
   </select>
 
+  <!-- Normalized interaction type and model weight for one activity row, shared by the
+       workspace-wide aggregate and the subject-scoped evidence union so both read the same
+       attribution vocabulary. Requires the table aliased `a`. -->
+  <sql id="activityInteractionType">
+    CASE LOWER(a.type)
+      WHEN 'meeting' THEN 'meeting'
+      WHEN 'call' THEN 'call'
+      WHEN 'email' THEN 'email'
+      ELSE 'other'
+    END
+  </sql>
+
+  <sql id="activityBaseWeight">
+    CASE LOWER(a.type)
+      WHEN 'meeting' THEN #{model.meetingWeight}
+      WHEN 'call' THEN #{model.callWeight}
+      WHEN 'email' THEN #{model.emailWeight}
+      ELSE #{model.otherActivityWeight}
+    END
+  </sql>
+
   <sql id="relationshipTouchSources">
     SELECT a.person_id AS entity_id,
            'activity' AS source_type,
            a.id AS source_id,
-           CASE LOWER(a.type)
-             WHEN 'meeting' THEN 'meeting'
-             WHEN 'call' THEN 'call'
-             WHEN 'email' THEN 'email'
-             ELSE 'other'
-           END AS interaction_type,
+           <include refid="activityInteractionType"/> AS interaction_type,
            a.timestamp AS touched_at,
-           CASE LOWER(a.type)
-             WHEN 'meeting' THEN #{model.meetingWeight}
-             WHEN 'call' THEN #{model.callWeight}
-             WHEN 'email' THEN #{model.emailWeight}
-             ELSE #{model.otherActivityWeight}
-           END AS weight
+           <include refid="activityBaseWeight"/> AS weight
     FROM activity a
     WHERE a.workspace_id = #{workspaceId} AND a.person_id IS NOT NULL
     UNION ALL
@@ -116,6 +127,56 @@
            #{model.taskWeight} AS weight
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+  </sql>
+
+  <!-- Sources attributed to one contact, filtered inside every branch so the union stays
+       index-driven on that contact and can be capped by row count. A source links to at most one
+       contact, so the branches cannot produce the same source twice. -->
+  <sql id="personEvidenceSources">
+    SELECT 'activity' AS source_type,
+           a.id AS source_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId} AND a.person_id = #{personId}
+      AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+    UNION ALL
+    SELECT 'note' AS source_type,
+           n.id AS source_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND n.person_id = #{personId}
+      AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
+      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+  </sql>
+
+  <!-- Contact evidence reads the capped source set twice: once collapsed to totals, once ranked for
+       the returned contributors. Both bind the same #{sourceLimit}, so neither statement can scan or
+       rank more rows than the service allows. -->
+  <sql id="personEvidenceScope">
+    FROM (
+      <include refid="personEvidenceSources"/>
+      LIMIT #{sourceLimit}
+    ) source
+    WHERE EXISTS (
+      SELECT 1
+      FROM person p
+      WHERE p.id = #{personId}
+        AND <include refid="visible"/>
+        AND p.suspended_at IS NULL
+    )
   </sql>
 
   <select id="getPersonsForNetworkReport" resultMap="PersonResult">
@@ -159,75 +220,62 @@
     ORDER BY p.id
   </select>
 
-  <select id="getRelationshipEvidence"
-          resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto">
-    SELECT evidence.source_type,
-           evidence.source_id,
-           evidence.interaction_type,
-           DATE_FORMAT(evidence.touched_at, '%Y-%m-%d %H:%i:%s') AS occurred_at,
-           evidence.base_weight,
-           evidence.decayed_contribution,
-           evidence.total_contributor_count,
-           evidence.total_decayed_contribution,
-           evidence.activity_count,
-           evidence.note_count,
-           evidence.task_count,
-           evidence.recent_weight,
-           evidence.prior_weight,
-           DATE_FORMAT(evidence.last_touch_at, '%Y-%m-%d %H:%i:%s') AS last_touch_at,
-           evidence.recent_touch_count
+  <select id="getRelationshipEvidenceTotals" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto">
+    SELECT COUNT(*) AS contributor_count,
+           COALESCE(SUM(capped.base_weight
+             * POW(#{model.decayBase}, -capped.age_days / #{model.halfLifeDays})), 0.0)
+             AS total_decayed_contribution,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'activity' THEN 1 ELSE 0 END), 0)
+             AS activity_count,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'note' THEN 1 ELSE 0 END), 0)
+             AS note_count,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'task' THEN 1 ELSE 0 END), 0)
+             AS task_count,
+           COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                             THEN capped.base_weight ELSE 0.0 END), 0.0) AS recent_weight,
+           COALESCE(SUM(CASE WHEN capped.age_days &gt; #{model.recentWindowDays}
+                               AND capped.age_days &lt;= #{model.priorWindowDays}
+                             THEN capped.base_weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(capped.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                             THEN 1 ELSE 0 END), 0) AS recent_touch_count
     FROM (
-      SELECT scored.*,
-             COUNT(*) OVER () AS total_contributor_count,
-             SUM(scored.decayed_contribution) OVER () AS total_decayed_contribution,
-             SUM(CASE WHEN scored.source_type = 'activity' THEN 1 ELSE 0 END)
-               OVER () AS activity_count,
-             SUM(CASE WHEN scored.source_type = 'note' THEN 1 ELSE 0 END)
-               OVER () AS note_count,
-             SUM(CASE WHEN scored.source_type = 'task' THEN 1 ELSE 0 END)
-               OVER () AS task_count,
-             SUM(CASE WHEN scored.age_days &lt;= #{model.recentWindowDays}
-                      THEN scored.base_weight ELSE 0.0 END) OVER () AS recent_weight,
-             SUM(CASE WHEN scored.age_days &gt; #{model.recentWindowDays}
-                        AND scored.age_days &lt;= #{model.priorWindowDays}
-                      THEN scored.base_weight ELSE 0.0 END) OVER () AS prior_weight,
-             MAX(scored.touched_at) OVER () AS last_touch_at,
-             SUM(CASE WHEN scored.age_days &lt;= #{model.recentWindowDays}
-                      THEN 1 ELSE 0 END) OVER () AS recent_touch_count
-      FROM (
-        SELECT aged.*,
-               aged.base_weight
-                 * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
-                 AS decayed_contribution
-        FROM (
-          SELECT source.source_type,
-                 source.source_id,
-                 source.interaction_type,
-                 source.touched_at,
-                 source.weight AS base_weight,
-                 GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
-                     / #{model.microsecondsPerDay}) AS age_days
-          FROM (
-            <include refid="relationshipTouchSources"/>
-          ) source
-          WHERE source.entity_id = #{personId}
-            AND source.touched_at IS NOT NULL
-            AND source.touched_at &lt;= #{reference}
-            AND EXISTS (
-              SELECT 1
-              FROM person p
-              WHERE p.id = source.entity_id
-                AND <include refid="visible"/>
-                AND p.suspended_at IS NULL
-            )
-        ) aged
-      ) scored
-    ) evidence
-    ORDER BY evidence.decayed_contribution DESC,
-             evidence.touched_at DESC,
-             evidence.source_type,
-             evidence.source_id
+      SELECT source.source_type,
+             source.touched_at,
+             source.weight AS base_weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      <include refid="personEvidenceScope"/>
+    ) capped
+  </select>
+
+  <select id="getRelationshipEvidenceContributors" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto">
+    SELECT aged.source_type,
+           aged.source_id,
+           aged.interaction_type,
+           DATE_FORMAT(aged.touched_at, '%Y-%m-%d %H:%i:%s') AS occurred_at,
+           aged.base_weight,
+           aged.base_weight
+             * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
+             AS decayed_contribution
+    FROM (
+      SELECT source.source_type,
+             source.source_id,
+             source.interaction_type,
+             source.touched_at,
+             source.weight AS base_weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      <include refid="personEvidenceScope"/>
+    ) aged
+    ORDER BY decayed_contribution DESC,
+             aged.touched_at DESC,
+             aged.source_type,
+             aged.source_id
     LIMIT #{limit}
   </select>
 

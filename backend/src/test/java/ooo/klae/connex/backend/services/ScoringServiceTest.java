@@ -42,10 +42,12 @@ import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.PrivateNoteCountScope
 import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SourceType;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SubjectType;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -498,17 +500,18 @@ class ScoringServiceTest {
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         List<RelationshipEvidenceRowDto> rows = List.of(
             new RelationshipEvidenceRowDto(
-                "activity", 101, "meeting", "2026-06-29 12:00:00",
-                1.0, 0.99, 25, 5.0, 20, 3, 2,
-                4.0, 0.8, "2026-06-29 12:00:00", 20),
+                "activity", 101, "meeting", "2026-06-29 12:00:00", 1.0, 0.99),
             new RelationshipEvidenceRowDto(
-                "note", 102, "workspace-note", "2026-06-29 11:00:00",
-                0.4, 0.39, 25, 5.0, 20, 3, 2,
-                4.0, 0.8, "2026-06-29 12:00:00", 20)
+                "note", 102, "workspace-note", "2026-06-29 11:00:00", 0.4, 0.39)
         );
+        RelationshipEvidenceTotalsDto totals = new RelationshipEvidenceTotalsDto(
+            25, 5.0, 20, 3, 2, 4.0, 0.8, "2026-06-29 12:00:00", 20);
         when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
-        when(personMapper.getRelationshipEvidence(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 20
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(totals);
+        when(personMapper.getRelationshipEvidenceContributors(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20
         )).thenReturn(rows);
         when(noteMapper.countOwnPrivateNotesForPersonEvidence(WS, 7, 42, reference)).thenReturn(2);
         ScoringService service = new ScoringService(
@@ -544,9 +547,72 @@ class ScoringServiceTest {
         assertEquals(2, evidence.coverage().callerPrivateNotesExcluded());
         assertEquals(PrivateNoteCountScope.CURRENT_CALLER_ONLY,
             evidence.coverage().privateNoteCountScope());
-        verify(personMapper).getRelationshipEvidence(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 20);
+        verify(personMapper).getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
+        verify(personMapper).getRelationshipEvidenceContributors(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20);
         verify(noteMapper).countOwnPrivateNotesForPersonEvidence(WS, 7, 42, reference);
+    }
+
+    @Test
+    void contactEvidenceRefusesARecordWhoseEligibleSourcesExceedTheServerBound() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(
+            100_001, 5.0, 100_001, 0, 0, 4.0, 0.8, "2026-06-29 12:00:00", 20));
+        ScoringService service = new ScoringService(
+            personMapper,
+            mock(CompanyMapper.class),
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
+
+        verify(personMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+        verify(noteMapper, never()).countOwnPrivateNotesForPersonEvidence(
+            anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void companyEvidenceSkipsTheRankedReadWhenNoSourceIsEligible() {
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        Company company = new Company();
+        company.setId(10);
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(companyMapper.getRelationshipEvidenceTotals(
+            WS, 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
+        when(noteMapper.countOwnPrivateNotesForCompanyEvidence(WS, 10, 42, reference)).thenReturn(3);
+        ScoringService service = new ScoringService(
+            mock(PersonMapper.class),
+            companyMapper,
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        RelationshipEvidenceDto evidence = service.companyEvidence(WS, 10, 42);
+
+        assertEquals(0, evidence.totals().contributorCount());
+        assertEquals(0, evidence.contributors().size());
+        assertEquals("cold", evidence.temperature().getBand());
+        assertTrue(evidence.coverage().limitedEvidence());
+        assertEquals(3, evidence.coverage().callerPrivateNotesExcluded());
+        verify(companyMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
     }
 
     @Test

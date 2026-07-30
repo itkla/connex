@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
@@ -33,11 +34,18 @@ public interface CompanyMapper {
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
-    List<RelationshipEvidenceRowDto> getRelationshipEvidence(
+    RelationshipEvidenceTotalsDto getRelationshipEvidenceTotals(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
+            @Param("sourceLimit") int sourceLimit);
+    List<RelationshipEvidenceRowDto> getRelationshipEvidenceContributors(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId,
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model,
+            @Param("sourceLimit") int sourceLimit,
             @Param("limit") int limit);
     List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,

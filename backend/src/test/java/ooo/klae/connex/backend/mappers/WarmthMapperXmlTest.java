@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +33,7 @@ class WarmthMapperXmlTest {
             "personId", 11,
             "reference", reference,
             "model", RelationshipWarmthModel.current().sqlParameters(),
+            "sourceLimit", 100_001,
             "limit", 20
         );
         Map<String, Object> companyParameters = Map.of(
@@ -38,6 +41,7 @@ class WarmthMapperXmlTest {
             "companyId", 13,
             "reference", reference,
             "model", RelationshipWarmthModel.current().sqlParameters(),
+            "sourceLimit", 100_001,
             "limit", 20
         );
 
@@ -45,10 +49,14 @@ class WarmthMapperXmlTest {
             configuration, PersonMapper.class, "getRelationshipScoreAggregates", personParameters);
         String companyAggregate = sql(
             configuration, CompanyMapper.class, "getRelationshipScoreAggregates", companyParameters);
+        String personEvidenceTotals = sql(
+            configuration, PersonMapper.class, "getRelationshipEvidenceTotals", personParameters);
+        String companyEvidenceTotals = sql(
+            configuration, CompanyMapper.class, "getRelationshipEvidenceTotals", companyParameters);
         String personEvidence = sql(
-            configuration, PersonMapper.class, "getRelationshipEvidence", personParameters);
+            configuration, PersonMapper.class, "getRelationshipEvidenceContributors", personParameters);
         String companyEvidence = sql(
-            configuration, CompanyMapper.class, "getRelationshipEvidence", companyParameters);
+            configuration, CompanyMapper.class, "getRelationshipEvidenceContributors", companyParameters);
         String personPrivateNotes = sql(
             configuration,
             NoteMapper.class,
@@ -74,16 +82,59 @@ class WarmthMapperXmlTest {
 
         assertTrue(personAggregate.contains("POW(?, -touch.age_days / ?)"));
         assertTrue(companyAggregate.contains("POW(?, -touch.age_days / ?)"));
+        assertTrue(personEvidenceTotals.contains("POW(?, -capped.age_days / ?)"));
+        assertTrue(companyEvidenceTotals.contains("POW(?, -capped.age_days / ?)"));
         assertTrue(personEvidence.contains("POW(?, -aged.age_days / ?)"));
         assertTrue(companyEvidence.contains("POW(?, -aged.age_days / ?)"));
         assertTrue(personEvidence.contains("LIMIT ?"));
         assertTrue(companyEvidence.contains("LIMIT ?"));
         assertTrue(personEvidence.contains("n.visibility = 'workspace'"));
         assertTrue(companyEvidence.contains("n.visibility = 'workspace'"));
+        assertTrue(personEvidenceTotals.contains("n.visibility = 'workspace'"));
+        assertTrue(companyEvidenceTotals.contains("n.visibility = 'workspace'"));
         assertTrue(personPrivateNotes.contains("n.author_id = ?"));
         assertTrue(personPrivateNotes.contains("n.visibility = 'private'"));
         assertTrue(companyPrivateNotes.contains("n.author_id = ?"));
         assertTrue(companyPrivateNotes.contains("n.visibility = 'private'"));
+    }
+
+    @Test
+    void evidenceStatementsCapTheirSourceSetAndRunWithoutWindowAggregates() throws Exception {
+        Configuration configuration = configuration();
+        LocalDateTime reference = LocalDateTime.of(2026, 6, 30, 0, 0);
+        Map<String, Object> personParameters = Map.of(
+            "workspaceId", 7,
+            "personId", 11,
+            "reference", reference,
+            "model", RelationshipWarmthModel.current().sqlParameters(),
+            "sourceLimit", 100_001,
+            "limit", 20
+        );
+        Map<String, Object> companyParameters = Map.of(
+            "workspaceId", 7,
+            "companyId", 13,
+            "reference", reference,
+            "model", RelationshipWarmthModel.current().sqlParameters(),
+            "sourceLimit", 100_001,
+            "limit", 20
+        );
+
+        for (String statement : new String[] {
+                "getRelationshipEvidenceTotals",
+                "getRelationshipEvidenceContributors"}) {
+            String personSql = sql(configuration, PersonMapper.class, statement, personParameters);
+            String companySql = sql(configuration, CompanyMapper.class, statement, companyParameters);
+            assertFalse(personSql.contains("OVER ()"), statement + " still uses window aggregates");
+            assertFalse(companySql.contains("OVER ()"), statement + " still uses window aggregates");
+            assertTrue(personSql.contains("LIMIT ?"), statement + " does not cap its source set");
+            assertTrue(companySql.contains("LIMIT ?"), statement + " does not cap its source set");
+            assertEquals(10, timeout(configuration, PersonMapper.class, statement));
+            assertEquals(10, timeout(configuration, CompanyMapper.class, statement));
+        }
+    }
+
+    private static Integer timeout(Configuration configuration, Class<?> mapper, String statement) {
+        return configuration.getMappedStatement(mapper.getName() + "." + statement).getTimeout();
     }
 
     private Configuration configuration() throws Exception {
