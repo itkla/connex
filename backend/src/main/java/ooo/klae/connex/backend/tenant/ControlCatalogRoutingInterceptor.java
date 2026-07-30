@@ -57,6 +57,16 @@ public class ControlCatalogRoutingInterceptor implements Interceptor {
         Stream.of(MAPPERS + "AuditLogMapper", MAPPERS + "RoleMapper"))
         .collect(Collectors.toUnmodifiableSet());
 
+    /**
+     * Control-only statements that live in otherwise mixed-plane mapper
+     * namespaces.
+     */
+    public static final Set<String> CONTROL_CATALOG_STATEMENTS = Set.of(
+        MAPPERS + "NotificationMapper.getStateVersion",
+        MAPPERS + "NotificationMapper.bumpStateVersions",
+        MAPPERS + "NotificationMapper.lockRecipientMemberships",
+        MAPPERS + "NotificationMapper.findWorkspaceRecipientIds");
+
     private final TenantContext tenantContext;
     private final boolean routingEnabled;
 
@@ -103,8 +113,11 @@ public class ControlCatalogRoutingInterceptor implements Interceptor {
         return result;
     }
 
-    /** Whether the mapped statement belongs to a physically control-only mapper. */
+    /** Whether the mapped statement is physically control-plane-only. */
     boolean routesToControlCatalog(String statementId) {
+        if (CONTROL_CATALOG_STATEMENTS.contains(statementId)) {
+            return true;
+        }
         for (String namespace : CONTROL_CATALOG_NAMESPACES) {
             if (statementId.startsWith(namespace + ".")) {
                 return true;

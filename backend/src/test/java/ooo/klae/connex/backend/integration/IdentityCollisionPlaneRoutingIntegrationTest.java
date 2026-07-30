@@ -52,6 +52,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -76,6 +77,7 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private NotificationMapper notificationMapper;
     @Autowired private OrgPlacementMapper orgPlacementMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
@@ -155,6 +157,9 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
                     organizationId);
             }
             for (int userId : userIds) {
+                jdbcTemplate.update(
+                    "DELETE FROM notification_recipient_state WHERE recipient_id = ?",
+                    userId);
                 jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", userId);
             }
             return null;
@@ -283,6 +288,55 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
         assertEquals(defaultCatalog(), currentCatalog());
     }
 
+    @Test
+    void dedicatedPlacementRoutesMixedMapperControlStatements() throws SQLException {
+        ControlFixture fixture = newControlFixture("mixed-control");
+        String scratchCatalog = "cnx_identity_mixed_" + compactUuid();
+        scratchCatalogs.add(scratchCatalog);
+        createScratchCatalog(scratchCatalog);
+        insertPlacement(
+            fixture.organization().getId(),
+            "dedicated_database",
+            scratchCatalog);
+
+        tenantWorkScope.withWorkspacePlacement(
+            fixture.workspace().getId(),
+            (orgId, catalog) -> {
+                TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                transaction.executeWithoutResult(status -> {
+                    assertEquals(
+                        scratchCatalog,
+                        jdbcTemplate.queryForObject("SELECT DATABASE()", String.class));
+                    assertEquals(
+                        0L,
+                        notificationMapper.getStateVersion(fixture.user().getId()));
+                    assertEquals(
+                        1,
+                        notificationMapper.bumpStateVersions(
+                            List.of(fixture.user().getId())));
+                    assertEquals(
+                        1L,
+                        notificationMapper.getStateVersion(fixture.user().getId()));
+                    assertEquals(
+                        List.of(fixture.workspace().getId()),
+                        notificationMapper.lockRecipientMemberships(
+                            fixture.user().getId()));
+                    assertEquals(
+                        List.of(fixture.user().getId()),
+                        notificationMapper.findWorkspaceRecipientIds(
+                            fixture.workspace().getId()));
+                    assertEquals(
+                        scratchCatalog,
+                        jdbcTemplate.queryForObject("SELECT DATABASE()", String.class));
+                });
+                return null;
+            });
+
+        assertFalse(tableExists(scratchCatalog, "notification_recipient_state"));
+        assertFalse(tableExists(scratchCatalog, "workspace_member"));
+        assertEquals(defaultCatalog(), currentCatalog());
+    }
+
     private void prepareDedicatedCollision(
             ControlFixture fixture,
             String scratchCatalog) {
@@ -305,11 +359,6 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
             decoys.get(1).getId(),
             "Routed Beta",
             "routed@example.com");
-        jdbcTemplate.update(
-            "INSERT INTO `" + identifier(scratchCatalog)
-                + "`.workspace_member (workspace_id, user_id, role, status) VALUES (?, ?, 'member', 'active')",
-            fixture.workspace().getId(),
-            fixture.user().getId());
         insertPlacement(fixture.organization().getId(), "dedicated_database", scratchCatalog);
 
         tenantWorkScope.withWorkspacePlacement(
@@ -433,8 +482,7 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
                 "company",
                 "person_identity",
                 "company_identity",
-                "identity_collision",
-                "workspace_member")) {
+                "identity_collision")) {
             jdbcTemplate.execute(
                 "CREATE TABLE `" + scratch + "`.`" + table
                     + "` LIKE `" + source + "`.`" + table + "`");

@@ -90,13 +90,23 @@ class MapperPlaneArchTest {
 
     @Test
     void controlCatalogRoutingRegistryIsExactAndPhysicallyControlOnly() throws IOException {
-        Set<String> expected = Stream.concat(
+        Set<String> expectedNamespaces = Stream.concat(
             TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.stream(),
             Stream.of(
                 "ooo.klae.connex.backend.mappers.AuditLogMapper",
                 "ooo.klae.connex.backend.mappers.RoleMapper"))
             .collect(Collectors.toUnmodifiableSet());
-        assertEquals(expected, ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES);
+        assertEquals(
+            expectedNamespaces,
+            ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES);
+        Set<String> expectedStatements = Set.of(
+            "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientMemberships",
+            "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceRecipientIds");
+        assertEquals(
+            expectedStatements,
+            ControlCatalogRoutingInterceptor.CONTROL_CATALOG_STATEMENTS);
 
         List<String> tenantReferences = new ArrayList<>();
         for (String namespace : ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES) {
@@ -105,8 +115,25 @@ class MapperPlaneArchTest {
                 tenantReferences.add(mapper + " -> " + table);
             }
         }
+        for (String statementId : ControlCatalogRoutingInterceptor.CONTROL_CATALOG_STATEMENTS) {
+            int statementSeparator = statementId.lastIndexOf('.');
+            String mapper = statementId.substring(
+                statementId.lastIndexOf('.', statementSeparator - 1) + 1,
+                statementSeparator);
+            String statement = statementId.substring(statementSeparator + 1);
+            String statementXml = statementXml(mapper, statement);
+            assertFalse(
+                statementXml.contains("<include"),
+                "Explicitly routed control statement must not contain unexpanded SQL fragments: "
+                    + statementId);
+            for (String table : tableReferences(
+                    statementXml,
+                    TablePlaneRegistry.ORG_DATA_TABLES)) {
+                tenantReferences.add(mapper + "." + statement + " -> " + table);
+            }
+        }
         assertTrue(tenantReferences.isEmpty(),
-            "Control-catalog routing may contain only physically control-plane mappers: "
+            "Control-catalog routing may contain only physically control-plane SQL: "
                 + tenantReferences);
     }
 
@@ -121,15 +148,32 @@ class MapperPlaneArchTest {
 
     private Set<String> crossPlaneReferences(String mapper, Set<String> otherPlane) throws IOException {
         String xml = mapperXml(mapper).replaceAll("(?s)<!--.*?-->", "");
+        return tableReferences(xml, otherPlane);
+    }
+
+    private Set<String> tableReferences(String xml, Set<String> tables) {
         Set<String> crossings = new java.util.TreeSet<>();
         Matcher matcher = TABLE_TOKEN.matcher(xml);
         while (matcher.find()) {
             String table = matcher.group(1);
-            if (otherPlane.contains(table)) {
+            if (tables.contains(table)) {
                 crossings.add(table);
             }
         }
         return crossings;
+    }
+
+    private String statementXml(String mapper, String statement) throws IOException {
+        String xml = mapperXml(mapper).replaceAll("(?s)<!--.*?-->", "");
+        Pattern pattern = Pattern.compile(
+            "(?s)<(select|insert|update|delete)\\b"
+                + "(?=[^>]*\\bid\\s*=\\s*\"" + Pattern.quote(statement) + "\")"
+                + "[^>]*>.*?</\\1>");
+        Matcher matcher = pattern.matcher(xml);
+        assertTrue(
+            matcher.find(),
+            "Mapped statement not found: " + mapper + "." + statement);
+        return matcher.group();
     }
 
     private String mapperXml(String mapper) throws IOException {

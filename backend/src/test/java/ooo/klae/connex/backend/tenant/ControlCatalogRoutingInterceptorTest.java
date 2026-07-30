@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -128,6 +129,37 @@ class ControlCatalogRoutingInterceptorTest {
         assertTrue(interceptor.routesToControlCatalog(
             "ooo.klae.connex.backend.mappers.RoleMapper.findPermissions"));
         assertFalse(interceptor.routesToControlCatalog(TENANT_STATEMENT));
+    }
+
+    @Test
+    void routesControlOnlyStatementsFromMixedMapper() throws Throwable {
+        ControlCatalogRoutingInterceptor interceptor =
+            new ControlCatalogRoutingInterceptor(tenantContext, true);
+        Object parameter = new Object();
+        when(executor.getTransaction()).thenReturn(transaction);
+        when(transaction.getConnection()).thenReturn(connection);
+        when(connection.enterControlCatalog()).thenReturn(TENANT_CATALOG);
+        when(executor.update(statement, parameter)).thenReturn(4);
+
+        for (String statementId : java.util.List.of(
+                "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
+                "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions",
+                "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientMemberships",
+                "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceRecipientIds")) {
+            when(statement.getId()).thenReturn(statementId);
+
+            assertEquals(
+                4,
+                interceptor.intercept(
+                    new Invocation(
+                        executor,
+                        UPDATE_METHOD,
+                        new Object[] { statement, parameter })));
+        }
+
+        verify(connection, times(4)).enterControlCatalog();
+        verify(executor, times(4)).update(statement, parameter);
+        verify(connection, times(4)).restoreCatalog(TENANT_CATALOG);
     }
 
     @Test
