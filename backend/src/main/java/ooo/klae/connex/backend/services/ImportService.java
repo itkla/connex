@@ -249,9 +249,10 @@ public class ImportService {
             if (email != null) {
                 applyIdentityMatch(row, byEmail.get(email), "contacts");
             } else {
-                applyFallbackPersonEmailMatch(
-                    row,
-                    byFallbackEmail.get(fallbackEmailKey(row.std.get("email"))));
+                String fallbackEmail = fallbackEmailKey(row.std.get("email"));
+                if (fallbackEmail != null) {
+                    applyFallbackPersonEmailMatch(row, byFallbackEmail.get(fallbackEmail));
+                }
             }
         }
         dedupeWithinFile(
