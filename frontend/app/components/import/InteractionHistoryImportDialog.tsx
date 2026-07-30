@@ -23,6 +23,7 @@ import {
     buildHistoryImportMapping,
     historyImportFields,
     historyImportMappingIsComplete,
+    historyImportReviewPage,
     suggestHistoryImportField,
 } from "@/app/lib/interaction-history-import";
 import { toastError, toastSuccess } from "@/app/lib/toast";
@@ -49,6 +50,13 @@ import {
     ResponsiveDialogHeader,
     ResponsiveDialogTitle,
 } from "@/components/ui/responsive-dialog";
+import {
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationNext,
+    PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
     Select,
     SelectContent,
@@ -227,6 +235,12 @@ export default function InteractionHistoryImportDialog({
                 setParseError(t("errors.tooManyRows", { count: csv.rows.length }));
                 return;
             }
+            setLinks({});
+            setLinkLabels({});
+            setPreview(null);
+            setResult(null);
+            setReviewedKey(null);
+            setReviewProof(null);
             setParsed(csv);
             initializeTargets(csv, kind);
             setStep("map");
@@ -388,6 +402,7 @@ export default function InteractionHistoryImportDialog({
                     )}
                     {step === "review" && preview && (
                         <ReviewStep
+                            key={reviewedKey ?? "review"}
                             preview={preview}
                             stale={reviewStale}
                             links={links}
@@ -517,7 +532,7 @@ function UploadStep({
 
             <label
                 className={cn(
-                    "flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-muted/30 px-5 text-center transition-colors hover:bg-muted/50",
+                    "flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-muted/30 px-5 text-center transition-colors hover:bg-muted/50 has-[:focus-visible]:border-ring has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
                     dragActive && "border-brand bg-brand/5",
                 )}
                 onDragEnter={() => onDragActive(true)}
@@ -635,16 +650,18 @@ function ReviewStep({
     onUnlink: (rowIndex: number) => void;
 }) {
     const t = useTranslations("importExport.history");
-    const attention = preview.rows.filter((row) =>
-        row.status === "needs_review" || row.status === "invalid",
+    const [page, setPage] = useState(1);
+    const pageSummaryRef = useRef<HTMLParagraphElement>(null);
+    const reviewPage = useMemo(
+        () => historyImportReviewPage(preview.rows, page),
+        [page, preview.rows],
     );
-    const settled = preview.rows.filter((row) =>
-        row.status === "ready" || row.status === "already_imported",
-    );
-    const shown = [
-        ...attention,
-        ...settled.slice(0, Math.max(0, 100 - attention.length)),
-    ].sort((left, right) => left.rowIndex - right.rowIndex);
+
+    function goToPage(nextPage: number) {
+        setPage(nextPage);
+        window.requestAnimationFrame(() => pageSummaryRef.current?.focus());
+    }
+
     return (
         <div className="space-y-5">
             {stale && (
@@ -659,13 +676,22 @@ function ReviewStep({
                 <ReviewCount label={t("counts.invalid")} value={preview.invalid} destructive />
             </div>
 
-            {shown.length > 0 && (
+            {reviewPage.rows.length > 0 && (
                 <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                        {t("reviewRows", { shown: shown.length, total: preview.rows.length })}
+                    <p
+                        ref={pageSummaryRef}
+                        className="text-xs text-muted-foreground focus:outline-none"
+                        tabIndex={-1}
+                        aria-live="polite"
+                    >
+                        {t("reviewRows", {
+                            from: reviewPage.from,
+                            to: reviewPage.to,
+                            total: preview.rows.length,
+                        })}
                     </p>
                     <ul className="space-y-2">
-                        {shown.map((row) => (
+                        {reviewPage.rows.map((row) => (
                             <li key={row.rowIndex} className="space-y-3 rounded-xl border border-border bg-card p-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0 space-y-1">
@@ -706,6 +732,37 @@ function ReviewStep({
                             </li>
                         ))}
                     </ul>
+                    {reviewPage.pageCount > 1 && (
+                        <Pagination
+                            className="justify-end pt-2"
+                            aria-label={t("reviewPagination")}
+                        >
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        disabled={reviewPage.page === 1}
+                                        onClick={() => goToPage(reviewPage.page - 1)}
+                                        aria-label={t("previousPage")}
+                                    />
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <span className="px-2 text-xs text-muted-foreground">
+                                        {t("reviewPage", {
+                                            page: reviewPage.page,
+                                            pages: reviewPage.pageCount,
+                                        })}
+                                    </span>
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <PaginationNext
+                                        disabled={reviewPage.page === reviewPage.pageCount}
+                                        onClick={() => goToPage(reviewPage.page + 1)}
+                                        aria-label={t("nextPage")}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    )}
                 </div>
             )}
         </div>

@@ -186,7 +186,11 @@
         "needs_review": "要確認",
         "invalid": "無効"
       },
-      "reviewRows": "確認した{total}行のうち{shown}行を表示しています。",
+      "reviewRows": "{total}行中{from}〜{to}行を表示しています。",
+      "reviewPagination": "確認行のページ",
+      "reviewPage": "{pages}ページ中{page}ページ目",
+      "previousPage": "前の確認行",
+      "nextPage": "次の確認行",
       "matchedContact": "{name}に一致",
       "candidateLabel": "参加者の完全一致候補",
       "evidence": {

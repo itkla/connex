@@ -186,7 +186,11 @@
         "needs_review": "Needs review",
         "invalid": "Invalid"
       },
-      "reviewRows": "Showing {shown} of {total} reviewed rows.",
+      "reviewRows": "Showing rows {from}–{to} of {total}.",
+      "reviewPagination": "Review rows",
+      "reviewPage": "Page {page} of {pages}",
+      "previousPage": "Previous review rows",
+      "nextPage": "Next review rows",
       "matchedContact": "Matched to {name}",
       "candidateLabel": "Exact participant matches",
       "evidence": {

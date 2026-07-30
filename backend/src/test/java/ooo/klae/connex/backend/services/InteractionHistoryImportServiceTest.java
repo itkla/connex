@@ -397,6 +397,40 @@ class InteractionHistoryImportServiceTest {
     }
 
     @Test
+    void sourceLessOccurrenceKeysStayStableAcrossProgressiveManualReview() {
+        HistoryImportRequest first = sourceLessDuplicateRequest();
+        DuplicatePreflightResponse unresolved = response(List.of(), false);
+        DuplicatePreflightResponse matched = strongResponse(PERSON_ID);
+
+        queuePreview(List.of(unresolved, matched), PROOF);
+        HistoryImportPreviewResult firstPreview = service.previewActivities(first);
+        assertEquals(1, firstPreview.toCreate());
+        assertEquals(1, firstPreview.needsReview());
+
+        first.setDuplicateReviewProof(PROOF);
+        queueCommit(List.of(unresolved, matched));
+        HistoryImportResult firstResult = service.commitActivities(first);
+        assertEquals(1, firstResult.created());
+
+        HistoryImportRequest second = sourceLessDuplicateRequest();
+        second.setLinks(Map.of(0, PERSON_ID));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(PERSON_ID)))
+            .thenReturn(List.of(person(PERSON_ID, WORKSPACE_ID)));
+        queuePreview(List.of(unresolved, matched), PROOF);
+
+        HistoryImportPreviewResult secondPreview = service.previewActivities(second);
+
+        assertEquals(1, secondPreview.toCreate());
+        assertEquals(1, secondPreview.alreadyImported());
+        second.setDuplicateReviewProof(PROOF);
+        queueCommit(List.of(unresolved, matched));
+        HistoryImportResult secondResult = service.commitActivities(second);
+        assertEquals(1, secondResult.created());
+        assertEquals(1, secondResult.skipped());
+        assertEquals(2, activityWrites.size());
+    }
+
+    @Test
     void proofContextChangesWithRawRowsAndAClaimCannotBeReused() {
         HistoryImportRequest request = activityRequest(
             "proof-source", "Original", "2026-01-01T00:00:00Z");
@@ -499,6 +533,15 @@ class InteractionHistoryImportServiceTest {
         request.setDuplicateReviewProof(PROOF);
         queueCommit(List.of(response));
         return service.commitActivities(request);
+    }
+
+    private static HistoryImportRequest sourceLessDuplicateRequest() {
+        HistoryImportRequest request = activityRequest(
+            null, "Repeated event", "2026-01-01T00:00:00Z");
+        request.setRows(List.of(
+            request.getRows().getFirst(),
+            new LinkedHashMap<>(request.getRows().getFirst())));
+        return request;
     }
 
     private HistoryImportResult previewAndCommitNote(

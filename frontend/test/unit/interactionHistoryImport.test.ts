@@ -4,8 +4,10 @@ import {
     buildHistoryImportMapping,
     historyImportFields,
     historyImportMappingIsComplete,
+    historyImportReviewPage,
     suggestHistoryImportField,
 } from "@/app/lib/interaction-history-import";
+import type { HistoryImportRowAnalysis } from "@/app/lib/types";
 
 describe("interaction history import mapping", () => {
     it("offers common and kind-specific fields", () => {
@@ -61,5 +63,27 @@ describe("interaction history import mapping", () => {
             { column: "third", field: "occurredAt" },
             { column: "fourth", field: "description" },
         ]);
+    });
+
+    it("bounds review pages while keeping every attention row reachable", () => {
+        const rows: HistoryImportRowAnalysis[] = Array.from(
+            { length: 5000 },
+            (_, rowIndex) => ({
+                rowIndex,
+                status: "needs_review",
+            }),
+        );
+        const seen = new Set<number>();
+
+        for (let page = 1; page <= 50; page++) {
+            const result = historyImportReviewPage(rows, page);
+            expect(result.rows).toHaveLength(100);
+            expect(result.page).toBe(page);
+            result.rows.forEach((row) => seen.add(row.rowIndex));
+        }
+
+        expect(seen.size).toBe(5000);
+        expect(historyImportReviewPage(rows, 0).page).toBe(1);
+        expect(historyImportReviewPage(rows, 51).page).toBe(50);
     });
 });

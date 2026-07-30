@@ -420,8 +420,23 @@ class NotificationReconciliationServiceTest {
     /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */
     private static DealRiskService noRiskService() {
         DealRiskService mock = Mockito.mock(DealRiskService.class);
-        when(mock.assessWorkspace(anyInt(), any())).thenReturn(List.of());
+        when(mock.assessWorkspaceNotificationStates(anyInt(), any(), any()))
+            .thenReturn(List.of());
         return mock;
+    }
+
+    private static DealRiskService.NotificationRiskState riskState(DealRiskDto risk) {
+        return riskState(
+            risk,
+            Integer.toHexString(risk.getDealId()).repeat(64).substring(0, 64));
+    }
+
+    private static DealRiskService.NotificationRiskState riskState(
+            DealRiskDto risk,
+            String sourceStateHash) {
+        return new DealRiskService.NotificationRiskState(
+            risk,
+            sourceStateHash);
     }
 
     private static NotificationStateVersionService stateVersions(NotificationMapper notificationMapper) {
@@ -452,7 +467,8 @@ class NotificationReconciliationServiceTest {
         DealRiskDto low = new DealRiskDto(102, 0.0, null, "low", 10,
             List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(high, low));
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(List.of(riskState(high), riskState(low)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
             recipient(102, "Beta deal", 42)));
@@ -494,7 +510,8 @@ class NotificationReconciliationServiceTest {
         service.reconcileWorkspace(7, true);
 
         verify(dealRiskService, never()).assessWorkspace(anyInt());
-        verify(dealRiskService, never()).assessWorkspace(anyInt(), any());
+        verify(dealRiskService, never())
+            .assessWorkspaceNotificationStates(anyInt(), any(), any());
     }
 
     @Test
@@ -508,7 +525,8 @@ class NotificationReconciliationServiceTest {
         DealRiskDto medium = new DealRiskDto(101, 0.0, null, "medium", 25,
             List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 40))),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(medium));
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(List.of(riskState(medium)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
             recipient(101, "Acme renewal", 43)));
@@ -543,8 +561,18 @@ class NotificationReconciliationServiceTest {
         optOut.setEnabled(false);
 
         when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of(optOut));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, 0.0, null, "high", 60,
-            List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))), "2026-06-23 15:30:00")));
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(List.of(riskState(new DealRiskDto(
+                101,
+                0.0,
+                null,
+                "high",
+                60,
+                List.of(new DealRiskFactor(
+                    "close_overdue",
+                    "high",
+                    Map.of("daysOverdue", 22L))),
+                "2026-06-23 15:30:00"))));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(recipient(101, "Acme renewal", 42)));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
@@ -569,7 +597,8 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
 
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of());
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(List.of());
         when(notificationMapper.resolveReminder(
             7, 42, 202, "2026-06-23 15:30:00")).thenReturn(1);
 
@@ -747,7 +776,8 @@ class NotificationReconciliationServiceTest {
         verify(dispatcher).dispatch(captor.capture());
         assertEquals(NotificationReconciliationService.TASK_TYPE, captor.getValue().getType());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
-        verify(dealRiskService, never()).assessWorkspace(anyInt(), any());
+        verify(dealRiskService, never())
+            .assessWorkspaceNotificationStates(anyInt(), any(), any());
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
     }
 
@@ -762,7 +792,8 @@ class NotificationReconciliationServiceTest {
         Notification existing = reminderNotification(
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenThrow(new IllegalStateException("risk engine down"));
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenThrow(new IllegalStateException("risk engine down"));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, Mockito.mock(DuplicateDecisionLockService.class),
@@ -801,7 +832,8 @@ class NotificationReconciliationServiceTest {
             dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
-        verify(dealRiskService, never()).assessWorkspace(anyInt(), any());
+        verify(dealRiskService, never())
+            .assessWorkspaceNotificationStates(anyInt(), any(), any());
         verify(notificationMapper).resolveReminder(7, 42, 55, "2026-06-23 15:30:00");
         verify(notificationMapper).resolveReminder(7, 42, 202, "2026-06-23 15:30:00");
     }
@@ -825,8 +857,18 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, 0.0, null, "high", 60,
-            List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))), "2026-06-23 15:30:00")));
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(List.of(riskState(new DealRiskDto(
+                101,
+                0.0,
+                null,
+                "high",
+                60,
+                List.of(new DealRiskFactor(
+                    "close_overdue",
+                    "high",
+                    Map.of("daysOverdue", 22L))),
+                "2026-06-23 15:30:00"))));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(new AbstractList<>() {
             @Override
             public OpenDealRecipient get(int index) {
@@ -926,6 +968,180 @@ class NotificationReconciliationServiceTest {
             anyInt(), anyInt(), anyInt(), anyString());
         assertEquals("2026-06-20 10:00:00", existing.getReadAt());
         assertEquals("2026-06-21 10:00:00", existing.getDismissedAt());
+    }
+
+    @Test
+    void clockOnlyTaskSeverityChangeKeepsHistoricalBaselineSuppressed() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDelivery notificationDelivery = Mockito.mock(NotificationDelivery.class);
+        Clock dueSoon = Clock.fixed(
+            Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+        Clock overdue = Clock.fixed(
+            Instant.parse("2026-06-24T15:30:00Z"), ZoneOffset.UTC);
+        when(notificationMapper.findTaskReminderCandidates(7))
+            .thenReturn(List.of(taskCandidate()));
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        when(scoringService.scoreContactsExcludingHistoryImports(
+                eq(7), any(Instant.class), any(), any(), any()))
+            .thenReturn(List.of());
+        NotificationReconciliationService dueSoonService = baselineService(
+            notificationMapper,
+            preferenceMapper,
+            notificationDelivery,
+            scoringService,
+            dueSoon);
+        NotificationReconciliationService overdueService = baselineService(
+            notificationMapper,
+            preferenceMapper,
+            notificationDelivery,
+            scoringService,
+            overdue);
+        NotificationReconciliationService.HistoricalExpectation dueSoonExpectation =
+            dueSoonService.historicalExpectationSnapshot(7, dueSoon.instant())
+                .expectations().values().iterator().next();
+        NotificationReconciliationService.HistoricalExpectation overdueExpectation =
+            overdueService.historicalExpectationSnapshot(7, overdue.instant())
+                .expectations().values().iterator().next();
+        HistoricalNotificationBaseline baseline =
+            baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
+        baseline.setSourceStateHash(dueSoonExpectation.sourceStateHash());
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(baseline));
+
+        overdueService.reconcileWorkspace(7, false);
+
+        assertEquals("warning", dueSoonExpectation.severity());
+        assertEquals("critical", overdueExpectation.severity());
+        assertEquals(
+            dueSoonExpectation.sourceStateHash(),
+            overdueExpectation.sourceStateHash());
+        verify(notificationDelivery, never()).deliver(any());
+        verify(notificationMapper, never()).deleteHistoricalNotificationBaselines(
+            anyInt(), anyList());
+    }
+
+    @Test
+    void clockOnlyRelationshipPriorityChangeKeepsHistoricalSourceStateStable() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        RelationshipNudgeCandidate candidate = nudgeCandidate();
+        candidate.setExpectedCloseDate("2026-07-15");
+        when(notificationMapper.findRelationshipNudgeCandidates(7))
+            .thenReturn(List.of(candidate));
+        RelationshipTemperatureDto temperature = new RelationshipTemperatureDto(
+            9,
+            28,
+            "cool",
+            "cooling",
+            "2026-05-10 09:00:00",
+            44,
+            1,
+            null,
+            null,
+            "test-model",
+            Instant.EPOCH);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        when(scoringService.scoreContactsExcludingHistoryImports(
+                eq(7), any(Instant.class), any(), any(), any()))
+            .thenReturn(List.of(temperature));
+        Clock beforeClosingSoon = Clock.fixed(
+            Instant.parse("2026-06-30T15:30:00Z"), ZoneOffset.UTC);
+        Clock closingSoon = Clock.fixed(
+            Instant.parse("2026-07-01T15:30:00Z"), ZoneOffset.UTC);
+
+        NotificationReconciliationService.HistoricalExpectation before =
+            baselineService(
+                notificationMapper,
+                Mockito.mock(PreferenceMapper.class),
+                Mockito.mock(NotificationDelivery.class),
+                scoringService,
+                beforeClosingSoon)
+                .historicalExpectationSnapshot(7, beforeClosingSoon.instant())
+                .expectations().values().iterator().next();
+        NotificationReconciliationService.HistoricalExpectation after =
+            baselineService(
+                notificationMapper,
+                Mockito.mock(PreferenceMapper.class),
+                Mockito.mock(NotificationDelivery.class),
+                scoringService,
+                closingSoon)
+                .historicalExpectationSnapshot(7, closingSoon.instant())
+                .expectations().values().iterator().next();
+
+        assertEquals(before.sourceStateHash(), after.sourceStateHash());
+    }
+
+    @Test
+    void clockOnlyDealRiskBandChangeKeepsHistoricalBaselineSuppressed() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        NotificationDelivery notificationDelivery = Mockito.mock(NotificationDelivery.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        String sourceStateHash = "d".repeat(64);
+        DealRiskDto high = new DealRiskDto(
+            101,
+            0.0,
+            null,
+            "high",
+            60,
+            List.of(new DealRiskFactor(
+                "close_overdue",
+                "high",
+                Map.of("daysOverdue", 22L))),
+            "2026-06-23 15:30:00");
+        DealRiskDto medium = new DealRiskDto(
+            101,
+            0.0,
+            null,
+            "medium",
+            25,
+            List.of(new DealRiskFactor(
+                "stalled",
+                "medium",
+                Map.of("daysSinceTouch", 30))),
+            "2026-06-24 15:30:00");
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(
+                List.of(riskState(high, sourceStateHash)),
+                List.of(riskState(medium, sourceStateHash)));
+        when(notificationMapper.findOpenDealRecipients(7))
+            .thenReturn(List.of(recipient(101, "Acme renewal", 42)));
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        when(scoringService.scoreContactsExcludingHistoryImports(
+                eq(7), any(Instant.class), any(), any(), any()))
+            .thenReturn(List.of());
+        when(scoringService.scoreContacts(eq(7), any(Instant.class)))
+            .thenReturn(List.of());
+        Clock clock = Clock.fixed(
+            Instant.parse("2026-06-24T15:30:00Z"), ZoneOffset.UTC);
+        NotificationReconciliationService service =
+            new NotificationReconciliationService(
+                notificationMapper,
+                Mockito.mock(DuplicateDecisionLockService.class),
+                Mockito.mock(PreferenceMapper.class),
+                notificationDelivery,
+                stateVersions(notificationMapper),
+                new NotificationProperties(),
+                scoringService,
+                Mockito.mock(IntroductionService.class),
+                dealRiskService,
+                clock,
+                new ObjectMapper());
+        NotificationReconciliationService.HistoricalExpectation initial =
+            service.historicalExpectationSnapshot(7, clock.instant())
+                .expectations().values().iterator().next();
+        HistoricalNotificationBaseline baseline = baseline(
+            NotificationReconciliationService.DEAL_RISK_TYPE,
+            "critical",
+            "deal.risk:101");
+        baseline.setSourceStateHash(initial.sourceStateHash());
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(baseline));
+
+        service.reconcileWorkspace(7, true);
+
+        verify(notificationDelivery, never()).deliver(any());
+        verify(notificationMapper, never()).deleteHistoricalNotificationBaselines(
+            anyInt(), anyList());
     }
 
     @Test
@@ -1061,6 +1277,11 @@ class NotificationReconciliationServiceTest {
                     "task.due", "critical"),
                 created, new NotificationReconciliationService.HistoricalExpectation(
                     "deal.close", "warning")));
+        HistoricalNotificationBaseline existing =
+            baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:2");
+        existing.setSourceStateHash(warning.sourceStateHash());
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(existing));
 
         service.persistHistoricalBaselines(
             7,
@@ -1082,6 +1303,194 @@ class NotificationReconciliationServiceTest {
                     && baselines.stream().noneMatch(
                         baseline -> "deal.close:3".equals(baseline.getDedupeKey()))));
         verify(notificationDelivery, never()).deliver(any());
+    }
+
+    @Test
+    void importSnapshotPreservesBaselineReleasedByLiveSourceChange() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        NotificationReconciliationService service = baselineService(
+            notificationMapper,
+            Mockito.mock(PreferenceMapper.class),
+            Mockito.mock(NotificationDelivery.class),
+            Mockito.mock(ScoringService.class),
+            Clock.systemUTC());
+        NotificationReconciliationService.HistoricalExpectationKey key =
+            new NotificationReconciliationService.HistoricalExpectationKey(
+                7, 42, "task.due:91");
+        NotificationReconciliationService.HistoricalExpectation beforeExpectation =
+            new NotificationReconciliationService.HistoricalExpectation(
+                NotificationReconciliationService.TASK_TYPE,
+                "warning",
+                "a".repeat(64));
+        NotificationReconciliationService.HistoricalExpectation afterExpectation =
+            new NotificationReconciliationService.HistoricalExpectation(
+                NotificationReconciliationService.TASK_TYPE,
+                "critical",
+                "b".repeat(64));
+        HistoricalNotificationBaseline existing =
+            baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
+        existing.setSourceStateHash("c".repeat(64));
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(existing));
+
+        service.persistHistoricalBaselines(
+            7,
+            new NotificationReconciliationService.HistoricalExpectationSnapshot(
+                Map.of(key, beforeExpectation)),
+            new NotificationReconciliationService.HistoricalExpectationSnapshot(
+                Map.of(key, afterExpectation)),
+            new NotificationReconciliationService.HistoricalBaselineScope(
+                Set.of(), Set.of(), Set.of(), Set.of(91)),
+            "f".repeat(64));
+
+        verify(notificationMapper, never()).insertHistoricalNotificationBaselines(
+            anyInt(), anyList());
+    }
+
+    @Test
+    void disabledDeliveryPreferenceRetainsHistoricalBaselineUntilReenabled() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDelivery notificationDelivery = Mockito.mock(NotificationDelivery.class);
+        NotificationPreference optOut = new NotificationPreference();
+        optOut.setUserId(42);
+        optOut.setType(NotificationReconciliationService.TASK_TYPE);
+        optOut.setChannel("in_app");
+        optOut.setEnabled(false);
+        when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app"))
+            .thenReturn(List.of(optOut));
+        when(notificationMapper.findTaskReminderCandidates(7))
+            .thenReturn(List.of(taskCandidate()));
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        when(scoringService.scoreContactsExcludingHistoryImports(
+                eq(7), any(Instant.class), any(), any(), any()))
+            .thenReturn(List.of());
+        NotificationReconciliationService service = baselineService(
+            notificationMapper,
+            preferenceMapper,
+            notificationDelivery,
+            scoringService,
+            Clock.fixed(
+                Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC));
+
+        NotificationReconciliationService.HistoricalExpectationSnapshot snapshot =
+            service.historicalExpectationSnapshot(
+                7, Instant.parse("2026-06-23T15:30:00Z"));
+        HistoricalNotificationBaseline baseline =
+            baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
+        baseline.setSourceStateHash(
+            snapshot.expectations().values().iterator().next().sourceStateHash());
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(baseline));
+        when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app"))
+            .thenReturn(List.of(optOut), List.of());
+
+        service.reconcileWorkspace(7, false);
+        service.reconcileWorkspace(7, false);
+
+        assertTrue(snapshot.expectations().keySet().stream()
+            .anyMatch(key -> "task.due:91".equals(key.dedupeKey())));
+        verify(notificationMapper, never()).deleteHistoricalNotificationBaselines(
+            anyInt(), anyList());
+        verify(notificationDelivery, never()).deliver(any());
+    }
+
+    @Test
+    void importedWarmthThatRemovesDealRiskPreservesUntilLiveSourceChange() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        NotificationDelivery notificationDelivery = Mockito.mock(NotificationDelivery.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        Clock clock = Clock.fixed(
+            Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+        NotificationReconciliationService service =
+            new NotificationReconciliationService(
+                notificationMapper,
+                Mockito.mock(DuplicateDecisionLockService.class),
+                Mockito.mock(PreferenceMapper.class),
+                notificationDelivery,
+                stateVersions(notificationMapper),
+                new NotificationProperties(),
+                Mockito.mock(ScoringService.class),
+                Mockito.mock(IntroductionService.class),
+                dealRiskService,
+                clock,
+                new ObjectMapper());
+        NotificationReconciliationService.HistoricalExpectationKey key =
+            new NotificationReconciliationService.HistoricalExpectationKey(
+                7, 42, "deal.risk:101");
+        NotificationReconciliationService.HistoricalExpectation previous =
+            new NotificationReconciliationService.HistoricalExpectation(
+                NotificationReconciliationService.DEAL_RISK_TYPE,
+                "critical",
+                "a".repeat(64));
+        String warmedSourceState = "b".repeat(64);
+        service.persistHistoricalBaselines(
+            7,
+            new NotificationReconciliationService.HistoricalExpectationSnapshot(
+                Map.of(key, previous)),
+            new NotificationReconciliationService.HistoricalExpectationSnapshot(
+                Map.of(),
+                Map.of(key, warmedSourceState)),
+            new NotificationReconciliationService.HistoricalBaselineScope(
+                Set.of(9), Set.of(81), Set.of(), Set.of()),
+            "f".repeat(64));
+        verify(notificationMapper).insertHistoricalNotificationBaselines(
+            eq(7),
+            org.mockito.ArgumentMatchers.argThat(baselines ->
+                baselines.size() == 1
+                    && "deal.risk:101".equals(
+                        baselines.getFirst().getDedupeKey())
+                    && warmedSourceState.equals(
+                        baselines.getFirst().getSourceStateHash())));
+        HistoricalNotificationBaseline baseline = baseline(
+            NotificationReconciliationService.DEAL_RISK_TYPE,
+            "critical",
+            "deal.risk:101");
+        baseline.setSourceStateHash(warmedSourceState);
+        Notification existing = reminderNotification(
+            202,
+            NotificationReconciliationService.DEAL_RISK_TYPE,
+            "deal.risk:101");
+        when(notificationMapper.findWorkspaceReminderNotifications(7))
+            .thenReturn(List.of(existing));
+        when(notificationMapper.findHistoricalNotificationBaselines(7))
+            .thenReturn(List.of(baseline));
+        when(notificationMapper.findOpenDealRecipients(7))
+            .thenReturn(List.of(recipient(101, "Acme renewal", 42)));
+        DealRiskDto none = new DealRiskDto(
+            101,
+            0.0,
+            null,
+            "none",
+            0,
+            List.of(),
+            "2026-06-23 15:30:00");
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+            .thenReturn(
+                List.of(riskState(none, warmedSourceState)),
+                List.of(riskState(none, "c".repeat(64))));
+        when(notificationMapper.deleteHistoricalNotificationBaselines(
+                7, List.of(baseline)))
+            .thenReturn(1);
+        when(notificationMapper.resolveReminder(
+                7, 42, 202, "2026-06-23 15:30:00"))
+            .thenReturn(1);
+
+        service.reconcileWorkspace(7, true);
+
+        assertEquals(warmedSourceState, baseline.getSourceStateHash());
+        verify(notificationDelivery, never()).deliver(any());
+        verify(notificationMapper, never()).deleteHistoricalNotificationBaselines(
+            anyInt(), anyList());
+        verify(notificationMapper, never()).resolveReminder(
+            anyInt(), anyInt(), anyInt(), anyString());
+
+        service.reconcileWorkspace(7, true);
+
+        verify(notificationMapper).deleteHistoricalNotificationBaselines(
+            7, List.of(baseline));
+        verify(notificationMapper).resolveReminder(
+            7, 42, 202, "2026-06-23 15:30:00");
     }
 
     @Test
@@ -1115,7 +1524,7 @@ class NotificationReconciliationServiceTest {
                 7, 42, "deal.close:5"),
             new NotificationReconciliationService.HistoricalExpectation(
                 NotificationReconciliationService.DEAL_TYPE, "warning")));
-        assertFalse(scope.includes(
+        assertTrue(scope.includes(
             new NotificationReconciliationService.HistoricalExpectationKey(
                 7, 42, "deal.risk:5"),
             new NotificationReconciliationService.HistoricalExpectation(

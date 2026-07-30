@@ -626,12 +626,14 @@ public class InteractionHistoryImportService {
         Map<String, List<PlanRow>> byKey = new LinkedHashMap<>();
         Map<List<String>, Integer> semanticOccurrences = new HashMap<>();
         for (PlanRow row : plan) {
-            if (!READY.equals(row.status)) {
-                continue;
-            }
-            if (row.sourceId == null) {
+            if (row.sourceId == null && !row.semanticValues.isEmpty()) {
                 row.semanticOccurrence = semanticOccurrences.merge(
                     row.semanticValues, 1, Integer::sum) - 1;
+            }
+        }
+        for (PlanRow row : plan) {
+            if (!READY.equals(row.status)) {
+                continue;
             }
             row.historyImportKey = historyImportKey(kind, row);
             row.historyPayloadHash = historyPayloadHash(kind, row);

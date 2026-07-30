@@ -128,10 +128,19 @@ public class NotificationReconciliationService {
             staged -> addDealCloseReminders(
                 workspaceId, existing, staged, preferences, triggeredAt, evaluationInstant));
 
-        Map<Integer, RelationshipTemperatureDto> temperatures =
+        RelationshipSourceSnapshot relationshipSources =
             includeRelationshipNudges
-                ? scoreByPerson(workspaceId, evaluationInstant)
+                ? relationshipSourceSnapshot(workspaceId, evaluationInstant)
                 : null;
+        Map<Integer, RelationshipTemperatureDto> temperatures =
+            relationshipSources == null
+                ? null
+                : relationshipSources.temperatures();
+        Map<Integer, String> contactSourceStateHashes =
+            relationshipSources == null
+                ? Map.of()
+                : relationshipSources.sourceStateHashes();
+        Map<ReminderKey, String> dealRiskSourceStates = new LinkedHashMap<>();
         if (includeRelationshipNudges) {
             boolean scored = temperatures != null;
             runManagedPass(workspaceId, expected, managedTypes, RELATIONSHIP_TYPE, true, scored,
@@ -147,22 +156,43 @@ public class NotificationReconciliationService {
             runManagedPass(workspaceId, expected, managedTypes, INTRO_OPPORTUNITY_TYPE,
                 properties.isIntroOpportunitiesEnabled(), scored, "Intro-opportunity",
                 staged -> addIntroOpportunities(workspaceId, staged, preferences, triggeredAt, temperatures));
+            Map<ReminderKey, String> stagedDealRiskSourceStates =
+                new LinkedHashMap<>();
             runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
                 properties.isDealRiskEnabled(), scored, "Deal-risk",
-                staged -> addDealRiskNotifications(workspaceId, staged, preferences, triggeredAt, temperatures));
+                staged -> addDealRiskNotifications(
+                    workspaceId,
+                    staged,
+                    preferences,
+                    triggeredAt,
+                    temperatures,
+                    contactSourceStateHashes,
+                    stagedDealRiskSourceStates));
+            if (managedTypes.contains(DEAL_RISK_TYPE)
+                    && properties.isDealRiskEnabled()
+                    && scored) {
+                dealRiskSourceStates.putAll(stagedDealRiskSourceStates);
+            }
         }
 
-        Set<ReminderKey> suppressed = reconcileHistoricalBaselines(
-            workspaceId, expected, managedTypes, baselines, temperatures);
+        Set<ReminderKey> historicallySuppressed = reconcileHistoricalBaselines(
+            workspaceId,
+            expected,
+            managedTypes,
+            baselines,
+            contactSourceStateHashes,
+            preferences,
+            dealRiskSourceStates);
         expected.entrySet().stream()
-            .filter(entry -> !suppressed.contains(entry.getKey()))
+            .filter(entry -> !historicallySuppressed.contains(entry.getKey()))
             .map(Map.Entry::getValue)
             .forEach(notificationDelivery::deliver);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
             if (notification.getResolvedAt() == null
                     && managedTypes.contains(notification.getType())
-                    && !expected.containsKey(entry.getKey())) {
+                    && !expected.containsKey(entry.getKey())
+                    && !historicallySuppressed.contains(entry.getKey())) {
                 int rows = notificationMapper.resolveReminder(
                     workspaceId,
                     notification.getRecipientId(),
@@ -191,7 +221,7 @@ public class NotificationReconciliationService {
             HistoricalBaselineScope exclusion) {
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
-        Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
+        Map<PreferenceKey, Boolean> preferences = Map.of();
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
         addTaskReminders(
             workspaceId,
@@ -208,8 +238,13 @@ public class NotificationReconciliationService {
             preferences,
             triggeredAt,
             evaluationInstant);
+        RelationshipSourceSnapshot relationshipSources =
+            relationshipSourceSnapshotStrict(
+                workspaceId, evaluationInstant, exclusion);
         Map<Integer, RelationshipTemperatureDto> temperatures =
-            scoreByPersonStrict(workspaceId, evaluationInstant, exclusion);
+            relationshipSources.temperatures();
+        Map<Integer, String> contactSourceStateHashes =
+            relationshipSources.sourceStateHashes();
         addRelationshipNudges(
             workspaceId,
             existing,
@@ -223,11 +258,40 @@ public class NotificationReconciliationService {
                 workspaceId, expected, preferences, triggeredAt, temperatures);
         }
         if (properties.isDealRiskEnabled()) {
+            Map<ReminderKey, String> dealRiskSourceStates = new LinkedHashMap<>();
             addDealRiskNotifications(
-                workspaceId, expected, preferences, triggeredAt, temperatures);
+                workspaceId,
+                expected,
+                preferences,
+                triggeredAt,
+                temperatures,
+                contactSourceStateHashes,
+                dealRiskSourceStates);
+            Map<HistoricalExpectationKey, String> historicalSourceStates =
+                historicalSourceStates(workspaceId, dealRiskSourceStates);
+            Map<HistoricalExpectationKey, HistoricalExpectation> snapshot =
+                historicalExpectations(
+                    workspaceId,
+                    expected,
+                    contactSourceStateHashes,
+                    dealRiskSourceStates);
+            return new HistoricalExpectationSnapshot(snapshot, historicalSourceStates);
         }
-        Map<HistoricalExpectationKey, HistoricalExpectation> snapshot =
-            new LinkedHashMap<>();
+        return new HistoricalExpectationSnapshot(
+            historicalExpectations(
+                workspaceId,
+                expected,
+                contactSourceStateHashes,
+                Map.of()),
+            Map.of());
+    }
+
+    private Map<HistoricalExpectationKey, HistoricalExpectation> historicalExpectations(
+            int workspaceId,
+            Map<ReminderKey, Notification> expected,
+            Map<Integer, String> contactSourceStateHashes,
+            Map<ReminderKey, String> sourceStates) {
+        Map<HistoricalExpectationKey, HistoricalExpectation> snapshot = new LinkedHashMap<>();
         for (Map.Entry<ReminderKey, Notification> entry : expected.entrySet()) {
             ReminderKey key = entry.getKey();
             Notification notification = entry.getValue();
@@ -235,9 +299,25 @@ public class NotificationReconciliationService {
                 key.workspaceId(), key.recipientId(), key.dedupeKey());
             snapshot.put(
                 snapshotKey,
-                historicalExpectation(notification, temperatures));
+                historicalExpectation(
+                    notification,
+                    contactSourceStateHashes,
+                    sourceStates.get(key)));
         }
-        return new HistoricalExpectationSnapshot(snapshot);
+        return snapshot;
+    }
+
+    private static Map<HistoricalExpectationKey, String> historicalSourceStates(
+            int workspaceId,
+            Map<ReminderKey, String> sourceStates) {
+        Map<HistoricalExpectationKey, String> historical = new LinkedHashMap<>();
+        sourceStates.forEach((key, sourceStateHash) -> historical.put(
+            new HistoricalExpectationKey(
+                workspaceId,
+                key.recipientId(),
+                key.dedupeKey()),
+            sourceStateHash));
+        return historical;
     }
 
     void persistHistoricalBaselines(
@@ -247,12 +327,32 @@ public class NotificationReconciliationService {
             HistoricalBaselineScope scope,
             String importRunId) {
         List<HistoricalNotificationBaseline> baselines = new ArrayList<>();
+        Map<HistoricalExpectationKey, HistoricalNotificationBaseline> existingBaselines =
+            new HashMap<>();
+        for (HistoricalNotificationBaseline baseline
+                : notificationMapper.findHistoricalNotificationBaselines(workspaceId)) {
+            existingBaselines.put(
+                new HistoricalExpectationKey(
+                    workspaceId,
+                    baseline.getRecipientId(),
+                    baseline.getDedupeKey()),
+                baseline);
+        }
         for (Map.Entry<HistoricalExpectationKey, HistoricalExpectation> entry
                 : after.expectations().entrySet()) {
             HistoricalExpectation previous = before.expectations().get(entry.getKey());
             HistoricalExpectation current = entry.getValue();
             if (current.equals(previous)
                     || !scope.includes(entry.getKey(), current)) {
+                continue;
+            }
+            HistoricalNotificationBaseline existingBaseline =
+                existingBaselines.get(entry.getKey());
+            if (existingBaseline != null
+                    && (previous == null
+                        || !existingBaseline.getNotificationType().equals(previous.type())
+                        || !existingBaseline.getSourceStateHash().equals(
+                            previous.sourceStateHash()))) {
                 continue;
             }
             HistoricalNotificationBaseline baseline =
@@ -263,6 +363,38 @@ public class NotificationReconciliationService {
             baseline.setNotificationType(current.type());
             baseline.setBaselineSeverity(current.severity());
             baseline.setSourceStateHash(current.sourceStateHash());
+            baseline.setImportRunId(importRunId);
+            baselines.add(baseline);
+        }
+        for (Map.Entry<HistoricalExpectationKey, HistoricalExpectation> entry
+                : before.expectations().entrySet()) {
+            HistoricalExpectation previous = entry.getValue();
+            if (after.expectations().containsKey(entry.getKey())
+                    || !DEAL_RISK_TYPE.equals(previous.type())
+                    || !scope.includes(entry.getKey(), previous)) {
+                continue;
+            }
+            String sourceStateHash =
+                after.sourceStateHashes().get(entry.getKey());
+            if (sourceStateHash == null) {
+                continue;
+            }
+            HistoricalNotificationBaseline existingBaseline =
+                existingBaselines.get(entry.getKey());
+            if (existingBaseline != null
+                    && (!existingBaseline.getNotificationType().equals(previous.type())
+                        || !existingBaseline.getSourceStateHash().equals(
+                            previous.sourceStateHash()))) {
+                continue;
+            }
+            HistoricalNotificationBaseline baseline =
+                new HistoricalNotificationBaseline();
+            baseline.setWorkspaceId(workspaceId);
+            baseline.setRecipientId(entry.getKey().recipientId());
+            baseline.setDedupeKey(entry.getKey().dedupeKey());
+            baseline.setNotificationType(previous.type());
+            baseline.setBaselineSeverity(previous.severity());
+            baseline.setSourceStateHash(sourceStateHash);
             baseline.setImportRunId(importRunId);
             baselines.add(baseline);
         }
@@ -280,7 +412,9 @@ public class NotificationReconciliationService {
             Map<ReminderKey, Notification> expected,
             Set<String> managedTypes,
             List<HistoricalNotificationBaseline> baselines,
-            Map<Integer, RelationshipTemperatureDto> temperatures) {
+            Map<Integer, String> contactSourceStateHashes,
+            Map<PreferenceKey, Boolean> preferences,
+            Map<ReminderKey, String> dealRiskSourceStates) {
         Set<ReminderKey> suppressed = new HashSet<>();
         List<HistoricalNotificationBaseline> removals = new ArrayList<>();
         for (HistoricalNotificationBaseline baseline : baselines) {
@@ -289,11 +423,25 @@ public class NotificationReconciliationService {
             Notification notification = expected.get(key);
             HistoricalExpectation current = notification == null
                 ? null
-                : historicalExpectation(notification, temperatures);
+                : historicalExpectation(
+                    notification,
+                    contactSourceStateHashes,
+                    dealRiskSourceStates.get(key));
+            if (notification == null
+                    && !enabled(
+                        preferences,
+                        baseline.getRecipientId(),
+                        baseline.getNotificationType())) {
+                continue;
+            }
             if (notification != null
                     && baseline.getNotificationType().equals(current.type())
-                    && baseline.getBaselineSeverity().equals(current.severity())
                     && baseline.getSourceStateHash().equals(current.sourceStateHash())) {
+                suppressed.add(key);
+            } else if (notification == null
+                    && DEAL_RISK_TYPE.equals(baseline.getNotificationType())
+                    && baseline.getSourceStateHash().equals(
+                        dealRiskSourceStates.get(key))) {
                 suppressed.add(key);
             } else if (notification != null
                     || managedTypes.contains(baseline.getNotificationType())) {
@@ -488,28 +636,36 @@ public class NotificationReconciliationService {
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
         String triggeredAt,
-        Map<Integer, RelationshipTemperatureDto> temperatures
+        Map<Integer, RelationshipTemperatureDto> temperatures,
+        Map<Integer, String> contactSourceStateHashes,
+        Map<ReminderKey, String> sourceStates
     ) {
-        Map<Integer, DealRiskDto> byDeal = new HashMap<>();
-        for (DealRiskDto risk : dealRiskService.assessWorkspace(workspaceId, temperatures)) {
-            if (riskSeverity(risk.getLevel()) != null) {
-                byDeal.put(risk.getDealId(), risk);
-            }
+        Map<Integer, DealRiskService.NotificationRiskState> byDeal = new HashMap<>();
+        for (DealRiskService.NotificationRiskState state
+                : dealRiskService.assessWorkspaceNotificationStates(
+                    workspaceId,
+                    temperatures,
+                    contactSourceStateHashes)) {
+            byDeal.put(state.assessment().getDealId(), state);
         }
         if (byDeal.isEmpty()) {
             return;
         }
         for (OpenDealRecipient recipient : notificationMapper.findOpenDealRecipients(workspaceId)) {
-            DealRiskDto risk = byDeal.get(recipient.getDealId());
-            if (risk == null) {
+            DealRiskService.NotificationRiskState state =
+                byDeal.get(recipient.getDealId());
+            if (state == null) {
                 continue;
             }
+            String dedupeKey = DEAL_RISK_TYPE + ":" + recipient.getDealId();
+            ReminderKey key = new ReminderKey(
+                workspaceId, recipient.getRecipientId(), dedupeKey);
+            sourceStates.put(key, state.sourceStateHash());
+            DealRiskDto risk = state.assessment();
             String severity = riskSeverity(risk.getLevel());
             if (severity == null || !enabled(preferences, recipient.getRecipientId(), DEAL_RISK_TYPE)) {
                 continue;
             }
-            String dedupeKey = DEAL_RISK_TYPE + ":" + recipient.getDealId();
-            ReminderKey key = new ReminderKey(workspaceId, recipient.getRecipientId(), dedupeKey);
             expected.put(key, dealRiskNotification(workspaceId, recipient, risk, severity, dedupeKey, triggeredAt));
         }
     }
@@ -784,11 +940,23 @@ public class NotificationReconciliationService {
      * types stay unmanaged, preserving existing notifications) while task and deal reminders still
      * deliver. Decay is time-driven, so the next sweep recovers naturally once scoring succeeds.
      */
-    private Map<Integer, RelationshipTemperatureDto> scoreByPerson(
+    private RelationshipSourceSnapshot relationshipSourceSnapshot(
             int workspaceId,
             Instant evaluationInstant) {
         try {
-            return scoreByPersonStrict(workspaceId, evaluationInstant);
+            Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
+            for (RelationshipTemperatureDto temperature
+                    : scoringService.scoreContacts(
+                        workspaceId, evaluationInstant)) {
+                temperatures.put(temperature.getId(), temperature);
+            }
+            return new RelationshipSourceSnapshot(
+                temperatures,
+                scoringService.contactSourceStateHashes(
+                    workspaceId,
+                    Set.of(),
+                    Set.of(),
+                    Set.of()));
         } catch (RuntimeException exception) {
             log.warn("Warmth scoring failed for workspace={}; skipping relationship passes this cycle",
                 workspaceId, exception);
@@ -796,24 +964,13 @@ public class NotificationReconciliationService {
         }
     }
 
-    private Map<Integer, RelationshipTemperatureDto> scoreByPersonStrict(
-            int workspaceId,
-            Instant evaluationInstant) {
-        Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
-        for (RelationshipTemperatureDto temperature :
-                scoringService.scoreContacts(workspaceId, evaluationInstant)) {
-            temperatures.put(temperature.getId(), temperature);
-        }
-        return temperatures;
-    }
-
-    private Map<Integer, RelationshipTemperatureDto> scoreByPersonStrict(
+    private RelationshipSourceSnapshot relationshipSourceSnapshotStrict(
             int workspaceId,
             Instant evaluationInstant,
             HistoricalBaselineScope exclusion) {
         Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
-        for (RelationshipTemperatureDto temperature :
-                scoringService.scoreContactsExcludingHistoryImports(
+        for (RelationshipTemperatureDto temperature
+                : scoringService.scoreContactsExcludingHistoryImports(
                     workspaceId,
                     evaluationInstant,
                     exclusion.activityIds(),
@@ -821,7 +978,15 @@ public class NotificationReconciliationService {
                     exclusion.taskIds())) {
             temperatures.put(temperature.getId(), temperature);
         }
-        return temperatures;
+        Map<Integer, String> sourceStateHashes =
+            scoringService.contactSourceStateHashes(
+                workspaceId,
+                exclusion.activityIds(),
+                exclusion.noteIds(),
+                exclusion.taskIds());
+        return new RelationshipSourceSnapshot(
+            temperatures,
+            sourceStateHashes);
     }
 
     private Map<ReminderKey, Notification> loadExisting(int workspaceId) {
@@ -1019,54 +1184,62 @@ public class NotificationReconciliationService {
 
     private HistoricalExpectation historicalExpectation(
             Notification notification,
-            Map<Integer, RelationshipTemperatureDto> temperatures) {
+            Map<Integer, String> contactSourceStateHashes,
+            String sourceStateHashOverride) {
         return new HistoricalExpectation(
             notification.getType(),
             notification.getSeverity(),
-            sourceStateHash(notification, temperatures));
+            sourceStateHashOverride == null
+                ? sourceStateHash(notification, contactSourceStateHashes)
+                : sourceStateHashOverride);
     }
 
     private String sourceStateHash(
             Notification notification,
-            Map<Integer, RelationshipTemperatureDto> temperatures) {
+            Map<Integer, String> contactSourceStateHashes) {
         List<String> values = new ArrayList<>();
         values.add(notification.getType());
-        values.add(notification.getCategory());
-        values.add(Integer.toString(notification.getTemplateVersion()));
-        values.add(notification.getTitle());
         values.add(notification.getActorId() == null
             ? null
             : notification.getActorId().toString());
-        values.add(notification.getActorLabel());
         values.add(notification.getSourceType());
         values.add(notification.getSourceId() == null
             ? null
             : notification.getSourceId().toString());
-        values.add(notification.getSourceLabel());
         values.add(notification.getContextType());
         values.add(notification.getContextId() == null
             ? null
             : notification.getContextId().toString());
-        values.add(notification.getContextLabel());
-        values.add(notification.getActionUrl());
         switch (notification.getType()) {
             case TASK_TYPE -> {
                 values.add(notification.getBody());
                 values.add(notification.getData());
             }
             case RELATIONSHIP_TYPE -> {
-                addTemperatureState(values, temperatures, notification.getSourceId());
+                addContactSourceState(
+                    values,
+                    contactSourceStateHashes,
+                    notification.getSourceId());
                 addJsonState(
                     values,
                     notification.getData(),
                     "dealValue",
                     "expectedCloseDate",
-                    "role",
-                    "priorityReasons");
+                    "role");
             }
+            case DEAL_RISK_TYPE -> values.add(
+                notification.getSourceId() == null
+                    ? null
+                    : notification.getSourceId().toString());
             case INTRO_OPPORTUNITY_TYPE -> {
-                addTemperatureState(values, temperatures, notification.getSourceId());
-                addTemperatureState(values, temperatures, notification.getContextId());
+                addContactSourceState(
+                    values,
+                    contactSourceStateHashes,
+                    notification.getSourceId());
+                addContactSourceState(
+                    values,
+                    contactSourceStateHashes,
+                    notification.getContextId());
                 addJsonState(
                     values,
                     notification.getData(),
@@ -1082,18 +1255,16 @@ public class NotificationReconciliationService {
         return hashValues(values);
     }
 
-    private static void addTemperatureState(
+    private static void addContactSourceState(
             List<String> values,
-            Map<Integer, RelationshipTemperatureDto> temperatures,
+            Map<Integer, String> contactSourceStateHashes,
             Integer personId) {
-        RelationshipTemperatureDto temperature =
-            temperatures == null || personId == null
-                ? null
-                : temperatures.get(personId);
-        values.add(temperature == null ? null : temperature.getLastTouchAt());
-        values.add(temperature == null
-            ? null
-            : Integer.toString(temperature.getTouchCount()));
+        values.add(
+            personId == null
+                ? ScoringService.emptyContactSourceStateHash()
+                : contactSourceStateHashes.getOrDefault(
+                    personId,
+                    ScoringService.emptyContactSourceStateHash()));
     }
 
     private void addJsonState(
@@ -1146,6 +1317,11 @@ public class NotificationReconciliationService {
 
     private record PreferenceKey(int recipientId, String type) {}
 
+    private record RelationshipSourceSnapshot(
+        Map<Integer, RelationshipTemperatureDto> temperatures,
+        Map<Integer, String> sourceStateHashes
+    ) {}
+
     record HistoricalExpectationKey(int workspaceId, int recipientId, String dedupeKey) {}
 
     record HistoricalExpectation(
@@ -1159,10 +1335,17 @@ public class NotificationReconciliationService {
     }
 
     record HistoricalExpectationSnapshot(
-            Map<HistoricalExpectationKey, HistoricalExpectation> expectations) {
+            Map<HistoricalExpectationKey, HistoricalExpectation> expectations,
+            Map<HistoricalExpectationKey, String> sourceStateHashes) {
 
         HistoricalExpectationSnapshot {
             expectations = Map.copyOf(expectations);
+            sourceStateHashes = Map.copyOf(sourceStateHashes);
+        }
+
+        HistoricalExpectationSnapshot(
+                Map<HistoricalExpectationKey, HistoricalExpectation> expectations) {
+            this(expectations, Map.of());
         }
     }
 
@@ -1196,6 +1379,7 @@ public class NotificationReconciliationService {
                     containsKeyId(personIds, key.dedupeKey(), INTRO_OPPORTUNITY_TYPE, 0)
                         || containsKeyId(
                             personIds, key.dedupeKey(), INTRO_OPPORTUNITY_TYPE, 1);
+                case DEAL_RISK_TYPE -> !personIds.isEmpty();
                 default -> false;
             };
         }

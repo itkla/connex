@@ -1,7 +1,10 @@
 import type {
     HistoryImportColumnMapping,
     HistoryImportKind,
+    HistoryImportRowAnalysis,
 } from '@/app/lib/types';
+
+export const HISTORY_IMPORT_REVIEW_PAGE_SIZE = 100;
 
 export type HistoryImportField = {
     key: string;
@@ -47,6 +50,13 @@ const SYNONYMS: Record<string, readonly string[]> = {
     completed: ['completed', 'done', 'iscomplete', 'status'],
 };
 
+const EXACT_SYNONYMS = new Map(
+    Object.entries(SYNONYMS).map(([field, synonyms]) => [
+        field,
+        new Set(synonyms),
+    ]),
+);
+
 function normalizeHeader(header: string): string {
     return header.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -65,7 +75,8 @@ export function suggestHistoryImportField(
     if (!normalized) return null;
     const fields = historyImportFields(kind);
     for (const field of fields) {
-        if ((SYNONYMS[field.key] ?? [field.key.toLowerCase()]).includes(normalized)) {
+        const exact = EXACT_SYNONYMS.get(field.key);
+        if (exact?.has(normalized) || field.key.toLowerCase() === normalized) {
             return field.key;
         }
     }
@@ -94,10 +105,48 @@ export function historyImportMappingIsComplete(
     kind: HistoryImportKind,
     targets: Readonly<Record<string, string>>,
 ): boolean {
-    const selected = Object.values(targets).filter((field) => field !== 'ignore');
-    if (new Set(selected).size !== selected.length) return false;
-    if (!selected.includes('participantEmail') && !selected.includes('participantPhone')) return false;
+    const selectedValues = Object.values(targets).filter((field) => field !== 'ignore');
+    const selected = new Set(selectedValues);
+    if (selected.size !== selectedValues.length) return false;
+    if (!selected.has('participantEmail') && !selected.has('participantPhone')) return false;
     return historyImportFields(kind)
         .filter((field) => field.required)
-        .every((field) => selected.includes(field.key));
+        .every((field) => selected.has(field.key));
+}
+
+/** Returns one bounded review page with attention rows ordered before settled rows. */
+export function historyImportReviewPage(
+    rows: readonly HistoryImportRowAnalysis[],
+    requestedPage: number,
+): {
+    rows: HistoryImportRowAnalysis[];
+    page: number;
+    pageCount: number;
+    from: number;
+    to: number;
+} {
+    const attention = rows.filter((row) =>
+        row.status === 'needs_review' || row.status === 'invalid',
+    );
+    const settled = rows.filter((row) =>
+        row.status === 'ready' || row.status === 'already_imported',
+    );
+    const ordered = [...attention, ...settled];
+    const pageCount = Math.max(
+        1,
+        Math.ceil(ordered.length / HISTORY_IMPORT_REVIEW_PAGE_SIZE),
+    );
+    const page = Math.min(Math.max(1, requestedPage), pageCount);
+    const start = (page - 1) * HISTORY_IMPORT_REVIEW_PAGE_SIZE;
+    const pageRows = ordered.slice(
+        start,
+        start + HISTORY_IMPORT_REVIEW_PAGE_SIZE,
+    );
+    return {
+        rows: pageRows,
+        page,
+        pageCount,
+        from: pageRows.length === 0 ? 0 : start + 1,
+        to: start + pageRows.length,
+    };
 }
