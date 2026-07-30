@@ -46,9 +46,8 @@ for (const locale of ["en", "ja"] as const) {
             name: message(locale, "importExport", "importExport.history.review"),
         }).click();
 
-        await expect(page.getByText(
-            message(locale, "importExport", "importExport.history.counts.ready"),
-            { exact: true },
+        await expect(page.getByLabel(
+            `${message(locale, "importExport", "importExport.history.counts.ready")}: 1`,
         )).toBeVisible();
         await page.getByRole("button", {
             name: message(locale, "importExport", "importExport.history.import"),
