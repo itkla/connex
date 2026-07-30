@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 class CompanyMapperTest extends AbstractMapperTest {
 
@@ -630,11 +631,13 @@ class CompanyMapperTest extends AbstractMapperTest {
         LocalDateTime reference = LocalDateTime.parse("2026-07-11T00:00:00");
 
         RelationshipScoreAggregateDto personScore = personMapper
-            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .getRelationshipScoreAggregates(
+                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == person.getId())
             .findFirst().orElseThrow();
         RelationshipScoreAggregateDto companyScore = companyMapper
-            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .getRelationshipScoreAggregates(
+                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == company.getId())
             .findFirst().orElseThrow();
 
@@ -648,10 +651,12 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertTrue(companyScore.rawWeight() > 0);
 
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
-        assertFalse(personMapper.getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+        assertFalse(personMapper.getRelationshipScoreAggregates(
+                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .anyMatch(score -> score.id() == person.getId()));
         RelationshipScoreAggregateDto restrictedCompanyScore = companyMapper
-            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .getRelationshipScoreAggregates(
+                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == company.getId())
             .findFirst().orElseThrow();
         assertEquals(0, restrictedCompanyScore.recentTouchCount());

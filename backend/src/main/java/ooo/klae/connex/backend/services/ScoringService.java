@@ -11,9 +11,11 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -26,11 +28,23 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BandCounts;
 import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.AttributionRule;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.Contributor;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.Coverage;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.PrivateNoteCountScope;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SourceCounts;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SourceType;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SubjectType;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.Totals;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -38,6 +52,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.util.DateTimes;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /**
  * Computes relationship "temperature" (warmth) for contacts and companies on read.
@@ -47,14 +62,17 @@ import ooo.klae.connex.backend.util.DateTimes;
  *
  * <p>Warmth is a recency-decayed, intent-weighted sum of logged interactions. Each touch
  * starts at a base weight (meeting &gt; call &gt; email &gt; note &gt; task) and decays by
- * half every {@link #HALF_LIFE_DAYS}. The decayed sum is squashed into 0–100 so the score
- * saturates rather than growing without bound for very active relationships.
+ * half over time. The decayed sum is squashed into 0–100 so the score saturates rather than
+ * growing without bound for very active relationships. The versioned formula and all tuning
+ * parameters live in {@link RelationshipWarmthModel}.
  *
  * <p>Every read is workspace-scoped; the caller resolves the active workspace and passes it in.
  */
 @Service
 @RequiredArgsConstructor
 public class ScoringService {
+    private static final RelationshipWarmthModel WARMTH_MODEL = RelationshipWarmthModel.current();
+
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
@@ -63,29 +81,17 @@ public class ScoringService {
     private final TaskMapper taskMapper;
     private final Clock clock;
 
-    private static final long DAY_MS = 24L * 60 * 60 * 1000;
-    /** Half-life of a single touch's contribution, in days. */
-    private static final double HALF_LIFE_DAYS = 30.0;
-    /** Decayed-weight sum that maps to a ~63 score; tunes how quickly warmth saturates. */
-    private static final double SATURATION = 0.7;
-    /** Score at/below which a relationship is "cold"; also the target for predictive decay. */
-    private static final int COLD_SCORE = 15;
-    /** Decayed-weight sum at which the score reaches {@link #COLD_SCORE}; the predictive decay floor. */
-    private static final double RAW_COLD = -SATURATION * log2(1.0 - COLD_SCORE / 100.0);
-    /** Recent window (days) used for trend detection and the contextual touch count. */
-    private static final int RECENT_WINDOW_DAYS = 21;
-    /** Prior window (days) compared against the recent window to detect cooling. */
-    private static final int PRIOR_WINDOW_DAYS = 120;
-    /** Minimum prior-window weight for a relationship to count as "was warm" when cooling. */
-    private static final double COOLING_PRIOR_MIN = 0.8;
-
-    private static final double NOTE_WEIGHT = 0.4;
-    private static final double TASK_WEIGHT = 0.3;
     private static final int MAX_BATCH_CONTACTS = 1_000;
     private static final int MAX_BATCH_COMPANIES = 2_000;
+    private static final int MAX_EVIDENCE_CONTRIBUTORS = 20;
+    private static final int MAX_EVIDENCE_SOURCES = 100_000;
+    private static final int MINIMUM_CONFIDENT_CONTRIBUTORS = 3;
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private static final RelationshipEvidenceTotalsDto EMPTY_EVIDENCE_TOTALS =
+        new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0);
 
     /** A single timestamped, intent-weighted interaction. */
     private record Touch(long epochMillis, double weight) {}
@@ -100,17 +106,19 @@ public class ScoringService {
      * Scores every contact in the workspace as of now, including those with no activity (band "cold").
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
-        long reference = Instant.now(clock).toEpochMilli();
+        Instant reference = scoringInstant(Instant.now(clock));
         return computeContactScores(workspaceId, reference, reference);
     }
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
     public WorkspaceScores scoreWorkspace(int workspaceId) {
-        Instant now = Instant.now(clock);
+        Instant now = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return new WorkspaceScores(
-            temperatures(personMapper.getRelationshipScoreAggregates(workspaceId, reference), now.toEpochMilli()),
-            temperatures(companyMapper.getRelationshipScoreAggregates(workspaceId, reference), now.toEpochMilli())
+            temperatures(personMapper.getRelationshipScoreAggregates(
+                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now),
+            temperatures(companyMapper.getRelationshipScoreAggregates(
+                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now)
         );
     }
 
@@ -131,8 +139,55 @@ public class ScoringService {
      * future-dated interaction can never leak into a past frame.
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
-        long t = asOf.toEpochMilli();
-        return computeContactScores(workspaceId, t, t);
+        Instant reference = scoringInstant(asOf);
+        return computeContactScores(workspaceId, reference, reference);
+    }
+
+    /**
+     * Returns bounded, source-level evidence for one visible, processable contact.
+     *
+     * <p>Only active-workspace activities, workspace-visible notes, and tasks are eligible.
+     * Private-note disclosure is restricted to the current caller's own excluded notes.
+     *
+     * <p>Totals and the ranked contributors are two reads of the same capped source set inside one
+     * read-only transaction, so they share a snapshot and the returned rows always reconcile with
+     * the totals the score is derived from.
+     */
+    @Transactional(readOnly = true)
+    public RelationshipEvidenceDto contactEvidence(int workspaceId, int personId, int currentUserId) {
+        if (!personMapper.getProcessablePersonIds(workspaceId, List.of(personId)).contains(personId)) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        Instant asOf = scoringInstant(Instant.now(clock));
+        LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
+        RelationshipEvidenceTotalsDto totals = boundedTotals(personMapper.getRelationshipEvidenceTotals(
+            workspaceId,
+            personId,
+            reference,
+            WARMTH_MODEL.sqlParameters(),
+            MAX_EVIDENCE_SOURCES + 1
+        ));
+        List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
+            ? List.of()
+            : personMapper.getRelationshipEvidenceContributors(
+                workspaceId,
+                personId,
+                reference,
+                WARMTH_MODEL.sqlParameters(),
+                MAX_EVIDENCE_SOURCES + 1,
+                MAX_EVIDENCE_CONTRIBUTORS
+            );
+        int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            workspaceId, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+        return evidence(
+            SubjectType.PERSON,
+            personId,
+            asOf,
+            AttributionRule.DIRECT_PERSON_TOUCHES,
+            totals,
+            rows,
+            privateNotes
+        );
     }
 
     /**
@@ -155,7 +210,7 @@ public class ScoringService {
         if (requested.isEmpty()) {
             return List.of();
         }
-        long reference = Instant.now(clock).toEpochMilli();
+        Instant reference = scoringInstant(Instant.now(clock));
         Set<Integer> existing = new HashSet<>(personMapper.getProcessablePersonIds(workspaceId, requested));
         List<Integer> processable = requested.stream().filter(existing::contains).toList();
         if (processable.isEmpty()) {
@@ -174,14 +229,14 @@ public class ScoringService {
             Integer personId = personId(note.getPerson());
             Long timestamp = epoch(note.getCreatedAt());
             if (personId != null && timestamp != null) {
-                add(touches, personId, new Touch(timestamp, NOTE_WEIGHT));
+                add(touches, personId, new Touch(timestamp, WARMTH_MODEL.noteWeight()));
             }
         }
         for (Task task : taskMapper.getTasksByPersonIds(workspaceId, processable)) {
             Integer personId = personId(task.getPerson());
             Long timestamp = epoch(task.getCreatedAt());
             if (personId != null && timestamp != null) {
-                add(touches, personId, new Touch(timestamp, TASK_WEIGHT));
+                add(touches, personId, new Touch(timestamp, WARMTH_MODEL.taskWeight()));
             }
         }
         List<RelationshipTemperatureDto> out = new ArrayList<>(existing.size());
@@ -191,7 +246,8 @@ public class ScoringService {
         return out;
     }
 
-    private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
+    private List<RelationshipTemperatureDto> computeContactScores(
+            int workspaceId, Instant reference, Instant cutoff) {
         List<Person> persons = personMapper.getProcessablePersons(workspaceId);
         Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId, personIds(persons));
         List<RelationshipTemperatureDto> out = new ArrayList<>(persons.size());
@@ -216,14 +272,14 @@ public class ScoringService {
             Integer pid = personId(n.getPerson());
             Long ts = epoch(n.getCreatedAt());
             if (pid != null && processablePersonIds.contains(pid) && ts != null) {
-                add(byPerson, pid, new Touch(ts, NOTE_WEIGHT));
+                add(byPerson, pid, new Touch(ts, WARMTH_MODEL.noteWeight()));
             }
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
             Integer pid = personId(t.getPerson());
             Long ts = epoch(t.getCreatedAt());
             if (pid != null && processablePersonIds.contains(pid) && ts != null) {
-                add(byPerson, pid, new Touch(ts, TASK_WEIGHT));
+                add(byPerson, pid, new Touch(ts, WARMTH_MODEL.taskWeight()));
             }
         }
         return byPerson;
@@ -231,14 +287,18 @@ public class ScoringService {
 
     /**
      * Scores every company in the workspace as of now. A touch counts toward a company when it is
-     * linked to one of the company's contacts or one of its deals (mirroring how engagement metrics
-     * are scoped elsewhere).
+     * linked to one of the company's present-day contacts or one of its current deals. When both
+     * links target the same company, the touch is counted once.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
-        long reference = Instant.now(clock).toEpochMilli();
+        Instant reference = scoringInstant(Instant.now(clock));
         return computeCompanyScores(workspaceId, reference, reference);
     }
 
+    /**
+     * Returns cooling companies using
+     * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
+     */
     public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
         return scoreCompanies(workspaceId).stream()
             .filter(temperature -> "cooling".equals(temperature.getTrend()))
@@ -251,7 +311,8 @@ public class ScoringService {
 
     /**
      * Scores only the given visible companies as of now, gathering each company's touches directly
-     * instead of scanning every company in the workspace.
+     * instead of scanning every company in the workspace. Attribution uses
+     * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
         List<Integer> requested = companyIds.stream()
@@ -263,6 +324,7 @@ public class ScoringService {
                 "At most " + MAX_BATCH_COMPANIES + " companies may be scored in one request");
         }
         if (requested.isEmpty()) return List.of();
+        Instant reference = scoringInstant(Instant.now(clock));
         List<Company> companies = companyMapper.getByIds(workspaceId, requested);
         if (companies.isEmpty()) return List.of();
         List<Integer> visibleIds = companies.stream().map(Company::getId).toList();
@@ -284,7 +346,6 @@ public class ScoringService {
             processablePersonIds(workspaceId, activities, notes, tasks),
             dealCompany,
             byCompany);
-        long reference = Instant.now(clock).toEpochMilli();
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
         for (Company company : companies) {
             scores.put(company.getId(), temperature(
@@ -328,7 +389,11 @@ public class ScoringService {
         return List.copyOf(activities.values());
     }
 
-    /** Scores the complete relationship-map company set after enforcing its fixed workspace cap. */
+    /**
+     * Scores the complete relationship-map company set with
+     * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY} after enforcing its fixed
+     * workspace cap.
+     */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
         long companyCount = companyMapper.countCompanies(
             workspaceId, null, null, false, null, MemberScope.allTeam());
@@ -336,10 +401,11 @@ public class ScoringService {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");
         }
-        Instant now = Instant.now(clock);
+        Instant now = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return temperatures(
-            companyMapper.getRelationshipScoreAggregates(workspaceId, reference), now.toEpochMilli());
+            companyMapper.getRelationshipScoreAggregates(
+                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now);
     }
 
     /**
@@ -349,8 +415,56 @@ public class ScoringService {
      * as-of-{@code asOf} employment when it assembles frames.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
-        long t = asOf.toEpochMilli();
-        return computeCompanyScores(workspaceId, t, t);
+        Instant reference = scoringInstant(asOf);
+        return computeCompanyScores(workspaceId, reference, reference);
+    }
+
+    /**
+     * Returns bounded, source-level evidence for one visible company.
+     *
+     * <p>Live company attribution uses each contact's present-day company plus the current company
+     * of a linked deal, deduplicating a source when both links resolve to this company.
+     *
+     * <p>Totals and the ranked contributors are two reads of the same capped source set inside one
+     * read-only transaction, so they share a snapshot and the returned rows always reconcile with
+     * the totals the score is derived from.
+     */
+    @Transactional(readOnly = true)
+    public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
+        if (companyMapper.getByIds(workspaceId, List.of(companyId)).stream()
+                .noneMatch(company -> company.getId() == companyId)) {
+            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        }
+        Instant asOf = scoringInstant(Instant.now(clock));
+        LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
+        RelationshipEvidenceTotalsDto totals = boundedTotals(companyMapper.getRelationshipEvidenceTotals(
+            workspaceId,
+            companyId,
+            reference,
+            WARMTH_MODEL.sqlParameters(),
+            MAX_EVIDENCE_SOURCES + 1
+        ));
+        List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
+            ? List.of()
+            : companyMapper.getRelationshipEvidenceContributors(
+                workspaceId,
+                companyId,
+                reference,
+                WARMTH_MODEL.sqlParameters(),
+                MAX_EVIDENCE_SOURCES + 1,
+                MAX_EVIDENCE_CONTRIBUTORS
+            );
+        int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForCompanyEvidence(
+            workspaceId, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+        return evidence(
+            SubjectType.COMPANY,
+            companyId,
+            asOf,
+            AttributionRule.PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY,
+            totals,
+            rows,
+            privateNotes
+        );
     }
 
     public WarmthSummaryDto summarize(int workspaceId) {
@@ -401,7 +515,8 @@ public class ScoringService {
         return days != null && days >= minimum && days <= maximum;
     }
 
-    private List<RelationshipTemperatureDto> computeCompanyScores(int workspaceId, long reference, long cutoff) {
+    private List<RelationshipTemperatureDto> computeCompanyScores(
+            int workspaceId, Instant reference, Instant cutoff) {
         Map<Integer, List<Touch>> byCompany = collectCompanyTouches(workspaceId);
         List<Company> companies = companyMapper.getAllCompanies(workspaceId);
         List<RelationshipTemperatureDto> out = new ArrayList<>(companies.size());
@@ -447,14 +562,14 @@ public class ScoringService {
         for (Note note : notes) {
             Long timestamp = epoch(note.getCreatedAt());
             if (timestamp != null) {
-                attribute(note.getPerson(), note.getDeal(), new Touch(timestamp, NOTE_WEIGHT),
+                attribute(note.getPerson(), note.getDeal(), new Touch(timestamp, WARMTH_MODEL.noteWeight()),
                     personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
         for (Task task : tasks) {
             Long timestamp = epoch(task.getCreatedAt());
             if (timestamp != null) {
-                attribute(task.getPerson(), task.getDeal(), new Touch(timestamp, TASK_WEIGHT),
+                attribute(task.getPerson(), task.getDeal(), new Touch(timestamp, WARMTH_MODEL.taskWeight()),
                     personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
@@ -510,7 +625,8 @@ public class ScoringService {
      * <em>when the touch occurred</em> via {@code employerAt}, so a contact moving employers cools the
      * old account and heats the new one rather than retroactively re-crediting their whole history; a
      * deal's touch uses {@code dealCompany}, the present-day parentage). Each frame's map omits nodes
-     * with no qualifying touch (the caller defaults them to "cold").
+     * with no qualifying touch (the caller defaults them to "cold"). This is
+     * {@link AttributionRule#TOUCH_TIME_EMPLOYER_OR_PRESENT_DAY_DEAL_COMPANY}.
      */
     public ReplayBands replayBands(int workspaceId, long[] frameMillis, EmployerResolver employerAt,
             Set<Integer> processablePersonIds, Map<Integer, Integer> dealCompany) {
@@ -522,11 +638,11 @@ public class ScoringService {
         }
         for (Note n : noteMapper.getAllNotes(workspaceId)) {
             if (!isSharedNote(n)) continue;
-            collectTouch(epoch(n.getCreatedAt()), NOTE_WEIGHT, n.getPerson(), n.getDeal(),
+            collectTouch(epoch(n.getCreatedAt()), WARMTH_MODEL.noteWeight(), n.getPerson(), n.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
-            collectTouch(epoch(t.getCreatedAt()), TASK_WEIGHT, t.getPerson(), t.getDeal(),
+            collectTouch(epoch(t.getCreatedAt()), WARMTH_MODEL.taskWeight(), t.getPerson(), t.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
 
@@ -535,9 +651,10 @@ public class ScoringService {
         List<Map<Integer, String>> contactFrames = new ArrayList<>(frameMillis.length);
         List<Map<Integer, String>> companyFrames = new ArrayList<>(frameMillis.length);
         for (long t : frameMillis) {
+            Instant asOf = Instant.ofEpochMilli(t);
             Map<Integer, String> contactBands = new HashMap<>();
             for (Map.Entry<Integer, List<Touch>> e : byPerson.entrySet()) {
-                contactBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+                contactBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), asOf, asOf).getBand());
             }
             contactFrames.add(contactBands);
 
@@ -548,7 +665,7 @@ public class ScoringService {
             }
             Map<Integer, String> companyBands = new HashMap<>();
             for (Map.Entry<Integer, List<Touch>> e : byCompany.entrySet()) {
-                companyBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+                companyBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), asOf, asOf).getBand());
             }
             companyFrames.add(companyBands);
         }
@@ -602,45 +719,169 @@ public class ScoringService {
     }
 
     /**
+     * Rejects a record whose eligible source set exceeds {@link #MAX_EVIDENCE_SOURCES}, so one
+     * pathological history degrades into a fast, predictable refusal instead of an unbounded scan
+     * that holds a pooled connection. The statements bind the same ceiling, so a set at the ceiling
+     * is reported as one row over the limit and never as a silently truncated total.
+     */
+    private static RelationshipEvidenceTotalsDto boundedTotals(RelationshipEvidenceTotalsDto totals) {
+        if (totals == null) {
+            return EMPTY_EVIDENCE_TOTALS;
+        }
+        if (totals.contributorCount() > MAX_EVIDENCE_SOURCES) {
+            throw new BadRequestException(
+                "Relationship evidence supports at most " + MAX_EVIDENCE_SOURCES
+                    + " attributed sources for one record");
+        }
+        return totals;
+    }
+
+    private static int boundedPrivateNoteCount(int count) {
+        if (count > MAX_EVIDENCE_SOURCES) {
+            throw new BadRequestException(
+                "Relationship evidence supports at most " + MAX_EVIDENCE_SOURCES
+                    + " excluded private notes for one caller and record");
+        }
+        return count;
+    }
+
+    private RelationshipEvidenceDto evidence(
+            SubjectType subjectType,
+            int subjectId,
+            Instant asOf,
+            AttributionRule attributionRule,
+            RelationshipEvidenceTotalsDto total,
+            List<RelationshipEvidenceRowDto> rows,
+            int callerPrivateNotesExcluded) {
+        if (total.contributorCount() == 0) {
+            return new RelationshipEvidenceDto(
+                subjectType,
+                subjectId,
+                emptyTemperature(subjectId, asOf),
+                asOf,
+                attributionRule,
+                List.of(),
+                new Totals(0, 0, 0, 0.0, 0.0, 0.0, new SourceCounts(0, 0, 0)),
+                new Coverage(
+                    true,
+                    MINIMUM_CONFIDENT_CONTRIBUTORS,
+                    callerPrivateNotesExcluded,
+                    PrivateNoteCountScope.CURRENT_CALLER_ONLY
+                )
+            );
+        }
+
+        RelationshipScoreAggregateDto aggregate = new RelationshipScoreAggregateDto(
+            subjectId,
+            total.totalDecayedContribution(),
+            total.recentWeight(),
+            total.priorWeight(),
+            total.lastTouchAt(),
+            total.recentTouchCount()
+        );
+        RelationshipTemperatureDto temperature = temperatures(List.of(aggregate), asOf).getFirst();
+        List<Contributor> contributors = rows.stream()
+            .map(row -> new Contributor(
+                sourceType(row.sourceType()),
+                row.sourceId(),
+                row.interactionType(),
+                requiredInstant(row.occurredAt()),
+                row.baseWeight(),
+                row.decayedContribution()
+            ))
+            .toList();
+        double returnedContribution = contributors.stream()
+            .mapToDouble(Contributor::decayedContribution)
+            .sum();
+        int omittedCount = Math.max(0, total.contributorCount() - contributors.size());
+        double omittedContribution = Math.max(
+            0.0, total.totalDecayedContribution() - returnedContribution);
+        Totals totals = new Totals(
+            total.contributorCount(),
+            contributors.size(),
+            omittedCount,
+            total.totalDecayedContribution(),
+            returnedContribution,
+            omittedContribution,
+            new SourceCounts(total.activityCount(), total.noteCount(), total.taskCount())
+        );
+        Coverage coverage = new Coverage(
+            total.contributorCount() < MINIMUM_CONFIDENT_CONTRIBUTORS,
+            MINIMUM_CONFIDENT_CONTRIBUTORS,
+            callerPrivateNotesExcluded,
+            PrivateNoteCountScope.CURRENT_CALLER_ONLY
+        );
+        return new RelationshipEvidenceDto(
+            subjectType,
+            subjectId,
+            temperature,
+            asOf,
+            attributionRule,
+            contributors,
+            totals,
+            coverage
+        );
+    }
+
+    private static SourceType sourceType(String value) {
+        return switch (value) {
+            case "activity" -> SourceType.ACTIVITY;
+            case "note" -> SourceType.NOTE;
+            case "task" -> SourceType.TASK;
+            default -> throw new IllegalStateException("Unexpected relationship evidence source");
+        };
+    }
+
+    private static Instant requiredInstant(String value) {
+        Long timestamp = epoch(value);
+        if (timestamp == null) {
+            throw new IllegalStateException("Relationship evidence timestamp is missing");
+        }
+        return Instant.ofEpochMilli(timestamp);
+    }
+
+    /**
      * Collapses a contact's or company's touches into a single temperature reading, decayed against
      * {@code reference} and counting only touches timestamped at or before {@code cutoff}. Live and
      * replay readings both use their reference instant as the cutoff, so future-dated touches are
      * skipped before the age calculation.
      */
-    private RelationshipTemperatureDto temperature(int id, List<Touch> touches, long reference, long cutoff) {
+    private RelationshipTemperatureDto temperature(
+            int id, List<Touch> touches, Instant reference, Instant cutoff) {
+        long referenceEpochMillis = reference.toEpochMilli();
+        long cutoffEpochMillis = cutoff.toEpochMilli();
         double raw = 0, recent = 0, prior = 0;
         long lastTs = Long.MIN_VALUE;
         int recentCount = 0;
         boolean any = false;
         for (Touch t : touches) {
-            if (t.epochMillis() > cutoff) continue;
+            if (t.epochMillis() > cutoffEpochMillis) continue;
             any = true;
-            double ageDays = Math.max(0.0, (reference - t.epochMillis()) / (double) DAY_MS);
-            raw += t.weight() * Math.pow(2.0, -ageDays / HALF_LIFE_DAYS);
-            if (ageDays <= RECENT_WINDOW_DAYS) {
+            double ageDays = WARMTH_MODEL.ageDays(referenceEpochMillis, t.epochMillis());
+            raw += WARMTH_MODEL.decayedContribution(t.weight(), ageDays);
+            if (WARMTH_MODEL.isRecent(ageDays)) {
                 recent += t.weight();
                 recentCount++;
-            } else if (ageDays <= PRIOR_WINDOW_DAYS) {
+            } else if (WARMTH_MODEL.isPrior(ageDays)) {
                 prior += t.weight();
             }
             if (t.epochMillis() > lastTs) lastTs = t.epochMillis();
         }
         if (!any) {
-            return new RelationshipTemperatureDto(id, 0, "cold", "steady", null, null, 0, null, null);
+            return emptyTemperature(id, reference);
         }
 
         return temperature(id, raw, recent, prior, lastTs, recentCount, reference);
     }
 
-    private List<RelationshipTemperatureDto> temperatures(
+    List<RelationshipTemperatureDto> temperatures(
             List<RelationshipScoreAggregateDto> aggregates,
-            long reference) {
+            Instant reference) {
         List<RelationshipTemperatureDto> scores = new ArrayList<>(aggregates.size());
         for (RelationshipScoreAggregateDto aggregate : aggregates) {
             Long lastTouch = epoch(aggregate.lastTouchAt());
             if (lastTouch == null) {
-                scores.add(new RelationshipTemperatureDto(
-                    aggregate.id(), 0, "cold", "steady", null, null, 0, null, null));
+                scores.add(emptyTemperature(aggregate.id(), reference));
             } else {
                 scores.add(temperature(
                     aggregate.id(),
@@ -662,40 +903,45 @@ public class ScoringService {
             double prior,
             long lastTs,
             int recentCount,
-            long reference) {
-
-        int score = (int) Math.round(100.0 * (1.0 - Math.pow(2.0, -raw / SATURATION)));
-        score = Math.max(0, Math.min(100, score));
-        String band = score >= 60 ? "hot" : score >= 35 ? "warm" : score >= 15 ? "cool" : "cold";
-
-        long daysSince = (reference - lastTs) / DAY_MS;
-        String trend;
-        if (prior >= COOLING_PRIOR_MIN && recent < prior * 0.5 && daysSince >= RECENT_WINDOW_DAYS) {
-            trend = "cooling";
-        } else if (recent > prior) {
-            trend = "rising";
-        } else {
-            trend = "steady";
-        }
+            Instant reference) {
+        long referenceEpochMillis = reference.toEpochMilli();
+        int score = WARMTH_MODEL.score(raw);
+        String band = WARMTH_MODEL.band(score);
+        long daysSince = WARMTH_MODEL.wholeDaysSince(referenceEpochMillis, lastTs);
+        String trend = WARMTH_MODEL.trend(recent, prior, daysSince);
 
         String lastTouchAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(lastTs), ZoneOffset.UTC)
             .format(MYSQL_DATETIME);
 
         Integer daysUntilCold = null;
         String goesColdAt = null;
-        if (raw > RAW_COLD) {
-            double daysToCold = HALF_LIFE_DAYS * log2(raw / RAW_COLD);
+        OptionalDouble predictedDays = WARMTH_MODEL.daysToCold(raw);
+        if (predictedDays.isPresent()) {
+            double daysToCold = predictedDays.getAsDouble();
             daysUntilCold = (int) Math.round(daysToCold);
             goesColdAt = LocalDateTime.ofInstant(
-                Instant.ofEpochMilli(reference + Math.round(daysToCold * DAY_MS)), ZoneOffset.UTC).format(MYSQL_DATETIME);
+                Instant.ofEpochMilli(WARMTH_MODEL.plusDays(referenceEpochMillis, daysToCold)), ZoneOffset.UTC)
+                .format(MYSQL_DATETIME);
         }
 
         return new RelationshipTemperatureDto(id, score, band, trend, lastTouchAt, (int) daysSince, recentCount,
-            goesColdAt, daysUntilCold);
+            goesColdAt, daysUntilCold, WARMTH_MODEL.version(), reference);
     }
 
-    private static double log2(double value) {
-        return Math.log(value) / Math.log(2.0);
+    private static RelationshipTemperatureDto emptyTemperature(int id, Instant reference) {
+        return new RelationshipTemperatureDto(
+            id,
+            0,
+            "cold",
+            "steady",
+            null,
+            null,
+            0,
+            null,
+            null,
+            WARMTH_MODEL.version(),
+            reference
+        );
     }
 
     /** Attributes a touch to its contact's company and/or its deal's company (deduplicated). */
@@ -723,13 +969,7 @@ public class ScoringService {
     }
 
     private static double activityWeight(String type) {
-        if (type == null) return 0.5;
-        return switch (type.toLowerCase()) {
-            case "meeting" -> 1.0;
-            case "call" -> 0.8;
-            case "email" -> 0.6;
-            default -> 0.5;
-        };
+        return WARMTH_MODEL.activityWeight(type);
     }
 
     private static Integer personId(Person p) {
@@ -742,6 +982,10 @@ public class ScoringService {
 
     private static Long epoch(String s) {
         return DateTimes.epochMillis(s);
+    }
+
+    private static Instant scoringInstant(Instant instant) {
+        return Instant.ofEpochMilli(instant.toEpochMilli());
     }
 
     private static boolean isSharedNote(Note note) {

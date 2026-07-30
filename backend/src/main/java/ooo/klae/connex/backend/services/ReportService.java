@@ -65,6 +65,7 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -74,6 +75,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class ReportService {
+    private static final RelationshipWarmthModel WARMTH_MODEL = RelationshipWarmthModel.current();
+
     private static final int MAX_CONFIG_BYTES = 131_072;
     private static final int MAX_SNAPSHOT_BYTES = 4_194_304;
     private static final int MAX_SNAPSHOT_LIST_SIZE = 100;
@@ -525,11 +528,15 @@ public class ReportService {
                 .contains(widget.measure())) {
             List<ReportAggregateRow> current = reportMapper.aggregateCoverageGaps(query(
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
-                    period.currentEndUtc(), period.zone()));
+                    period.currentEndUtc(), period.zone()),
+                    period.currentEndUtc().minusNanos(1_000_000),
+                    WARMTH_MODEL.sqlParameters());
             List<ReportAggregateRow> prior = priorComparable(widget, filters)
                     ? reportMapper.aggregateCoverageGaps(query(
                             workspaceId, widget, filters, bucket, period.priorStartUtc(),
-                            period.priorEndUtc(), period.zone()))
+                            period.priorEndUtc(), period.zone()),
+                            period.priorEndUtc().minusNanos(1_000_000),
+                            WARMTH_MODEL.sqlParameters())
                     : List.of();
             return new RowPair(
                     countTotalRow(widget, current),

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -421,6 +422,7 @@ class WarmPathRankingTest {
     private static RelationshipTemperatureDto temp(
             int id, int score, String band, Integer daysSinceTouch, int touchCount) {
         return new RelationshipTemperatureDto(
-            id, score, band, "steady", null, daysSinceTouch, touchCount, null, null);
+            id, score, band, "steady", null, daysSinceTouch, touchCount, null, null,
+            "test-model", Instant.EPOCH);
     }
 }

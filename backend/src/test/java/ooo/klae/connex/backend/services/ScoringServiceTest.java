@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,16 +36,26 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BandCounts;
 import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.AttributionRule;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.PrivateNoteCountScope;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SourceType;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto.SubjectType;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /**
  * Unit tests for the as-of scoring behaviour that the time-travel replay (#48) relies on: a
@@ -71,6 +82,8 @@ class ScoringServiceTest {
 
         assertEquals(live, asOfNow);
         assertNotEquals("cold", scoreFor(live, 1).getBand());
+        assertEquals("warmth-v1", scoreFor(live, 1).getModelVersion());
+        assertEquals(NOW, scoreFor(live, 1).getAsOf());
     }
 
     @Test
@@ -81,7 +94,11 @@ class ScoringServiceTest {
             List.of(activity(contact, "meeting", "2026-06-25 09:00:00")),
             List.of(), List.of());
 
-        assertEquals(service.scoreCompanies(WS), service.scoreCompanies(WS, NOW));
+        RelationshipTemperatureDto live = service.scoreCompanies(WS).getFirst();
+
+        assertEquals(List.of(live), service.scoreCompanies(WS, NOW));
+        assertEquals("warmth-v1", live.getModelVersion());
+        assertEquals(NOW, live.getAsOf());
     }
 
     @Test
@@ -398,7 +415,7 @@ class ScoringServiceTest {
 
         verify(companyMapper, never()).getAllCompanies(anyInt());
         verify(personMapper, never()).getAllPersons(anyInt());
-        verify(companyMapper, never()).getRelationshipScoreAggregates(anyInt(), any());
+        verify(companyMapper, never()).getRelationshipScoreAggregates(anyInt(), any(), any());
     }
 
     @Test
@@ -476,6 +493,187 @@ class ScoringServiceTest {
     }
 
     @Test
+    void contactEvidenceReturnsBoundedTotalsAndCallerOnlyExclusionDisclosure() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        List<RelationshipEvidenceRowDto> rows = List.of(
+            new RelationshipEvidenceRowDto(
+                "activity", 101, "meeting", "2026-06-29 12:00:00", 1.0, 0.99),
+            new RelationshipEvidenceRowDto(
+                "note", 102, "workspace-note", "2026-06-29 11:00:00", 0.4, 0.39)
+        );
+        RelationshipEvidenceTotalsDto totals = new RelationshipEvidenceTotalsDto(
+            25, 5.0, 20, 3, 2, 4.0, 0.8, "2026-06-29 12:00:00", 20);
+        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(totals);
+        when(personMapper.getRelationshipEvidenceContributors(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20
+        )).thenReturn(rows);
+        when(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001)).thenReturn(2);
+        ScoringService service = new ScoringService(
+            personMapper,
+            companyMapper,
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        RelationshipEvidenceDto evidence = service.contactEvidence(WS, 7, 42);
+
+        assertEquals(SubjectType.PERSON, evidence.subjectType());
+        assertEquals(7, evidence.subjectId());
+        assertEquals(NOW, evidence.asOf());
+        assertEquals(AttributionRule.DIRECT_PERSON_TOUCHES, evidence.attributionRule());
+        assertEquals(RelationshipWarmthModel.current().version(), evidence.temperature().getModelVersion());
+        assertEquals(NOW, evidence.temperature().getAsOf());
+        assertEquals(List.of(SourceType.ACTIVITY, SourceType.NOTE),
+            evidence.contributors().stream().map(RelationshipEvidenceDto.Contributor::sourceType).toList());
+        assertEquals(25, evidence.totals().contributorCount());
+        assertEquals(2, evidence.totals().returnedCount());
+        assertEquals(23, evidence.totals().omittedCount());
+        assertEquals(5.0, evidence.totals().totalDecayedContribution(), 0.000_000_001);
+        assertEquals(1.38, evidence.totals().returnedDecayedContribution(), 0.000_000_001);
+        assertEquals(3.62, evidence.totals().omittedDecayedContribution(), 0.000_000_001);
+        assertEquals(20, evidence.totals().sourceCounts().activities());
+        assertEquals(3, evidence.totals().sourceCounts().notes());
+        assertEquals(2, evidence.totals().sourceCounts().tasks());
+        assertFalse(evidence.coverage().limitedEvidence());
+        assertEquals(2, evidence.coverage().callerPrivateNotesExcluded());
+        assertEquals(PrivateNoteCountScope.CURRENT_CALLER_ONLY,
+            evidence.coverage().privateNoteCountScope());
+        verify(personMapper).getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
+        verify(personMapper).getRelationshipEvidenceContributors(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20);
+        verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001);
+    }
+
+    @Test
+    void contactEvidenceRefusesARecordWhoseEligibleSourcesExceedTheServerBound() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(
+            100_001, 5.0, 100_001, 0, 0, 4.0, 0.8, "2026-06-29 12:00:00", 20));
+        ScoringService service = new ScoringService(
+            personMapper,
+            mock(CompanyMapper.class),
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
+
+        verify(personMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+        verify(noteMapper, never()).countOwnPrivateNotesForPersonEvidence(
+            anyInt(), anyInt(), anyInt(), any(), anyInt());
+    }
+
+    @Test
+    void contactEvidenceRefusesARecordWhoseExcludedPrivateNotesExceedTheServerBound() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getRelationshipEvidenceTotals(
+            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(
+            0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
+        when(noteMapper.countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001)).thenReturn(100_001);
+        ScoringService service = new ScoringService(
+            personMapper,
+            mock(CompanyMapper.class),
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
+
+        verify(personMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+        verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
+            WS, 7, 42, reference, 100_001);
+    }
+
+    @Test
+    void companyEvidenceSkipsTheRankedReadWhenNoSourceIsEligible() {
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        Company company = new Company();
+        company.setId(10);
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(companyMapper.getRelationshipEvidenceTotals(
+            WS, 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+        )).thenReturn(new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
+        when(noteMapper.countOwnPrivateNotesForCompanyEvidence(
+            WS, 10, 42, reference, 100_001)).thenReturn(3);
+        ScoringService service = new ScoringService(
+            mock(PersonMapper.class),
+            companyMapper,
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        RelationshipEvidenceDto evidence = service.companyEvidence(WS, 10, 42);
+
+        assertEquals(0, evidence.totals().contributorCount());
+        assertEquals(0, evidence.contributors().size());
+        assertEquals("cold", evidence.temperature().getBand());
+        assertTrue(evidence.coverage().limitedEvidence());
+        assertEquals(3, evidence.coverage().callerPrivateNotesExcluded());
+        verify(companyMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void companyEvidenceRejectsAnInvisibleCompanyBeforeReadingSourcesOrPrivateNoteCounts() {
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of());
+        ScoringService service = new ScoringService(
+            mock(PersonMapper.class),
+            companyMapper,
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            noteMapper,
+            mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        assertThrows(ResourceNotFoundException.class, () -> service.companyEvidence(WS, 10, 42));
+
+        verify(companyMapper, never()).getRelationshipEvidenceTotals(
+            anyInt(), anyInt(), any(), any(), anyInt());
+        verify(companyMapper, never()).getRelationshipEvidenceContributors(
+            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+        verify(noteMapper, never()).countOwnPrivateNotesForCompanyEvidence(
+            anyInt(), anyInt(), anyInt(), any(), anyInt());
+    }
+
+    @Test
     void workspaceSnapshotUsesOnlyCompactScoringAggregates() {
         PersonMapper personMapper = mock(PersonMapper.class);
         CompanyMapper companyMapper = mock(CompanyMapper.class);
@@ -488,8 +686,10 @@ class ScoringServiceTest {
             1, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1);
         RelationshipScoreAggregateDto company = new RelationshipScoreAggregateDto(
             10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1);
-        when(personMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(contact));
-        when(companyMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(company));
+        when(personMapper.getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
+        when(companyMapper.getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
         ScoringService service = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper,
             noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
@@ -500,8 +700,10 @@ class ScoringServiceTest {
         assertEquals(1, scores.companies().size());
         assertEquals(1, scores.contacts().getFirst().getTouchCount());
         assertEquals(1, scores.companies().getFirst().getTouchCount());
-        verify(personMapper).getRelationshipScoreAggregates(WS, reference);
-        verify(companyMapper).getRelationshipScoreAggregates(WS, reference);
+        verify(personMapper).getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters());
+        verify(companyMapper).getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters());
         verify(personMapper, never()).getAllPersons(anyInt());
         verify(companyMapper, never()).getAllCompanies(anyInt());
         verify(dealMapper, never()).getAllDeals(anyInt());
@@ -516,7 +718,8 @@ class ScoringServiceTest {
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(companyMapper.countCompanies(
             WS, null, null, false, null, MemberScope.allTeam())).thenReturn(1L);
-        when(companyMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(
+        when(companyMapper.getRelationshipScoreAggregates(
+                WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(
             new RelationshipScoreAggregateDto(
                 10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));
         PersonMapper personMapper = mock(PersonMapper.class);
@@ -531,7 +734,8 @@ class ScoringServiceTest {
         List<RelationshipTemperatureDto> scores = service.scoreCompaniesForMap(WS);
 
         assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
-        verify(companyMapper).getRelationshipScoreAggregates(WS, reference);
+        verify(companyMapper).getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters());
         verify(companyMapper, never()).getAllCompanies(anyInt());
         verify(personMapper, never()).getAllPersons(anyInt());
         verify(dealMapper, never()).getAllDeals(anyInt());
@@ -629,6 +833,7 @@ class ScoringServiceTest {
     }
 
     private static RelationshipTemperatureDto temperature(int id, String band, String trend, Integer daysUntilCold) {
-        return new RelationshipTemperatureDto(id, 0, band, trend, null, null, 0, null, daysUntilCold);
+        return new RelationshipTemperatureDto(
+            id, 0, band, trend, null, null, 0, null, daysUntilCold, "test-model", Instant.EPOCH);
     }
 }

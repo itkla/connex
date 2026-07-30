@@ -90,11 +90,13 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
     private void warmth(int personId, int score, String band, String trend, int daysSinceTouch) {
         warmthList(new RelationshipTemperatureDto(personId, score, band, trend, "2126-05-01 10:00:00",
-            daysSinceTouch, 0, null, null));
+            daysSinceTouch, 0, null, null, "test-model", Instant.EPOCH));
     }
 
     private RelationshipTemperatureDto temp(int personId, String band, String trend) {
-        return new RelationshipTemperatureDto(personId, 0, band, trend, "2126-05-01 10:00:00", 40, 0, null, null);
+        return new RelationshipTemperatureDto(
+            personId, 0, band, trend, "2126-05-01 10:00:00", 40, 0, null, null,
+            "test-model", Instant.EPOCH);
     }
 
     private void warmthList(RelationshipTemperatureDto... temps) {

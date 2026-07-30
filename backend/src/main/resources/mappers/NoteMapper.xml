@@ -30,6 +30,22 @@
     n.id, n.workspace_id, n.content, n.title, n.visibility, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
   </sql>
 
+  <sql id="visiblePerson">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace pvws ON pvws.id = ps.workspace_id
+        JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleCompany">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace cvws ON cvws.id = cs.workspace_id
+        JOIN workspace cows ON cows.id = c.workspace_id AND cows.org_id = cvws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
   <select id="getAllNotes" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} ORDER BY created_at DESC, id DESC
@@ -163,6 +179,68 @@
             AND d.company_id IN
             <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
     ORDER BY n.created_at DESC, n.id DESC
+  </select>
+
+  <select id="countOwnPrivateNotesForPersonEvidence" timeout="10" resultType="int">
+    SELECT COUNT(*)
+    FROM (
+      SELECT n.id
+      FROM note n
+      JOIN person p ON p.id = n.person_id
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.person_id = #{personId}
+        AND n.author_id = #{currentUserId}
+        AND n.visibility = 'private'
+        AND n.created_at IS NOT NULL
+        AND n.created_at &lt;= #{reference}
+        AND p.suspended_at IS NULL
+        AND <include refid="visiblePerson"/>
+      LIMIT #{sourceLimit}
+    ) capped
+  </select>
+
+  <select id="countOwnPrivateNotesForCompanyEvidence" timeout="10" resultType="int">
+    SELECT COUNT(*)
+    FROM (
+      SELECT n.id
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.author_id = #{currentUserId}
+        AND n.visibility = 'private'
+        AND n.created_at IS NOT NULL
+        AND n.created_at &lt;= #{reference}
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM person p
+            WHERE p.id = n.person_id
+              AND p.company_id = #{companyId}
+              AND p.suspended_at IS NULL
+              AND <include refid="visiblePerson"/>
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM deal d
+            WHERE d.id = n.deal_id
+              AND d.workspace_id = #{workspaceId}
+              AND d.company_id = #{companyId}
+              AND (n.person_id IS NULL OR EXISTS (
+                SELECT 1
+                FROM person p
+                WHERE p.id = n.person_id
+                  AND p.suspended_at IS NULL
+                  AND <include refid="visiblePerson"/>
+              ))
+          )
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM company c
+          WHERE c.id = #{companyId}
+            AND <include refid="visibleCompany"/>
+        )
+      LIMIT #{sourceLimit}
+    ) capped
   </select>
 
   <select id="getNotesReferencing" resultMap="NoteResult">

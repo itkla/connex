@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -443,10 +444,9 @@ class ReportNetworkServiceTest {
     }
 
     private static RelationshipTemperatureDto score(int id, int value) {
-        RelationshipTemperatureDto score = new RelationshipTemperatureDto();
-        score.setId(id);
-        score.setScore(value);
-        return score;
+        return new RelationshipTemperatureDto(
+            id, value, "cold", "steady", null, null, 0, null, null,
+            "test-model", Instant.EPOCH);
     }
 
     private static ReportNetworkAccountRow account(int id, String name, String currency, String value) {

@@ -5,6 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.RelationshipEvidenceDto;
 import ooo.klae.connex.backend.dto.ScoringIdsRequest;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -40,6 +42,16 @@ public class ScoringController {
         return scoringService.scoreContacts(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
     }
 
+    /** Source-level evidence for one visible, processable contact in the active workspace. */
+    @GetMapping("/contacts/{id}/evidence")
+    public RelationshipEvidenceDto contactEvidence(@PathVariable int id) {
+        return scoringService.contactEvidence(
+            workspaceService.getCurrentWorkspaceId(),
+            id,
+            workspaceService.getCurrentUserId()
+        );
+    }
+
     /** Highest-priority cooling contacts for dashboard cards. */
     @GetMapping("/contacts/cooling")
     public List<RelationshipTemperatureDto> coolingContacts(
@@ -52,6 +64,16 @@ public class ScoringController {
     @GetMapping("/companies")
     public List<RelationshipTemperatureDto> companies(@RequestParam(required = false) List<Integer> ids) {
         return scoringService.scoreCompanies(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
+    }
+
+    /** Source-level evidence for one visible company in the active workspace. */
+    @GetMapping("/companies/{id}/evidence")
+    public RelationshipEvidenceDto companyEvidence(@PathVariable int id) {
+        return scoringService.companyEvidence(
+            workspaceService.getCurrentWorkspaceId(),
+            id,
+            workspaceService.getCurrentUserId()
+        );
     }
 
     /** Warmth for up to 2,000 visible companies without expanding ids into the request URL. */

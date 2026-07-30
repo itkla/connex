@@ -33,6 +33,229 @@
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
+  <!-- Normalized interaction type and model weight for one activity row, shared by the
+       workspace-wide aggregate and the subject-scoped evidence union so both read the same
+       attribution vocabulary. Requires the table aliased `a`. -->
+  <sql id="activityInteractionType">
+    CASE LOWER(a.type)
+      WHEN 'meeting' THEN 'meeting'
+      WHEN 'call' THEN 'call'
+      WHEN 'email' THEN 'email'
+      ELSE 'other'
+    END
+  </sql>
+
+  <sql id="activityBaseWeight">
+    CASE LOWER(a.type)
+      WHEN 'meeting' THEN #{model.meetingWeight}
+      WHEN 'call' THEN #{model.callWeight}
+      WHEN 'email' THEN #{model.emailWeight}
+      ELSE #{model.otherActivityWeight}
+    END
+  </sql>
+
+  <!-- A contact whose touches may be attributed to its company. Requires the table aliased `p`. -->
+  <sql id="attributablePerson">
+    p.suspended_at IS NULL AND <include refid="visiblePerson"/>
+  </sql>
+
+  <sql id="relationshipTouchSources">
+    SELECT 'activity' AS source_type,
+           a.id AS source_id,
+           p.company_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    JOIN person p ON p.id = a.person_id
+    WHERE a.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+      AND <include refid="attributablePerson"/>
+    UNION ALL
+    SELECT 'activity' AS source_type,
+           a.id AS source_id,
+           d.company_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    JOIN deal d ON d.id = a.deal_id
+    WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND d.company_id IS NOT NULL
+      AND (a.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = a.person_id AND <include refid="attributablePerson"/>
+      ))
+    UNION ALL
+    SELECT 'note' AS source_type,
+           n.id AS source_id,
+           p.company_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    JOIN person p ON p.id = n.person_id
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND p.company_id IS NOT NULL
+      AND <include refid="attributablePerson"/>
+    UNION ALL
+    SELECT 'note' AS source_type,
+           n.id AS source_id,
+           d.company_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    JOIN deal d ON d.id = n.deal_id
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+      AND (n.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = n.person_id AND <include refid="attributablePerson"/>
+      ))
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           p.company_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    JOIN person p ON p.id = t.person_id
+    WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+      AND <include refid="attributablePerson"/>
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           d.company_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    JOIN deal d ON d.id = t.deal_id
+    WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND d.company_id IS NOT NULL
+      AND (t.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+      ))
+  </sql>
+
+  <!-- Sources attributed to one company, filtered inside every branch so the union stays
+       index-driven on that company and can be capped by row count. The deal branches drop a source
+       whose contact already attributes it to the same company, so dual-attributed sources appear
+       once without a deduplication pass over the whole union. -->
+  <sql id="companyEvidenceSources">
+    SELECT 'activity' AS source_type,
+           a.id AS source_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    JOIN person p ON p.id = a.person_id
+    WHERE a.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+      AND <include refid="attributablePerson"/>
+      AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+    UNION ALL
+    SELECT 'activity' AS source_type,
+           a.id AS source_id,
+           <include refid="activityInteractionType"/> AS interaction_type,
+           a.timestamp AS touched_at,
+           <include refid="activityBaseWeight"/> AS weight
+    FROM activity a
+    JOIN deal d ON d.id = a.deal_id
+    WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND d.company_id = #{companyId}
+      AND (a.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = a.person_id AND <include refid="attributablePerson"/>
+      ))
+      AND NOT EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = a.person_id AND p.company_id = d.company_id
+          AND <include refid="attributablePerson"/>
+      )
+      AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+    UNION ALL
+    SELECT 'note' AS source_type,
+           n.id AS source_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    JOIN person p ON p.id = n.person_id
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND p.company_id = #{companyId}
+      AND <include refid="attributablePerson"/>
+      AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+    UNION ALL
+    SELECT 'note' AS source_type,
+           n.id AS source_id,
+           'workspace-note' AS interaction_type,
+           n.created_at AS touched_at,
+           #{model.noteWeight} AS weight
+    FROM note n
+    JOIN deal d ON d.id = n.deal_id
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}
+      AND (n.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = n.person_id AND <include refid="attributablePerson"/>
+      ))
+      AND NOT EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = n.person_id AND p.company_id = d.company_id
+          AND <include refid="attributablePerson"/>
+      )
+      AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    JOIN person p ON p.id = t.person_id
+    WHERE t.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+      AND <include refid="attributablePerson"/>
+      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    JOIN deal d ON d.id = t.deal_id
+    WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND d.company_id = #{companyId}
+      AND (t.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+      ))
+      AND NOT EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND p.company_id = d.company_id
+          AND <include refid="attributablePerson"/>
+      )
+      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+  </sql>
+
+  <!-- Company evidence reads the capped source set twice: once collapsed to totals, once ranked for
+       the returned contributors. Both bind the same #{sourceLimit}, so neither statement can scan or
+       rank more rows than the service allows. -->
+  <sql id="companyEvidenceScope">
+    FROM (
+      <include refid="companyEvidenceSources"/>
+      LIMIT #{sourceLimit}
+    ) source
+    WHERE EXISTS (
+      SELECT 1
+      FROM company c
+      WHERE c.id = #{companyId}
+        AND <include refid="visible"/>
+    )
+  </sql>
+
   <select id="getAllCompanies" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
@@ -53,101 +276,104 @@
   <select id="getRelationshipScoreAggregates"
           resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
     SELECT c.id,
-           COALESCE(SUM(touch.weight * POW(2.0, -touch.age_days / 30.0)), 0.0) AS raw_weight,
-           COALESCE(SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN touch.weight ELSE 0.0 END), 0.0)
+           COALESCE(SUM(touch.weight
+             * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0)
              AS recent_weight,
-           COALESCE(SUM(CASE WHEN touch.age_days &gt; 21.0 AND touch.age_days &lt;= 120.0
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                               AND touch.age_days &lt;= #{model.priorWindowDays}
                              THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
            DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
-           SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN 1 ELSE 0 END) AS recent_touch_count
+           SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                    THEN 1 ELSE 0 END) AS recent_touch_count
     FROM company c
     LEFT JOIN (
       SELECT attributed.company_id, attributed.touched_at, attributed.weight,
              GREATEST(0.0,
-               TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference}) / 86400000000.0) AS age_days
+               TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
       FROM (
-        SELECT source.touch_kind, source.touch_id, source.company_id, source.touched_at, source.weight
+        SELECT source.source_type,
+               source.source_id,
+               source.company_id,
+               source.interaction_type,
+               source.touched_at,
+               source.weight
         FROM (
-          SELECT 'activity' AS touch_kind, a.id AS touch_id, p.company_id,
-                 a.timestamp AS touched_at,
-                 CASE LOWER(a.type)
-                   WHEN 'meeting' THEN 1.0
-                   WHEN 'call' THEN 0.8
-                   WHEN 'email' THEN 0.6
-                   ELSE 0.5
-                 END AS weight
-          FROM activity a
-          JOIN person p ON p.id = a.person_id
-          WHERE a.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
-            AND p.suspended_at IS NULL
-            AND <include refid="visiblePerson"/>
-          UNION ALL
-          SELECT 'activity' AS touch_kind, a.id AS touch_id, d.company_id,
-                 a.timestamp AS touched_at,
-                 CASE LOWER(a.type)
-                   WHEN 'meeting' THEN 1.0
-                   WHEN 'call' THEN 0.8
-                   WHEN 'email' THEN 0.6
-                   ELSE 0.5
-                 END AS weight
-          FROM activity a
-          JOIN deal d ON d.id = a.deal_id
-          WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
-            AND d.company_id IS NOT NULL
-            AND (a.person_id IS NULL OR EXISTS (
-              SELECT 1 FROM person p
-              WHERE p.id = a.person_id AND p.suspended_at IS NULL
-                AND <include refid="visiblePerson"/>
-            ))
-          UNION ALL
-          SELECT 'note' AS touch_kind, n.id AS touch_id, p.company_id,
-                 n.created_at AS touched_at, 0.4 AS weight
-          FROM note n
-          JOIN person p ON p.id = n.person_id
-          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
-            AND p.company_id IS NOT NULL AND p.suspended_at IS NULL
-            AND <include refid="visiblePerson"/>
-          UNION ALL
-          SELECT 'note' AS touch_kind, n.id AS touch_id, d.company_id,
-                 n.created_at AS touched_at, 0.4 AS weight
-          FROM note n
-          JOIN deal d ON d.id = n.deal_id
-          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
-            AND d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
-            AND (n.person_id IS NULL OR EXISTS (
-              SELECT 1 FROM person p
-              WHERE p.id = n.person_id AND p.suspended_at IS NULL
-                AND <include refid="visiblePerson"/>
-            ))
-          UNION ALL
-          SELECT 'task' AS touch_kind, t.id AS touch_id, p.company_id,
-                 t.created_at AS touched_at, 0.3 AS weight
-          FROM task t
-          JOIN person p ON p.id = t.person_id
-          WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
-            AND p.suspended_at IS NULL
-            AND <include refid="visiblePerson"/>
-          UNION ALL
-          SELECT 'task' AS touch_kind, t.id AS touch_id, d.company_id,
-                 t.created_at AS touched_at, 0.3 AS weight
-          FROM task t
-          JOIN deal d ON d.id = t.deal_id
-          WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
-            AND d.company_id IS NOT NULL
-            AND (t.person_id IS NULL OR EXISTS (
-              SELECT 1 FROM person p
-              WHERE p.id = t.person_id AND p.suspended_at IS NULL
-                AND <include refid="visiblePerson"/>
-            ))
+          <include refid="relationshipTouchSources"/>
         ) source
         WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
-        GROUP BY source.touch_kind, source.touch_id, source.company_id,
-                 source.touched_at, source.weight
+        GROUP BY source.source_type,
+                 source.source_id,
+                 source.company_id,
+                 source.interaction_type,
+                 source.touched_at,
+                 source.weight
       ) attributed
     ) touch ON touch.company_id = c.id
     WHERE <include refid="visible"/>
     GROUP BY c.id
     ORDER BY c.id
+  </select>
+
+  <select id="getRelationshipEvidenceTotals" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto">
+    SELECT COUNT(*) AS contributor_count,
+           COALESCE(SUM(capped.base_weight
+             * POW(#{model.decayBase}, -capped.age_days / #{model.halfLifeDays})), 0.0)
+             AS total_decayed_contribution,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'activity' THEN 1 ELSE 0 END), 0)
+             AS activity_count,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'note' THEN 1 ELSE 0 END), 0)
+             AS note_count,
+           COALESCE(SUM(CASE WHEN capped.source_type = 'task' THEN 1 ELSE 0 END), 0)
+             AS task_count,
+           COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                             THEN capped.base_weight ELSE 0.0 END), 0.0) AS recent_weight,
+           COALESCE(SUM(CASE WHEN capped.age_days &gt; #{model.recentWindowDays}
+                               AND capped.age_days &lt;= #{model.priorWindowDays}
+                             THEN capped.base_weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(capped.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                             THEN 1 ELSE 0 END), 0) AS recent_touch_count
+    FROM (
+      SELECT source.source_type,
+             source.touched_at,
+             source.weight AS base_weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      <include refid="companyEvidenceScope"/>
+    ) capped
+  </select>
+
+  <select id="getRelationshipEvidenceContributors" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto">
+    SELECT aged.source_type,
+           aged.source_id,
+           aged.interaction_type,
+           DATE_FORMAT(aged.touched_at, '%Y-%m-%d %H:%i:%s') AS occurred_at,
+           aged.base_weight,
+           aged.base_weight
+             * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
+             AS decayed_contribution
+    FROM (
+      SELECT source.source_type,
+             source.source_id,
+             source.interaction_type,
+             source.touched_at,
+             source.weight AS base_weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      <include refid="companyEvidenceScope"/>
+    ) aged
+    ORDER BY decayed_contribution DESC,
+             aged.touched_at DESC,
+             aged.source_type,
+             aged.source_id
+    LIMIT #{limit}
   </select>
 
   <sql id="pageWhere">
