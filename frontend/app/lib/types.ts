@@ -132,6 +132,8 @@ export type ImportRowAnalysis = {
     status: ImportRowStatus;
     matchedId?: number | null;
     matchedLabel?: string | null;
+    canonicalRowIndex?: number | null;
+    mergedRowCount?: number | null;
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
 };

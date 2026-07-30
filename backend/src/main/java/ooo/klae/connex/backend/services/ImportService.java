@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -136,8 +137,11 @@ public class ImportService {
         String label;
         final List<String> errors = new ArrayList<>();
         final Map<String, String> std = new HashMap<>();
+        final Map<String, Integer> stdSourceRows = new HashMap<>();
         final Map<String, String> custom = new HashMap<>();
         final List<String> tagNames = new ArrayList<>();
+        final List<PlanRow> sourceRows = new ArrayList<>();
+        final Set<CanonicalIdentity> missingCanonicalIdentities = new HashSet<>();
         String companyName;
         String companyDependencyKey;
         String companyDependencyError;
@@ -159,7 +163,10 @@ public class ImportService {
         COMMIT
     }
 
-    private record ImportAnalysis(List<PlanRow> plan, String reviewProof) {
+    private record ImportAnalysis(
+            List<PlanRow> plan,
+            List<PlanRow> mutations,
+            String reviewProof) {
     }
 
     // ===================================================================================
@@ -182,10 +189,11 @@ public class ImportService {
                 "person",
                 workspaceId,
                 request.getMapping(),
-                plan,
+                analysis.mutations(),
                 action,
                 Permission.PERSON_UPDATE);
-            ImportPreviewResult result = summarize(plan, action);
+            ImportPreviewResult result = summarize(
+                plan, analysis.mutations(), action);
             result.setDuplicateReviewProof(analysis.reviewProof());
             return result;
         } catch (RuntimeException exception) {
@@ -210,29 +218,32 @@ public class ImportService {
                 request.getDuplicateReviewProof(), reviewContext);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
-        List<PlanRow> plan =
-            analyzePersons(
-                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext).plan();
-        requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
+        ImportAnalysis analysis = analyzePersons(
+            request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
+        List<PlanRow> plan = analysis.plan();
+        List<PlanRow> mutations = analysis.mutations();
+        requireUpdatePermission(mutations, action, Permission.PERSON_UPDATE);
 
         Map<Integer, Person> lockedTargets = lockMatchedTargets(
-            plan,
+            mutations,
             action,
             id -> personMapper.getOwnedPersonByIdForUpdate(workspaceId, id),
             "contact");
-        revalidatePersonTargets(plan, lockedTargets);
-        serializeAndRevalidatePersonIdentities(workspaceId, plan, action);
+        revalidatePersonTargets(mutations, lockedTargets);
+        serializeAndRevalidatePersonIdentities(workspaceId, mutations, action);
         Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "person", request.getMapping(), plan, action);
-        Map<String, Integer> tagByName = resolveTags(plan, action);
-        Map<String, Integer> companyByName = resolveCompanies(plan, action);
+            "person", request.getMapping(), mutations, action);
+        Map<Integer, Map<Integer, Object>> customValues =
+            existingCustomValues("person", mutations, action);
+        Map<String, Integer> tagByName = resolveTags(mutations, action);
+        Map<String, Integer> companyByName = resolveCompanies(mutations, action);
 
         List<PlanRow> toCreate = new ArrayList<>();
         List<Person> beans = new ArrayList<>();
         int updated = 0;
         int skipped = 0;
 
-        for (PlanRow row : plan) {
+        for (PlanRow row : mutations) {
             if (INVALID.equals(row.status)) continue;
             if (SKIP.equals(row.status)) { skipped++; continue; }
             if (MATCH.equals(row.status)) {
@@ -242,6 +253,7 @@ public class ImportService {
                         row,
                         action,
                         columnToDef,
+                        customValues,
                         tagByName,
                         companyByName,
                         lockedTargets)) {
@@ -271,15 +283,24 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Person bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
-                identityIntakeService.recordPerson(
-                    workspaceId, bean.getId(), bean.getEmail(), bean.getPhone(),
-                    IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row));
+                recordPersonIdentities(
+                    workspaceId,
+                    bean,
+                    row,
+                    bean.getEmail() != null,
+                    bean.getPhone() != null);
                 Integer companyId = bean.getCompany() != null ? bean.getCompany().getId() : null;
                 if (companyId != null) {
                     employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
                 }
                 attachTags(workspaceId, "person", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues("person", bean.getId(), row.custom, columnToDef, action, false);
+                applyCustomValues(
+                    "person",
+                    bean.getId(),
+                    row.custom,
+                    columnToDef,
+                    action,
+                    Map.of());
             }
         }
 
@@ -341,16 +362,15 @@ public class ImportService {
                 }
                 applyStrongMatch(row, "person", "contact");
             }
-            dedupeWithinFileByStrongKeys(
-                plan,
-                resolveAction(request.getOnDuplicate()),
-                this::personIdentityKeys);
             String action = resolveAction(request.getOnDuplicate());
+            validateWithinFileStrongKeys(plan, this::personIdentityKeys);
+            List<PlanRow> mutations =
+                coalesceByCanonicalTarget(plan, action, this::personIdentityKeys);
             applyCompanyDependencyFailures(
-                plan,
+                mutations,
                 row -> personCompanyDependencyRequired(
                     workspaceId, row, action));
-            return new ImportAnalysis(plan, reviewProof);
+            return new ImportAnalysis(plan, mutations, reviewProof);
         } catch (RuntimeException exception) {
             cancelPreviewAnalysis(phase, reviewProof);
             throw exception;
@@ -359,6 +379,7 @@ public class ImportService {
 
     private boolean applyPersonUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef,
+            Map<Integer, Map<Integer, Object>> customValues,
             Map<String, Integer> tagByName,
             Map<String, Integer> companyByName,
             Map<Integer, Person> lockedTargets) {
@@ -368,8 +389,10 @@ public class ImportService {
             return false;
         }
         Integer beforeCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
-        boolean emailAcquired = fieldAcquired(action, existing.getEmail(), row.std.get("email"));
-        boolean phoneAcquired = fieldAcquired(action, existing.getPhone(), row.std.get("phone"));
+        String beforeName = existing.getName();
+        String beforeEmail = existing.getEmail();
+        String beforePhone = existing.getPhone();
+        String beforeTitle = existing.getTitle();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
@@ -380,18 +403,42 @@ public class ImportService {
             stub.setId(companyId);
             existing.setCompany(stub);
         }
-        personMapper.update(existing);
-        identityIntakeService.recordPerson(
-            workspaceId, existing.getId(), existing.getEmail(), existing.getPhone(),
-            IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row),
-            emailAcquired, phoneAcquired);
         Integer afterCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
+        boolean emailAcquired = row.std.containsKey("email")
+            && (!Objects.equals(beforeEmail, existing.getEmail())
+                || missingCanonicalIdentity(
+                    row, IdentityKind.EMAIL, existing.getEmail()));
+        boolean phoneAcquired = row.std.containsKey("phone")
+            && (!Objects.equals(beforePhone, existing.getPhone())
+                || missingCanonicalIdentity(
+                    row, IdentityKind.PHONE, existing.getPhone()));
+        boolean parentChanged =
+            !Objects.equals(beforeName, existing.getName())
+                || !Objects.equals(beforeEmail, existing.getEmail())
+                || !Objects.equals(beforePhone, existing.getPhone())
+                || !Objects.equals(beforeTitle, existing.getTitle())
+                || !Objects.equals(beforeCompanyId, afterCompanyId);
+        if (parentChanged) {
+            personMapper.update(existing);
+        }
+        boolean identitiesChanged = recordPersonIdentities(
+            workspaceId, existing, row, emailAcquired, phoneAcquired);
         if (afterCompanyId != null && !afterCompanyId.equals(beforeCompanyId)) {
             employmentService.recordTransition(workspaceId, existing.getId(), afterCompanyId, existing.getTitle());
         }
-        attachTags(workspaceId, "person", existing.getId(), row.tagNames, tagByName);
-        applyCustomValues("person", existing.getId(), row.custom, columnToDef, action, true);
-        return true;
+        boolean referencesChanged = attachTags(
+            workspaceId, "person", existing.getId(), row.tagNames, tagByName);
+        boolean customChanged = applyCustomValues(
+            "person",
+            existing.getId(),
+            row.custom,
+            columnToDef,
+            action,
+            customValues.getOrDefault(existing.getId(), Map.of()));
+        return parentChanged
+            || identitiesChanged
+            || referencesChanged
+            || customChanged;
     }
 
     private Person getOwnedPerson(int workspaceId, int personId) {
@@ -487,10 +534,11 @@ public class ImportService {
                 "company",
                 workspaceId,
                 request.getMapping(),
-                plan,
+                analysis.mutations(),
                 action,
                 Permission.COMPANY_UPDATE);
-            ImportPreviewResult result = summarize(plan, action);
+            ImportPreviewResult result = summarize(
+                plan, analysis.mutations(), action);
             result.setDuplicateReviewProof(analysis.reviewProof());
             return result;
         } catch (RuntimeException exception) {
@@ -513,27 +561,31 @@ public class ImportService {
                 request.getDuplicateReviewProof(), reviewContext);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
-        List<PlanRow> plan =
-            analyzeCompanies(
-                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext).plan();
-        requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
+        ImportAnalysis analysis = analyzeCompanies(
+            request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
+        List<PlanRow> plan = analysis.plan();
+        List<PlanRow> mutations = analysis.mutations();
+        requireUpdatePermission(mutations, action, Permission.COMPANY_UPDATE);
 
         Map<Integer, Company> lockedTargets = lockMatchedTargets(
-            plan,
+            mutations,
             action,
             id -> companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id),
             "company");
-        serializeAndRevalidateCompanyIdentities(workspaceId, plan, action);
+        serializeAndRevalidateCompanyIdentities(
+            workspaceId, mutations, action);
         Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "company", request.getMapping(), plan, action);
-        Map<String, Integer> tagByName = resolveTags(plan, action);
+            "company", request.getMapping(), mutations, action);
+        Map<Integer, Map<Integer, Object>> customValues =
+            existingCustomValues("company", mutations, action);
+        Map<String, Integer> tagByName = resolveTags(mutations, action);
 
         List<PlanRow> toCreate = new ArrayList<>();
         List<Company> beans = new ArrayList<>();
         int updated = 0;
         int skipped = 0;
 
-        for (PlanRow row : plan) {
+        for (PlanRow row : mutations) {
             if (INVALID.equals(row.status)) continue;
             if (SKIP.equals(row.status)) { skipped++; continue; }
             if (MATCH.equals(row.status)) {
@@ -543,6 +595,7 @@ public class ImportService {
                         row,
                         action,
                         columnToDef,
+                        customValues,
                         tagByName,
                         lockedTargets)) {
                     updated++;
@@ -566,11 +619,20 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Company bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
-                identityIntakeService.recordCompany(
-                    workspaceId, bean.getId(), bean.getWebsite(), bean.getPhone(),
-                    IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row));
+                recordCompanyIdentities(
+                    workspaceId,
+                    bean,
+                    row,
+                    bean.getWebsite() != null,
+                    bean.getPhone() != null);
                 attachTags(workspaceId, "company", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues("company", bean.getId(), row.custom, columnToDef, action, false);
+                applyCustomValues(
+                    "company",
+                    bean.getId(),
+                    row.custom,
+                    columnToDef,
+                    action,
+                    Map.of());
             }
         }
 
@@ -628,13 +690,13 @@ public class ImportService {
                 }
                 applyStrongMatch(row, "company", "company");
             }
-            dedupeWithinFileByStrongKeys(
-                plan,
-                resolveAction(request.getOnDuplicate()),
-                row -> identityKeys(
-                    IdentityKind.DOMAIN, row.std.get("website"),
-                    IdentityKind.PHONE, row.std.get("phone")));
-            return new ImportAnalysis(plan, reviewProof);
+            Function<PlanRow, List<String>> keys = row -> identityKeys(
+                IdentityKind.DOMAIN, row.std.get("website"),
+                IdentityKind.PHONE, row.std.get("phone"));
+            validateWithinFileStrongKeys(plan, keys);
+            List<PlanRow> mutations = coalesceByCanonicalTarget(
+                plan, resolveAction(request.getOnDuplicate()), keys);
+            return new ImportAnalysis(plan, mutations, reviewProof);
         } catch (RuntimeException exception) {
             cancelPreviewAnalysis(phase, reviewProof);
             throw exception;
@@ -643,6 +705,7 @@ public class ImportService {
 
     private boolean applyCompanyUpdate(int workspaceId, PlanRow row, String action,
             Map<String, Integer> columnToDef,
+            Map<Integer, Map<Integer, Object>> customValues,
             Map<String, Integer> tagByName,
             Map<Integer, Company> lockedTargets) {
         Company existing = lockedTargets.get(row.matchedId);
@@ -650,22 +713,48 @@ public class ImportService {
             fail(row, "Matched company #" + row.matchedId + " not found");
             return false;
         }
-        boolean websiteAcquired =
-            fieldAcquired(action, existing.getWebsite(), row.std.get("website"));
-        boolean phoneAcquired = fieldAcquired(action, existing.getPhone(), row.std.get("phone"));
+        String beforeName = existing.getName();
+        String beforeWebsite = existing.getWebsite();
+        String beforeIndustry = existing.getIndustry();
+        String beforePhone = existing.getPhone();
+        String beforeAddress = existing.getAddress();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setWebsite(merge(action, existing.getWebsite(), row.std.get("website")));
         existing.setIndustry(merge(action, existing.getIndustry(), row.std.get("industry")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
-        companyMapper.update(existing);
-        identityIntakeService.recordCompany(
-            workspaceId, existing.getId(), existing.getWebsite(), existing.getPhone(),
-            IdentityAcquisitionSource.CSV_IMPORT, csvRowRef(row),
-            websiteAcquired, phoneAcquired);
-        attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
-        applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
-        return true;
+        boolean websiteAcquired = row.std.containsKey("website")
+            && (!Objects.equals(beforeWebsite, existing.getWebsite())
+                || missingCanonicalIdentity(
+                    row, IdentityKind.DOMAIN, existing.getWebsite()));
+        boolean phoneAcquired = row.std.containsKey("phone")
+            && (!Objects.equals(beforePhone, existing.getPhone())
+                || missingCanonicalIdentity(
+                    row, IdentityKind.PHONE, existing.getPhone()));
+        boolean parentChanged =
+            !Objects.equals(beforeName, existing.getName())
+                || !Objects.equals(beforeWebsite, existing.getWebsite())
+                || !Objects.equals(beforeIndustry, existing.getIndustry())
+                || !Objects.equals(beforePhone, existing.getPhone())
+                || !Objects.equals(beforeAddress, existing.getAddress());
+        if (parentChanged) {
+            companyMapper.update(existing);
+        }
+        boolean identitiesChanged = recordCompanyIdentities(
+            workspaceId, existing, row, websiteAcquired, phoneAcquired);
+        boolean referencesChanged = attachTags(
+            workspaceId, "company", existing.getId(), row.tagNames, tagByName);
+        boolean customChanged = applyCustomValues(
+            "company",
+            existing.getId(),
+            row.custom,
+            columnToDef,
+            action,
+            customValues.getOrDefault(existing.getId(), Map.of()));
+        return parentChanged
+            || identitiesChanged
+            || referencesChanged
+            || customChanged;
     }
 
     private Company getOwnedCompany(int workspaceId, int companyId) {
@@ -858,10 +947,11 @@ public class ImportService {
                 "deal",
                 workspaceId,
                 request.getMapping(),
-                plan,
+                analysis.mutations(),
                 action,
                 Permission.DEAL_UPDATE);
-            ImportPreviewResult result = summarize(plan, action);
+            ImportPreviewResult result = summarize(
+                plan, analysis.mutations(), action);
             result.setDuplicateReviewProof(analysis.reviewProof());
             return result;
         } catch (RuntimeException exception) {
@@ -885,24 +975,29 @@ public class ImportService {
                 request.getDuplicateReviewProof(), reviewContext);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
-        List<PlanRow> plan = analyzeDeals(
+        ImportAnalysis analysis = analyzeDeals(
             request,
             workspaceId,
             ImportPhase.COMMIT,
             admission,
-            reviewContext).plan();
-        requireUpdatePermission(plan, action, Permission.DEAL_UPDATE);
+            reviewContext);
+        List<PlanRow> plan = analysis.plan();
+        List<PlanRow> mutations = analysis.mutations();
+        requireUpdatePermission(mutations, action, Permission.DEAL_UPDATE);
 
         Map<Integer, Deal> lockedTargets = lockMatchedTargets(
-            plan,
+            mutations,
             action,
             id -> dealMapper.getDealByIdForUpdate(workspaceId, id),
             "deal");
         Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "deal", request.getMapping(), plan, action);
-        Map<String, Integer> tagByName = resolveTags(plan, action);
-        Map<String, Integer> companyByName = resolveCompanies(plan, action);
-        Map<String, Integer> personByEmail = resolveDealPeople(workspaceId, plan, action);
+            "deal", request.getMapping(), mutations, action);
+        Map<Integer, Map<Integer, Object>> customValues =
+            existingCustomValues("deal", mutations, action);
+        Map<String, Integer> tagByName = resolveTags(mutations, action);
+        Map<String, Integer> companyByName = resolveCompanies(mutations, action);
+        Map<String, Integer> personByEmail =
+            resolveDealPeople(workspaceId, mutations, action);
         Map<Integer, String> stageOutcome = new HashMap<>();
 
         List<PlanRow> toCreate = new ArrayList<>();
@@ -910,7 +1005,7 @@ public class ImportService {
         int updated = 0;
         int skipped = 0;
 
-        for (PlanRow row : plan) {
+        for (PlanRow row : mutations) {
             if (INVALID.equals(row.status)) continue;
             if (SKIP.equals(row.status)) { skipped++; continue; }
             if (MATCH.equals(row.status)) {
@@ -920,6 +1015,7 @@ public class ImportService {
                         row,
                         action,
                         columnToDef,
+                        customValues,
                         tagByName,
                         companyByName,
                         personByEmail,
@@ -956,7 +1052,13 @@ public class ImportService {
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
-                applyCustomValues("deal", bean.getId(), row.custom, columnToDef, action, false);
+                applyCustomValues(
+                    "deal",
+                    bean.getId(),
+                    row.custom,
+                    columnToDef,
+                    action,
+                    Map.of());
             }
         }
 
@@ -996,11 +1098,15 @@ public class ImportService {
         }
         try {
             applyCompanyDependencyCandidates(companyReview, responses);
-            Map<String, Integer> byNameCompany = new HashMap<>();
+            Map<String, List<Integer>> byNameCompany = new HashMap<>();
             for (Deal existing : dealMapper.getDealsForDedup(workspaceId)) {
-                byNameCompany.putIfAbsent(
-                    dealKey(normName(existing.getName()), existing.getCompanyId()),
-                    existing.getId());
+                String normalizedName = normName(existing.getName());
+                if (normalizedName == null) {
+                    continue;
+                }
+                byNameCompany.computeIfAbsent(
+                    dealKey(normalizedName, existing.getCompanyId()),
+                    ignored -> new ArrayList<>()).add(existing.getId());
             }
             Map<Integer, Integer> links =
                 request.getLinks() == null ? Map.of() : request.getLinks();
@@ -1018,20 +1124,24 @@ public class ImportService {
                 }
                 boolean companyKnown =
                     row.companyName == null || row.resolvedCompanyId != null;
-                Integer matchId = companyKnown
+                String normalizedName = normName(row.std.get("name"));
+                List<Integer> matchIds = companyKnown && normalizedName != null
                     ? byNameCompany.get(dealKey(
-                        normName(row.std.get("name")),
+                        normalizedName,
                         row.resolvedCompanyId))
                     : null;
-                if (matchId != null) markMatch(row, matchId, row.std.get("name"));
+                if (matchIds != null && matchIds.size() > 1) {
+                    fail(row, "Multiple owned deals match the imported name and company");
+                } else if (matchIds != null && !matchIds.isEmpty()) {
+                    markMatch(row, matchIds.getFirst(), row.std.get("name"));
+                }
             }
-            resolveStages(workspaceId, plan);
-            dedupeWithinFile(plan,
-                r -> normName(r.std.get("name")) + " "
-                    + (normName(r.companyName) == null ? "" : normName(r.companyName)));
             String action = resolveAction(request.getOnDuplicate());
+            List<PlanRow> mutations = coalesceByCanonicalTarget(
+                plan, action, row -> List.of(dealCanonicalKey(row)));
+            resolveStages(workspaceId, mutations);
             applyCompanyDependencyFailures(
-                plan,
+                mutations,
                 row -> dealCompanyDependencyRequired(
                     workspaceId, row, action));
             String decisionFingerprint = dealDecisionFingerprint(plan);
@@ -1044,7 +1154,7 @@ public class ImportService {
                     Objects.requireNonNull(commitSession),
                     decisionFingerprint);
             }
-            return new ImportAnalysis(plan, reviewProof);
+            return new ImportAnalysis(plan, mutations, reviewProof);
         } catch (RuntimeException exception) {
             cancelPreviewAnalysis(phase, reviewProof);
             throw exception;
@@ -1092,6 +1202,7 @@ public class ImportService {
             PlanRow row,
             String action,
             Map<String, Integer> columnToDef,
+            Map<Integer, Map<Integer, Object>> customValues,
             Map<String, Integer> tagByName,
             Map<String, Integer> companyByName,
             Map<String, Integer> personByEmail,
@@ -1104,13 +1215,26 @@ public class ImportService {
         }
         Integer beforeStageId = existing.getStageId();
         Boolean beforeOutcome = existing.getWon();
+        String beforeName = existing.getName();
+        double beforeValue = existing.getValue();
+        String beforeCurrency = existing.getCurrency();
+        Integer beforePipelineId = existing.getPipelineId();
+        Integer beforeCompanyId = existing.getCompanyId();
+        String beforeExpectedCloseDate = existing.getExpectedCloseDate();
+        String beforeClosedAt = existing.getClosedAt();
+        String beforeClosedReason = existing.getClosedReason();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
         String value = row.std.get("value");
-        boolean shouldUpdateValue = value != null && (OVERWRITE.equals(action) || existing.getValue() == 0d);
-        if (shouldUpdateValue && dealLineItemMapper.countByDealIdForUpdate(workspaceId, existing.getId()) == 0) {
-            existing.setValue(parseValue(value));
+        double incomingValue = parseValue(value);
+        boolean shouldUpdateValue = value != null
+            && (OVERWRITE.equals(action) || existing.getValue() == 0d)
+            && Double.compare(existing.getValue(), incomingValue) != 0;
+        if (shouldUpdateValue
+                && dealLineItemMapper.countByDealIdForUpdate(
+                    workspaceId, existing.getId()) == 0) {
+            existing.setValue(incomingValue);
         }
         Integer companyId = companyId(row, companyByName);
         if (companyId != null && (OVERWRITE.equals(action) || existing.getCompanyId() == null)) {
@@ -1121,16 +1245,38 @@ public class ImportService {
             existing.setStageId(row.resolvedStageId);
         }
         reconcileClose(workspaceId, existing, stageOutcome);
-        dealMapper.update(existing);
         Integer afterStageId = existing.getStageId();
+        boolean parentChanged =
+            !Objects.equals(beforeName, existing.getName())
+                || Double.compare(beforeValue, existing.getValue()) != 0
+                || !Objects.equals(beforeCurrency, existing.getCurrency())
+                || !Objects.equals(beforePipelineId, existing.getPipelineId())
+                || !Objects.equals(beforeStageId, afterStageId)
+                || !Objects.equals(beforeCompanyId, existing.getCompanyId())
+                || !Objects.equals(
+                    beforeExpectedCloseDate, existing.getExpectedCloseDate())
+                || !Objects.equals(beforeClosedAt, existing.getClosedAt())
+                || !Objects.equals(beforeClosedReason, existing.getClosedReason())
+                || !Objects.equals(beforeOutcome, existing.getWon());
+        if (parentChanged) {
+            dealMapper.update(existing);
+        }
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
             dealStageHistoryService.recordTransition(
                 workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());
         }
-        attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
-        linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);
-        applyCustomValues("deal", existing.getId(), row.custom, columnToDef, action, true);
-        return true;
+        boolean tagsChanged = attachDealTags(
+            workspaceId, existing.getId(), row.tagNames, tagByName);
+        boolean peopleChanged = linkDealPeople(
+            workspaceId, existing.getId(), row.peopleEmails, personByEmail);
+        boolean customChanged = applyCustomValues(
+            "deal",
+            existing.getId(),
+            row.custom,
+            columnToDef,
+            action,
+            customValues.getOrDefault(existing.getId(), Map.of()));
+        return parentChanged || tagsChanged || peopleChanged || customChanged;
     }
 
     private void resolveStages(int workspaceId, List<PlanRow> plan) {
@@ -1191,20 +1337,29 @@ public class ImportService {
         return byEmail;
     }
 
-    private void linkDealPeople(int workspaceId, int dealId, List<String> emails, Map<String, Integer> personByEmail) {
+    private boolean linkDealPeople(int workspaceId, int dealId, List<String> emails, Map<String, Integer> personByEmail) {
         Set<Integer> linked = new LinkedHashSet<>();
         for (String email : emails) {
             Integer personId = personByEmail.get(email);
             if (personId != null) linked.add(personId);
         }
-        for (Integer personId : linked) {
-            dealMapper.addPerson(workspaceId, dealId, personId, null);
+        if (linked.isEmpty()) {
+            return false;
         }
+        boolean changed = false;
+        for (Integer personId : linked) {
+            changed |= dealMapper.addPersonIfAbsent(
+                workspaceId, dealId, personId) > 0;
+        }
+        return changed;
     }
 
-    private void attachDealTags(int workspaceId, int dealId, List<String> tagNames, Map<String, Integer> tagByName) {
+    private boolean attachDealTags(int workspaceId, int dealId, List<String> tagNames, Map<String, Integer> tagByName) {
         List<Integer> ids = tagIds(tagNames, tagByName);
-        if (!ids.isEmpty()) dealMapper.insertTags(workspaceId, dealId, ids);
+        if (ids.isEmpty()) {
+            return false;
+        }
+        return dealMapper.insertTags(workspaceId, dealId, ids) > 0;
     }
 
     private Map<String, List<IdentityMatchRow>> currentPersonIdentityMatches(
@@ -1292,6 +1447,28 @@ public class ImportService {
         return name + " " + (companyId == null ? "" : companyId);
     }
 
+    private String dealCanonicalKey(PlanRow row) {
+        String normalizedName = normName(row.std.get("name"));
+        if (normalizedName == null) {
+            return "deal-row:" + row.rowIndex;
+        }
+        String companyKey;
+        if (row.resolvedCompanyId != null) {
+            companyKey = "id:" + row.resolvedCompanyId;
+        } else if (row.companyDependencyKey != null) {
+            companyKey = "name:" + row.companyDependencyKey;
+        } else {
+            companyKey = "none";
+        }
+        return "deal:"
+            + encodedCanonicalPart(normalizedName)
+            + encodedCanonicalPart(companyKey);
+    }
+
+    private static String encodedCanonicalPart(String value) {
+        return value.length() + ":" + value;
+    }
+
     private static double parseValue(String raw) {
         if (raw == null) return 0d;
         String cleaned = raw.replaceAll("[,\\s]", "");
@@ -1342,6 +1519,7 @@ public class ImportService {
                     row.custom.put(column, stored);
                 } else if (field != null) {
                     row.std.put(field, normalizeStandard(field, value));
+                    row.stdSourceRows.put(field, i);
                 }
             }
             row.label = row.std.get("name");
@@ -1613,10 +1791,11 @@ public class ImportService {
             .thenComparing(CanonicalIdentity::normalizedValue));
         for (PlanRow row : plan) {
             if (!willWrite(row, action)
-                    || !(CREATE.equals(row.status) || row.automaticIdentityMatch)) {
+                    || !(CREATE.equals(row.status) || MATCH.equals(row.status))) {
                 continue;
             }
-            List<CanonicalIdentity> rowKeys = identities.apply(row);
+            List<CanonicalIdentity> rowKeys =
+                suppliedCanonicalIdentities(row, identities);
             keysByRow.put(row, rowKeys);
             keys.addAll(rowKeys);
         }
@@ -1650,12 +1829,41 @@ public class ImportService {
                     + " acquired a supplied identity after duplicate review");
                 continue;
             }
+            if (MATCH.equals(row.status)
+                    && currentRecordIds.stream()
+                        .anyMatch(id -> !Objects.equals(id, row.matchedId))) {
+                fail(row, "A supplied identity belongs to another "
+                    + entityLabel + " after duplicate review");
+                continue;
+            }
             if (row.automaticIdentityMatch
-                    && !currentRecordIds.equals(Set.of(row.matchedId))) {
+                    && !currentRecordIds.contains(row.matchedId)) {
                 fail(row, "Matched " + entityLabel + " #" + row.matchedId
                     + " no longer uniquely carries the supplied identities");
             }
+            if (MATCH.equals(row.status)) {
+                entry.getValue().stream()
+                    .filter(key -> matchesByKey
+                        .getOrDefault(key, Set.of())
+                        .isEmpty())
+                    .forEach(row.missingCanonicalIdentities::add);
+            }
         }
+    }
+
+    private static List<CanonicalIdentity> suppliedCanonicalIdentities(
+            PlanRow row,
+            Function<PlanRow, List<CanonicalIdentity>> identities) {
+        List<PlanRow> sources = row.sourceRows.isEmpty()
+            ? List.of(row)
+            : row.sourceRows;
+        return sources.stream()
+            .flatMap(source -> identities.apply(source).stream())
+            .distinct()
+            .sorted(Comparator
+                .comparing(CanonicalIdentity::kind)
+                .thenComparing(CanonicalIdentity::normalizedValue))
+            .toList();
     }
 
     private static void failMatchedRows(
@@ -1743,11 +1951,15 @@ public class ImportService {
     // Apply helpers
     // ===================================================================================
 
-    private void attachTags(int workspaceId, String entityType, int entityId, List<String> tagNames, Map<String, Integer> tagByName) {
+    private boolean attachTags(int workspaceId, String entityType, int entityId, List<String> tagNames, Map<String, Integer> tagByName) {
         List<Integer> ids = tagIds(tagNames, tagByName);
-        if (ids.isEmpty()) return;
-        if ("person".equals(entityType)) personMapper.insertTags(workspaceId, entityId, ids);
-        else if ("company".equals(entityType)) companyMapper.insertTags(workspaceId, entityId, ids);
+        if (ids.isEmpty()) {
+            return false;
+        }
+        if ("person".equals(entityType)) {
+            return personMapper.insertTags(workspaceId, entityId, ids) > 0;
+        }
+        return companyMapper.insertTags(workspaceId, entityId, ids) > 0;
     }
 
     private static List<Integer> tagIds(List<String> tagNames, Map<String, Integer> tagByName) {
@@ -1759,24 +1971,121 @@ public class ImportService {
         return new ArrayList<>(ids);
     }
 
-    private void applyCustomValues(String entityType, int entityId, Map<String, String> custom,
-            Map<String, Integer> columnToDef, String action, boolean isUpdate) {
-        if (custom.isEmpty()) return;
-        boolean fillEmpty = isUpdate && FILL_EMPTY.equals(action);
-        Map<Integer, Object> existing = fillEmpty
-            ? customFieldValueService.getForEntities(entityType, List.of(entityId)).getOrDefault(entityId, Map.of())
-            : Map.of();
-        Map<Integer, Object> values = new HashMap<>();
-        for (Map.Entry<String, String> entry : custom.entrySet()) {
+    private boolean applyCustomValues(
+            String entityType,
+            int entityId,
+            Map<String, String> custom,
+            Map<String, Integer> columnToDef,
+            String action,
+            Map<Integer, Object> existing) {
+        if (custom.isEmpty()) {
+            return false;
+        }
+        boolean fillEmpty = FILL_EMPTY.equals(action);
+        Map<Integer, Object> values = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry
+                : new TreeMap<>(custom).entrySet()) {
             Integer defId = columnToDef.get(entry.getKey());
             if (defId == null) continue;
             if (fillEmpty) {
                 Object current = existing.get(defId);
                 if (current != null && !String.valueOf(current).isBlank()) continue;
             }
+            if (customValueEquals(existing.get(defId), entry.getValue())) {
+                continue;
+            }
             values.put(defId, entry.getValue());
         }
-        if (!values.isEmpty()) customFieldValueService.applyValues(entityType, entityId, values);
+        if (values.isEmpty()) {
+            return false;
+        }
+        customFieldValueService.applyValues(entityType, entityId, values);
+        return true;
+    }
+
+    private Map<Integer, Map<Integer, Object>> existingCustomValues(
+            String entityType,
+            List<PlanRow> mutations,
+            String action) {
+        if (SKIP.equals(action)) {
+            return Map.of();
+        }
+        List<Integer> entityIds = mutations.stream()
+            .filter(row -> MATCH.equals(row.status))
+            .filter(row -> !row.custom.isEmpty())
+            .map(row -> row.matchedId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        return customFieldValueService.getForEntities(
+            entityType, entityIds);
+    }
+
+    private static boolean customValueEquals(
+            Object existing,
+            String incoming) {
+        if (existing == null) {
+            return false;
+        }
+        if (existing instanceof BigDecimal number) {
+            try {
+                return number.compareTo(new BigDecimal(incoming)) == 0;
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+        }
+        if (existing instanceof Boolean bool) {
+            return switch (incoming.toLowerCase(Locale.ROOT)) {
+                case "true", "1", "yes" -> bool;
+                case "false", "0", "no" -> !bool;
+                default -> false;
+            };
+        }
+        return String.valueOf(existing).equals(incoming);
+    }
+
+    private boolean recordPersonIdentities(
+            int workspaceId,
+            Person person,
+            PlanRow row,
+            boolean emailAcquired,
+            boolean phoneAcquired) {
+        if (!emailAcquired && !phoneAcquired) {
+            return false;
+        }
+        identityIntakeService.recordPerson(
+            workspaceId,
+            person.getId(),
+            person.getEmail(),
+            person.getPhone(),
+            IdentityAcquisitionSource.CSV_IMPORT,
+            csvRowRef(row, "email"),
+            csvRowRef(row, "phone"),
+            emailAcquired,
+            phoneAcquired);
+        return true;
+    }
+
+    private boolean recordCompanyIdentities(
+            int workspaceId,
+            Company company,
+            PlanRow row,
+            boolean websiteAcquired,
+            boolean phoneAcquired) {
+        if (!websiteAcquired && !phoneAcquired) {
+            return false;
+        }
+        identityIntakeService.recordCompany(
+            workspaceId,
+            company.getId(),
+            company.getWebsite(),
+            company.getPhone(),
+            IdentityAcquisitionSource.CSV_IMPORT,
+            csvRowRef(row, "website"),
+            csvRowRef(row, "phone"),
+            websiteAcquired,
+            phoneAcquired);
+        return true;
     }
 
     private void requireUpdatePermission(List<PlanRow> plan, String action, Permission updatePermission) {
@@ -1789,29 +2098,60 @@ public class ImportService {
     // Preview summary + audit
     // ===================================================================================
 
-    private ImportPreviewResult summarize(List<PlanRow> plan, String onDuplicate) {
+    private ImportPreviewResult summarize(
+            List<PlanRow> plan,
+            List<PlanRow> mutations,
+            String onDuplicate) {
         String action = resolveAction(onDuplicate);
         List<RowAnalysis> rows = new ArrayList<>(plan.size());
         int toCreate = 0;
         int toUpdate = 0;
         int toSkip = 0;
         int invalid = 0;
+        Map<PlanRow, MergePreviewInfo> mergeInfo =
+            new java.util.IdentityHashMap<>();
+        for (PlanRow mutation : mutations) {
+            if (mutation.sourceRows.size() <= 1) {
+                continue;
+            }
+            MergePreviewInfo info = new MergePreviewInfo(
+                mutation.rowIndex, mutation.sourceRows.size());
+            for (PlanRow source : mutation.sourceRows) {
+                mergeInfo.put(source, info);
+            }
+        }
         for (PlanRow row : plan) {
             String status = row.status;
             if (INVALID.equals(status)) {
                 invalid++;
-            } else if (SKIP.equals(status)) {
-                toSkip++;
             } else if (MATCH.equals(status)) {
-                if (SKIP.equals(action)) { status = SKIP; toSkip++; } else { toUpdate++; }
-            } else {
-                toCreate++;
+                if (SKIP.equals(action)) status = SKIP;
             }
-            rows.add(new RowAnalysis(row.rowIndex, status, row.matchedId, row.label,
+            MergePreviewInfo info = mergeInfo.get(row);
+            rows.add(new RowAnalysis(
+                row.rowIndex,
+                status,
+                row.matchedId,
+                row.label,
+                info == null ? null : info.canonicalRowIndex(),
+                info == null ? null : info.mergedRowCount(),
                 row.errors.isEmpty() ? null : List.copyOf(row.errors),
                 row.duplicateCandidates.isEmpty()
                     ? null
                     : List.copyOf(row.duplicateCandidates)));
+        }
+        for (PlanRow mutation : mutations) {
+            if (INVALID.equals(mutation.status)) {
+                continue;
+            }
+            if (SKIP.equals(mutation.status)
+                    || MATCH.equals(mutation.status) && SKIP.equals(action)) {
+                toSkip++;
+            } else if (MATCH.equals(mutation.status)) {
+                toUpdate++;
+            } else {
+                toCreate++;
+            }
         }
         return new ImportPreviewResult(plan.size(), toCreate, toUpdate, toSkip, invalid, rows);
     }
@@ -1856,24 +2196,15 @@ public class ImportService {
         return byColumn;
     }
 
-    private static void dedupeWithinFile(List<PlanRow> plan, Function<PlanRow, String> keyFn) {
-        Set<String> seen = new HashSet<>();
-        for (PlanRow row : plan) {
-            if (!CREATE.equals(row.status)) continue;
-            String key = keyFn.apply(row);
-            if (key == null || key.isBlank()) continue;
-            if (!seen.add(key)) row.status = SKIP;
-        }
-    }
-
-    private static void dedupeWithinFileByStrongKeys(
+    private static void validateWithinFileStrongKeys(
             List<PlanRow> plan,
-            String action,
             Function<PlanRow, List<String>> keysFn) {
         Map<PlanRow, List<String>> keysByRow = new LinkedHashMap<>();
         Map<String, List<PlanRow>> rowsByKey = new LinkedHashMap<>();
         for (PlanRow row : plan) {
-            if (!willWrite(row, action)) continue;
+            if (!(CREATE.equals(row.status) || MATCH.equals(row.status))) {
+                continue;
+            }
             List<String> keys = keysFn.apply(row).stream()
                 .filter(key -> key != null && !key.isBlank())
                 .distinct()
@@ -1897,7 +2228,10 @@ public class ImportService {
             for (PlanRow row : component) {
                 commonKeys.retainAll(keysByRow.getOrDefault(row, List.of()));
             }
-            if (matchedIds.size() > 1 || component.size() > 1 && commonKeys.isEmpty()) {
+            if (matchedIds.size() > 1
+                    || matchedIds.isEmpty()
+                        && component.size() > 1
+                        && commonKeys.isEmpty()) {
                 String error = matchedIds.size() > 1
                     ? "Canonical identity is linked to multiple import targets"
                     : "Connected canonical identities require explicit duplicate resolution";
@@ -1906,9 +2240,6 @@ public class ImportService {
                     .forEach(row -> fail(row, error));
             }
         }
-        Set<String> seen = new HashSet<>();
-        reserveStrongKeys(plan, action, MATCH, keysByRow, seen);
-        reserveStrongKeys(plan, action, CREATE, keysByRow, seen);
     }
 
     private static Set<PlanRow> strongKeyComponent(
@@ -1929,19 +2260,210 @@ public class ImportService {
         return component;
     }
 
-    private static void reserveStrongKeys(
+    private List<PlanRow> coalesceByCanonicalTarget(
             List<PlanRow> plan,
             String action,
-            String status,
-            Map<PlanRow, List<String>> keysByRow,
-            Set<String> seen) {
+            Function<PlanRow, List<String>> keysFn) {
+        Map<PlanRow, List<String>> keysByRow = new LinkedHashMap<>();
+        Map<String, List<PlanRow>> rowsByKey = new LinkedHashMap<>();
+        Map<Integer, List<PlanRow>> rowsByMatchedId = new LinkedHashMap<>();
         for (PlanRow row : plan) {
-            if (!status.equals(row.status) || !willWrite(row, action)) continue;
-            List<String> keys = keysByRow.getOrDefault(row, List.of());
-            if (keys.stream().anyMatch(seen::contains)) {
-                row.status = SKIP;
-            } else {
-                seen.addAll(keys);
+            if (!(CREATE.equals(row.status) || MATCH.equals(row.status))) {
+                continue;
+            }
+            List<String> keys = keysFn.apply(row).stream()
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
+            keysByRow.put(row, keys);
+            for (String key : keys) {
+                rowsByKey.computeIfAbsent(
+                    key, ignored -> new ArrayList<>()).add(row);
+            }
+            if (MATCH.equals(row.status) && row.matchedId != null) {
+                rowsByMatchedId.computeIfAbsent(
+                    row.matchedId, ignored -> new ArrayList<>()).add(row);
+            }
+        }
+        Set<PlanRow> visited =
+            java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        List<PlanRow> mutations = new ArrayList<>();
+        for (PlanRow start : keysByRow.keySet()) {
+            if (visited.contains(start)) {
+                continue;
+            }
+            List<PlanRow> component = canonicalTargetComponent(
+                start, keysByRow, rowsByKey, rowsByMatchedId);
+            visited.addAll(component);
+            component.sort(Comparator.comparingInt(row -> row.rowIndex));
+            mutations.add(mergeCanonicalRows(component, action));
+        }
+        return List.copyOf(mutations);
+    }
+
+    private static List<PlanRow> canonicalTargetComponent(
+            PlanRow start,
+            Map<PlanRow, List<String>> keysByRow,
+            Map<String, List<PlanRow>> rowsByKey,
+            Map<Integer, List<PlanRow>> rowsByMatchedId) {
+        Set<PlanRow> component =
+            java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        List<PlanRow> pending = new ArrayList<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            PlanRow row = pending.removeLast();
+            if (!component.add(row)) {
+                continue;
+            }
+            for (String key : keysByRow.getOrDefault(row, List.of())) {
+                pending.addAll(rowsByKey.getOrDefault(key, List.of()));
+            }
+            if (MATCH.equals(row.status) && row.matchedId != null) {
+                pending.addAll(rowsByMatchedId.getOrDefault(
+                    row.matchedId, List.of()));
+            }
+        }
+        return new ArrayList<>(component);
+    }
+
+    private static PlanRow mergeCanonicalRows(
+            List<PlanRow> sources,
+            String action) {
+        PlanRow mutation = new PlanRow();
+        mutation.rowIndex = sources.getFirst().rowIndex;
+        mutation.sourceRows.addAll(sources);
+        Set<Integer> matchedIds = sources.stream()
+            .filter(row -> MATCH.equals(row.status))
+            .map(row -> row.matchedId)
+            .filter(Objects::nonNull)
+            .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
+        mutation.status = matchedIds.isEmpty() ? CREATE : MATCH;
+        if (matchedIds.size() > 1) {
+            fail(
+                mutation,
+                "Canonical import target resolves to multiple matched records");
+            return mutation;
+        }
+        if (!matchedIds.isEmpty()) {
+            mutation.matchedId = matchedIds.iterator().next();
+            PlanRow matchedSource = sources.stream()
+                .filter(row -> Objects.equals(
+                    mutation.matchedId, row.matchedId))
+                .findFirst()
+                .orElseThrow();
+            mutation.label = matchedSource.label;
+            for (PlanRow source : sources) {
+                markMatch(
+                    source, mutation.matchedId, mutation.label);
+            }
+        }
+        mutation.automaticIdentityMatch = sources.stream()
+            .anyMatch(row -> row.automaticIdentityMatch);
+        boolean overwrite = OVERWRITE.equals(action);
+        for (PlanRow source : sources) {
+            mergeFields(
+                mutation.std,
+                mutation.stdSourceRows,
+                source.std,
+                source.stdSourceRows,
+                overwrite);
+            mergeFields(
+                mutation.custom,
+                null,
+                source.custom,
+                null,
+                overwrite);
+            unionIgnoreCase(mutation.tagNames, source.tagNames);
+            unionExact(mutation.peopleEmails, source.peopleEmails);
+        }
+        PlanRow companySource = selectedSource(
+            sources, row -> row.companyName != null, overwrite);
+        if (companySource != null) {
+            mutation.companyName = companySource.companyName;
+            mutation.companyDependencyKey =
+                companySource.companyDependencyKey;
+            mutation.companyDependencyError =
+                companySource.companyDependencyError;
+            mutation.companyDependencyCandidates =
+                companySource.companyDependencyCandidates;
+            mutation.resolvedCompanyId =
+                companySource.resolvedCompanyId;
+        }
+        PlanRow stageSource = selectedSource(
+            sources,
+            row -> row.pipelineName != null || row.stageName != null,
+            overwrite);
+        if (stageSource != null) {
+            mutation.pipelineName = stageSource.pipelineName;
+            mutation.stageName = stageSource.stageName;
+        }
+        if (mutation.label == null) {
+            mutation.label = mutation.std.get("name");
+        }
+        return mutation;
+    }
+
+    private static void mergeFields(
+            Map<String, String> target,
+            Map<String, Integer> targetSourceRows,
+            Map<String, String> incoming,
+            Map<String, Integer> incomingSourceRows,
+            boolean overwrite) {
+        for (Map.Entry<String, String> entry
+                : new TreeMap<>(incoming).entrySet()) {
+            if (!overwrite && target.containsKey(entry.getKey())) {
+                continue;
+            }
+            target.put(entry.getKey(), entry.getValue());
+            if (targetSourceRows != null && incomingSourceRows != null) {
+                Integer sourceRow = incomingSourceRows.get(entry.getKey());
+                if (sourceRow != null) {
+                    targetSourceRows.put(entry.getKey(), sourceRow);
+                }
+            }
+        }
+    }
+
+    private static PlanRow selectedSource(
+            List<PlanRow> sources,
+            Predicate<PlanRow> eligible,
+            boolean overwrite) {
+        PlanRow selected = null;
+        for (PlanRow source : sources) {
+            if (!eligible.test(source)) {
+                continue;
+            }
+            if (!overwrite) {
+                return source;
+            }
+            selected = source;
+        }
+        return selected;
+    }
+
+    private static void unionIgnoreCase(
+            List<String> target,
+            List<String> incoming) {
+        Set<String> normalized = target.stream()
+            .map(value -> value.toLowerCase(Locale.ROOT))
+            .collect(java.util.stream.Collectors.toCollection(
+                LinkedHashSet::new));
+        for (String value : incoming) {
+            if (normalized.add(value.toLowerCase(Locale.ROOT))) {
+                target.add(value);
+            }
+        }
+    }
+
+    private static void unionExact(
+            List<String> target,
+            List<String> incoming) {
+        Set<String> seen = new LinkedHashSet<>(target);
+        for (String value : incoming) {
+            if (seen.add(value)) {
+                target.add(value);
             }
         }
     }
@@ -1991,6 +2513,17 @@ public class ImportService {
         }
     }
 
+    private boolean missingCanonicalIdentity(
+            PlanRow row,
+            IdentityKind kind,
+            String rawValue) {
+        String normalized = canonicalIdentity(kind, rawValue);
+        return normalized != null
+            && row.missingCanonicalIdentities.contains(
+                new CanonicalIdentity(
+                    kind.getDatabaseValue(), normalized));
+    }
+
     private static String resolveAction(String onDuplicate) {
         if (SKIP.equals(onDuplicate) || OVERWRITE.equals(onDuplicate)) return onDuplicate;
         return FILL_EMPTY;
@@ -2002,22 +2535,22 @@ public class ImportService {
         return (existing == null || existing.isBlank()) ? incoming : existing;
     }
 
-    private static boolean fieldAcquired(String action, String existing, String incoming) {
-        return incoming != null
-            && (OVERWRITE.equals(action)
-                || existing == null
-                || existing.isBlank()
-                || incoming.equals(existing));
-    }
-
-    private static String csvRowRef(PlanRow row) {
-        return "csv-row:" + (row.rowIndex + 1);
+    private static String csvRowRef(
+            PlanRow row,
+            String field) {
+        Integer sourceRow = row.stdSourceRows.get(field);
+        return sourceRow == null ? null : "csv-row:" + (sourceRow + 1);
     }
 
     private record CanonicalIdentity(String kind, String normalizedValue) {
         private String dedupeKey() {
             return kind + ":" + normalizedValue;
         }
+    }
+
+    private record MergePreviewInfo(
+            int canonicalRowIndex,
+            int mergedRowCount) {
     }
 
     @FunctionalInterface
@@ -2041,7 +2574,12 @@ public class ImportService {
 
     private static void fail(PlanRow row, String error) {
         row.status = INVALID;
-        row.errors.add(error);
+        if (!row.errors.contains(error)) {
+            row.errors.add(error);
+        }
+        for (PlanRow source : row.sourceRows) {
+            fail(source, error);
+        }
     }
 
     private static String cell(Map<String, String> row, String column) {

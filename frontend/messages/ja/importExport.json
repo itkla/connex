@@ -63,6 +63,8 @@
       "overwrite": "上書き"
     },
     "countNew": "新規",
+    "rowMergeRepresentative": "{count} 行のデータを 1 件のレコードに統合します。",
+    "rowMergeContributor": "参照を作成する前に行 #{row} へ統合します。",
     "countUpdate": "更新",
     "countSkip": "スキップ",
     "countInvalid": "エラー",

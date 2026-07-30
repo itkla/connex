@@ -733,6 +733,13 @@ function ReviewStep({
                                                         ? row.errors.join('; ')
                                                         : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
                                                 </p>
+                                                {row.canonicalRowIndex != null && row.mergedRowCount != null && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {row.rowIndex === row.canonicalRowIndex
+                                                            ? t('rowMergeRepresentative', { count: row.mergedRowCount })
+                                                            : t('rowMergeContributor', { row: row.canonicalRowIndex + 1 })}
+                                                    </p>
+                                                )}
                                                 {row.candidates && row.candidates.length > 0 && (
                                                     <DuplicateCandidates
                                                         entity={entity}

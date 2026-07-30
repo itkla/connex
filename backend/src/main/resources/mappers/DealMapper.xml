@@ -1177,6 +1177,14 @@
     ON DUPLICATE KEY UPDATE role = #{role}
   </insert>
 
+  <insert id="addPersonIfAbsent">
+    INSERT IGNORE INTO deal_person (deal_id, person_id, role)
+    SELECT d.id, p.id, NULL
+    FROM deal d
+    JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
+  </insert>
+
   <update id="updatePersonRole">
     UPDATE deal_person dp
     JOIN deal d ON d.id = dp.deal_id
