@@ -1096,6 +1096,10 @@ export function getCapabilities(init: RequestInit = {}) {
     return getJson<Types.InstanceCapabilities>("/api/capabilities", { cache: "no-store", ...init });
 }
 
+export function getCapabilitiesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.InstanceCapabilities>((init) => getCapabilities(init), cookie);
+}
+
 /**
  * The fail-safe capabilities used when {@link getCapabilities} cannot be reached: everything off,
  * so optional UI stays hidden rather than rendering a feature the backend will reject.
@@ -1111,6 +1115,13 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
 
 export function getProviderConnections(init: RequestInit = {}) {
     return getJson<Types.ProviderConnection[]>(`/api/account/connections`, { cache: "no-store", ...init });
+}
+
+export function getProviderConnectionsResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ProviderConnection[]>(
+        (init) => getProviderConnections(init),
+        cookie,
+    );
 }
 
 export function beginProviderConnection(provider: Types.ConnectedAccountProvider) {
@@ -1410,6 +1421,16 @@ export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: R
     return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
 }
 
+export function getCompaniesPageResultFromCookie(
+    cookie: string | null,
+    params: Types.CompaniesPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Company>>(
+        (init) => getCompaniesPage(params, init),
+        cookie,
+    );
+}
+
 /** Resolves a bounded id set in URL-safe batches for selector labels. */
 export async function getCompaniesByIds(ids: number[], init: RequestInit = {}) {
     const unique = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
@@ -1543,6 +1564,16 @@ export function getContactsFromCookie(cookie: string | null, filters: Types.Cont
 
 export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
+}
+
+export function getContactsPageResultFromCookie(
+    cookie: string | null,
+    params: Types.ContactsPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Contact>>(
+        (init) => getContactsPage(params, init),
+        cookie,
+    );
 }
 
 /*
@@ -1854,6 +1885,13 @@ export function generateIntroRationale(personAId: number, personBId: number, ini
 
 export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: number) {
     return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
+}
+
+export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
+    return resultWithCookie<Types.IntroSuggestion[]>(
+        (init) => getIntroSuggestions(init, limit),
+        cookie,
+    );
 }
 
 /**
@@ -2168,6 +2206,16 @@ export function getDealMetricsFromCookie(cookie: string | null, params: Types.De
     );
 }
 
+export function getDealMetricsResultFromCookie(
+    cookie: string | null,
+    params: Types.DealFilterParams = {},
+) {
+    return resultWithCookie<Types.DealMetrics>(
+        (init) => getJson<Types.DealMetrics>(`/api/deals/metrics${buildQuery(params)}`, init),
+        cookie,
+    );
+}
+
 /**
  * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
  * counts, computed server-side over the whole workspace so options never vanish when the
@@ -2350,6 +2398,13 @@ export function getWarmthSummaryFromCookie(cookie: string | null) {
 /** One shared warmth/risk snapshot for the dashboard relationship widgets. */
 export function getRelationshipDashboardFromCookie(cookie: string | null) {
     return getJson<Types.RelationshipDashboard>(`/api/scoring/dashboard`, withCookie(cookie));
+}
+
+export function getRelationshipDashboardResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.RelationshipDashboard>(
+        (init) => getJson<Types.RelationshipDashboard>(`/api/scoring/dashboard`, init),
+        cookie,
+    );
 }
 
 /**
@@ -2681,6 +2736,10 @@ export function getPipelinesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
 }
 
+export function getPipelinesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.Pipeline[]>((init) => getPipelines(init), cookie);
+}
+
 /** Returns every pipeline stage visible in the active workspace in one request. */
 export function getAllStages(init: RequestInit = {}) {
     return getJson<Types.Stage[]>(`/api/pipelines/stages`, init);
@@ -2688,6 +2747,10 @@ export function getAllStages(init: RequestInit = {}) {
 
 export function getAllStagesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Stage>((init) => getAllStages(init), cookie);
+}
+
+export function getAllStagesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.Stage[]>((init) => getAllStages(init), cookie);
 }
 
 export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}) {
@@ -3245,6 +3308,10 @@ export function getEffectivePermissions(init: RequestInit = {}) {
 
 export function getEffectivePermissionsFromCookie(cookie: string | null) {
     return safeWithCookie<string>((init) => getEffectivePermissions(init), cookie);
+}
+
+export function getEffectivePermissionsResultFromCookie(cookie: string | null) {
+    return resultWithCookie<string[]>((init) => getEffectivePermissions(init), cookie);
 }
 
 /*

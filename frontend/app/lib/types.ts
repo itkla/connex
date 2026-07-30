@@ -2419,6 +2419,7 @@ export type CompanyTimeline = {
 /** Coherent relationship snapshot computed once for all dashboard relationship widgets. */
 export type RelationshipDashboard = {
     warmthSummary: WarmthSummary;
+    hasRelationshipEvidence: boolean;
     coolingContacts: Array<{ contact: Contact; temperature: RelationshipTemperature }>;
     coolingCompanies: Array<{ company: Company; temperature: RelationshipTemperature }>;
     dealRisks: Array<{ deal: Deal; company: Company | null; risk: DealRisk }>;

@@ -49,6 +49,7 @@
     "dealLabel": "Deal",
     "dealPlaceholder": "Link a deal",
     "noDealFound": "No deal found.",
+    "relationshipTargetRequired": "Link a contact or deal so this activity becomes relationship evidence.",
     "cancel": "Cancel",
     "create": "Create",
     "toastSubjectRequired": "Subject is required",

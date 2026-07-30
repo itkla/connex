@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /**
  * Regression coverage for the surfaces that kept showing archived contacts and companies after
@@ -72,6 +74,51 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
         assertEquals(1, personMapper.restore(workspace.getId(), mover.getId()));
         assertTrue(recentMoveIds().contains(mover.getId()));
+    }
+
+    @Test
+    void relationshipScoringIgnoresUnlinkedAndArchivedEvidenceUntilRestore() {
+        Company employer = newCompany();
+        Person contact = newPerson(employer);
+        User author = newUser();
+        LocalDateTime reference = LocalDateTime.parse("2026-07-31T00:00:00");
+        Activity unlinked = new Activity();
+        unlinked.setWorkspaceId(workspace.getId());
+        unlinked.setType("meeting");
+        unlinked.setSubject("Unlinked activity");
+        unlinked.setCreatedBy(author);
+        unlinked.setTimestamp("2026-07-30 09:00:00");
+        activityMapper.insert(unlinked);
+
+        assertNull(personScore(contact.getId(), reference).lastTouchAt());
+        assertNull(companyScore(employer.getId(), reference).lastTouchAt());
+
+        newActivity(contact, null, author);
+
+        assertNotNull(personScore(contact.getId(), reference).lastTouchAt());
+        assertNotNull(companyScore(employer.getId(), reference).lastTouchAt());
+
+        assertEquals(1, personMapper.archive(workspace.getId(), contact.getId()));
+        assertFalse(personScores(reference).stream().anyMatch(score -> score.id() == contact.getId()));
+        assertNull(companyScore(employer.getId(), reference).lastTouchAt());
+
+        assertEquals(1, personMapper.restore(workspace.getId(), contact.getId()));
+        assertNotNull(personScore(contact.getId(), reference).lastTouchAt());
+        assertNotNull(companyScore(employer.getId(), reference).lastTouchAt());
+
+        Company account = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, account);
+        newActivity(null, deal, author);
+
+        assertNotNull(companyScore(account.getId(), reference).lastTouchAt());
+
+        assertEquals(1, companyMapper.archive(workspace.getId(), account.getId()));
+        assertFalse(companyScores(reference).stream().anyMatch(score -> score.id() == account.getId()));
+
+        assertEquals(1, companyMapper.restore(workspace.getId(), account.getId()));
+        assertNotNull(companyScore(account.getId(), reference).lastTouchAt());
     }
 
     /**
@@ -433,6 +480,30 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         return companyMapper.getCompaniesPage(viewer.getId(), null, "name", "asc", null, false, null,
                 allTeamScope(), archived, 500, 0)
             .stream().map(Company::getId).toList();
+    }
+
+    private List<RelationshipScoreAggregateDto> personScores(LocalDateTime reference) {
+        return personMapper.getRelationshipScoreAggregates(
+            workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters());
+    }
+
+    private RelationshipScoreAggregateDto personScore(int personId, LocalDateTime reference) {
+        return personScores(reference).stream()
+            .filter(score -> score.id() == personId)
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private List<RelationshipScoreAggregateDto> companyScores(LocalDateTime reference) {
+        return companyMapper.getRelationshipScoreAggregates(
+            workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters());
+    }
+
+    private RelationshipScoreAggregateDto companyScore(int companyId, LocalDateTime reference) {
+        return companyScores(reference).stream()
+            .filter(score -> score.id() == companyId)
+            .findFirst()
+            .orElseThrow();
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {

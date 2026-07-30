@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -42,6 +44,7 @@ public class RelationshipDashboardService {
     private static final int DASHBOARD_LIMIT = 6;
 
     /** Computes and hydrates the bounded dashboard relationship snapshot. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RelationshipDashboardDto getDashboard(int workspaceId) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         List<RelationshipTemperatureDto> contactScores = scores.contacts();
@@ -83,11 +86,19 @@ public class RelationshipDashboardService {
         }
         return new RelationshipDashboardDto(
             scoringService.summarizeScores(contactScores, companyScores),
+            hasRelationshipEvidence(contactScores, companyScores),
             contactItems,
             companyItems,
             riskItems,
             riskResult.truncated()
         );
+    }
+
+    private static boolean hasRelationshipEvidence(
+            List<RelationshipTemperatureDto> contactScores,
+            List<RelationshipTemperatureDto> companyScores) {
+        return contactScores.stream().anyMatch(score -> score.getLastTouchAt() != null)
+            || companyScores.stream().anyMatch(score -> score.getLastTouchAt() != null);
     }
 
     private static List<RelationshipTemperatureDto> cooling(List<RelationshipTemperatureDto> scores) {

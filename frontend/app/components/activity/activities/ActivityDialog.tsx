@@ -77,6 +77,8 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    /** Requires a contact or deal link when this activity is intended to create relationship evidence. */
+    requireRelationshipTarget?: boolean;
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
@@ -114,6 +116,7 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requireRelationshipTarget = false,
     initialDraftGeneration,
     onDraftMounted,
     requestInit,
@@ -168,6 +171,7 @@ export default function ActivityDialog({
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
                         defaultNotes={defaultNotes}
+                        requireRelationshipTarget={requireRelationshipTarget}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
                         onSubmittingChange={(value) => {
@@ -203,6 +207,7 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    requireRelationshipTarget?: boolean;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onSubmittingChange: (submitting: boolean) => void;
@@ -233,6 +238,7 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    requireRelationshipTarget = false,
     ownsInitialDraft = false,
     requestInit,
     onSubmittingChange,
@@ -257,6 +263,7 @@ export function ActivityDialogForm({
     const [followUpDescription, setFollowUpDescription] = useState('');
     const [followUpDueDate, setFollowUpDueDate] = useState('');
     const [followUpFailed, setFollowUpFailed] = useState(false);
+    const [relationshipTargetMissing, setRelationshipTargetMissing] = useState(false);
     const activityCreatedRef = useRef(false);
     const ownsDraftRef = useRef(ownsInitialDraft);
     const hasChangedRef = useRef(false);
@@ -319,6 +326,10 @@ export function ActivityDialogForm({
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         resetFieldErrors();
+        if (requireRelationshipTarget && selectedPerson === null && selectedDeal === null) {
+            setRelationshipTargetMissing(true);
+            return;
+        }
         setSubmitting(true);
         onSubmittingChange(true);
         try {
@@ -494,7 +505,10 @@ export function ActivityDialogForm({
                                 items={persons}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
-                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                                onValueChange={(p) => {
+                                    setSelectedPerson(p as Contact | null);
+                                    setRelationshipTargetMissing(false);
+                                }}
                             >
                                 <ComboboxInput
                                     id="activity-person"
@@ -525,7 +539,10 @@ export function ActivityDialogForm({
                                 items={deals}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
-                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                                onValueChange={(d) => {
+                                    setSelectedDeal(d as Deal | null);
+                                    setRelationshipTargetMissing(false);
+                                }}
                             >
                                 <ComboboxInput
                                     id="activity-deal"
@@ -549,6 +566,11 @@ export function ActivityDialogForm({
                                 </ComboboxContent>
                             </Combobox>
                         </div>
+                        {relationshipTargetMissing ? (
+                            <p role="alert" className="text-sm text-destructive md:col-span-2">
+                                {t('relationshipTargetRequired')}
+                            </p>
+                        ) : null}
                     </div>
 
                     <div className="ncd-rise grid gap-2" style={{ animationDelay: '315ms' }}>

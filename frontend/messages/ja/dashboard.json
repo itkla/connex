@@ -60,6 +60,89 @@
     "empty": "ワークスペースのコンタクトに最近の転職はありません。",
     "unknown": "不明"
   },
+  "DashboardActivation": {
+    "sectionTitle": "はじめに",
+    "checklistTitle": "このワークスペースの設定",
+    "checklistProgress": "{done} / {total}",
+    "optionalLabel": "任意",
+    "doneLabel": "完了:",
+    "evidenceTitle": "根拠",
+    "followUp": "フォローアップを予約",
+    "steps": {
+      "contacts": {
+        "title": "コンタクトを取り込む",
+        "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。",
+        "cta": "コンタクトをインポート",
+        "done": "{count}件のコンタクト"
+      },
+      "companies": {
+        "title": "所属する会社を追加する",
+        "body": "同じ会社を介した紹介は、このつながりから導き出されます。",
+        "cta": "会社をインポート",
+        "done": "{count}社"
+      },
+      "interactions": {
+        "title": "接点を記録する",
+        "body": "アクティビティ、共有ノート、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
+        "cta": "アクティビティを記録",
+        "done": "接点を記録済み"
+      },
+      "pipeline": {
+        "title": "パイプラインを作成する",
+        "body": "新しいワークスペースにはステージがないため、案件を置く場所がまだありません。",
+        "cta": "パイプラインを設定",
+        "done": "{count}件のパイプライン"
+      },
+      "team": {
+        "title": "同僚を招待する",
+        "body": "同僚のネットワークが加わるほど、温かい紹介の経路は強くなります。",
+        "cta": "同僚を招待",
+        "done": "{count}人のメンバー"
+      },
+      "connections": {
+        "title": "メールボックスを連携する",
+        "body": "メールボックスを連携すると、手作業で記録しなくても接点が最新に保たれます。",
+        "cta": "アカウントを連携",
+        "done": "アカウント連携済み"
+      }
+    },
+    "insight": {
+      "dealRisk": {
+        "headline": "対応が必要な商談があります",
+        "open": "商談を開く"
+      },
+      "coolingContact": {
+        "headline": "この関係は冷え込みつつあります",
+        "open": "コンタクトを開く"
+      },
+      "introPath": {
+        "headline": "温かい紹介ができます",
+        "open": "紹介を表示"
+      }
+    },
+    "evidence": {
+      "lastTouch": "最終接触 {date}",
+      "touchCount": "接点の記録 {count}件",
+      "goesCold": "{date}頃に冷め込む見込み",
+      "mutualConnections": "共通のつながり {count}件",
+      "sharedCompany": "どちらも {company} とつながりがあります"
+    },
+    "missing": {
+      "title": "まだ根拠が足りません",
+      "body": "Connex は記録された接点から関係の温度感を算出します。今はその材料がなく、根拠のないスコアは作られた判断でしかないため、ここにはスコアを表示しません。",
+      "noSignalTitle": "関係のシグナルはまだありません",
+      "noSignalBody": "関係の根拠は記録されていますが、今すぐ対応が必要な兆候や、有用な紹介につながる材料はありません。",
+      "unavailableTitle": "関係のシグナルを読み込めませんでした",
+      "unavailableBody": "チェックリストとインサイトは一時的に利用できません。ワークスペースのデータは変更されていません。",
+      "retry": "もう一度試す",
+      "gapsTitle": "足りないもの",
+      "gap": {
+        "contacts": "コンタクトがまだありません",
+        "interactions": "接点が記録されていません",
+        "noSignal": "コンタクトと接点はありますが、示すに足るシグナルにはまだ達していません。"
+      }
+    }
+  },
   "DashboardGreeting": {
     "workingLate": "遅くまでお疲れさまです、",
     "goodMorning": "おはようございます、",

@@ -312,8 +312,8 @@
                                 "description": "Every card and nearly every row is a link. Click through to jump straight to the records behind the number."
                             },
                             {
-                                "title": "A little context too",
-                                "description": "Some cards add a helpful line under the number, like how many companies you gained this week or what your last deal closed for."
+                                "title": "Always the current count",
+                                "description": "The totals are read from your workspace every time the dashboard loads, so they match what the records pages show."
                             }
                         ]
                     },

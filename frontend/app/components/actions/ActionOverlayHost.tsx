@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
@@ -124,6 +125,7 @@ export default function ActionOverlayHost({
     onClose: () => void;
 }) {
     const t = useTranslations("Actions");
+    const router = useRouter();
 
     const [rendered, setRendered] = useState<{
         generation: number;
@@ -361,8 +363,14 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
 
-    const handleCompaniesImported = () => publishRecordMutation("company");
-    const handleContactsImported = () => publishRecordMutation("contact");
+    const handleCompaniesImported = () => {
+        publishRecordMutation("company");
+        router.refresh();
+    };
+    const handleContactsImported = () => {
+        publishRecordMutation("contact");
+        router.refresh();
+    };
 
     const references = loadedReferences?.key === referenceKey ? loadedReferences : null;
     const users = loadedUsers?.key === usersKey ? loadedUsers.users : null;
@@ -439,6 +447,7 @@ export default function ActionOverlayHost({
                         defaultType={defaultActivityType}
                         defaultSubject={activityDraft?.subject ?? ""}
                         defaultNotes={activityDraft?.notes ?? ""}
+                        requireRelationshipTarget={rendered.request.requireRelationshipTarget}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
