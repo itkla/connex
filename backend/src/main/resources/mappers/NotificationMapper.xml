@@ -615,6 +615,72 @@
     ORDER BY n.recipient_id, n.id
   </select>
 
+  <select id="findHistoricalNotificationBaselines"
+          resultType="ooo.klae.connex.backend.beans.HistoricalNotificationBaseline">
+    SELECT workspace_id, recipient_id, dedupe_key, notification_type, baseline_severity,
+           LOWER(HEX(source_state_hash)) AS source_state_hash,
+           LOWER(HEX(import_run_id)) AS import_run_id, created_at
+    FROM historical_notification_baseline
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY recipient_id, dedupe_key
+  </select>
+
+  <insert id="insertHistoricalNotificationBaselines">
+    INSERT INTO historical_notification_baseline (
+      workspace_id, recipient_id, dedupe_key, notification_type,
+      baseline_severity, source_state_hash, import_run_id, created_at
+    )
+    VALUES
+    <foreach collection="baselines" item="baseline" separator=",">
+      (
+        #{workspaceId}, #{baseline.recipientId}, #{baseline.dedupeKey},
+        #{baseline.notificationType}, #{baseline.baselineSeverity},
+        UNHEX(#{baseline.sourceStateHash}), UNHEX(#{baseline.importRunId}),
+        UTC_TIMESTAMP(6)
+      )
+    </foreach>
+    ON DUPLICATE KEY UPDATE
+      notification_type = VALUES(notification_type),
+      baseline_severity = VALUES(baseline_severity),
+      source_state_hash = VALUES(source_state_hash),
+      import_run_id = VALUES(import_run_id),
+      created_at = VALUES(created_at)
+  </insert>
+
+  <delete id="deleteHistoricalNotificationBaselines">
+    DELETE FROM historical_notification_baseline
+    WHERE workspace_id = #{workspaceId}
+      AND (
+        recipient_id,
+        dedupe_key,
+        notification_type,
+        baseline_severity,
+        source_state_hash,
+        import_run_id
+      ) IN
+      <foreach collection="baselines" item="baseline" open="(" separator="," close=")">
+        (
+          #{baseline.recipientId},
+          #{baseline.dedupeKey},
+          #{baseline.notificationType},
+          #{baseline.baselineSeverity},
+          UNHEX(#{baseline.sourceStateHash}),
+          UNHEX(#{baseline.importRunId})
+        )
+      </foreach>
+  </delete>
+
+  <delete id="deleteHistoricalNotificationBaselinesForRecipient">
+    DELETE FROM historical_notification_baseline
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+  </delete>
+
+  <delete id="deleteHistoricalNotificationBaselinesForRecipientAnywhere">
+    DELETE FROM historical_notification_baseline
+    WHERE recipient_id = #{recipientId}
+  </delete>
+
   <update id="resolveReminder">
     UPDATE notification
     SET resolved_at = #{resolvedAt}

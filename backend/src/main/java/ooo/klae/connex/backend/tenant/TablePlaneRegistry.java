@@ -118,6 +118,7 @@ public final class TablePlaneRegistry {
         "document_template",
         "product",
         "entity_reference",
+        "historical_notification_baseline",
         "identity_collision",
         "introduction",
         "managed_object_usage",

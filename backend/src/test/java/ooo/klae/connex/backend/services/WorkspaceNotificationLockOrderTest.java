@@ -60,6 +60,8 @@ class WorkspaceNotificationLockOrderTest {
 
         InOrder order = inOrder(notificationMapper, workspaceMapper, stateVersionService);
         order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(notificationMapper)
+            .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(workspaceMapper).removeMember(7, 9);
         order.verify(stateVersionService).markChanged(9);

@@ -186,6 +186,35 @@
     )
   </insert>
 
+  <select id="findHistoryImports" resultType="ooo.klae.connex.backend.beans.HistoryImportProvenance">
+    SELECT id AS entity_id,
+           history_import_key,
+           history_payload_hash
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+      AND history_import_key IN
+      <foreach collection="historyImportKeys" item="historyImportKey" open="(" separator="," close=")">
+        #{historyImportKey}
+      </foreach>
+  </select>
+
+  <insert id="insertHistoryBatch">
+    INSERT INTO task (
+      workspace_id, description, completed, status, position, due_date, assigned_to_id,
+      person_id, deal_id, created_at, updated_at, history_import_key, history_payload_hash,
+      history_source_system, history_source_id, history_source_row_ref, history_imported_at
+    )
+    VALUES
+    <foreach collection="rows" item="row" separator=",">
+      (
+        #{workspaceId}, #{row.description}, #{row.completed}, #{row.status}, #{row.position},
+        #{row.dueDate}, #{row.actorId}, #{row.personId}, NULL, #{row.occurredAt}, #{row.occurredAt},
+        #{row.historyImportKey}, #{row.historyPayloadHash}, 'csv',
+        #{row.historySourceId}, #{row.historySourceRowRef}, UTC_TIMESTAMP(6)
+      )
+    </foreach>
+  </insert>
+
   <update id="update">
     UPDATE task
     SET description = #{description},

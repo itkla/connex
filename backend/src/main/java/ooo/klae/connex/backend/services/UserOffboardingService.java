@@ -135,6 +135,8 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
+            notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
+                workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         }
@@ -163,6 +165,8 @@ public class UserOffboardingService {
         dealMapper.clearMemberDealOwnership(workspaceId, userId);
         campaignMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
+        notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
+            workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
     }
 
@@ -215,6 +219,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
+        notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);
         int clearedActorRows = notificationMapper.clearActorAnywhere(userId);

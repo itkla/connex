@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -66,6 +67,68 @@ class ScoringServiceTest {
 
     private static final int WS = 1;
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
+
+    @Test
+    void contactSourceStateIsClockStableAndDetectsBackdatedWeightChange() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Person person = person(1, null);
+        Activity latest = activity(
+            person, "meeting", "2026-06-20 09:00:00");
+        latest.setId(10);
+        Activity backdated = activity(
+            person, "call", "2026-06-01 09:00:00");
+        backdated.setId(11);
+        when(activityMapper.getAllActivities(WS))
+            .thenReturn(List.of(latest, backdated));
+        when(noteMapper.getAllNotes(WS)).thenReturn(List.of());
+        when(taskMapper.getAllTasks(WS)).thenReturn(List.of());
+        ScoringService before = new ScoringService(
+            personMapper,
+            companyMapper,
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper,
+            Clock.fixed(NOW, ZoneOffset.UTC));
+        ScoringService later = new ScoringService(
+            personMapper,
+            companyMapper,
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper,
+            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC));
+
+        Map<Integer, String> beforeHashes =
+            before.contactSourceStateHashes(
+                WS, Set.of(), Set.of(), Set.of());
+        Map<Integer, String> laterHashes =
+            later.contactSourceStateHashes(
+                WS, Set.of(), Set.of(), Set.of());
+        Map<Integer, String> excludedHashes =
+            later.contactSourceStateHashes(
+                WS, Set.of(backdated.getId()), Set.of(), Set.of());
+        when(activityMapper.getAllActivities(WS))
+            .thenReturn(List.of(latest));
+        Map<Integer, String> withoutBackdatedHashes =
+            later.contactSourceStateHashes(
+                WS, Set.of(), Set.of(), Set.of());
+        when(activityMapper.getAllActivities(WS))
+            .thenReturn(List.of(latest, backdated));
+        backdated.setType("meeting");
+        Map<Integer, String> changedHashes =
+            later.contactSourceStateHashes(
+                WS, Set.of(), Set.of(), Set.of());
+
+        assertEquals(beforeHashes, laterHashes);
+        assertEquals(withoutBackdatedHashes, excludedHashes);
+        assertNotEquals(beforeHashes.get(1), changedHashes.get(1));
+    }
 
     @Test
     void asOfNow_matchesLiveContactScores() {

@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -16,8 +17,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -51,11 +55,11 @@ class RbacEnforcementArchTest {
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
         "IntroductionService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
-        "SuppressionService", "WarmPathService");
+        "SuppressionService", "WarmPathService", "InteractionHistoryImportService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(
-        "^(create|update|delete|add|remove|replace|close|reopen|complete|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
+        "^(create|update|delete|add|remove|replace|close|reopen|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
 
     @Test
     void every_mutating_entity_service_method_is_permission_guarded() throws Exception {
@@ -125,5 +129,71 @@ class RbacEnforcementArchTest {
         assertEquals(9, lifecycleMethodCount, "Workflow lifecycle surface changed without updating the RBAC guard");
         assertTrue(violations.isEmpty(),
             "Every workflow lifecycle method must require RULE_MANAGE: " + violations);
+    }
+
+    @Test
+    void interactionHistoryImportSurfaceUsesEntityNativePermissions() {
+        Map<String, Permission> expected = Map.of(
+            "previewActivities", Permission.ACTIVITY_CREATE,
+            "commitActivities", Permission.ACTIVITY_CREATE,
+            "previewNotes", Permission.NOTE_CREATE,
+            "commitNotes", Permission.NOTE_CREATE,
+            "previewTasks", Permission.TASK_CREATE,
+            "commitTasks", Permission.TASK_CREATE);
+        List<String> violations = new ArrayList<>();
+        int publicMethods = 0;
+        for (Method method : InteractionHistoryImportService.class.getDeclaredMethods()) {
+            if (!Modifier.isPublic(method.getModifiers())
+                    || method.isSynthetic()
+                    || method.isBridge()) {
+                continue;
+            }
+            publicMethods++;
+            RequirePermission permission = method.getAnnotation(RequirePermission.class);
+            if (!expected.containsKey(method.getName())
+                    || permission == null
+                    || permission.value() != expected.get(method.getName())) {
+                violations.add(method.getName());
+            }
+        }
+        assertEquals(6, publicMethods,
+            "Interaction-history import surface changed without updating the RBAC guard");
+        assertTrue(violations.isEmpty(),
+            "Interaction-history import methods must use entity-native create permissions: "
+                + violations);
+    }
+
+    @Test
+    void interactionHistoryCommitsUseReadCommittedTransactions() throws Exception {
+        for (String methodName : List.of(
+                "commitActivities", "commitNotes", "commitTasks")) {
+            Method method = InteractionHistoryImportService.class.getDeclaredMethod(
+                methodName,
+                ooo.klae.connex.backend.dto.HistoryImportRequest.class);
+            Transactional transaction = method.getAnnotation(Transactional.class);
+            assertTrue(transaction != null
+                    && transaction.isolation() == Isolation.READ_COMMITTED,
+                methodName + " must claim its proof and write inside READ_COMMITTED");
+        }
+    }
+
+    @Test
+    void interactionHistoryImportsUseDirectMappersWithoutMutationPublishers() {
+        Set<String> dependencies = java.util.Arrays.stream(
+                InteractionHistoryImportService.class.getDeclaredFields())
+            .map(field -> field.getType().getSimpleName())
+            .collect(java.util.stream.Collectors.toSet());
+
+        assertTrue(dependencies.containsAll(Set.of(
+            "ActivityMapper", "NoteMapper", "TaskMapper")));
+        Set<String> forbidden = Set.of(
+            "ActivityService",
+            "NoteService",
+            "TaskService",
+            "ReferenceService",
+            "NotificationChangePublisher",
+            "RuleTriggerPublisher");
+        assertTrue(java.util.Collections.disjoint(dependencies, forbidden),
+            "Historical imports must bypass per-row mutation side effects: " + dependencies);
     }
 }

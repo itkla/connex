@@ -11,6 +11,7 @@ const TABS = [
     { key: "tabMembers", href: "/settings/members" },
     { key: "tabRoles", href: "/settings/roles" },
     { key: "tabCustomFields", href: "/settings/custom-fields" },
+    { key: "tabData", href: "/settings/data" },
     { key: "tabEmail", href: "/settings/email" },
     { key: "tabDelivery", href: "/settings/delivery" },
 ] as const;

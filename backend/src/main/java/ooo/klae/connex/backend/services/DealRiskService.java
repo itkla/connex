@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -110,6 +115,12 @@ public class DealRiskService {
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /**
+     * One deal-risk assessment plus a clock-stable fingerprint of the persisted inputs that
+     * produced it.
+     */
+    public record NotificationRiskState(DealRiskDto assessment, String sourceStateHash) {}
+
+    /**
      * Assesses every open deal in the workspace and returns only those with at least one risk
      * factor, ordered by descending {@link DealRiskDto#getScore() score}.
      */
@@ -123,22 +134,52 @@ public class DealRiskService {
      * shares that map across its passes, avoiding a second full rescore here.
      */
     public List<DealRiskDto> assessWorkspace(int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth) {
+        return assessWorkspaceNotificationStates(
+                workspaceId,
+                warmth,
+                Map.of()).stream()
+            .map(NotificationRiskState::assessment)
+            .filter(assessment -> !assessment.getFactors().isEmpty())
+            .sorted(Comparator.comparingInt(DealRiskDto::getScore).reversed())
+            .toList();
+    }
+
+    /**
+     * Assesses every eligible open deal for notification reconciliation, including deals whose
+     * current assessment has no factors.
+     */
+    public List<NotificationRiskState> assessWorkspaceNotificationStates(
+            int workspaceId,
+            Map<Integer, RelationshipTemperatureDto> warmth,
+            Map<Integer, String> contactSourceStateHashes) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         List<Deal> open = dealMapper.getAllDeals(workspaceId).stream()
             .filter(deal -> isOpen(deal) && !deal.isRiskExcluded())
             .toList();
-        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, open, now.toEpochMilli());
+        DealTouchState touchState = dealTouchState(workspaceId, open, now.toEpochMilli());
         Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
 
-        List<DealRiskDto> out = new ArrayList<>();
+        List<NotificationRiskState> out = new ArrayList<>();
         for (Deal deal : open) {
-            DealRiskDto assessment = assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
-            if (!assessment.getFactors().isEmpty()) {
-                out.add(assessment);
-            }
+            DealRiskDto assessment = assess(
+                deal,
+                now,
+                touchState.effectiveLastTouch(),
+                stakeholders,
+                warmth,
+                assessedAt);
+            out.add(new NotificationRiskState(
+                assessment,
+                notificationSourceStateHash(
+                    deal,
+                    touchState.sourceStateHashes().get(deal.getId()),
+                    stakeholders.getOrDefault(deal.getId(), List.of()),
+                    contactSourceStateHashes,
+                    warmth)));
         }
-        out.sort(Comparator.comparingInt(DealRiskDto::getScore).reversed());
+        out.sort(Comparator.comparingInt(
+            state -> state.assessment().getDealId()));
         return out;
     }
 
@@ -463,22 +504,151 @@ public class DealRiskService {
      * infinitely quiet. Future-dated timestamps are ignored so a stray forward-dated interaction
      * cannot make a genuinely quiet deal read as freshly touched.
      */
-    private Map<Integer, Long> dealLastTouch(int workspaceId, List<Deal> deals, long nowMs) {
-        Map<Integer, Long> last = new HashMap<>();
+    private DealTouchState dealTouchState(int workspaceId, List<Deal> deals, long nowMs) {
+        Map<Integer, Long> effective = new HashMap<>();
+        Map<Integer, List<DealSourceTouch>> sourceTouches = new HashMap<>();
         for (Deal deal : deals) {
-            merge(last, deal.getId(), notFuture(epoch(deal.getCreatedAt()), nowMs));
+            merge(
+                effective,
+                deal.getId(),
+                notFuture(epoch(deal.getCreatedAt()), nowMs));
         }
         for (Activity activity : activityMapper.getAllActivities(workspaceId)) {
-            merge(last, dealId(activity.getDeal()), notFuture(epoch(activity.getTimestamp()), nowMs));
+            mergeTouchState(
+                effective,
+                sourceTouches,
+                dealId(activity.getDeal()),
+                "activity",
+                activity.getId(),
+                epoch(activity.getTimestamp()),
+                activity.getTimestamp(),
+                nowMs);
         }
         for (Note note : noteMapper.getAllNotes(workspaceId)) {
             if (!isSharedNote(note)) continue;
-            merge(last, dealId(note.getDeal()), notFuture(epoch(note.getCreatedAt()), nowMs));
+            mergeTouchState(
+                effective,
+                sourceTouches,
+                dealId(note.getDeal()),
+                "note",
+                note.getId(),
+                epoch(note.getCreatedAt()),
+                note.getCreatedAt(),
+                nowMs);
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
-            merge(last, dealId(task.getDeal()), notFuture(epoch(task.getCreatedAt()), nowMs));
+            mergeTouchState(
+                effective,
+                sourceTouches,
+                dealId(task.getDeal()),
+                "task",
+                task.getId(),
+                epoch(task.getCreatedAt()),
+                task.getCreatedAt(),
+                nowMs);
         }
-        return last;
+        Map<Integer, String> sourceStateHashes = new HashMap<>();
+        sourceTouches.forEach((dealId, touches) ->
+            sourceStateHashes.put(dealId, dealSourceStateHash(touches)));
+        return new DealTouchState(effective, sourceStateHashes);
+    }
+
+    private record DealTouchState(
+        Map<Integer, Long> effectiveLastTouch,
+        Map<Integer, String> sourceStateHashes
+    ) {}
+
+    private record DealSourceTouch(
+        String kind,
+        int id,
+        String timestamp
+    ) {}
+
+    private static void mergeTouchState(
+            Map<Integer, Long> effective,
+            Map<Integer, List<DealSourceTouch>> sourceTouches,
+            Integer dealId,
+            String kind,
+            int sourceId,
+            Long epochMillis,
+            String timestamp,
+            long nowMs) {
+        if (dealId == null || epochMillis == null) {
+            return;
+        }
+        sourceTouches.computeIfAbsent(dealId, key -> new ArrayList<>()).add(
+            new DealSourceTouch(kind, sourceId, timestamp));
+        merge(effective, dealId, notFuture(epochMillis, nowMs));
+    }
+
+    private static String notificationSourceStateHash(
+            Deal deal,
+            String dealTouchSourceStateHash,
+            List<DealStakeholder> stakeholders,
+            Map<Integer, String> contactSourceStateHashes,
+            Map<Integer, RelationshipTemperatureDto> warmth) {
+        List<String> values = new ArrayList<>();
+        values.add(Integer.toString(deal.getId()));
+        values.add(Double.toString(deal.getValue()));
+        values.add(deal.getCurrency());
+        values.add(deal.getExpectedCloseDate());
+        values.add(deal.getCreatedAt());
+        values.add(deal.getUpdatedAt());
+        values.add(dealTouchSourceStateHash);
+        stakeholders.stream()
+            .sorted(Comparator
+                .comparingInt(DealStakeholder::getPersonId)
+                .thenComparing(
+                    DealStakeholder::getRole,
+                    Comparator.nullsFirst(String::compareTo))
+                .thenComparing(DealStakeholder::isRiskExcluded))
+            .forEach(stakeholder -> {
+                values.add(Integer.toString(stakeholder.getPersonId()));
+                values.add(stakeholder.getRole());
+                values.add(Boolean.toString(stakeholder.isRiskExcluded()));
+                values.add(Boolean.toString(
+                    warmth.containsKey(stakeholder.getPersonId())));
+                values.add(contactSourceStateHashes.getOrDefault(
+                    stakeholder.getPersonId(),
+                    ScoringService.emptyContactSourceStateHash()));
+            });
+        return hashValues(values);
+    }
+
+    private static String dealSourceStateHash(List<DealSourceTouch> sourceTouches) {
+        List<String> values = new ArrayList<>();
+        sourceTouches.stream()
+            .sorted(Comparator
+                .comparing(DealSourceTouch::kind)
+                .thenComparingInt(DealSourceTouch::id)
+                .thenComparing(DealSourceTouch::timestamp))
+            .forEach(touch -> {
+                values.add(touch.kind());
+                values.add(Integer.toString(touch.id()));
+                values.add(touch.timestamp());
+            });
+        return hashValues(values);
+    }
+
+    private static String hashValues(List<String> values) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+        for (String value : values) {
+            if (value == null) {
+                digest.update(
+                    ByteBuffer.allocate(Integer.BYTES).putInt(-1).array());
+                continue;
+            }
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            digest.update(
+                ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+            digest.update(bytes);
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private static Long notFuture(Long epochMillis, long nowMs) {

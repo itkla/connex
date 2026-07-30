@@ -830,6 +830,8 @@ public class WorkspaceService {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }
         notificationMapper.lockRecipientMemberships(userId);
+        notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
+            workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);

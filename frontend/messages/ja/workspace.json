@@ -66,8 +66,16 @@
     "tabMembers": "メンバー",
     "tabRoles": "ロール",
     "tabCustomFields": "カスタムフィールド",
+    "tabData": "データ",
     "tabEmail": "メール",
     "tabDelivery": "配信"
+  },
+  "WorkspaceData": {
+    "title": "データ",
+    "subtitle": "自動処理や通知を発生させずに、既存の関係履歴をこのワークスペースへ取り込みます。",
+    "historyTitle": "やり取り履歴",
+    "historyDescription": "アクティビティ、メモ、タスクの履歴をCSVから取り込みます。書き込み前に参加者の完全一致を確認できます。",
+    "historyAction": "履歴をインポート"
   },
   "WorkspaceMembers": {
     "title": "メンバー",

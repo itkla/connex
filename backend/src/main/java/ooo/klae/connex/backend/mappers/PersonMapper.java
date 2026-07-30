@@ -30,6 +30,13 @@ public interface PersonMapper {
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
+    List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesExcludingHistoryImports(
+            @Param("workspaceId") int workspaceId,
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model,
+            @Param("excludedActivityIds") List<Integer> excludedActivityIds,
+            @Param("excludedNoteIds") List<Integer> excludedNoteIds,
+            @Param("excludedTaskIds") List<Integer> excludedTaskIds);
     RelationshipEvidenceTotalsDto getRelationshipEvidenceTotals(
             @Param("workspaceId") int workspaceId,
             @Param("personId") int personId,

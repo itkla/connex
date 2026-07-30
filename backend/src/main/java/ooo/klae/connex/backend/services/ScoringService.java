@@ -1,13 +1,19 @@
 package ooo.klae.connex.backend.services;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,6 +102,16 @@ public class ScoringService {
     /** A single timestamped, intent-weighted interaction. */
     private record Touch(long epochMillis, double weight) {}
 
+    private record ContactSourceTouch(
+        String kind,
+        int id,
+        String timestamp,
+        String weight
+    ) {}
+
+    private static final String EMPTY_CONTACT_SOURCE_STATE_HASH =
+        contactSourceStateHash(List.of());
+
     /** Contact and company temperatures derived from one workspace aggregate snapshot. */
     public record WorkspaceScores(
         List<RelationshipTemperatureDto> contacts,
@@ -141,6 +157,129 @@ public class ScoringService {
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
         Instant reference = scoringInstant(asOf);
         return computeContactScores(workspaceId, reference, reference);
+    }
+
+    List<RelationshipTemperatureDto> scoreContactsExcludingHistoryImports(
+            int workspaceId,
+            Instant asOf,
+            Set<Integer> excludedActivityIds,
+            Set<Integer> excludedNoteIds,
+            Set<Integer> excludedTaskIds) {
+        Instant reference = scoringInstant(asOf);
+        LocalDateTime referenceDateTime =
+            LocalDateTime.ofInstant(reference, ZoneOffset.UTC);
+        return temperatures(
+            personMapper.getRelationshipScoreAggregatesExcludingHistoryImports(
+                workspaceId,
+                referenceDateTime,
+                WARMTH_MODEL.sqlParameters(),
+                List.copyOf(excludedActivityIds),
+                List.copyOf(excludedNoteIds),
+                List.copyOf(excludedTaskIds)),
+            reference);
+    }
+
+    /**
+     * Returns clock-independent fingerprints of every persisted touch that affects each contact's
+     * warmth score.
+     */
+    Map<Integer, String> contactSourceStateHashes(
+            int workspaceId,
+            Set<Integer> excludedActivityIds,
+            Set<Integer> excludedNoteIds,
+            Set<Integer> excludedTaskIds) {
+        Map<Integer, List<ContactSourceTouch>> touches = new HashMap<>();
+        for (Activity activity : activityMapper.getAllActivities(workspaceId)) {
+            Integer personId = personId(activity.getPerson());
+            if (personId != null
+                    && !excludedActivityIds.contains(activity.getId())
+                    && epoch(activity.getTimestamp()) != null) {
+                touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
+                    new ContactSourceTouch(
+                        "activity",
+                        activity.getId(),
+                        activity.getTimestamp(),
+                        Double.toString(activityWeight(activity.getType()))));
+            }
+        }
+        for (Note note : noteMapper.getAllNotes(workspaceId)) {
+            Integer personId = personId(note.getPerson());
+            if (personId != null
+                    && !excludedNoteIds.contains(note.getId())
+                    && isSharedNote(note)
+                    && epoch(note.getCreatedAt()) != null) {
+                touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
+                    new ContactSourceTouch(
+                        "note",
+                        note.getId(),
+                        note.getCreatedAt(),
+                        Double.toString(WARMTH_MODEL.noteWeight())));
+            }
+        }
+        for (Task task : taskMapper.getAllTasks(workspaceId)) {
+            Integer personId = personId(task.getPerson());
+            if (personId != null
+                    && !excludedTaskIds.contains(task.getId())
+                    && epoch(task.getCreatedAt()) != null) {
+                touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
+                    new ContactSourceTouch(
+                        "task",
+                        task.getId(),
+                        task.getCreatedAt(),
+                        Double.toString(WARMTH_MODEL.taskWeight())));
+            }
+        }
+        Map<Integer, String> hashes = new LinkedHashMap<>();
+        touches.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> hashes.put(
+                entry.getKey(),
+                contactSourceStateHash(entry.getValue())));
+        return hashes;
+    }
+
+    static String emptyContactSourceStateHash() {
+        return EMPTY_CONTACT_SOURCE_STATE_HASH;
+    }
+
+    private static String contactSourceStateHash(
+            List<ContactSourceTouch> sourceTouches) {
+        List<String> values = new ArrayList<>();
+        values.add(WARMTH_MODEL.version());
+        sourceTouches.stream()
+            .sorted(Comparator
+                .comparing(ContactSourceTouch::kind)
+                .thenComparingInt(ContactSourceTouch::id)
+                .thenComparing(ContactSourceTouch::timestamp)
+                .thenComparing(ContactSourceTouch::weight))
+            .forEach(touch -> {
+                values.add(touch.kind());
+                values.add(Integer.toString(touch.id()));
+                values.add(touch.timestamp());
+                values.add(touch.weight());
+            });
+        return hashValues(values);
+    }
+
+    private static String hashValues(List<String> values) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+        for (String value : values) {
+            if (value == null) {
+                digest.update(
+                    ByteBuffer.allocate(Integer.BYTES).putInt(-1).array());
+                continue;
+            }
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            digest.update(
+                ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+            digest.update(bytes);
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     /**

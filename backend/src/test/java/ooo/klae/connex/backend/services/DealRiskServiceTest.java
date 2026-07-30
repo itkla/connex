@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -305,6 +306,57 @@ class DealRiskServiceTest extends AbstractServiceTest {
             .allMatch(risk -> risk.getValue() == overdue.getValue()
                 && overdue.getCurrency().equals(risk.getCurrency()));
         assertThat(risks).noneMatch(risk -> risk.getDealId() == healthy.getId());
+    }
+
+    @Test
+    void notificationSourceStateStaysStableAcrossClockOnlyRiskBoundary() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-07-08");
+        touch(deal, "2126-06-01 10:00:00");
+        Clock beforeClosingSoon = Clock.fixed(
+            Instant.parse("2126-06-23T15:30:00Z"), ZoneOffset.UTC);
+        Clock closingSoon = Clock.fixed(
+            Instant.parse("2126-06-24T15:30:00Z"), ZoneOffset.UTC);
+        DealRiskService beforeService = new DealRiskService(
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper,
+            scoring,
+            beforeClosingSoon);
+        DealRiskService afterService = new DealRiskService(
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper,
+            scoring,
+            closingSoon);
+
+        DealRiskService.NotificationRiskState before =
+            beforeService.assessWorkspaceNotificationStates(
+                workspace.getId(), Map.of(), Map.of()).stream()
+                .filter(state -> state.assessment().getDealId() == deal.getId())
+                .findFirst()
+                .orElseThrow();
+        DealRiskService.NotificationRiskState after =
+            afterService.assessWorkspaceNotificationStates(
+                workspace.getId(), Map.of(), Map.of()).stream()
+                .filter(state -> state.assessment().getDealId() == deal.getId())
+                .findFirst()
+                .orElseThrow();
+        touch(deal, "2126-05-01 10:00:00");
+        DealRiskService.NotificationRiskState changed =
+            afterService.assessWorkspaceNotificationStates(
+                workspace.getId(), Map.of(), Map.of()).stream()
+                .filter(state -> state.assessment().getDealId() == deal.getId())
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(before.assessment().getLevel()).isEqualTo("low");
+        assertThat(after.assessment().getLevel()).isEqualTo("high");
+        assertThat(before.sourceStateHash()).isEqualTo(after.sourceStateHash());
+        assertThat(changed.sourceStateHash())
+            .isNotEqualTo(after.sourceStateHash());
     }
 
     @Test

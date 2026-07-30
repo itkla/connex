@@ -286,6 +286,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("delivery_provider_config", 510));
         raw.add(direct("document_template", 520));
         raw.add(direct("entity_reference", 530));
+        raw.add(direct("historical_notification_baseline", 535));
         raw.add(direct("notification", 540));
         raw.add(direct("product", 550));
         raw.add(direct("report_goal", 560));
