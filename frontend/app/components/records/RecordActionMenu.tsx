@@ -95,6 +95,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
         } = model;
 
         const registry = (id: ActionId): MenuItemDescriptor | null => {
+            if (!actions.some((action) => action.id === id)) return null;
             const action = getAction(id);
             if (!action || !isAvailableForRecord(id, record)) return null;
             const Icon = action.icon;

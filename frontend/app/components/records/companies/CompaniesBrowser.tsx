@@ -381,10 +381,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
-        if (showArchived) {
-            setTempByCompanyId(new Map());
-            return;
-        }
+        if (showArchived) return;
         let cancelled = false;
         getCompanyTemperatures(companies.map((company) => company.id))
             .then((temps) => {

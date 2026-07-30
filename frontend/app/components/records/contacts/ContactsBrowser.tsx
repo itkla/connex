@@ -291,10 +291,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
-        if (showArchived) {
-            setTempByContactId(new Map());
-            return;
-        }
+        if (showArchived) return;
         let cancelled = false;
         getContactTemperatures(contacts.map((contact) => contact.id))
             .then((temps) => {

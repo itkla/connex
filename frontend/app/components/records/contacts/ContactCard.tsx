@@ -18,11 +18,10 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
-// import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import type { RecordRemoveIntent } from '@/app/components/records/types';
-import { BuildingOffice2Icon, NoSymbolIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
 
 function initialsOf(name: string): string {
@@ -90,7 +89,6 @@ export default function ContactCard({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
-    const [removeFromCompanyOpen, setRemoveFromCompanyOpen] = useState(false);
 
     function openContactPage() {
         router.push(`/records/contacts/${id}`);
@@ -223,10 +221,6 @@ export default function ContactCard({
                                 <DropdownMenuItem onClick={() => openChangeCompanyDialog()}>
                                     <BuildingOffice2Icon className="size-4 text-muted-foreground" />
                                     {t('changeCompany')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setRemoveFromCompanyOpen(true)}>
-                                    <NoSymbolIcon className="size-4 text-muted-foreground" />
-                                    {t('removeFromCompany')}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                             </>
