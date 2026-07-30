@@ -1,6 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { expect, request, test as setup } from "@playwright/test";
-import { E2E_ARTIFACT_DIR, E2E_BASE_URL, RUN_FIXTURE_PATH, STORAGE_STATE_PATH } from "../../playwright.config";
+import {
+    E2E_ARTIFACT_DIR,
+    E2E_BASE_URL,
+    runFixturePath,
+    storageStatePath,
+    tenantScopeForProject,
+} from "../../playwright.config";
 import { csrfBootstrap, activeWorkspaceId, registerUser, seeder, type RunFixture } from "./support/api";
 
 /**
@@ -9,8 +16,9 @@ import { csrfBootstrap, activeWorkspaceId, registerUser, seeder, type RunFixture
  * cookies), persists the browser storage state, and seeds the records the flow specs assert
  * against. Every run gets its own workspace, so runs are isolated and rerunnable.
  */
-setup("provision tenant and seed records", async () => {
+setup("provision tenant and seed records", async ({}, testInfo) => {
     setup.setTimeout(240_000);
+    const tenantScope = tenantScopeForProject(testInfo.project.name);
     const api = await request.newContext({ baseURL: E2E_BASE_URL });
 
     const probe = await api.get("/auth/login").catch(() => null);
@@ -21,7 +29,7 @@ setup("provision tenant and seed records", async () => {
         );
     }
 
-    const runId = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+    const runId = `${tenantScope[0]}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
     const contactNames = {
         peek: `Peek Target ${runId}`,
         edit: `Edit Target ${runId}`,
@@ -95,9 +103,9 @@ setup("provision tenant and seed records", async () => {
         });
     }
 
-    mkdirSync(E2E_ARTIFACT_DIR, { recursive: true });
-    await api.storageState({ path: STORAGE_STATE_PATH });
-    writeFileSync(RUN_FIXTURE_PATH, JSON.stringify(fixture, null, 2));
+    mkdirSync(path.join(E2E_ARTIFACT_DIR, tenantScope), { recursive: true });
+    await api.storageState({ path: storageStatePath(tenantScope) });
+    writeFileSync(runFixturePath(tenantScope), JSON.stringify(fixture, null, 2));
 
     const me = await api.get("/api/auth/me");
     expect(me.status()).toBe(200);

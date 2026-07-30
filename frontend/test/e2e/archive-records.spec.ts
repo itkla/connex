@@ -3,9 +3,10 @@ import { E2E_BASE_URL } from "../../playwright.config";
 import { runFixture } from "./support/fixtures";
 
 test.describe("record archive and restore", () => {
-    test("contact archive is reversible and replaces delete", async ({ page }) => {
-        const contact = runFixture().contacts.archive;
-        await ensureActive(page, `/api/persons/${contact.id}/restore`);
+    test("contact archive is reversible and replaces delete", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const contact = fixture.contacts.archive;
+        await ensureActive(page, `/api/persons/${contact.id}/restore`, fixture.workspaceId);
         try {
             const listUrl = `/records/contacts?view=table&q=${encodeURIComponent(contact.name)}`;
             await page.goto(listUrl);
@@ -44,17 +45,17 @@ test.describe("record archive and restore", () => {
             await scope.getByRole("button", { name: "Active", exact: true }).click();
             await expect(page.getByRole("row").filter({ hasText: contact.name })).toBeVisible();
         } finally {
-            await ensureActive(page, `/api/persons/${contact.id}/restore`);
+            await ensureActive(page, `/api/persons/${contact.id}/restore`, fixture.workspaceId);
         }
     });
 
-    test("company archive and restore work in Japanese at mobile width", async ({ page }) => {
-        await page.setViewportSize({ width: 390, height: 844 });
+    test("company archive and restore work in Japanese at mobile width @mobile-only", async ({ page }, testInfo) => {
         await page.context().addCookies([
             { name: "NEXT_LOCALE", value: "ja", url: E2E_BASE_URL },
         ]);
-        const company = runFixture().companies.archive;
-        await ensureActive(page, `/api/companies/${company.id}/restore`);
+        const fixture = runFixture(testInfo.project.name);
+        const company = fixture.companies.archive;
+        await ensureActive(page, `/api/companies/${company.id}/restore`, fixture.workspaceId);
         try {
             const listUrl = `/records/companies?view=grid&q=${encodeURIComponent(company.name)}`;
             await page.goto(listUrl);
@@ -94,13 +95,12 @@ test.describe("record archive and restore", () => {
             await scope.getByRole("button", { name: "有効", exact: true }).click();
             await expect(page.locator("div.group").filter({ hasText: company.name }).first()).toBeVisible();
         } finally {
-            await ensureActive(page, `/api/companies/${company.id}/restore`);
+            await ensureActive(page, `/api/companies/${company.id}/restore`, fixture.workspaceId);
         }
     });
 });
 
-async function ensureActive(page: Page, restorePath: string): Promise<void> {
-    const fixture = runFixture();
+async function ensureActive(page: Page, restorePath: string, workspaceId: number): Promise<void> {
     const csrfResponse = await page.request.get("/api/auth/csrf");
     expect(csrfResponse.status()).toBe(200);
     const csrf: unknown = await csrfResponse.json();
@@ -116,7 +116,7 @@ async function ensureActive(page: Page, restorePath: string): Promise<void> {
     }
     const response = await page.request.post(restorePath, {
         headers: {
-            "X-Workspace-Id": String(fixture.workspaceId),
+            "X-Workspace-Id": String(workspaceId),
             [csrf.headerName]: csrf.token,
         },
         data: {},

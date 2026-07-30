@@ -68,9 +68,11 @@ row-count summaries, and closes the application context.
 
 ## CI invocation
 
-Create a fresh CI catalog whose name starts with `connex_seed`, export a
-`CONNEX_DB_URL` that names that disposable catalog together with
-`CONNEX_DB_USERNAME` and `CONNEX_DB_PASSWORD`, then run:
+The `Frontend — unit & e2e` job in `.github/workflows/ci.yml` runs the seeder against the fresh
+`connex_seed_e2e` schema its MySQL service creates per run, **after** building the war and
+**before** booting the backend. The guard permits only a non-web one-shot process, so the seeder
+cannot run inside the serving app, and the dedicated catalog prefix satisfies the one-shot
+contract:
 
 ```bash
 bash gradlew seedData \
@@ -78,10 +80,14 @@ bash gradlew seedData \
   -PseederSeed=853 \
   -PseederWorkspaces=1 \
   -PseederAnchorDate=2026-01-15 \
-  --no-daemon
+  --no-daemon \
+  | tee ../frontend/test/e2e/.artifacts/seeder.log
 ```
 
-Do not reuse the backend test job's normal `connexdb` catalog.
+No alternate test-database configuration is required: the job's existing `CONNEX_DB_URL`,
+`CONNEX_DB_USERNAME`, and `CONNEX_DB_PASSWORD` already point at the disposable CI schema. The
+tee'd log is how e2e specs learn the seeded usernames — see
+[FRONTEND_TESTING.md](FRONTEND_TESTING.md#seeded-identities-deterministic-volume-seeder).
 
 ## Production guard
 

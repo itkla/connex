@@ -21,8 +21,8 @@ test.describe("auth", () => {
         await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
     });
 
-    test("logging in with an existing account lands on the dashboard", async ({ page }) => {
-        const fixture = runFixture();
+    test("logging in with an existing account lands on the dashboard", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         await page.goto("/auth/login");
         await page.getByLabel("Username or email").fill(fixture.username);
         await page.getByLabel("Password", { exact: true }).fill(fixture.password);
@@ -30,8 +30,8 @@ test.describe("auth", () => {
         await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
     });
 
-    test("a wrong password shows the invalid-credentials error", async ({ page }) => {
-        const fixture = runFixture();
+    test("a wrong password shows the invalid-credentials error", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
         await page.goto("/auth/login");
         await page.getByLabel("Username or email").fill(fixture.username);
         await page.getByLabel("Password", { exact: true }).fill("Wrong!Password1");

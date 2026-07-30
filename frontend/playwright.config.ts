@@ -7,8 +7,37 @@ export const E2E_BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 /** Directory for per-run bootstrap artifacts (storage state + seeded-record fixture). Never committed. */
 export const E2E_ARTIFACT_DIR = path.resolve(__dirname, "test/e2e/.artifacts");
 
-export const STORAGE_STATE_PATH = path.join(E2E_ARTIFACT_DIR, "storage-state.json");
-export const RUN_FIXTURE_PATH = path.join(E2E_ARTIFACT_DIR, "run.json");
+export type E2ETenantScope = "desktop" | "mobile";
+
+/** Browser storage state for one project-isolated tenant. */
+export function storageStatePath(scope: E2ETenantScope): string {
+    return path.join(E2E_ARTIFACT_DIR, scope, "storage-state.json");
+}
+
+/** Seeded-record fixture for one project-isolated tenant. */
+export function runFixturePath(scope: E2ETenantScope): string {
+    return path.join(E2E_ARTIFACT_DIR, scope, "run.json");
+}
+
+/** Maps a setup or browser project to the tenant scope it exclusively owns. */
+export function tenantScopeForProject(projectName: string): E2ETenantScope {
+    if (projectName === "setup-mobile" || projectName === "mobile-chromium") {
+        return "mobile";
+    }
+    if (projectName === "setup-desktop" || projectName === "chromium") {
+        return "desktop";
+    }
+    throw new Error(`Project ${projectName} has no E2E tenant scope`);
+}
+
+/** Gradle console log of the deterministic volume-seeder run that populated the stack under test. */
+export const SEED_LOG_PATH = process.env.E2E_SEED_LOG ?? path.join(E2E_ARTIFACT_DIR, "seeder.log");
+
+/** Tests whose title carries this tag also run in the phone-viewport project. */
+export const MOBILE_TAG = /@mobile/;
+
+/** Tests whose title carries this tag run *only* in the phone-viewport project. */
+export const MOBILE_ONLY_TAG = /@mobile-only/;
 
 export default defineConfig({
     testDir: "./test/e2e",
@@ -29,16 +58,30 @@ export default defineConfig({
     },
     projects: [
         {
-            name: "setup",
+            name: "setup-desktop",
+            testMatch: /global\.setup\.ts/,
+        },
+        {
+            name: "setup-mobile",
             testMatch: /global\.setup\.ts/,
         },
         {
             name: "chromium",
             use: {
                 ...devices["Desktop Chrome"],
-                storageState: STORAGE_STATE_PATH,
+                storageState: storageStatePath("desktop"),
             },
-            dependencies: ["setup"],
+            grepInvert: MOBILE_ONLY_TAG,
+            dependencies: ["setup-desktop"],
+        },
+        {
+            name: "mobile-chromium",
+            use: {
+                ...devices["Pixel 7"],
+                storageState: storageStatePath("mobile"),
+            },
+            grep: MOBILE_TAG,
+            dependencies: ["setup-mobile"],
         },
     ],
 });

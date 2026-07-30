@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { runFixture } from "./support/fixtures";
 
 test.describe("records browse and peek", () => {
-    test("row opens a peek, peek opens the detail, and back restores the list context", async ({ page }) => {
-        const contact = runFixture().contacts.peek;
+    test("row opens a peek, peek opens the detail, and back restores the list context", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.peek;
         const listUrl = `/records/contacts?view=table&q=${encodeURIComponent(contact.name)}`;
         await page.goto(listUrl);
 
