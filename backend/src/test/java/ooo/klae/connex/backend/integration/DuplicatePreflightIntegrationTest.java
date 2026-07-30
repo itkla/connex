@@ -35,8 +35,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
@@ -49,6 +47,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * End-to-end duplicate-preflight visibility. Organizations and workspaces are committed

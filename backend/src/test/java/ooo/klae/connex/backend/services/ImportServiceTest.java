@@ -198,7 +198,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(0, preview.getInvalid());
         assertEquals(1, preview.getToSkip());
-        assertEquals("match", preview.getRows().getFirst().getStatus());
+        assertEquals("skip", preview.getRows().getFirst().getStatus());
     }
 
     @Test
@@ -375,7 +375,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, ambiguous.getInvalid());
         assertTrue(ambiguous.getRows().getFirst().getErrors().getFirst()
-            .contains("Multiple contacts"));
+            .contains("Multiple visible contact records"));
     }
 
     @Test
@@ -911,7 +911,10 @@ class ImportServiceTest extends AbstractServiceTest {
         target.setEmail("changing-target-" + unique() + "@example.test");
         Person created = personService.create(target);
         doReturn(List.of()).when(identityMapperSpy)
-            .lockCurrentPersonIdentityKeysForRecord(workspace.getId(), created.getId());
+            .findCurrentPersonIdentityMatches(
+                workspace.getId(),
+                "email",
+                List.of(target.getEmail()));
 
         ImportResult result = reviewAndCommitPersons(req(
             List.of(map("Name", "name"), map("Email", "email")),
@@ -923,7 +926,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(0, result.getUpdated());
         assertEquals(1, result.getFailed().size());
         assertTrue(result.getFailed().getFirst().getReason()
-            .contains("no longer carries a supplied identity"));
+            .contains("no longer uniquely carries the supplied identities"));
     }
 
     @Test
@@ -1019,7 +1022,7 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportResult first = reviewAndCommitDeals(req(mapping, rows, "fill_empty"));
         assertEquals(1, first.getCreated());
 
-        ImportResult second = reviewAndCommitDeals(req(mapping, rows, "fill_empty"));
+        ImportResult second = reviewAndCommitDeals(req(mapping, rows, "overwrite"));
         assertEquals(0, second.getCreated());
         assertEquals(1, second.getUpdated());
     }
@@ -1221,7 +1224,10 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void companyAndDealPreviews_requireUpdatePermissionForMatchedRows() {
-        Company company = newCompany();
+        Company companyDraft = new Company();
+        companyDraft.setName("Permission company " + unique());
+        companyDraft.setWebsite("https://permission-" + unique() + ".example.com");
+        Company company = companyService.createCompany(companyDraft);
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
