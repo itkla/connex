@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -22,7 +23,11 @@ import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -73,6 +78,19 @@ public class UserService implements UserDetailsService {
 
     public List<User> getAllUsers() {
         return workspaceService.getMembers(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /** Returns requested active-member references without loading the whole workspace directory. */
+    public List<UserReferenceDto> getActiveWorkspaceMemberReferences(List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<UserReferenceDto> references = tenantWorkScope.unrouted(() ->
+            userMapper.getActiveWorkspaceMemberReferencesByIds(workspaceId, ids));
+        Map<Integer, UserReferenceDto> referencesById = references.stream().collect(
+            Collectors.toMap(UserReferenceDto::id, Function.identity()));
+        return ids.stream()
+            .map(referencesById::get)
+            .filter(Objects::nonNull)
+            .toList();
     }
 
     public User getUserById(int id) {

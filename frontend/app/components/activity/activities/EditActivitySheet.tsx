@@ -21,11 +21,15 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ACTIVITY_REFERENCE_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import RecordSelect from '@/app/components/records/RecordSelect';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
 import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import {
+    useContactTargetSearch,
+    useDealTargetSearch,
+} from '@/app/hooks/useRecordTargetSearch';
 import { type Activity, type Contact, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
 import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 
@@ -101,6 +105,8 @@ export default function EditActivitySheet({
     const [savingSession, setSavingSession] = useState<EditSession | null>(null);
     const sessionRef = useRef(session);
     const latestActivityRef = useRef(activity);
+    const personSearch = useContactTargetSearch(open, [activity.personId], persons);
+    const dealSearch = useDealTargetSearch(open, [activity.dealId], deals);
 
     useLayoutEffect(() => {
         latestActivityRef.current = activity;
@@ -271,46 +277,43 @@ export default function EditActivitySheet({
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-person">{t('personLabel')}</Label>
-                            <Select
+                            <RecordSelect
                                 value={draft.personId != null ? draft.personId.toString() : NONE_VALUE}
                                 onValueChange={(value) =>
                                     setDraft((d) => ({ ...d, personId: value === NONE_VALUE ? null : Number(value) }))
                                 }
-                            >
-                                <SelectTrigger id="activity-person" className={inputClass}>
-                                    <SelectValue placeholder={t('selectPersonPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value={NONE_VALUE}>{t('noPerson')}</SelectItem>
-                                    {persons.map((person) => (
-                                        <SelectItem key={person.id} value={person.id.toString()}>
-                                            {person.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                id="activity-person"
+                                placeholder={t('selectPersonPlaceholder')}
+                                className={inputClass}
+                                noneOption={{ value: NONE_VALUE, label: t('noPerson') }}
+                                options={personSearch.contacts.map((person) => ({
+                                    id: person.id,
+                                    label: person.name,
+                                    imageUrl: person.imageUrl,
+                                }))}
+                                onInputValueChange={personSearch.onInputValueChange}
+                                emptyLabel={personSearch.loading ? t('searching') : t('noPersonFound')}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
-                            <Select
+                            <RecordSelect
                                 value={draft.dealId != null ? draft.dealId.toString() : NONE_VALUE}
                                 onValueChange={(value) =>
                                     setDraft((d) => ({ ...d, dealId: value === NONE_VALUE ? null : Number(value) }))
                                 }
-                            >
-                                <SelectTrigger id="activity-deal" className={inputClass}>
-                                    <SelectValue placeholder={t('selectDealPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value={NONE_VALUE}>{t('noDeal')}</SelectItem>
-                                    {deals.map((deal) => (
-                                        <SelectItem key={deal.id} value={deal.id.toString()}>
-                                            {deal.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                id="activity-deal"
+                                placeholder={t('selectDealPlaceholder')}
+                                className={inputClass}
+                                noneOption={{ value: NONE_VALUE, label: t('noDeal') }}
+                                options={dealSearch.deals.map((deal) => ({
+                                    id: deal.id,
+                                    label: deal.name,
+                                }))}
+                                onInputValueChange={dealSearch.onInputValueChange}
+                                emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">

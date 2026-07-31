@@ -50,6 +50,10 @@ import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialo
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import {
+    recordDetailNavigationPath,
+    recordDetailPath,
+} from '@/app/lib/recordReturnPath';
 
 const NO_ITEMS: Contact[] = [];
 const ARCHIVED_FILTER_KEY = 'archived';
@@ -525,10 +529,12 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); refresh(); }, [setSelectedIds, refresh]);
 
     const viewSelected = () => {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedContacts.length === 1) {
-            router.push(`/records/contacts/${selectedContacts[0].id}`);
+            router.push(recordDetailNavigationPath('contacts', selectedContacts[0].id));
         } else {
-            selectedContacts.forEach((c) => window.open(`/records/contacts/${c.id}`, '_blank'));
+            selectedContacts.forEach((contact) =>
+                window.open(recordDetailPath('contacts', contact.id, returnTo), '_blank'));
         }
     };
 

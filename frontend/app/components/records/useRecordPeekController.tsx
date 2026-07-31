@@ -40,12 +40,22 @@ export function useRecordPeekController<T extends { id: number }>(
     useEffect(() => {
         if (targetId !== null) setActiveId(targetId);
     }, [targetId, setActiveId]);
+    const closePeek = useCallback(() => {
+        const closingId = peek.target?.id;
+        peek.close();
+        if (closingId == null) return;
+        window.requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>(
+                `[data-record-row-id="${closingId}"]`,
+            )?.focus();
+        });
+    }, [peek]);
 
     const drawer = (
         <RecordPeekDrawer
             target={peek.target}
             browserType={browserType}
-            onClose={peek.close}
+            onClose={closePeek}
             onPrev={onPrev}
             onNext={onNext}
             hasPrev={peek.hasPrev}

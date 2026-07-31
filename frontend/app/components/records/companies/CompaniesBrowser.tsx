@@ -59,6 +59,10 @@ import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import {
+    recordDetailNavigationPath,
+    recordDetailPath,
+} from '@/app/lib/recordReturnPath';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -622,10 +626,12 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); refresh(); }, [setSelectedIds, refresh]);
 
     const viewSelected = () => {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedCompanies.length === 1) {
-            router.push(`/records/companies/${selectedCompanies[0].id}`);
+            router.push(recordDetailNavigationPath('companies', selectedCompanies[0].id));
         } else {
-            selectedCompanies.forEach((c) => window.open(`/records/companies/${c.id}`, '_blank'));
+            selectedCompanies.forEach((company) =>
+                window.open(recordDetailPath('companies', company.id, returnTo), '_blank'));
         }
     };
 

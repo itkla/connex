@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
 import { getMyWorkspacesFromCookie } from "@/app/lib/api";
-import { type Activity, type Contact, type Deal, type Note, type Task, type User } from "@/app/lib/types";
+import { type Activity, type Contact, type Deal, type Note, type Task, type UserReference } from "@/app/lib/types";
 import { timeOf } from "@/app/lib/utils";
 import TimelineRow, { type TimelineEntry } from "./TimelineRow";
 
@@ -51,7 +51,7 @@ export default async function Timeline({
     tasks: Task[];
     activities: Activity[];
     notes: Note[];
-    users?: User[];
+    users?: UserReference[];
     persons?: Contact[];
     deals?: Deal[];
     currentUserId?: number;

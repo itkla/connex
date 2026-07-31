@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { type Activity, type Contact, type Deal, type Note, type Task, type User } from '@/app/lib/types';
+import { type Activity, type Contact, type Deal, type Note, type Task, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,10 @@ import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
+import {
+    useContactTargetSearch,
+    useDealTargetSearch,
+} from '@/app/hooks/useRecordTargetSearch';
 
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
@@ -52,7 +56,7 @@ export default function TimelineRow({
     originWorkspaceId,
 }: {
     entry: TimelineEntry;
-    author?: User;
+    author?: UserReference;
     persons: Contact[];
     deals: Deal[];
     currentUserId?: number;
@@ -67,6 +71,17 @@ export default function TimelineRow({
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const isHighlighted = entry.kind === 'note' && searchParams.get('note') === String(entry.note.id);
+    const noteOpen = editOpen && entry.kind === 'note';
+    const personSearch = useContactTargetSearch(
+        noteOpen,
+        entry.kind === 'note' ? [entry.note.person] : [],
+        persons,
+    );
+    const dealSearch = useDealTargetSearch(
+        noteOpen,
+        entry.kind === 'note' ? [entry.note.deal] : [],
+        deals,
+    );
 
     useEffect(() => {
         if (isHighlighted) {
@@ -220,9 +235,13 @@ export default function TimelineRow({
                     note={entry.note}
                     open={editOpen}
                     onOpenChange={setEditOpen}
-                    persons={persons}
-                    deals={deals}
+                    persons={personSearch.contacts}
+                    deals={dealSearch.deals}
                     currentUserId={currentUserId}
+                    onPersonQueryChange={personSearch.onInputValueChange}
+                    onDealQueryChange={dealSearch.onInputValueChange}
+                    personOptionsLoading={personSearch.loading}
+                    dealOptionsLoading={dealSearch.loading}
                 />
             )}
         </li>

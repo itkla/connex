@@ -15,7 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.dto.UserReferenceDto;
 
 class UserMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -81,18 +81,36 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void getActiveWorkspaceMemberDisplayNamesByIdsExcludesPendingAndNonmembers() {
+    void getActiveWorkspaceMemberReferencesByIdsReturnsOnlyActiveMembersOfRequestedWorkspace() {
         User active = newUser();
+        String profilePictureUrl = "/api/users/" + active.getId() + "/profile-picture";
+        userMapper.updateProfilePictureUrlIfCurrent(active.getId(), null, profilePictureUrl);
         User pending = newUnassignedUser();
-        User nonmember = newUnassignedUser();
+        User inactive = newUser();
+        User foreign = newUnassignedUser();
         workspaceMapper.addPendingMember(workspace.getId(), pending.getId(), "member");
+        jdbcTemplate.update(
+            "UPDATE workspace_member SET status = 'inactive' WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), inactive.getId());
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        workspaceMapper.addMember(other.getId(), foreign.getId(), "member");
 
-        List<UserDisplayNameDto> labels = userMapper
-            .getActiveWorkspaceMemberDisplayNamesByIds(
-                workspace.getId(), List.of(active.getId(), pending.getId(), nonmember.getId()));
+        List<UserReferenceDto> references = userMapper
+            .getActiveWorkspaceMemberReferencesByIds(
+                workspace.getId(),
+                List.of(
+                    active.getId(),
+                    pending.getId(),
+                    inactive.getId(),
+                    foreign.getId(),
+                    Integer.MAX_VALUE));
 
         assertEquals(
-            List.of(new UserDisplayNameDto(active.getId(), active.getDisplayName())), labels);
+            List.of(new UserReferenceDto(active.getId(), active.getDisplayName(), profilePictureUrl)),
+            references);
     }
 
     /**

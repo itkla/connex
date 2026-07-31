@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -61,6 +61,10 @@ type Props = {
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
+    onPersonQueryChange?: (query: string) => void;
+    onDealQueryChange?: (query: string) => void;
+    personOptionsLoading?: boolean;
+    dealOptionsLoading?: boolean;
 };
 
 export default function NoteDialog(props: Props) {
@@ -87,6 +91,10 @@ function ScopedNoteDialog({
     initialDraftGeneration,
     onDraftMounted,
     requestInit,
+    onPersonQueryChange,
+    onDealQueryChange,
+    personOptionsLoading = false,
+    dealOptionsLoading = false,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityNotesDialog');
@@ -139,6 +147,10 @@ function ScopedNoteDialog({
                         defaultContent={defaultContent}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
+                        onPersonQueryChange={onPersonQueryChange}
+                        onDealQueryChange={onDealQueryChange}
+                        personOptionsLoading={personOptionsLoading}
+                        dealOptionsLoading={dealOptionsLoading}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -172,6 +184,10 @@ type FormProps = {
     defaultContent: string;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
+    onPersonQueryChange?: (query: string) => void;
+    onDealQueryChange?: (query: string) => void;
+    personOptionsLoading?: boolean;
+    dealOptionsLoading?: boolean;
     onSubmittingChange: (value: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -200,6 +216,10 @@ export function NoteDialogForm({
     defaultContent,
     ownsInitialDraft = false,
     requestInit,
+    onPersonQueryChange,
+    onDealQueryChange,
+    personOptionsLoading = false,
+    dealOptionsLoading = false,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -212,11 +232,21 @@ export function NoteDialogForm({
     const isEdit = note !== null;
 
     const [content, setContent] = useState(() => note?.content ?? defaultContent);
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() =>
-        note ? persons.find((p) => p.id === note.person) ?? null : defaultPerson,
+    const [selectedPersonId, setSelectedPersonId] = useState<number | null>(
+        () => note?.person ?? defaultPerson?.id ?? null,
     );
-    const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() =>
-        note ? deals.find((d) => d.id === note.deal) ?? null : defaultDeal,
+    const [selectedDealId, setSelectedDealId] = useState<number | null>(
+        () => note?.deal ?? defaultDeal?.id ?? null,
+    );
+    const selectedPerson = useMemo(
+        () => persons.find((person) => person.id === selectedPersonId)
+            ?? (defaultPerson?.id === selectedPersonId ? defaultPerson : null),
+        [defaultPerson, persons, selectedPersonId],
+    );
+    const selectedDeal = useMemo(
+        () => deals.find((deal) => deal.id === selectedDealId)
+            ?? (defaultDeal?.id === selectedDealId ? defaultDeal : null),
+        [deals, defaultDeal, selectedDealId],
     );
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
@@ -226,13 +256,13 @@ export function NoteDialogForm({
 
     const [initial] = useState(() => ({
         content,
-        personId: selectedPerson?.id ?? null,
-        dealId: selectedDeal?.id ?? null,
+        personId: selectedPersonId,
+        dealId: selectedDealId,
     }));
     const formChanged =
         content !== initial.content ||
-        (selectedPerson?.id ?? null) !== initial.personId ||
-        (selectedDeal?.id ?? null) !== initial.dealId;
+        selectedPersonId !== initial.personId ||
+        selectedDealId !== initial.dealId;
     const dirty = !submitting && !succeeded && formChanged;
     useEffect(() => {
         onDirtyChange?.(dirty);
@@ -254,10 +284,10 @@ export function NoteDialogForm({
         }
         onPersistDraft?.({
             content,
-            personId: selectedPerson?.id ?? null,
-            dealId: selectedDeal?.id ?? null,
+            personId: selectedPersonId,
+            dealId: selectedDealId,
         });
-    }, [content, formChanged, isEdit, onClearDraft, onPersistDraft, selectedDeal, selectedPerson, succeeded]);
+    }, [content, formChanged, isEdit, onClearDraft, onPersistDraft, selectedDealId, selectedPersonId, succeeded]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -279,8 +309,8 @@ export function NoteDialogForm({
                         content: trimmed,
                         title: note.title ?? null,
                         author: note.author,
-                        person: selectedPerson?.id ?? null,
-                        deal: selectedDeal?.id ?? null,
+                        person: selectedPersonId,
+                        deal: selectedDealId,
                     },
                     requestInit,
                 );
@@ -291,8 +321,8 @@ export function NoteDialogForm({
                     {
                         content: trimmed,
                         author: currentUserId,
-                        person: selectedPerson?.id ?? null,
-                        deal: selectedDeal?.id ?? null,
+                        person: selectedPersonId,
+                        deal: selectedDealId,
                     },
                     requestInit,
                 );
@@ -383,9 +413,11 @@ export function NoteDialogForm({
                             <Label htmlFor="note-person">{t('personLabel')}</Label>
                             <Combobox
                                 items={persons}
+                                filter={onPersonQueryChange ? null : undefined}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
-                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                                onInputValueChange={onPersonQueryChange}
+                                onValueChange={(person) => setSelectedPersonId(person?.id ?? null)}
                             >
                                 <ComboboxInput
                                     id="note-person"
@@ -398,7 +430,9 @@ export function NoteDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>
+                                            {personOptionsLoading ? t('searching') : t('noPersonFound')}
+                                        </ComboboxEmpty>
                                         {persons.map((p) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
@@ -413,9 +447,11 @@ export function NoteDialogForm({
                             <Label htmlFor="note-deal">{t('dealLabel')}</Label>
                             <Combobox
                                 items={deals}
+                                filter={onDealQueryChange ? null : undefined}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
-                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                                onInputValueChange={onDealQueryChange}
+                                onValueChange={(deal) => setSelectedDealId(deal?.id ?? null)}
                             >
                                 <ComboboxInput
                                     id="note-deal"
@@ -428,7 +464,9 @@ export function NoteDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>
+                                            {dealOptionsLoading ? t('searching') : t('noDealFound')}
+                                        </ComboboxEmpty>
                                         {deals.map((d) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}

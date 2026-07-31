@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -41,6 +42,25 @@ class UserServiceTest extends AbstractServiceTest {
     @Autowired AuthenticationManager authenticationManager;
     @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
+
+    @Test
+    void getActiveWorkspaceMemberReferencesPreservesRequestedOrderAndOmitsUnknownIds() {
+        User first = newUser();
+        User second = newUser();
+        userMapper.updateProfilePictureUrlIfCurrent(
+            second.getId(), null, "/api/users/" + second.getId() + "/profile-picture");
+
+        List<UserReferenceDto> references = userService.getActiveWorkspaceMemberReferences(
+            List.of(second.getId(), Integer.MAX_VALUE, first.getId()));
+
+        assertEquals(List.of(
+            new UserReferenceDto(
+                second.getId(),
+                second.getDisplayName(),
+                "/api/users/" + second.getId() + "/profile-picture"),
+            new UserReferenceDto(first.getId(), first.getDisplayName(), null)
+        ), references);
+    }
 
     @Test
     void getActivitiesByUserId_returnsOnlyActivitiesCreatedByUser() {

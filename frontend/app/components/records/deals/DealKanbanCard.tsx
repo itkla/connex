@@ -22,6 +22,7 @@ import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import { type Company, type Deal, type DealRisk } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 
 interface DealKanbanCardProps {
     deal: Deal;
@@ -41,7 +42,7 @@ export default function DealKanbanCard({ deal, company, risk, onQuickEdit, onDel
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
-    const open = () => router.push(`/records/deals/${deal.id}`);
+    const open = () => router.push(recordDetailNavigationPath('deals', deal.id));
     const closed = isDealClosed(deal);
     const statusLabel = closed ? t('statusClosed') : t('statusOpen');
 

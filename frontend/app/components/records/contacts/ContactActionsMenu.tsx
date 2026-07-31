@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
@@ -34,17 +34,19 @@ import { type WorkspaceMember } from '@/app/lib/types';
 import { type Contact, type Deal } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 import RestrictionsDialog from '@/app/components/records/contacts/RestrictionsDialog';
+import {
+    useContactTargetSearch,
+    useDealTargetSearch,
+} from '@/app/hooks/useRecordTargetSearch';
 
 export default function ContactActionsMenu({
     contact,
     currentUserId,
-    persons = [],
-    deals = [],
+    dealSeeds = [],
 }: {
     contact: Contact;
     currentUserId: number;
-    persons?: Contact[];
-    deals?: Deal[];
+    dealSeeds?: Deal[];
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsActionsMenu');
@@ -61,6 +63,9 @@ export default function ContactActionsMenu({
     const [restrictionsOpen, setRestrictionsOpen] = useState(false);
     const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const contactSeeds = useMemo(() => [contact], [contact]);
+    const contactSearch = useContactTargetSearch(noteOpen, [contact.id], contactSeeds);
+    const dealSearch = useDealTargetSearch(noteOpen, [], dealSeeds);
     useEffect(() => {
         if (!assignOwnerOpen || members.length > 0) return;
         getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
@@ -288,13 +293,17 @@ export default function ContactActionsMenu({
                 />
 
                 <NewNoteDialog
-                    persons={persons.length > 0 ? persons : [contact]}
-                    deals={deals}
+                    persons={contactSearch.contacts}
+                    deals={dealSearch.deals}
                     defaultPerson={contact}
                     note={null}
                     currentUserId={currentUserId}
                     open={noteOpen}
                     onOpenChange={setNoteOpen}
+                    onPersonQueryChange={contactSearch.onInputValueChange}
+                    onDealQueryChange={dealSearch.onInputValueChange}
+                    personOptionsLoading={contactSearch.loading}
+                    dealOptionsLoading={dealSearch.loading}
                 />
 
                 <ChangeCompanyDialog

@@ -4,6 +4,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.dto.UserReferenceDto;
 
 import java.util.List;
 
@@ -17,8 +18,8 @@ public interface UserMapper {
     List<User> getAllUsers();
     /** Current display labels for the requested control-plane user ids. */
     List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
-    /** Current display labels for requested active members of one workspace. */
-    List<UserDisplayNameDto> getActiveWorkspaceMemberDisplayNamesByIds(
+    /** Current display references for requested active members of one workspace. */
+    List<UserReferenceDto> getActiveWorkspaceMemberReferencesByIds(
         @Param("workspaceId") int workspaceId,
         @Param("ids") List<Integer> ids);
     User getUserById(int id);

@@ -237,6 +237,50 @@ export type RelationshipTemperature = {
     goesColdAt?: string | null;
     /** Whole days until {@link goesColdAt}; null if already cold or no activity. */
     daysUntilCold?: number | null;
+    modelVersion?: string;
+    asOf?: string;
+};
+
+export type RelationshipEvidenceSourceType = 'activity' | 'note' | 'task';
+
+export type RelationshipEvidenceContributor = {
+    sourceType: RelationshipEvidenceSourceType;
+    sourceId: number;
+    interactionType: string;
+    occurredAt: string;
+    baseWeight: number;
+    decayedContribution: number;
+};
+
+export type RelationshipEvidence = {
+    subjectType: 'person' | 'company';
+    subjectId: number;
+    temperature: RelationshipTemperature;
+    asOf: string;
+    attributionRule:
+        | 'direct_person_touches'
+        | 'present_day_person_company_or_deal_company'
+        | 'touch_time_employer_or_present_day_deal_company';
+    contributors: RelationshipEvidenceContributor[];
+    totals: {
+        contributorCount: number;
+        returnedCount: number;
+        omittedCount: number;
+        totalDecayedContribution: number;
+        returnedDecayedContribution: number;
+        omittedDecayedContribution: number;
+        sourceCounts: {
+            activities: number;
+            notes: number;
+            tasks: number;
+        };
+    };
+    coverage: {
+        limitedEvidence: boolean;
+        minimumContributorsForConfidence: number;
+        callerPrivateNotesExcluded: number;
+        privateNoteCountScope: 'current_caller_only';
+    };
 };
 
 export type ReplayGranularity = 'weekly' | 'monthly';
@@ -570,6 +614,10 @@ export type User = {
     timezone: string;
     locale: Locale;
 };
+
+export type UserReference =
+    Pick<User, "id" | "displayName">
+    & Partial<Pick<User, "username" | "profilePictureUrl">>;
 
 export type LoginPayload = {
     username: string;
@@ -1003,6 +1051,11 @@ export type Deal = {
     riskExcluded?: boolean;
     createdAt: string;
     updatedAt: string;
+};
+
+export type DealPerson = {
+    person: number;
+    role: string | null;
 };
 
 export type DealPrimaryContact = {

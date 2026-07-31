@@ -87,6 +87,10 @@ import {
     ApiError,
     isFieldError,
 } from '@/app/lib/api';
+import {
+    recordDetailNavigationPath,
+    recordDetailPath,
+} from '@/app/lib/recordReturnPath';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
@@ -918,10 +922,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const onBulkSuccess = refreshRecords;
 
     const viewSelected = () => {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedDeals.length === 1) {
-            router.push(`/records/deals/${selectedDeals[0].id}`);
+            router.push(recordDetailNavigationPath('deals', selectedDeals[0].id));
         } else {
-            selectedDeals.forEach((d) => window.open(`/records/deals/${d.id}`, '_blank'));
+            selectedDeals.forEach((deal) =>
+                window.open(recordDetailPath('deals', deal.id, returnTo), '_blank'));
         }
     };
 

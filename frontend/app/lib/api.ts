@@ -1226,6 +1226,21 @@ export function getUserById(id: number, init: RequestInit = {}) {
     return getJson<Types.User>(`/api/users/${id}`, init);
 }
 
+export async function getUserReferences(ids: number[], init: RequestInit = {}) {
+    const uniqueIds = [...new Set(ids)];
+    const batches = Array.from(
+        { length: Math.ceil(uniqueIds.length / WORKSPACE_LIST_PAGE_SIZE) },
+        (_, index) => uniqueIds.slice(
+            index * WORKSPACE_LIST_PAGE_SIZE,
+            (index + 1) * WORKSPACE_LIST_PAGE_SIZE,
+        ),
+    );
+    const references = await Promise.all(batches.map((batch) =>
+        getJson<Types.UserReference[]>(`/api/users/references${buildQuery({ ids: batch })}`, init),
+    ));
+    return references.flat();
+}
+
 export function getUsers(init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/users`, init);
 }
@@ -1847,6 +1862,10 @@ export async function getContactTemperatures(ids: number[], init: RequestInit = 
     return batches.flat().sort((left, right) => right.score - left.score);
 }
 
+export function getContactEvidence(id: number, init: RequestInit = {}) {
+    return getJson<Types.RelationshipEvidence>(`/api/scoring/contacts/${id}/evidence`, init);
+}
+
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
     return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
@@ -1862,6 +1881,10 @@ export function getCoolingContactTemperaturesFromCookie(cookie: string | null, l
 export async function getCompanyTemperatures(ids: number[], init: RequestInit = {}) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
     return postJson<Types.RelationshipTemperature[]>(`/api/scoring/companies/batch`, { ids }, init);
+}
+
+export function getCompanyEvidence(id: number, init: RequestInit = {}) {
+    return getJson<Types.RelationshipEvidence>(`/api/scoring/companies/${id}/evidence`, init);
 }
 
 export function getMapCompanyTemperatures(init: RequestInit = {}) {
@@ -2604,7 +2627,7 @@ export function replaceDealCollaborators(id: number, userIds: number[]) {
 }
 
 export function getDealPeople(id: number, init: RequestInit = {}) {
-    return getJson<Types.Contact[]>(`/api/deals/${id}/people`, init);
+    return getJson<Types.DealPerson[]>(`/api/deals/${id}/people`, init);
 }
 
 export function getDealPrimaryContacts(ids: number[], init: RequestInit = {}) {

@@ -23,6 +23,7 @@ import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import type { RecordRemoveIntent } from '@/app/components/records/types';
 import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 
 function initialsOf(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -91,7 +92,7 @@ export default function ContactCard({
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
 
     function openContactPage() {
-        router.push(`/records/contacts/${id}`);
+        router.push(recordDetailNavigationPath('contacts', id));
     }
 
     function openInternalQuickEdit() {
@@ -189,7 +190,7 @@ export default function ContactCard({
                     <DropdownMenuContent align="end" side="bottom" className="w-48" onClick={(e) => e.stopPropagation()}>
                         {!readOnly && (
                             <>
-                                <DropdownMenuItem onSelect={() => router.push(`/records/contacts/${id}`)}>
+                                <DropdownMenuItem onSelect={openContactPage}>
                                     <EyeIcon className="size-4 text-muted-foreground" />
                                     {t('view')}
                                 </DropdownMenuItem>

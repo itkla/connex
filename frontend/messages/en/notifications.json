@@ -30,6 +30,7 @@
     "viewAll": "View all notifications",
     "viewAction": "View",
     "loading": "Loading notifications…",
+    "loadingMembers": "Loading teammates…",
     "loadError": "Notifications could not be loaded.",
     "loadErrorHint": "Try again before reviewing or updating notifications.",
     "retry": "Retry",

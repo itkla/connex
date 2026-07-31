@@ -30,6 +30,7 @@
     "viewAll": "すべての通知を見る",
     "viewAction": "表示",
     "loading": "通知を読み込んでいます…",
+    "loadingMembers": "チームメンバーを読み込んでいます…",
     "loadError": "通知を読み込めませんでした。",
     "loadErrorHint": "通知を確認または更新する前に再試行してください。",
     "retry": "再試行",

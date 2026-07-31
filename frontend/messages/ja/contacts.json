@@ -38,6 +38,8 @@
     "empty": "つながりはまだありません。",
     "addPlaceholder": "コンタクトを追加…",
     "noContacts": "コンタクトが見つかりません",
+    "searching": "コンタクトを検索中…",
+    "searchFailed": "コンタクトを検索できませんでした",
     "add": "つながりを追加",
     "remove": "つながりを削除",
     "addFailed": "つながりを追加できませんでした。",

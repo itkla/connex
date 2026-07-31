@@ -21,14 +21,11 @@ import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
 import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
-import { type Company, type Contact, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
+import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
-import Chip from '@/app/components/Chip';
-import ContactAvatar from '../contacts/ContactAvatar';
 import { Suspense } from 'react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { getCompanyPeople, getDealPeople } from '@/app/lib/api';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 
 interface DealCardProps {
     deal: Deal;
@@ -48,29 +45,15 @@ export default function DealCard({ deal, company, pipeline, stage, risk, onQuick
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
-    const open = () => router.push(`/records/deals/${deal.id}`);
+    const open = () => router.push(recordDetailNavigationPath('deals', deal.id));
     const status = dealStatus(deal);
     const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
-
-    // get the associated contact for the deal
-    // let associatedContact: Contact | undefined;
-    // if (company) {
-    //     // look up the associated contact for the company using the company id
-    //     const associatedContact: Contact[] = await getCompanyPeople(company.id);
-    // } else {
-    //     const associatedContactPromise = (async () => {
-    //         const associatedContact: Contact[] = await getDealPeople(deal.id);
-    //         return associatedContact[0] ?? { id: 0, name: 'Freelancer', imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' };
-    //     })();
-    //     associatedContact = await associatedContactPromise;
-    // }
 
     return (
         <div
             className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 transition duration-200 hover:bg-muted hover:shadow-lg"
             onClick={open}
         >
-            {/* if company exists, show avatar; if not, assume freelancer and show a placeholder avatar */}
             <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-muted ring-1 ring-border" />}>
             {company ? (
                 <CompanyAvatar company={company} type="large" />

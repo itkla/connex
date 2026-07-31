@@ -50,7 +50,14 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             archive: { id: 0, name: contactNames.archive },
         },
         companies: {
+            primary: { id: 0, name: `Acme Rocket Co ${runId}` },
             archive: { id: 0, name: `Archive Company ${runId}` },
+        },
+        deals: {
+            primary: { id: 0, name: `E2E Deal 1 ${runId}` },
+        },
+        activities: {
+            evidence: { id: 0, name: `Evidence Call ${runId}` },
         },
         companyName: `Acme Rocket Co ${runId}`,
     };
@@ -66,6 +73,7 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         website: "https://acme-rocket.example.com",
         industry: "Aerospace",
     });
+    fixture.companies.primary.id = Number(company.id);
     const archiveCompany = await seed.post("/api/companies", {
         name: fixture.companies.archive.name,
         website: `https://archive-${runId}.example.net`,
@@ -92,7 +100,7 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         failure: false,
     });
     for (const [index, value] of [120000, 45000, 8000].entries()) {
-        await seed.post("/api/deals", {
+        const deal = await seed.post("/api/deals", {
             name: `E2E Deal ${index + 1} ${runId}`,
             value,
             actualValue: 0,
@@ -101,7 +109,16 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             stage: stage.id,
             company: company.id,
         });
+        if (index === 0) fixture.deals.primary.id = Number(deal.id);
     }
+    const evidenceActivity = await seed.post("/api/activities", {
+        type: "Call",
+        subject: fixture.activities.evidence.name,
+        personId: fixture.contacts.peek.id,
+        dealId: fixture.deals.primary.id,
+        timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
+    });
+    fixture.activities.evidence.id = Number(evidenceActivity.id);
 
     mkdirSync(path.join(E2E_ARTIFACT_DIR, tenantScope), { recursive: true });
     await api.storageState({ path: storageStatePath(tenantScope) });

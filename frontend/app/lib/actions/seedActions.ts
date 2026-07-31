@@ -20,6 +20,10 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { toastSuccess } from "@/app/lib/toast";
+import {
+    recordDetailNavigationPath,
+    recordDetailPath,
+} from "@/app/lib/recordReturnPath";
 import { deriveCreateDefaults } from "./createDefaults";
 import type { ActiveRecordRef, AppAction, RecordType } from "./types";
 
@@ -36,6 +40,30 @@ export const RECORD_PATHS: Record<RecordType, string | null> = {
 function recordHref(record: ActiveRecordRef): string | null {
     const base = RECORD_PATHS[record.type];
     return base ? `${base}/${record.id}` : null;
+}
+
+function contextualRecordHref(
+    record: ActiveRecordRef,
+    rememberHistory = false,
+): string | null {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    if (typeof record.id !== "number") return recordHref(record);
+    if (record.type === "person") {
+        return rememberHistory
+            ? recordDetailNavigationPath("contacts", record.id)
+            : recordDetailPath("contacts", record.id, returnTo);
+    }
+    if (record.type === "company") {
+        return rememberHistory
+            ? recordDetailNavigationPath("companies", record.id)
+            : recordDetailPath("companies", record.id, returnTo);
+    }
+    if (record.type === "deal") {
+        return rememberHistory
+            ? recordDetailNavigationPath("deals", record.id)
+            : recordDetailPath("deals", record.id, returnTo);
+    }
+    return recordHref(record);
 }
 
 function navigateAction(
@@ -195,7 +223,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         isAvailable: (context) => context.record !== null && recordHref(context.record) !== null,
         execute: (context, helpers) => {
             if (!context.record) return;
-            const href = recordHref(context.record);
+            const href = contextualRecordHref(context.record, true);
             if (href) helpers.router.push(href);
         },
     },
@@ -208,7 +236,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         isAvailable: (context) => context.record !== null && recordHref(context.record) !== null,
         execute: (context) => {
             if (!context.record) return;
-            const href = recordHref(context.record);
+            const href = contextualRecordHref(context.record);
             if (href) window.open(`${window.location.origin}${href}`, "_blank", "noopener,noreferrer");
         },
     },
