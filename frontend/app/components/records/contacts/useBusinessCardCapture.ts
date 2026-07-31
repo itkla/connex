@@ -31,6 +31,7 @@ import {
 import type {
     BusinessCardCompanyAction,
     BusinessCardImportDraft,
+    BusinessCardPersonAction,
     BusinessCardRequestErrorKind,
     BusinessCardRecoveryContext,
     BusinessCardScanResult,
@@ -572,6 +573,7 @@ export function useBusinessCardCapture({
 
     const prepareImportDraft = async (
         pendingAvatar: boolean,
+        personAction: BusinessCardPersonAction = { type: 'create' },
     ): Promise<BusinessCardImportDraft | undefined> => {
         setImportError(null);
         if (!file) return undefined;
@@ -586,7 +588,9 @@ export function useBusinessCardCapture({
         const currentPayload = payloadRef.current;
         const currentCompanyMode = companyModeRef.current;
         const currentCompanyName = companyNameRef.current.trim();
-        if (currentCompanyMode === 'existing' && currentPayload.companyId != null) {
+        if (personAction.type === 'existing') {
+            companyAction = { type: 'none' };
+        } else if (currentCompanyMode === 'existing' && currentPayload.companyId != null) {
             companyAction = { type: 'existing', companyId: currentPayload.companyId };
         } else if (currentCompanyMode === 'create' && canCreateCompany && currentCompanyName) {
             companyAction = { type: 'create', companyName: currentCompanyName };
@@ -641,7 +645,7 @@ export function useBusinessCardCapture({
             : { ...currentPayload, companyId: undefined };
         const recoveryContext = importRecoveryContextRef.current;
         if (!recoveryContext) return undefined;
-        return { requestId, recoveryContext, image: file, contact, companyAction };
+        return { requestId, recoveryContext, image: file, contact, personAction, companyAction };
     };
 
     const updateContactField = (field: BusinessCardContactField, value: string) => {

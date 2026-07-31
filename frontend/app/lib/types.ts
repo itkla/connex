@@ -701,6 +701,10 @@ export type BusinessCardCompanyAction =
     | { type: 'create'; companyName: string; duplicateReviewToken?: string }
     | { type: 'none' };
 
+export type BusinessCardPersonAction =
+    | { type: 'create' }
+    | { type: 'existing'; personId: number; duplicateReviewToken: string };
+
 export type BusinessCardRecoveryContext = {
     scope: string;
     workspaceId: string;
@@ -711,6 +715,7 @@ export type BusinessCardImportDraft = {
     recoveryContext: BusinessCardRecoveryContext;
     image: File;
     contact: CreateContactPayload;
+    personAction: BusinessCardPersonAction;
     companyAction: BusinessCardCompanyAction;
 };
 
@@ -722,6 +727,7 @@ export type BusinessCardImportResult = {
     contact: Pick<Contact, 'id' | 'name'> & Partial<Pick<Contact, 'email' | 'phone' | 'title' | 'imageUrl'>>;
     attachment: Pick<Attachment, 'id' | 'fileName' | 'url' | 'size'> & Partial<Pick<Attachment, 'contentType'>>;
     company?: (Pick<Company, 'id' | 'name'> & Partial<Pick<Company, 'website' | 'industry' | 'phone' | 'address' | 'logoUrl'>>) | null;
+    disposition: 'created' | 'reused';
 };
 
 export type BusinessCardRequestErrorKind =

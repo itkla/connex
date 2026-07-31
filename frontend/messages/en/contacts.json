@@ -76,6 +76,7 @@
     "filterNoCompany": "No company",
     "entityLabel": "contact",
     "toastContactCreated": "Contact created",
+    "toastCardAttached": "Business card attached",
     "toastFailedCreate": "Failed to create contact",
     "toastNoChangesToSave": "No changes to save",
     "toastNameRequiredForX": "Name is required for \"{name}\"",
@@ -243,7 +244,7 @@
     "dialogTitle": "New contact",
     "description": "Add a person to your contacts. These contacts will be shared with all users of this organization.",
     "businessCard": "Business card",
-    "businessCardDescription": "Scan or upload a JPEG, PNG, or WebP image, then review every detail. Automatic reading runs on this Connex instance when available; otherwise, the metadata-free image may be sent to your organization's configured AI provider. A metadata-free copy is saved with the contact when you create it.",
+    "businessCardDescription": "Scan or upload a JPEG, PNG, or WebP image, then review every detail. Automatic reading runs on this Connex instance when available; otherwise, the metadata-free image may be sent to your organization's configured AI provider. A metadata-free copy is saved with the contact when you finish.",
     "cardAvailabilityLoading": "Checking business-card availability…",
     "scanBusinessCard": "Scan business card",
     "scanCard": "Scan with camera",
@@ -303,8 +304,10 @@
     "cardImportRecoveryContinueManually": "Continue with a different contact",
     "cardImportCloseAndReconcile": "Close and reconcile later",
     "cardImportRecovered": "The contact from your earlier card import was created.",
+    "cardImportRecoveredExisting": "The card from your earlier import was attached to the existing contact.",
     "cardImportRecoveryGone": "Connex can no longer confirm an earlier card request. Check your contacts before retrying that card.",
     "cardImportRecoveredAvatarPending": "The earlier contact was created, but the selected profile photo was not uploaded. Open the contact and choose the photo again.",
+    "cardImportRecoveredExistingAvatarPending": "The earlier card was attached, but the selected profile photo was not applied. Open the existing contact and choose the photo again.",
     "cardAvatarUploadFailed": "Contact created, but the profile photo could not be added.",
     "cardCompanyChoice": "How should Connex handle the company?",
     "cardUseExistingCompany": "Use {name}",
@@ -327,7 +330,8 @@
     "noCompaniesFound": "No companies found.",
     "cancel": "Cancel",
     "create": "Create",
-    "createFromCard": "Create from card"
+    "createFromCard": "Create from card",
+    "attachCard": "Attach card"
   },
   "ContactsNewTaskDialog": {
     "triggerTitle": "Add task",

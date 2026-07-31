@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { runFixture } from "./support/fixtures";
+import { useLocale } from "./support/locale";
+import { message } from "./support/messages";
 
 test.describe("CSV duplicate review", () => {
     test("shows exact candidates and explicitly links an owned contact", async ({ page }, testInfo) => {
@@ -136,6 +138,10 @@ test.describe("manual duplicate review", () => {
         await expect(page.getByRole("region", { name: "Possible duplicates" })).toBeVisible();
         await expect(page.getByText("Same email")).toBeVisible();
         await expect(page.getByRole("button", { name: "Create from card" })).toBeDisabled();
+        await expect(page.getByRole("button", { name: /Use existing contact/ })).toBeVisible();
+        await expect(page.getByRole("button", { name: /Create separate contact/ })).toBeVisible();
+        await page.getByRole("button", { name: /Use existing contact/ }).click();
+        await expect(page.getByRole("button", { name: "Attach card" })).toBeEnabled();
     });
 
     test("reviews an OCR-created company before business-card import", async ({ page }, testInfo) => {
@@ -187,5 +193,162 @@ test.describe("manual duplicate review", () => {
         await expect(page.getByRole("region", { name: "Possible duplicates" })).toBeVisible();
         await expect(page.getByText(fixture.companyName).last()).toBeVisible();
         await expect(page.getByRole("button", { name: "Create from card" })).toBeDisabled();
+    });
+
+});
+
+for (const locale of ["en", "ja"] as const) {
+    const language = locale === "en" ? "English" : "Japanese";
+    test(`attaches a mobile camera scan in ${language} to the exact existing contact @mobile-only`, async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const contact = fixture.contacts.peek;
+        const email = `${contact.name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@acme-rocket.example.com`;
+        const importBodies: string[] = [];
+
+        await useLocale(page, locale);
+        await page.route("**/api/business-cards/availability", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ scanning: true, importing: true }),
+            });
+        });
+        await page.route("**/api/business-cards/scan", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    fields: {
+                        name: { value: contact.name, confidence: 0.99 },
+                        email: { value: email, confidence: 0.99 },
+                        phone: { value: null, confidence: null },
+                        title: { value: null, confidence: null },
+                    },
+                    company: { value: null, confidence: null, matchedCompanyId: null },
+                    warnings: [],
+                }),
+            });
+        });
+        await page.route("**/api/business-cards/import/reservation", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ expiresAt: "2026-12-31T00:00:00Z" }),
+            });
+        });
+        await page.route("**/api/business-cards/import", async (route) => {
+            importBodies.push(route.request().postDataBuffer()?.toString("utf8") ?? "");
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    contact: { id: contact.id, name: contact.name, email },
+                    attachment: {
+                        id: 991,
+                        fileName: "contact-card.png",
+                        url: `/api/attachments/991`,
+                        size: 68,
+                        contentType: "image/png",
+                    },
+                    company: null,
+                    disposition: "reused",
+                }),
+            });
+        });
+
+        await page.goto("/dashboard");
+        await page.getByRole("button", {
+            name: message(locale, "actions", "Actions.quickCreate.trigger"),
+            exact: true,
+        }).click();
+        await page.getByRole("option", {
+            name: message(locale, "actions", "Actions.create.person"),
+            exact: true,
+        }).click();
+
+        const cameraInput = page.locator('input[type="file"][capture="environment"]');
+        await expect(cameraInput).toHaveAttribute("accept", /image/);
+        await cameraInput.setInputFiles({
+            name: "contact-card.png",
+            mimeType: "image/png",
+            buffer: Buffer.from(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZKmcAAAAASUVORK5CYII=",
+                "base64",
+            ),
+        });
+
+        await expect(page.getByText(message(
+            locale,
+            "contacts",
+            "ContactsNewContactDialog.cardScanReady",
+        ))).toBeVisible();
+        await expect(page.getByRole("region", {
+            name: message(locale, "common", "DuplicateWarning.heading"),
+        })).toBeVisible();
+        await page.getByRole("button", {
+            name: new RegExp(message(locale, "common", "DuplicateWarning.useExisting")),
+        }).click();
+        await page.getByRole("button", {
+            name: message(locale, "contacts", "ContactsNewContactDialog.attachCard"),
+            exact: true,
+        }).click();
+
+        await expect(page.getByText(message(
+            locale,
+            "actions",
+            "Actions.feedback.businessCardAttached",
+        ))).toBeVisible();
+        expect(importBodies).toHaveLength(1);
+        expect(importBodies[0]).toContain('"type":"existing"');
+        expect(importBodies[0]).toContain(`"personId":${contact.id}`);
+        expect(importBodies[0]).toMatch(/"duplicateReviewToken":"[0-9a-f]{64}"/);
+        expect(importBodies[0].match(/duplicateReviewToken/g)).toHaveLength(1);
+        expect(importBodies[0]).toContain('"type":"none"');
+    });
+}
+
+test.describe("manual business-card fallback", () => {
+    test("keeps mobile card import usable when automatic reading is unavailable @mobile-only", async ({ page }) => {
+        await useLocale(page, "ja");
+        await page.route("**/api/business-cards/availability", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ scanning: false, importing: true }),
+            });
+        });
+
+        await page.goto("/dashboard");
+        await page.getByRole("button", {
+            name: message("ja", "actions", "Actions.quickCreate.trigger"),
+            exact: true,
+        }).click();
+        await page.getByRole("option", {
+            name: message("ja", "actions", "Actions.create.person"),
+            exact: true,
+        }).click();
+        await page.locator('input[type="file"][capture="environment"]').setInputFiles({
+            name: "manual-card.png",
+            mimeType: "image/png",
+            buffer: Buffer.from(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZKmcAAAAASUVORK5CYII=",
+                "base64",
+            ),
+        });
+
+        await expect(page.getByText(message(
+            "ja",
+            "contacts",
+            "ContactsNewContactDialog.cardManualOnly",
+        ))).toBeVisible();
+        await page.getByLabel(message(
+            "ja",
+            "contacts",
+            "ContactsNewContactDialog.name",
+        ), { exact: true }).fill("手動入力 太郎");
+        await expect(page.getByRole("button", {
+            name: message("ja", "contacts", "ContactsNewContactDialog.createFromCard"),
+            exact: true,
+        })).toBeEnabled();
     });
 });

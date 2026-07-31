@@ -249,6 +249,34 @@ public class PersonService {
     }
 
     /**
+     * Locks and revalidates an owned active contact selected for business-card reuse.
+     *
+     * @param personId selected existing contact
+     * @param request exact reviewed card values
+     * @param duplicateReviewToken token from the exact accepted duplicate review
+     * @return locked existing contact
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_CREATE)
+    public Person requireBusinessCardReuseTarget(
+            int personId,
+            PersonDuplicatePreflightRequest request,
+            String duplicateReviewToken) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
+        Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+        if (person == null
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw businessCardReuseConflict();
+        }
+        duplicatePreflightService.requireReviewedBusinessCardPersonReuse(
+            request, personId, duplicateReviewToken);
+        return person;
+    }
+
+    /**
      * Creates a business-card contact for trusted internal callers that own duplicate review.
      *
      * @param person reviewed contact
@@ -283,6 +311,11 @@ public class PersonService {
             auditService.diff(null, person, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", person.getId(), "person.created");
         return person;
+    }
+
+    private static ConflictException businessCardReuseConflict() {
+        return new ConflictException(
+            "Existing contact is no longer eligible for business-card reuse; review duplicates again");
     }
 
     /**

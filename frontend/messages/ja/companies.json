@@ -100,6 +100,7 @@
     "share": "共有",
     "entityLabel": "企業",
     "toastContactCreated": "コンタクトを作成しました",
+    "toastCardAttached": "名刺を添付しました",
     "toastCreateContactFailed": "コンタクトを作成できませんでした",
     "toastDealCreated": "案件を作成しました",
     "toastCreateDealFailed": "案件を作成できませんでした",
@@ -136,6 +137,7 @@
     "newContact": "新規コンタクト",
     "noContacts": "この企業に紐づくコンタクトはありません。",
     "toastContactCreated": "コンタクトを作成しました",
+    "toastCardAttached": "名刺を添付しました",
     "toastCreateContactFailed": "コンタクトを作成できませんでした"
   },
   "CompaniesEditSheet": {

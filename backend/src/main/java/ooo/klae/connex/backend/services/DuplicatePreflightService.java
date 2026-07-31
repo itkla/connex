@@ -136,6 +136,39 @@ public class DuplicatePreflightService {
     }
 
     /**
+     * Rechecks that a business-card import still resolves to one exact owned strong match.
+     *
+     * @param request exact reviewed card values
+     * @param personId selected existing contact
+     * @param duplicateReviewToken token from the exact accepted duplicate review
+     */
+    void requireReviewedBusinessCardPersonReuse(
+            PersonDuplicatePreflightRequest request,
+            int personId,
+            String duplicateReviewToken) {
+        NormalizedRequest normalized =
+            normalizePerson(Objects.requireNonNull(request, "request"));
+        rateLimiter.requireAllowed(workUnits(List.of(normalized)));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
+        lockIdentityGroups(
+            workspaceId,
+            normalized.identityKeys(),
+            identityMapper::lockCurrentPersonIdentityGroup);
+        DuplicatePreflightResponse response = match(
+            "person",
+            List.of(normalized),
+            PUBLIC_CANDIDATE_LIMIT,
+            false,
+            identityMapper::findVisiblePersonIdentityMatches,
+            identityMapper::findVisiblePersonNameMatches).getFirst();
+        if (!isExactOwnedStrongPerson(response, personId)
+                || !Objects.equals(response.reviewToken(), duplicateReviewToken)) {
+            throw businessCardReuseConflict();
+        }
+    }
+
+    /**
      * Rechecks a reviewed company immediately before interactive creation.
      *
      * @param request exact values about to be created
@@ -485,6 +518,23 @@ public class DuplicatePreflightService {
             throw new ConflictException(
                 "Possible duplicates must be reviewed before creation");
         }
+    }
+
+    private static boolean isExactOwnedStrongPerson(
+            DuplicatePreflightResponse response,
+            int personId) {
+        if (response.truncated() || response.candidates().size() != 1) {
+            return false;
+        }
+        DuplicateCandidateDto candidate = response.candidates().getFirst();
+        return candidate.recordId() == personId
+            && candidate.ownedByActiveWorkspace()
+            && candidate.strength() == DuplicateMatchStrength.STRONG;
+    }
+
+    private static ConflictException businessCardReuseConflict() {
+        return new ConflictException(
+            "Existing contact is no longer eligible for business-card reuse; review duplicates again");
     }
 
     private AdmissionContext admit(

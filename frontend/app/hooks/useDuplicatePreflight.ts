@@ -24,6 +24,7 @@ export type DuplicatePreflightDecision = {
     allowed: boolean;
     duplicateReviewToken: string | null;
     reviewSignature: string | null;
+    response: DuplicatePreflightResponse | null;
 };
 
 type CompletedCheck = {
@@ -200,6 +201,7 @@ export function useDuplicatePreflight(
                 allowed: true,
                 duplicateReviewToken: null,
                 reviewSignature: null,
+                response: null,
             };
         }
         const checked = await runCheck();
@@ -210,6 +212,7 @@ export function useDuplicatePreflight(
                 reviewSignature: checked
                     ? duplicatePreflightResponseSignature(checked)
                     : null,
+                response: checked,
             };
         }
         const reviewSignature = duplicatePreflightResponseSignature(checked);
@@ -218,6 +221,7 @@ export function useDuplicatePreflight(
                 allowed: true,
                 duplicateReviewToken: null,
                 reviewSignature,
+                response: checked,
             };
         }
         const checkedAcknowledgementKey =
@@ -230,6 +234,7 @@ export function useDuplicatePreflight(
                 ? checked.reviewToken
                 : null,
             reviewSignature,
+            response: checked,
         };
     }, [acknowledgedResponse, requestEligible, requestKey, runCheck]);
     const checkNow = useCallback(async () => {

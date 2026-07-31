@@ -17,12 +17,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -56,8 +61,10 @@ import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
+import ooo.klae.connex.backend.dto.BusinessCardImportDisposition;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
+import ooo.klae.connex.backend.dto.BusinessCardPersonAction;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
@@ -79,6 +86,9 @@ class BusinessCardServiceTest {
     private static final String IDEMPOTENCY_KEY = String.join(
             "-", "02a25a23", "70af", "4f8e", "a64a", "6cfc5f8c69be");
     private static final LocalDateTime EXPIRY = LocalDateTime.parse("2026-07-16T00:00:00");
+    private static final BusinessCardPersonAction CREATE_PERSON =
+        new BusinessCardPersonAction.Create();
+    private static final String REVIEW_TOKEN = "a".repeat(64);
 
     @Mock private BusinessCardImageValidator imageValidator;
     @Mock private BusinessCardOcrClient ocrClient;
@@ -327,7 +337,8 @@ class BusinessCardServiceTest {
         });
 
         BusinessCardImportResponse response = service.importCard(
-                image, contact, new BusinessCardCompanyAction.Existing(17), IDEMPOTENCY_KEY);
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.Existing(17), IDEMPOTENCY_KEY);
 
         assertTrue(service.isImportAvailable());
         ArgumentCaptor<Person> personCaptor = ArgumentCaptor.forClass(Person.class);
@@ -345,6 +356,7 @@ class BusinessCardServiceTest {
         assertEquals(31, response.contact().getId());
         assertEquals(41, response.attachment().getId());
         assertEquals(17, response.company().getId());
+        assertEquals(BusinessCardImportDisposition.CREATED, response.disposition());
         InOrder persistenceOrder = inOrder(
             binaryStore, companyService, personService, attachmentService);
         persistenceOrder.verify(binaryStore).store(
@@ -359,6 +371,173 @@ class BusinessCardServiceTest {
     }
 
     @Test
+    void distinctReuseKeysConvergeOnOneContactWithTwoAttachmentsAndNoCreateSideEffects() {
+        String secondKey = "12a25a23-70af-4f8e-a64a-6cfc5f8c69be";
+        BusinessCardContactRequest contact = new BusinessCardContactRequest(
+            "Ada Lovelace", "ada@example.test", "+12025550199", "Engineer", null);
+        BusinessCardPersonAction action =
+            new BusinessCardPersonAction.Existing(31, REVIEW_TOKEN);
+        Person existing = new Person();
+        existing.setId(31);
+        existing.setName("Ada Lovelace");
+        AtomicInteger attachmentId = new AtomicInteger(40);
+        when(importRequestMapper.get(5, secondKey)).thenReturn(activeReservation());
+        when(importRequestMapper.getForUpdate(5, secondKey)).thenReturn(activeReservation());
+        when(importRequestMapper.bindReservation(
+            eq(5), eq(9), eq(secondKey), any(), any(), any())).thenReturn(1);
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(personService.requireBusinessCardReuseTarget(
+            eq(31), any(), eq(REVIEW_TOKEN))).thenReturn(existing);
+        when(personService.getPersonById(31)).thenReturn(existing);
+        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+            .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
+                "/api/attachments/content/reused-card", validated.content().length));
+        when(attachmentService.createManaged(any())).thenAnswer(invocation -> {
+            Attachment attachment = invocation.getArgument(0);
+            attachment.setId(attachmentId.incrementAndGet());
+            return attachment;
+        });
+
+        BusinessCardImportResponse first = service.importCard(
+            image, contact, action, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
+        BusinessCardImportResponse second = service.importCard(
+            image, contact, action, new BusinessCardCompanyAction.None(), secondKey);
+
+        assertEquals(31, first.contact().getId());
+        assertEquals(31, second.contact().getId());
+        assertEquals(41, first.attachment().getId());
+        assertEquals(42, second.attachment().getId());
+        assertEquals(BusinessCardImportDisposition.REUSED, first.disposition());
+        assertEquals(BusinessCardImportDisposition.REUSED, second.disposition());
+        verify(personService, times(2)).requireBusinessCardReuseTarget(
+            eq(31), any(), eq(REVIEW_TOKEN));
+        verify(personService, never()).createFromBusinessCard(any(), anyString(), any());
+        verify(companyService, never()).getCompanyById(anyInt());
+        verify(companyService, never()).createCompanyReviewed(any(), any());
+        verify(importRequestMapper).complete(5, IDEMPOTENCY_KEY, 31, 41, null);
+        verify(importRequestMapper).complete(5, secondKey, 31, 42, null);
+    }
+
+    @Test
+    void reuseReplayBindsActionTypeTargetAndReviewTokenInTheFingerprint() {
+        BusinessCardContactRequest contact = new BusinessCardContactRequest(
+            "Ada Lovelace", "ada@example.test", "+12025550199", "Engineer", null);
+        BusinessCardPersonAction action =
+            new BusinessCardPersonAction.Existing(31, REVIEW_TOKEN);
+        AtomicReference<byte[]> fingerprint = new AtomicReference<>();
+        BusinessCardImportRecord reservation = activeReservation();
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+            .thenReturn(reservation)
+            .thenAnswer(invocation -> completedImport(fingerprint.get()));
+        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY))
+            .thenReturn(reservation)
+            .thenAnswer(invocation -> completedImport(fingerprint.get()));
+        when(importRequestMapper.bindReservation(
+            eq(5), eq(9), eq(IDEMPOTENCY_KEY), any(), any(), any()))
+            .thenAnswer(invocation -> {
+                fingerprint.set(invocation.getArgument(3, byte[].class).clone());
+                return 1;
+            });
+        Person existing = new Person();
+        existing.setId(31);
+        existing.setName("Ada Lovelace");
+        Attachment attachment = new Attachment();
+        attachment.setId(41);
+        when(personService.requireBusinessCardReuseTarget(
+            eq(31), any(), eq(REVIEW_TOKEN))).thenReturn(existing);
+        when(personService.getPersonById(31)).thenReturn(existing);
+        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+            .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
+                "/api/attachments/content/reused-card", validated.content().length));
+        when(attachmentService.createManaged(any())).thenReturn(attachment);
+        when(attachmentService.getById(41)).thenReturn(attachment);
+
+        BusinessCardImportResponse createdAssociation = service.importCard(
+            image, contact, action, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
+        BusinessCardImportResponse replay = service.importCard(
+            image, contact, action, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
+
+        assertEquals(BusinessCardImportDisposition.REUSED, createdAssociation.disposition());
+        assertEquals(BusinessCardImportDisposition.REUSED, replay.disposition());
+        assertThrows(
+            ConflictException.class,
+            () -> service.importCard(
+                image,
+                contact,
+                new BusinessCardPersonAction.Existing(32, REVIEW_TOKEN),
+                new BusinessCardCompanyAction.None(),
+                IDEMPOTENCY_KEY));
+        assertThrows(
+            ConflictException.class,
+            () -> service.importCard(
+                image,
+                contact,
+                new BusinessCardPersonAction.Existing(31, "b".repeat(64)),
+                new BusinessCardCompanyAction.None(),
+                IDEMPOTENCY_KEY));
+        assertThrows(
+            ConflictException.class,
+            () -> service.importCard(
+                image,
+                contact,
+                CREATE_PERSON,
+                new BusinessCardCompanyAction.None(),
+                IDEMPOTENCY_KEY));
+        verify(personService).requireBusinessCardReuseTarget(
+            eq(31), any(), eq(REVIEW_TOKEN));
+        verify(attachmentService).createManaged(any());
+    }
+
+    @Test
+    void createReplayAcceptsLegacyFingerprintAndReportsCreatedDisposition() {
+        BusinessCardContactRequest contact = new BusinessCardContactRequest(
+            "Ada Lovelace", null, null, null, null);
+        byte[] legacyFingerprint = legacyFingerprint(validated.content(), contact.name());
+        BusinessCardImportRecord completed = completedImport(legacyFingerprint);
+        when(imageValidator.validate(image)).thenReturn(validated);
+        when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(completed);
+        when(importRequestMapper.getForUpdate(5, IDEMPOTENCY_KEY)).thenReturn(completed);
+        Person person = new Person();
+        person.setId(31);
+        person.setName(contact.name());
+        Attachment attachment = new Attachment();
+        attachment.setId(41);
+        when(personService.getPersonById(31)).thenReturn(person);
+        when(attachmentService.getById(41)).thenReturn(attachment);
+
+        BusinessCardImportResponse response = service.importCard(
+            image, contact, CREATE_PERSON,
+            new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
+
+        assertEquals(BusinessCardImportDisposition.CREATED, response.disposition());
+        verify(personService, never()).createFromBusinessCard(any(), anyString(), any());
+        verify(attachmentService, never()).createManaged(any());
+        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+    }
+
+    @Test
+    void reuseRequiresCompanyActionNoneBeforeStorageOrRecordSideEffects() {
+        BusinessCardContactRequest contact = new BusinessCardContactRequest(
+            "Ada Lovelace", "ada@example.test", null, null, null);
+        when(imageValidator.validate(image)).thenReturn(validated);
+
+        assertThrows(
+            BadRequestException.class,
+            () -> service.importCard(
+                image,
+                contact,
+                new BusinessCardPersonAction.Existing(31, REVIEW_TOKEN),
+                new BusinessCardCompanyAction.Create("Analytical Labs"),
+                IDEMPOTENCY_KEY));
+
+        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+        verify(personService, never()).requireBusinessCardReuseTarget(
+            anyInt(), any(), anyString());
+        verify(companyService, never()).createCompanyReviewed(any(), any());
+    }
+
+    @Test
     void importRequiresAReservationBeforeProcessingPrivateMultipartData() {
         BusinessCardContactRequest contact = new BusinessCardContactRequest(
                 "Ada Lovelace", null, null, null, null);
@@ -366,7 +545,8 @@ class BusinessCardServiceTest {
         when(importRequestMapper.get(5, IDEMPOTENCY_KEY)).thenReturn(null);
 
         assertThrows(ConflictException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
         verify(rateLimiter).requireImportAllowed();
@@ -399,7 +579,8 @@ class BusinessCardServiceTest {
         when(binaryStore.isReady()).thenReturn(false);
 
         assertThrows(ServiceUnavailableException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(rateLimiter).requireImportAllowed();
         verify(importRequestMapper).bindReservation(
@@ -554,7 +735,8 @@ class BusinessCardServiceTest {
                 "Ada Lovelace", null, null, null, null);
 
         assertThrows(ResourceNotFoundException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
         verify(rateLimiter).requireImportAllowed();
@@ -576,7 +758,8 @@ class BusinessCardServiceTest {
                 "Ada Lovelace", null, null, null, null);
 
         assertThrows(BusinessCardImportResultGoneException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(imageValidator, never()).validate(image);
         verify(rateLimiter).requireImportAllowed();
@@ -589,7 +772,8 @@ class BusinessCardServiceTest {
         when(imageValidator.validate(image)).thenReturn(validated);
 
         assertThrows(BadRequestException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.Existing(18), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.Existing(18), IDEMPOTENCY_KEY));
 
         verify(companyService, never()).getCompanyById(18);
         verify(personService, never()).createFromBusinessCard(
@@ -604,7 +788,8 @@ class BusinessCardServiceTest {
         when(imageValidator.validate(image)).thenReturn(validated);
 
         assertThrows(BadRequestException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.Create("　"), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.Create("　"), IDEMPOTENCY_KEY));
 
         verify(companyService, never()).createCompany(any());
         verify(personService, never()).createFromBusinessCard(
@@ -629,7 +814,8 @@ class BusinessCardServiceTest {
         when(attachmentService.createManaged(any())).thenThrow(new ServiceUnavailableException("failed"));
 
         assertThrows(ServiceUnavailableException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(binaryStore).store(eq(5), any(), any(), any());
     }
@@ -645,7 +831,8 @@ class BusinessCardServiceTest {
                         "/attachments/person/card.jpg", validated.content().length - 1));
 
         assertThrows(ServiceUnavailableException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(binaryStore).store(eq(5), any(), any(), any());
         verify(attachmentService, never()).createManaged(any());
@@ -709,10 +896,12 @@ class BusinessCardServiceTest {
         when(attachmentService.getById(41)).thenReturn(attachment);
 
         BusinessCardImportResponse response = service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY);
         BusinessCardImportResponse normalizedResponse = service.importCard(
                 image,
                 new BusinessCardContactRequest("Ada Lovelace", null, null, null, null),
+                CREATE_PERSON,
                 new BusinessCardCompanyAction.None(),
                 IDEMPOTENCY_KEY);
 
@@ -738,7 +927,8 @@ class BusinessCardServiceTest {
                 .thenReturn(completed);
 
         assertThrows(ConflictException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(personService, never()).getPersonById(anyInt());
         verify(personService, never()).createFromBusinessCard(
@@ -752,7 +942,8 @@ class BusinessCardServiceTest {
                 "Ada Lovelace", null, null, null, null);
 
         assertThrows(BadRequestException.class, () -> service.importCard(
-                image, contact, new BusinessCardCompanyAction.None(), "not-a-uuid"));
+                image, contact, CREATE_PERSON,
+                new BusinessCardCompanyAction.None(), "not-a-uuid"));
 
         verify(imageValidator, never()).validate(image);
         verify(importRequestMapper, never()).get(anyInt(), anyString());
@@ -779,7 +970,8 @@ class BusinessCardServiceTest {
 
         assertThrows(ForbiddenException.class, () -> service.reserveImport(IDEMPOTENCY_KEY));
         assertThrows(ForbiddenException.class, () -> service.importCard(
-            image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
+            image, contact, CREATE_PERSON,
+            new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
         assertThrows(ForbiddenException.class, () -> service.importStatus(IDEMPOTENCY_KEY));
 
         verify(rateLimiter, never()).requireImportAllowed();
@@ -933,5 +1125,37 @@ class BusinessCardServiceTest {
 
     private static BusinessCardImportRecord completedImport(byte[] fingerprint) {
         return new BusinessCardImportRecord(fingerprint, 31, 41, null, EXPIRY, 9, null, null);
+    }
+
+    private static byte[] legacyFingerprint(byte[] content, String name) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            updateLegacyDigest(digest, "connex-business-card-import-v1");
+            updateLegacyDigest(digest, content);
+            updateLegacyDigest(digest, name);
+            updateLegacyDigest(digest, (byte[]) null);
+            updateLegacyDigest(digest, (byte[]) null);
+            updateLegacyDigest(digest, (byte[]) null);
+            updateLegacyDigest(digest, (byte[]) null);
+            updateLegacyDigest(digest, (byte[]) null);
+            updateLegacyDigest(digest, "none");
+            return digest.digest();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static void updateLegacyDigest(MessageDigest digest, String value) {
+        updateLegacyDigest(
+            digest,
+            value == null ? null : value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void updateLegacyDigest(MessageDigest digest, byte[] value) {
+        int length = value == null ? -1 : value.length;
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(length).array());
+        if (value != null) {
+            digest.update(value);
+        }
     }
 }

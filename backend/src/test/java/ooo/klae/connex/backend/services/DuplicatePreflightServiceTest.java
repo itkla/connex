@@ -124,6 +124,111 @@ class DuplicatePreflightServiceTest {
     }
 
     @Test
+    void businessCardReuseAcceptsTheExactOwnedStrongCandidate() {
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            null, List.of("probe@example.com"), List.of());
+        when(matchingService.normalizeIdentifier(
+            IdentityKind.EMAIL, "probe@example.com"))
+            .thenReturn(Optional.of("probe@example.com"));
+        when(identityMapper.findVisiblePersonIdentityMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(
+                row(12, 7, "Probe", "email", "probe@example.com")));
+        DuplicatePreflightResponse review = service.preflightPerson(request);
+
+        service.requireReviewedBusinessCardPersonReuse(
+            request, 12, review.reviewToken());
+
+        verify(identityMapper).lockCurrentPersonIdentityGroup(
+            7, "email", "probe@example.com");
+    }
+
+    @Test
+    void businessCardReuseRejectsSharedWeakAndAmbiguousCandidates() {
+        PersonDuplicatePreflightRequest sharedRequest = new PersonDuplicatePreflightRequest(
+            null, List.of("shared@example.com"), List.of());
+        when(matchingService.normalizeIdentifier(
+            IdentityKind.EMAIL, "shared@example.com"))
+            .thenReturn(Optional.of("shared@example.com"));
+        when(identityMapper.findVisiblePersonIdentityMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(
+                row(12, 9, "Shared", "email", "shared@example.com")));
+        DuplicatePreflightResponse sharedReview = service.preflightPerson(sharedRequest);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.requireReviewedBusinessCardPersonReuse(
+                sharedRequest, 12, sharedReview.reviewToken()));
+
+        PersonDuplicatePreflightRequest weakRequest = new PersonDuplicatePreflightRequest(
+            "Weak Candidate", List.of(), List.of());
+        when(matchingService.normalizeName("Weak Candidate"))
+            .thenReturn(Optional.of("weak candidate"));
+        when(identityMapper.findVisiblePersonNameMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(
+                row(13, 7, "Weak Candidate", "name", "weak candidate")));
+        DuplicatePreflightResponse weakReview = service.preflightPerson(weakRequest);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.requireReviewedBusinessCardPersonReuse(
+                weakRequest, 13, weakReview.reviewToken()));
+
+        PersonDuplicatePreflightRequest ambiguousRequest = new PersonDuplicatePreflightRequest(
+            null, List.of("ambiguous@example.com"), List.of());
+        when(matchingService.normalizeIdentifier(
+            IdentityKind.EMAIL, "ambiguous@example.com"))
+            .thenReturn(Optional.of("ambiguous@example.com"));
+        when(identityMapper.findVisiblePersonIdentityMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(
+                row(14, 7, "First", "email", "ambiguous@example.com"),
+                row(15, 7, "Second", "email", "ambiguous@example.com")));
+        DuplicatePreflightResponse ambiguousReview =
+            service.preflightPerson(ambiguousRequest);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.requireReviewedBusinessCardPersonReuse(
+                ambiguousRequest, 14, ambiguousReview.reviewToken()));
+    }
+
+    @Test
+    void businessCardReuseRejectsTruncatedAndStaleReviews() {
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            null, List.of("crowded@example.com"), List.of());
+        when(matchingService.normalizeIdentifier(
+            IdentityKind.EMAIL, "crowded@example.com"))
+            .thenReturn(Optional.of("crowded@example.com"));
+        List<DuplicateCandidateRow> crowded = java.util.stream.IntStream.rangeClosed(1, 51)
+            .mapToObj(id -> row(
+                id, 7, "Candidate " + id, "email", "crowded@example.com"))
+            .toList();
+        when(identityMapper.findVisiblePersonIdentityMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(crowded);
+        DuplicatePreflightResponse truncatedReview = service.preflightPerson(request);
+
+        assertTrue(truncatedReview.truncated());
+        assertThrows(
+            ConflictException.class,
+            () -> service.requireReviewedBusinessCardPersonReuse(
+                request, 1, truncatedReview.reviewToken()));
+
+        when(identityMapper.findVisiblePersonIdentityMatches(
+            eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(
+                row(1, 7, "Candidate 1", "email", "crowded@example.com")));
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.requireReviewedBusinessCardPersonReuse(
+                request, 1, truncatedReview.reviewToken()));
+    }
+
+    @Test
     void reviewedCreationRejectsAStaleCandidateToken() {
         PersonDuplicatePreflightRequest request =
             new PersonDuplicatePreflightRequest(

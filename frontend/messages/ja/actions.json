@@ -80,6 +80,7 @@
       "companyCreated": "会社を作成しました",
       "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
       "personCreated": "連絡先を作成しました",
+      "businessCardAttached": "名刺を添付しました",
       "dealCreated": "取引を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",
       "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",

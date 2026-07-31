@@ -40,11 +40,14 @@ import ooo.klae.connex.backend.dto.AttachmentDto;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
+import ooo.klae.connex.backend.dto.BusinessCardImportDisposition;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
+import ooo.klae.connex.backend.dto.BusinessCardPersonAction;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
 import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.BusinessCardImportResultGoneException;
@@ -63,6 +66,11 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  */
 @Service
 public class BusinessCardService {
+    private static final byte[] FINGERPRINT_V2_PREFIX =
+        "CNXBC02".getBytes(StandardCharsets.US_ASCII);
+    private static final byte CREATED_FINGERPRINT_MARKER = 1;
+    private static final byte REUSED_FINGERPRINT_MARKER = 2;
+
     private final BusinessCardProperties properties;
     private final BusinessCardImageValidator imageValidator;
     private final BusinessCardOcrClient ocrClient;
@@ -192,18 +200,21 @@ public class BusinessCardService {
      *
      * @param image original card image
      * @param contact reviewed contact values
+     * @param personAction explicit create or existing-person decision
      * @param companyAction explicit existing, create, or none decision
      * @param idempotencyKey caller-generated UUID retained across retries
-     * @return created records
+     * @return imported records and person disposition
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importCard(
             MultipartFile image,
             BusinessCardContactRequest contact,
+            BusinessCardPersonAction personAction,
             BusinessCardCompanyAction companyAction,
             String idempotencyKey) {
         Objects.requireNonNull(contact, "contact");
+        Objects.requireNonNull(personAction, "personAction");
         Objects.requireNonNull(companyAction, "companyAction");
         requireEntitled(Capability.BUSINESS_CARD_IMPORT);
         String requestId = BusinessCardIdempotencyKey.canonicalize(idempotencyKey);
@@ -219,9 +230,10 @@ public class BusinessCardService {
         requireOwnedByCurrentUser(snapshot, userId);
         requireCurrentImportState(snapshot, userId, utc(clock.instant()));
         ValidatedBusinessCardImage validated = imageValidator.validate(image);
-        ReviewedImport reviewed = normalizeRequest(contact, companyAction);
+        ReviewedImport reviewed = normalizeRequest(contact, personAction, companyAction);
         byte[] content = validated.content();
         byte[] requestFingerprint = fingerprint(content, reviewed);
+        byte[] legacyRequestFingerprint = legacyFingerprint(content, reviewed);
         Instant currentInstant = clock.instant();
         LocalDateTime now = utc(currentInstant);
         LocalDateTime expiresAt = utc(currentInstant.plus(properties.getIdempotencyRetention()));
@@ -239,18 +251,16 @@ public class BusinessCardService {
             }
         } else {
             requireOwnedByCurrentUser(existing, userId);
-            return replay(existing, requestFingerprint);
+            return replay(existing, requestFingerprint, legacyRequestFingerprint);
         }
         requireBinaryStorageReady();
         String fileName = "business-card." + validated.extension();
         BusinessCardBinaryStore.StoredBusinessCard stored = binaryStore.store(
                 workspaceId, fileName, validated.contentType(), content);
         requireStored(stored, content.length);
-        Company company = resolveCompany(reviewed);
-        Person person = personService.createFromBusinessCard(
-            toPerson(reviewed, company),
-            "business-card:" + requestId,
-            reviewed.duplicateReviewToken());
+        ResolvedPerson resolvedPerson = resolvePerson(reviewed, requestId);
+        Person person = resolvedPerson.person();
+        Company company = resolvedPerson.company();
         Attachment attachment = attachment(validated, stored, fileName, person.getId());
         Attachment createdAttachment = attachmentService.createManaged(attachment);
         int completed = importRequestMapper.complete(
@@ -262,10 +272,14 @@ public class BusinessCardService {
         if (completed != 1) {
             throw new IllegalStateException("Business-card import idempotency result was not recorded");
         }
+        Person responsePerson = resolvedPerson.disposition() == BusinessCardImportDisposition.REUSED
+            ? personService.getPersonById(person.getId())
+            : person;
         return new BusinessCardImportResponse(
-                PersonDto.from(person),
+                PersonDto.from(responsePerson),
                 AttachmentDto.from(createdAttachment),
-                CompanyDto.from(company));
+                CompanyDto.from(company),
+                resolvedPerson.disposition());
     }
 
     /**
@@ -350,11 +364,17 @@ public class BusinessCardService {
 
     private BusinessCardImportResponse replay(
             BusinessCardImportRecord record,
-            byte[] requestFingerprint) {
+            byte[] requestFingerprint,
+            byte[] legacyRequestFingerprint) {
         if (record == null || record.requestFingerprint() == null) {
             throw new IllegalStateException("Business-card import idempotency claim is unavailable");
         }
-        if (!MessageDigest.isEqual(record.requestFingerprint(), requestFingerprint)) {
+        byte[] recordedFingerprint = record.requestFingerprint();
+        boolean currentMatch = MessageDigest.isEqual(
+            recordedFingerprint, requestFingerprint);
+        boolean legacyMatch = legacyRequestFingerprint != null
+            && MessageDigest.isEqual(recordedFingerprint, legacyRequestFingerprint);
+        if (!currentMatch && !legacyMatch) {
             throw new ConflictException(
                     "Idempotency-Key was already used for a different business-card import");
         }
@@ -377,7 +397,8 @@ public class BusinessCardService {
             return new BusinessCardImportResponse(
                 PersonDto.from(person),
                 AttachmentDto.from(attachment),
-                CompanyDto.from(company));
+                CompanyDto.from(company),
+                disposition(record.requestFingerprint()));
         } catch (ResourceNotFoundException exception) {
             throw new BusinessCardImportResultGoneException(
                     "Business-card import completed, but its result is no longer available");
@@ -416,6 +437,35 @@ public class BusinessCardService {
             }
             case BusinessCardCompanyAction.None ignored -> null;
         };
+    }
+
+    private ResolvedPerson resolvePerson(ReviewedImport reviewed, String requestId) {
+        return switch (reviewed.personAction()) {
+            case BusinessCardPersonAction.Create ignored -> {
+                Company company = resolveCompany(reviewed);
+                Person person = personService.createFromBusinessCard(
+                    toPerson(reviewed, company),
+                    "business-card:" + requestId,
+                    reviewed.duplicateReviewToken());
+                yield new ResolvedPerson(
+                    person, company, BusinessCardImportDisposition.CREATED);
+            }
+            case BusinessCardPersonAction.Existing existing -> {
+                Person person = personService.requireBusinessCardReuseTarget(
+                    existing.personId(),
+                    duplicateRequest(reviewed),
+                    existing.duplicateReviewToken());
+                yield new ResolvedPerson(
+                    person, null, BusinessCardImportDisposition.REUSED);
+            }
+        };
+    }
+
+    private static PersonDuplicatePreflightRequest duplicateRequest(ReviewedImport reviewed) {
+        return new PersonDuplicatePreflightRequest(
+            reviewed.name(),
+            reviewed.email() == null ? List.of() : List.of(reviewed.email()),
+            reviewed.phone() == null ? List.of() : List.of(reviewed.phone()));
     }
 
     private static Person toPerson(ReviewedImport reviewed, Company company) {
@@ -494,6 +544,7 @@ public class BusinessCardService {
 
     private static ReviewedImport normalizeRequest(
             BusinessCardContactRequest contact,
+            BusinessCardPersonAction personAction,
             BusinessCardCompanyAction companyAction) {
         String name = requiredText(contact.name(), 255, "name");
         String email = nullableText(contact.email(), 255, "email");
@@ -520,6 +571,29 @@ public class BusinessCardService {
                 yield new BusinessCardCompanyAction.None();
             }
         };
+        BusinessCardPersonAction normalizedPersonAction = switch (personAction) {
+            case BusinessCardPersonAction.Create ignored ->
+                new BusinessCardPersonAction.Create();
+            case BusinessCardPersonAction.Existing existing -> {
+                if (existing.personId() == null || existing.personId() <= 0) {
+                    throw new BadRequestException("personId must be positive");
+                }
+                if (existing.duplicateReviewToken() == null
+                        || !existing.duplicateReviewToken().matches("^[0-9a-f]{64}$")) {
+                    throw new BadRequestException("duplicateReviewToken is invalid");
+                }
+                if (!(normalizedAction instanceof BusinessCardCompanyAction.None)) {
+                    throw new BadRequestException(
+                        "companyAction must be none when reusing an existing contact");
+                }
+                if (contact.duplicateReviewToken() != null) {
+                    throw new BadRequestException(
+                        "contact.duplicateReviewToken is only valid when creating a contact");
+                }
+                yield new BusinessCardPersonAction.Existing(
+                    existing.personId(), existing.duplicateReviewToken());
+            }
+        };
         return new ReviewedImport(
             name,
             email,
@@ -527,6 +601,7 @@ public class BusinessCardService {
             title,
             contact.companyId(),
             contact.duplicateReviewToken(),
+            normalizedPersonAction,
             normalizedAction);
     }
 
@@ -637,6 +712,55 @@ public class BusinessCardService {
     private static byte[] fingerprint(byte[] image, ReviewedImport reviewed) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            updateDigest(digest, "connex-business-card-import-v2");
+            updateDigest(digest, image);
+            updateDigest(digest, reviewed.name());
+            updateDigest(digest, reviewed.email());
+            updateDigest(digest, reviewed.phone());
+            updateDigest(digest, reviewed.title());
+            updateDigest(digest, reviewed.contactCompanyId());
+            updateDigest(digest, reviewed.duplicateReviewToken());
+            switch (reviewed.personAction()) {
+                case BusinessCardPersonAction.Create ignored ->
+                    updateDigest(digest, "create");
+                case BusinessCardPersonAction.Existing existing -> {
+                    updateDigest(digest, "existing");
+                    updateDigest(digest, existing.personId());
+                    updateDigest(digest, existing.duplicateReviewToken());
+                }
+            }
+            switch (reviewed.companyAction()) {
+                case BusinessCardCompanyAction.Existing existing -> {
+                    updateDigest(digest, "existing");
+                    updateDigest(digest, existing.companyId());
+                }
+                case BusinessCardCompanyAction.Create create -> {
+                    updateDigest(digest, "create");
+                    updateDigest(digest, create.companyName());
+                    updateDigest(digest, create.duplicateReviewToken());
+                }
+                case BusinessCardCompanyAction.None ignored -> updateDigest(digest, "none");
+            }
+            byte[] hash = digest.digest();
+            byte[] fingerprint = new byte[32];
+            System.arraycopy(
+                FINGERPRINT_V2_PREFIX, 0, fingerprint, 0, FINGERPRINT_V2_PREFIX.length);
+            fingerprint[FINGERPRINT_V2_PREFIX.length] =
+                fingerprintMarker(reviewed.personAction());
+            int digestOffset = FINGERPRINT_V2_PREFIX.length + 1;
+            System.arraycopy(hash, 0, fingerprint, digestOffset, fingerprint.length - digestOffset);
+            return fingerprint;
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static byte[] legacyFingerprint(byte[] image, ReviewedImport reviewed) {
+        if (!(reviewed.personAction() instanceof BusinessCardPersonAction.Create)) {
+            return null;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
             updateDigest(digest, "connex-business-card-import-v1");
             updateDigest(digest, image);
             updateDigest(digest, reviewed.name());
@@ -663,6 +787,38 @@ public class BusinessCardService {
         }
     }
 
+    private static byte fingerprintMarker(BusinessCardPersonAction personAction) {
+        return switch (personAction) {
+            case BusinessCardPersonAction.Create ignored -> CREATED_FINGERPRINT_MARKER;
+            case BusinessCardPersonAction.Existing ignored -> REUSED_FINGERPRINT_MARKER;
+        };
+    }
+
+    private static BusinessCardImportDisposition disposition(byte[] fingerprint) {
+        if (isV2Fingerprint(fingerprint)) {
+            return switch (fingerprint[FINGERPRINT_V2_PREFIX.length]) {
+                case CREATED_FINGERPRINT_MARKER -> BusinessCardImportDisposition.CREATED;
+                case REUSED_FINGERPRINT_MARKER -> BusinessCardImportDisposition.REUSED;
+                default -> throw new IllegalStateException(
+                    "Business-card import fingerprint disposition is invalid");
+            };
+        }
+        return BusinessCardImportDisposition.CREATED;
+    }
+
+    private static boolean isV2Fingerprint(byte[] fingerprint) {
+        if (fingerprint == null
+                || fingerprint.length <= FINGERPRINT_V2_PREFIX.length) {
+            return false;
+        }
+        for (int index = 0; index < FINGERPRINT_V2_PREFIX.length; index += 1) {
+            if (fingerprint[index] != FINGERPRINT_V2_PREFIX[index]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static void updateDigest(MessageDigest digest, Integer value) {
         updateDigest(digest, value == null ? null : Integer.toString(value));
     }
@@ -686,6 +842,13 @@ public class BusinessCardService {
             String title,
             Integer contactCompanyId,
             String duplicateReviewToken,
+            BusinessCardPersonAction personAction,
             BusinessCardCompanyAction companyAction) {
+    }
+
+    private record ResolvedPerson(
+            Person person,
+            Company company,
+            BusinessCardImportDisposition disposition) {
     }
 }

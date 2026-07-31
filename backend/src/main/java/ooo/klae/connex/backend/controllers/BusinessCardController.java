@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
+import ooo.klae.connex.backend.dto.BusinessCardPersonAction;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.services.BusinessCardService;
 
@@ -58,17 +59,23 @@ public class BusinessCardController {
      *
      * @param image original JPEG, PNG, or WebP image
      * @param contact reviewed contact JSON part
+     * @param personAction explicit person-action JSON part; absent legacy requests create a contact
      * @param companyAction explicit company-action JSON part
      * @param idempotencyKey caller-generated UUID retained across retries
-     * @return created contact, attachment, and optional company
+     * @return imported contact, attachment, optional company, and disposition
      */
     @PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public BusinessCardImportResponse importCard(
             @RequestPart("image") MultipartFile image,
             @Valid @RequestPart("contact") BusinessCardContactRequest contact,
+            @Valid @RequestPart(value = "personAction", required = false)
+                    BusinessCardPersonAction personAction,
             @Valid @RequestPart("companyAction") BusinessCardCompanyAction companyAction,
             @RequestHeader("Idempotency-Key") String idempotencyKey) {
-        return businessCardService.importCard(image, contact, companyAction, idempotencyKey);
+        BusinessCardPersonAction resolvedPersonAction =
+                personAction == null ? new BusinessCardPersonAction.Create() : personAction;
+        return businessCardService.importCard(
+                image, contact, resolvedPersonAction, companyAction, idempotencyKey);
     }
 
     /**

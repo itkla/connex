@@ -23,18 +23,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: docker compose config with and without OCR
+      - name: docker compose config defaults to OCR with an explicit opt-out
         working-directory: deploy
         run: |
           set -euo pipefail
+          DIGEST=0000000000000000000000000000000000000000000000000000000000000000
+          for TEMPLATE in eval.env.example silo.env.example onprem.env.example; do
+            cp "$TEMPLATE" .env
+            CONNEX_BACKEND_DIGEST="$DIGEST" \
+              CONNEX_FRONTEND_DIGEST="$DIGEST" \
+              CONNEX_OCR_DIGEST="$DIGEST" \
+              docker compose -f docker-compose.yml -f docker-compose.build.yml config --format json \
+              > "/tmp/${TEMPLATE}.json"
+            jq -e --arg template "$TEMPLATE" '
+              .services.ocr != null
+              and .services.backend.environment.CONNEX_BUSINESS_CARD_SCANNING_ENABLED == "true"
+              and .services.ocr.environment.CONNEX_OCR_SERVICE_TOKEN
+                == .services.backend.environment.CONNEX_OCR_SERVICE_TOKEN
+              and (
+                if $template == "eval.env.example"
+                then (.services.backend.environment.CONNEX_OCR_SERVICE_TOKEN | length) >= 32
+                else .services.backend.environment.CONNEX_OCR_SERVICE_TOKEN
+                  == "REPLACE_AT_LEAST_32_CHARS"
+                end
+              )
+            ' "/tmp/${TEMPLATE}.json" >/dev/null
+          done
           cp eval.env.example .env
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_SCANNING_ENABLED=.*/CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false/' .env
           docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
           if docker compose -f docker-compose.yml -f docker-compose.build.yml config --services \
               | grep -qx ocr; then
             exit 1
           fi
-          docker compose -f docker-compose.yml -f docker-compose.build.yml --profile ocr config -q
-          docker compose -f docker-compose.yml -f docker-compose.build.yml --profile ocr config --services | grep -qx ocr
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config --format json \
+            | jq -e '.services.backend.environment.CONNEX_BUSINESS_CARD_SCANNING_ENABLED == "false"' \
+              >/dev/null
 
   profile-boot:
     name: Boot every deployment profile

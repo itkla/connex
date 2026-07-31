@@ -2062,11 +2062,12 @@ export function reserveBusinessCardImport(
     );
 }
 
-/** Creates the reviewed contact and stores its source card in one backend transaction. */
+/** Creates or reuses the reviewed contact and stores its source card in one backend transaction. */
 export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: RequestInit = {}) {
     const body = new FormData();
     body.append("image", draft.image, draft.image.name);
     body.append("contact", new Blob([JSON.stringify(draft.contact)], { type: "application/json" }));
+    body.append("personAction", new Blob([JSON.stringify(draft.personAction)], { type: "application/json" }));
     body.append("companyAction", new Blob([JSON.stringify(draft.companyAction)], { type: "application/json" }));
     const boundInit = businessCardRequestInit(draft.recoveryContext, init);
     const headers = new Headers(boundInit.headers);

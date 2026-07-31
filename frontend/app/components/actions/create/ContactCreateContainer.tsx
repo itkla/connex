@@ -122,8 +122,9 @@ export default function ContactCreateContainer({
                 duplicateReviewToken: duplicateReviewToken ?? undefined,
             }, requestInit);
             if (!isCurrent()) return;
+            const reusedContact = imported?.disposition === 'reused';
             let avatarUploadFailed = false;
-            if (imageFile) {
+            if (imageFile && !reusedContact) {
                 try {
                     await uploadContactPicture(newContact.id, imageFile, requestInit);
                 } catch {
@@ -137,13 +138,15 @@ export default function ContactCreateContainer({
             let finalized = false;
             return {
                 avatarUploadFailed,
-                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                avatarUploaded: imageFile != null && !reusedContact && !avatarUploadFailed,
                 finalize: () => {
                     if (finalized || !isCurrent()) return;
                     finalized = true;
-                    toastSuccess(t('feedback.personCreated'));
+                    toastSuccess(t(reusedContact
+                        ? 'feedback.businessCardAttached'
+                        : 'feedback.personCreated'));
                     publishRecordMutation('contact');
-                    if (imported?.company) publishRecordMutation('company');
+                    if (imported?.company && !reusedContact) publishRecordMutation('company');
                     setSucceeded(true);
                     invalidatePendingClose();
                     const closeGeneration = closeGenerationRef.current;

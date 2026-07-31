@@ -290,6 +290,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#serviceAccountJson",
         "ooo/klae/connex/backend/dto/BusinessCardCompanyAction.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/BusinessCardContactRequest.java#duplicateReviewToken",
+        "ooo/klae/connex/backend/dto/BusinessCardPersonAction.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/ConnectorConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",

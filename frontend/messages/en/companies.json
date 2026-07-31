@@ -100,6 +100,7 @@
     "share": "Share",
     "entityLabel": "company",
     "toastContactCreated": "Contact created",
+    "toastCardAttached": "Business card attached",
     "toastCreateContactFailed": "Failed to create contact",
     "toastDealCreated": "Deal created",
     "toastCreateDealFailed": "Failed to create deal",
@@ -136,6 +137,7 @@
     "newContact": "New contact",
     "noContacts": "No contacts associated with this company.",
     "toastContactCreated": "Contact created",
+    "toastCardAttached": "Business card attached",
     "toastCreateContactFailed": "Failed to create contact"
   },
   "CompaniesEditSheet": {

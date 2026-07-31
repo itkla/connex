@@ -10,8 +10,11 @@ import { cn } from '@/lib/utils';
 import {
     type BusinessCardImportDraft,
     type BusinessCardImportResult,
+    type BusinessCardPersonAction,
     type Company,
     type CreateContactPayload,
+    type DuplicateCandidate,
+    type DuplicatePreflightResponse,
 } from '@/app/lib/types';
 import {
     ChangeEvent,
@@ -42,7 +45,10 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
-import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
+import {
+    duplicatePreflightResponseSignature,
+    useDuplicatePreflight,
+} from '@/app/hooks/useDuplicatePreflight';
 import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -79,6 +85,24 @@ export type ContactCreationOutcome = {
     avatarUploaded: boolean;
     finalize: () => void;
 } | void;
+
+type BusinessCardPersonResolutionSelection = {
+    reviewSignature: string;
+    personId: number;
+    selected: 'existing' | 'create';
+};
+
+function reusableBusinessCardCandidate(
+    response: DuplicatePreflightResponse | null,
+): DuplicateCandidate | null {
+    if (!response || response.truncated || response.candidates.length !== 1) return null;
+    const candidate = response.candidates[0];
+    return candidate.recordType === 'person'
+        && candidate.ownedByActiveWorkspace
+        && candidate.strength === 'STRONG'
+        ? candidate
+        : null;
+}
 
 export default function NewContactDialog({
     newContactDialogOpen,
@@ -238,6 +262,8 @@ export function NewContactForm({
     const [imageSelectionPending, setImageSelectionPending] = useState(false);
     const [cardSelectionPending, setCardSelectionPending] = useState(false);
     const [manualRecoveryOverride, setManualRecoveryOverride] = useState(false);
+    const [personResolutionSelection, setPersonResolutionSelection] =
+        useState<BusinessCardPersonResolutionSelection | null>(null);
     const [prevActive, setPrevActive] = useState(active);
     const recoveredImportHandledRef = useRef<string | null>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -264,12 +290,26 @@ export function NewContactForm({
         email: newContactPayload.email,
         phone: newContactPayload.phone,
     }, active, requestInit);
+    const duplicateReviewSignature = duplicatePreflight.response
+        ? duplicatePreflightResponseSignature(duplicatePreflight.response)
+        : null;
+    const reusablePersonCandidate = businessCard.file
+        ? reusableBusinessCardCandidate(duplicatePreflight.response)
+        : null;
+    const currentPersonResolution = reusablePersonCandidate
+        && duplicateReviewSignature
+        && personResolutionSelection?.reviewSignature === duplicateReviewSignature
+        && personResolutionSelection.personId === reusablePersonCandidate.recordId
+        ? personResolutionSelection.selected
+        : null;
+    const reuseExistingPerson = currentPersonResolution === 'existing';
     const companyDuplicatePreflight = useDuplicatePreflight('company', {
         name: businessCard.companyName,
     }, active
         && businessCard.file != null
         && businessCard.companyMode === 'create'
-        && businessCard.canCreateCompany,
+        && businessCard.canCreateCompany
+        && !reuseExistingPerson,
     requestInit);
     const previousRecoveryStatusRef = useRef(businessCard.recoveryStatus);
     const recoveredImport = businessCard.recoveredImport;
@@ -339,13 +379,17 @@ export function NewContactForm({
                     || !activeRef.current
                     || acknowledgmentGenerationRef.current !== generation) return;
                 if (recoveredImport.result) {
-                    toastSuccess(t('cardImportRecovered'));
+                    toastSuccess(t(recoveredImport.result.disposition === 'reused'
+                        ? 'cardImportRecoveredExisting'
+                        : 'cardImportRecovered'));
                     onRecoveredImportRef.current?.(recoveredImport.result);
                 } else {
                     toastError(t('cardImportRecoveryGone'));
                 }
                 if (recoveredImport.pendingAvatar) {
-                    toastError(t('cardImportRecoveredAvatarPending'));
+                    toastError(t(recoveredImport.result?.disposition === 'reused'
+                        ? 'cardImportRecoveredExistingAvatarPending'
+                        : 'cardImportRecoveredAvatarPending'));
                 }
                 router.refresh();
                 onCancelRef.current();
@@ -374,10 +418,34 @@ export function NewContactForm({
         let businessCardImport: BusinessCardImportDraft | undefined;
         try {
             const duplicateDecision = await duplicatePreflight.reviewNow();
-            if (!canCommit() || !duplicateDecision.allowed) return;
-            const companyDuplicateDecision = await companyDuplicatePreflight.reviewNow();
-            if (!canCommit() || !companyDuplicateDecision.allowed) return;
-            businessCardImport = await businessCard.prepareImportDraft(imageFile != null);
+            if (!canCommit()) return;
+            let personAction: BusinessCardPersonAction = { type: 'create' };
+            let duplicateReviewToken = duplicateDecision.duplicateReviewToken;
+            if (businessCard.file && reusablePersonCandidate) {
+                const checkedCandidate = reusableBusinessCardCandidate(duplicateDecision.response);
+                if (!personResolutionSelection
+                    || duplicateDecision.reviewSignature !== personResolutionSelection.reviewSignature
+                    || checkedCandidate?.recordId !== personResolutionSelection.personId) return;
+                duplicateReviewToken = duplicateDecision.response?.reviewToken ?? null;
+                if (personResolutionSelection.selected === 'existing') {
+                    if (!duplicateReviewToken) return;
+                    personAction = {
+                        type: 'existing',
+                        personId: personResolutionSelection.personId,
+                        duplicateReviewToken,
+                    };
+                }
+            } else if (!duplicateDecision.allowed) {
+                return;
+            }
+            const companyDuplicateDecision = personAction.type === 'existing'
+                ? null
+                : await companyDuplicatePreflight.reviewNow();
+            if (!canCommit() || companyDuplicateDecision?.allowed === false) return;
+            businessCardImport = await businessCard.prepareImportDraft(
+                imageFile != null && personAction.type === 'create',
+                personAction,
+            );
             if (!canCommit()) return;
             if (businessCard.file && !businessCardImport) return;
             if (businessCardImport) {
@@ -386,13 +454,15 @@ export function NewContactForm({
                     contact: {
                         ...businessCardImport.contact,
                         duplicateReviewToken:
-                            duplicateDecision.duplicateReviewToken ?? undefined,
+                            businessCardImport.personAction.type === 'create'
+                                ? duplicateReviewToken ?? undefined
+                                : undefined,
                     },
                     companyAction: businessCardImport.companyAction.type === 'create'
                         ? {
                             ...businessCardImport.companyAction,
                             duplicateReviewToken:
-                                companyDuplicateDecision.duplicateReviewToken ?? undefined,
+                                companyDuplicateDecision?.duplicateReviewToken ?? undefined,
                         }
                         : businessCardImport.companyAction,
                 };
@@ -434,8 +504,8 @@ export function NewContactForm({
             || businessCard.isScanning
             || businessCard.recoveryStatus === 'checking'
             || businessCard.recoveryStatus === 'acknowledging'
-            || duplicatePreflight.blocked
-            || companyDuplicatePreflight.blocked
+            || duplicatePreflightBlocked
+            || companyDuplicatePreflightBlocked
             || recoveryDecisionRequired) return;
         submissionPendingRef.current = true;
         setSubmissionPending(true);
@@ -471,6 +541,7 @@ export function NewContactForm({
             setImageSelectionPending(false);
             setCardSelectionPending(false);
             setManualRecoveryOverride(false);
+            setPersonResolutionSelection(null);
             resetFieldErrors();
         }
     }
@@ -554,11 +625,16 @@ export function NewContactForm({
         businessCard.retryRecovery();
     };
 
+    const duplicatePreflightBlocked = reusablePersonCandidate
+        ? currentPersonResolution == null
+        : duplicatePreflight.blocked;
+    const companyDuplicatePreflightBlocked = !reuseExistingPerson
+        && companyDuplicatePreflight.blocked;
     const hasErrors = Object.keys(fieldErrors).length > 0
-        || businessCard.companyValidationError != null
+        || (!reuseExistingPerson && businessCard.companyValidationError != null)
         || businessCard.importError != null
         || duplicatePreflight.status === 'error'
-        || companyDuplicatePreflight.status === 'error'
+        || (!reuseExistingPerson && companyDuplicatePreflight.status === 'error')
         || (!manualRecoveryOverride && businessCard.recoveryStatus === 'error');
     const formPending = submissionPending || isCreating || imageSelectionPending || cardSelectionPending;
     const recoveryBlocked = businessCard.recoveryStatus === 'checking'
@@ -605,7 +681,10 @@ export function NewContactForm({
                                 id="imageUrl"
                                 type="file"
                                 accept={MANAGED_IMAGE_ACCEPT}
-                                disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
+                                disabled={formPending
+                                    || recoveryBlocked
+                                    || businessCard.requiresExactImportRetry
+                                    || reuseExistingPerson}
                                 onChange={handleImageChange}
                                 className="sr-only"
                             />
@@ -658,10 +737,10 @@ export function NewContactForm({
                             disabled={formPending}
                             onCancelScan={businessCard.cancelScan}
                             onRetryScan={businessCard.retryScan}
-                            onRemove={businessCard.companyMode === 'create'
+                            onRemove={businessCard.companyMode === 'create' && !reuseExistingPerson
                                 ? undefined
                                 : businessCard.discardCardImage}
-                            onDiscardImage={businessCard.companyMode === 'create'
+                            onDiscardImage={businessCard.companyMode === 'create' && !reuseExistingPerson
                                 ? undefined
                                 : businessCard.discardCardImage}
                         />
@@ -680,6 +759,28 @@ export function NewContactForm({
                         onListWheel={handleListWheel}
                         duplicatePreflight={duplicatePreflight}
                         companyDuplicatePreflight={companyDuplicatePreflight}
+                        reusablePersonCandidate={reusablePersonCandidate}
+                        duplicateReviewSignature={duplicateReviewSignature}
+                        currentPersonResolution={currentPersonResolution}
+                        onPersonResolutionChange={(selected) => {
+                            if (submissionPendingRef.current
+                                || !reusablePersonCandidate
+                                || !duplicateReviewSignature) return;
+                            if (selected === 'existing') {
+                                imageSelectionSequenceRef.current += 1;
+                                imageSelectionPendingRef.current = false;
+                                setImageSelectionPending(false);
+                                if (imagePreview) URL.revokeObjectURL(imagePreview);
+                                setImagePreview(null);
+                                setImageFile(null);
+                            }
+                            setPersonResolutionSelection({
+                                reviewSignature: duplicateReviewSignature,
+                                personId: reusablePersonCandidate.recordId,
+                                selected,
+                            });
+                        }}
+                        reuseExistingPerson={reuseExistingPerson}
                     />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '290ms' }}>
@@ -705,13 +806,19 @@ export function NewContactForm({
                             variant="brand"
                             disabled={formPending
                                 || recoveryBlocked
-                                || duplicatePreflight.blocked
-                                || companyDuplicatePreflight.blocked
+                                || duplicatePreflightBlocked
+                                || companyDuplicatePreflightBlocked
                                 || isSuccess
                                 || businessCard.isScanning}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
-                            {formPending ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : businessCard.file ? t('createFromCard') : t('create')}
+                            {formPending
+                                ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" />
+                                : reuseExistingPerson
+                                    ? t('attachCard')
+                                    : businessCard.file
+                                        ? t('createFromCard')
+                                        : t('create')}
                         </Button>
                     </div>
                 </form>
@@ -800,6 +907,11 @@ type ContactDetailsFieldsProps = {
     onListWheel: (event: WheelEvent<HTMLDivElement>) => void;
     duplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
     companyDuplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
+    reusablePersonCandidate: DuplicateCandidate | null;
+    duplicateReviewSignature: string | null;
+    currentPersonResolution: 'existing' | 'create' | null;
+    onPersonResolutionChange: (selected: 'existing' | 'create') => void;
+    reuseExistingPerson: boolean;
 };
 
 function ContactDetailsFields({
@@ -815,9 +927,16 @@ function ContactDetailsFields({
     onListWheel,
     duplicatePreflight,
     companyDuplicatePreflight,
+    reusablePersonCandidate,
+    duplicateReviewSignature,
+    currentPersonResolution,
+    onPersonResolutionChange,
+    reuseExistingPerson,
 }: ContactDetailsFieldsProps) {
     const t = useTranslations('ContactsNewContactDialog');
-    const disabled = isCreating || businessCard.requiresExactImportRetry;
+    const disabled = isCreating
+        || businessCard.requiresExactImportRetry
+        || reuseExistingPerson;
 
     return (
         <>
@@ -857,6 +976,13 @@ function ContactDetailsFields({
                     acknowledged={duplicatePreflight.acknowledged}
                     onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                     onRetry={duplicatePreflight.retry}
+                    personResolution={reusablePersonCandidate && duplicateReviewSignature
+                        ? {
+                            selected: currentPersonResolution,
+                            disabled: isCreating || businessCard.requiresExactImportRetry,
+                            onSelectedChange: onPersonResolutionChange,
+                        }
+                        : undefined}
                 />
             </div>
 
@@ -963,7 +1089,7 @@ function ContactDetailsFields({
                     </ComboboxContent>
                 </Combobox>
                 <BusinessCardCompanyChoice
-                    active={businessCard.file != null}
+                    active={businessCard.file != null && !reuseExistingPerson}
                     canCreateCompany={businessCard.canCreateCompany}
                     mode={businessCard.companyMode}
                     existingCompanyName={resolvedCompany?.name ?? matchedCompanyName}
@@ -977,7 +1103,7 @@ function ContactDetailsFields({
                         clearError('companyName');
                     }}
                 />
-                {businessCard.companyMode === 'create' && (
+                {businessCard.companyMode === 'create' && !reuseExistingPerson && (
                     <DuplicatePreflightWarning
                         id="business-card-company-duplicate-preflight"
                         kind="company"

@@ -141,9 +141,10 @@ manifest before loading it. Do not describe registry provenance as independently
 ## Running the images
 
 The images carry no configuration. Every deployment supplies environment for the database,
-secret-store master key, audit HMAC, mail, deployment profile, private object storage, and optional
-OCR service. Use the reusable [`../deploy/`](../deploy) Compose bundle and its per-profile templates;
-the full operator contract is in [DEPLOYMENT.md](DEPLOYMENT.md).
+secret-store master key, audit HMAC, mail, deployment profile, private object storage, and the
+default private OCR service. Use the reusable [`../deploy/`](../deploy) Compose bundle and its
+per-profile templates; the full operator contract, including the low-resource OCR opt-out, is in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 Smoke-check a running backend:
 
@@ -166,8 +167,9 @@ Staging currently checks out `main` and runs it via an out-of-repo systemd unit 
 2. Replace the checkout-and-run unit with one that verifies the release manifest using the exact
    tag-bound identity above, derives the three `image@sha256:...` references, and runs those digests
    with the existing staging env (the fail-closed security env staging already requires — DB
-   `sslMode`, secret-store, and audit secrets). When local OCR is enabled, configure its token and
-   activate the `ocr` Compose profile.
+   `sslMode`, secret-store, audit secrets, and OCR token). The supported templates activate the
+   `ocr` Compose profile by default; use the documented low-resource opt-out only when the host lacks
+   AVX or cannot spare the sidecar resources.
 3. Verify and deploy a new signed manifest to roll forward.
 
 This step lives on the host because the systemd units and cloudflared config are not in the repository.

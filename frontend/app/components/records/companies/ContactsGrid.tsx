@@ -115,15 +115,18 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                     setCreationSucceeded(false);
                     setIsCreating(true);
                     try {
-                        const newContact = businessCard
-                            ? (await importBusinessCard(businessCard)).contact
-                            : await createContact({
+                        const imported = businessCard
+                            ? await importBusinessCard(businessCard)
+                            : null;
+                        const newContact = imported?.contact
+                            ?? await createContact({
                                 ...newContactPayload,
                                 duplicateReviewToken: duplicateReviewToken ?? undefined,
                             });
                         if (!isCurrent()) return;
+                        const reusedContact = imported?.disposition === 'reused';
                         let avatarUploadFailed = false;
-                        if (imageFile) {
+                        if (imageFile && !reusedContact) {
                             try {
                                 await uploadContactPicture(newContact.id, imageFile);
                             } catch {
@@ -135,13 +138,13 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         let finalized = false;
                         return {
                             avatarUploadFailed,
-                            avatarUploaded: imageFile != null && !avatarUploadFailed,
+                            avatarUploaded: imageFile != null && !reusedContact && !avatarUploadFailed,
                             finalize: () => {
                                 if (finalized || !isCurrent()) return;
                                 finalized = true;
                                 setNewContactPayload(emptyContactPayload(company.id));
                                 setImageFile(null);
-                                toast.success(t('toastContactCreated'));
+                                toast.success(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
                                 setCreationSucceeded(true);
                                 invalidatePendingClose();
                                 const closeGeneration = closeGenerationRef.current;
