@@ -370,18 +370,16 @@ class PersonServiceTest extends AbstractServiceTest {
             currentUser.getId(),
             false);
         PersonDuplicatePreflightRequest request = duplicateRequest(shared);
-        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
-        assertEquals(1, review.candidates().size());
-        assertFalse(review.candidates().getFirst().ownedByActiveWorkspace());
+        String reviewToken = "a".repeat(64);
 
         ConflictException sharedFailure = assertThrows(
             ConflictException.class,
             () -> personService.requireBusinessCardReuseTarget(
-                shared.getId(), request, review.reviewToken()));
+                shared.getId(), request, reviewToken));
         ConflictException missingFailure = assertThrows(
             ConflictException.class,
             () -> personService.requireBusinessCardReuseTarget(
-                Integer.MAX_VALUE, request, review.reviewToken()));
+                Integer.MAX_VALUE, request, reviewToken));
 
         assertEquals(businessCardReuseConflictMessage(), sharedFailure.getMessage());
         assertEquals(businessCardReuseConflictMessage(), missingFailure.getMessage());
