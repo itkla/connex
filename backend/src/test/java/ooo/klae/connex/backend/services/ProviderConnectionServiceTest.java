@@ -59,7 +59,9 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
 
     private static String fakeIdToken(String email) {
         String payload = Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(("{\"email\":\"" + email + "\"}").getBytes(StandardCharsets.UTF_8));
+            .encodeToString(("{\"aud\":\"client-id\",\"iss\":\"https://accounts.example.test\","
+                + "\"sub\":\"provider-account\",\"email\":\"" + email + "\"}")
+                .getBytes(StandardCharsets.UTF_8));
         return "header." + payload + ".signature";
     }
 
@@ -202,7 +204,11 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         dangling.setUserId(currentUser.getId());
         dangling.setProvider("google");
         dangling.setStatus("connected");
+        dangling.setProviderAccountId("provider-account");
+        dangling.setProviderAccountEmail("sales@example.com");
+        dangling.setGrantedScopes("openid email");
         dangling.setCredentialRef("secret:v1:999999999");
+        dangling.setCredentialGeneration(1);
         providerConnectionMapper.insert(dangling);
 
         connectionService.disconnect("google");

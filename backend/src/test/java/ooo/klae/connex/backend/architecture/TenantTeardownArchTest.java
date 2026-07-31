@@ -260,8 +260,8 @@ class TenantTeardownArchTest {
                 .filter(NullifyReference.class::isInstance)
                 .map(NullifyReference.class::cast)
                 .anyMatch(value -> edge.columns().contains(value.column()));
-            Integer childOrder = deleteOrder.get(edge.child());
-            Integer parentOrder = deleteOrder.get(edge.parent());
+            Integer childOrder = effectiveDeleteOrder(edge.child(), deleteOrder);
+            Integer parentOrder = effectiveDeleteOrder(edge.parent(), deleteOrder);
             if (!prepared && (childOrder == null || parentOrder == null
                     || childOrder >= parentOrder)) {
                 violations.add(edge.child() + " (" + edge.constraint() + ") -> "
@@ -269,6 +269,21 @@ class TenantTeardownArchTest {
                     + " is not child-before-parent and has no preparation");
             }
         }
+    }
+
+    private Integer effectiveDeleteOrder(String table, Map<String, Integer> deleteOrder) {
+        Set<String> visited = new HashSet<>();
+        TableLifecycle declaration = TenantLifecycleRegistry.require(table);
+        while (declaration.reach() instanceof Cascade cascade) {
+            if (!visited.add(declaration.table())) {
+                return null;
+            }
+            declaration = TenantLifecycleRegistry.declarations().get(cascade.parentTable());
+            if (declaration == null) {
+                return null;
+            }
+        }
+        return deleteOrder.get(declaration.table());
     }
 
     private record RestrictiveEdge(

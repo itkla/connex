@@ -4,9 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
@@ -22,6 +30,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
  * are {@code ON DELETE CASCADE}, a self-delete would rip out the owner row and bypass the last-owner
  * guards that live on the member operations. The account path re-applies those guards (#316).
  */
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class AccountDeletionGuardTest extends AbstractServiceTest {
 
     @Autowired private UserService userService;
@@ -30,6 +39,43 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    private final List<Integer> createdUserIds = new ArrayList<>();
+    private final List<Integer> createdWorkspaceIds = new ArrayList<>();
+    private final List<Integer> createdOrganizationIds = new ArrayList<>();
+    private final List<Integer> createdNoteIds = new ArrayList<>();
+    private final List<Integer> createdTaskIds = new ArrayList<>();
+
+    @AfterEach
+    void cleanUpCommittedFixtures() {
+        createdNoteIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM note WHERE id = ?", id));
+        createdTaskIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM task WHERE id = ?", id));
+        createdWorkspaceIds.reversed().forEach(
+            id -> jdbcTemplate.update(
+                "DELETE FROM workspace_member WHERE workspace_id = ?", id));
+        createdWorkspaceIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
+        createdOrganizationIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", id));
+        createdOrganizationIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM organization WHERE id = ?", id));
+        createdUserIds.reversed().forEach(
+            id -> jdbcTemplate.update(
+                "DELETE FROM workspace_member WHERE user_id = ?", id));
+        createdUserIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM org_member WHERE user_id = ?", id));
+        createdUserIds.reversed().forEach(
+            id -> jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", id));
+    }
+
+    @Override
+    protected User newUser() {
+        User user = super.newUser();
+        createdUserIds.add(user.getId());
+        return user;
+    }
 
     private int newOrgOwnedBy(int userId) {
         Organization org = new Organization();
@@ -37,6 +83,7 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
         org.setSlug("org-" + unique());
         organizationMapper.insert(org);
         orgMemberMapper.addMember(org.getId(), userId, "owner");
+        createdOrganizationIds.add(org.getId());
         return org.getId();
     }
 
@@ -71,7 +118,8 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
     @Test
     void authoredContentRefusesAccountDeletion() {
         User target = newUser();
-        newNote(target, null, null);
+        Note note = newNote(target, null, null);
+        createdNoteIds.add(note.getId());
         authenticateAs(target, workspace.getId());
 
         assertThrows(ConflictException.class, () -> userService.delete(target.getId()),
@@ -82,6 +130,7 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
     void cleanMemberAccount_deletesAndDetachesOrgDataReferences() {
         User target = newUser();
         Task task = newTask(target, null, null);
+        createdTaskIds.add(task.getId());
         authenticateAs(target, workspace.getId());
 
         userService.delete(target.getId());
@@ -100,5 +149,6 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
         soleOwned.setSlug("sole-owner-" + unique());
         workspaceMapper.insert(soleOwned);
         workspaceMapper.addMember(soleOwned.getId(), currentUser.getId(), "owner");
+        createdWorkspaceIds.add(soleOwned.getId());
     }
 }

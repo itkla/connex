@@ -31,7 +31,9 @@ class IdentityReadBoundaryArchTest {
         "DuplicatePreflightService",
         "IdentityBackfillTransaction",
         "IdentityIntakeService",
-        "ImportService");
+        "ImportService",
+        "ProviderCapturePagePersistence",
+        "ProviderCaptureReviewService");
     private static final Set<String> GUARDED_READ_METHODS = Set.of(
         "findVisiblePersonIdentityMatches",
         "findVisibleCompanyIdentityMatches",

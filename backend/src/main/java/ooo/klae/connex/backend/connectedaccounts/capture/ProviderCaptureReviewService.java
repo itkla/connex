@@ -316,8 +316,20 @@ public class ProviderCaptureReviewService {
             }
         }
         Person created = personService.createReviewed(
-            request.contact().toBean(), request.duplicateReviewToken());
+            request.contact().toBean(), duplicateReviewToken(request));
         return new Resolution("matched", created.getId(), "attach");
+    }
+
+    private static String duplicateReviewToken(
+            ProviderCaptureReviewRequest request) {
+        String token = request.duplicateReviewToken();
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        if (!token.matches("^[0-9a-f]{64}$")) {
+            throw new BadRequestException("duplicateReviewToken is invalid");
+        }
+        return token;
     }
 
     private void admitIfAutomatic(
