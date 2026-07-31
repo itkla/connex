@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
@@ -30,6 +31,7 @@ class CapabilityRegistryTest {
     @Mock private SsoConnectionService ssoConnectionService;
     @Mock private SocialLoginClientRegistrations socialLoginClientRegistrations;
     @Mock private ConnectedAccountProviders connectedAccountProviders;
+    @Mock private ConnectedCaptureProperties connectedCaptureProperties;
     @Mock private MailProperties mailProperties;
     @Mock private BusinessCardService businessCardService;
     @Mock private DeploymentProperties deploymentProperties;
@@ -40,7 +42,8 @@ class CapabilityRegistryTest {
     @BeforeEach
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
-                socialLoginClientRegistrations, connectedAccountProviders, mailProperties, businessCardService,
+                socialLoginClientRegistrations, connectedAccountProviders, connectedCaptureProperties,
+                mailProperties, businessCardService,
                 deploymentProperties, capability -> true, deliveryProperties);
     }
 
@@ -82,6 +85,7 @@ class CapabilityRegistryTest {
                 ssoConnectionService,
                 socialLoginClientRegistrations,
                 connectedAccountProviders,
+                connectedCaptureProperties,
                 mailProperties,
                 businessCardService,
                 deploymentProperties,
@@ -104,6 +108,7 @@ class CapabilityRegistryTest {
                 ssoConnectionService,
                 socialLoginClientRegistrations,
                 connectedAccountProviders,
+                new ConnectedCaptureProperties(),
                 managedMailProperties,
                 businessCardService,
                 new DeploymentProperties(),
@@ -119,6 +124,18 @@ class CapabilityRegistryTest {
         when(ssoConnectionService.isInstanceEnabled()).thenReturn(true);
 
         assertTrue(capabilityRegistry.isAvailable(Capability.SSO));
+    }
+
+    @Test
+    void captureRequiresConnectionSchedulingAndProviderIngestionAuthorization() {
+        when(connectedAccountProviders.isGoogleEnabled()).thenReturn(true);
+        when(connectedCaptureProperties.isCaptureEnabled("google"))
+            .thenReturn(false, true);
+
+        assertFalse(capabilityRegistry.isAvailable(
+            Capability.CONNECTED_CAPTURE_GOOGLE));
+        assertTrue(capabilityRegistry.isAvailable(
+            Capability.CONNECTED_CAPTURE_GOOGLE));
     }
 
     @Test

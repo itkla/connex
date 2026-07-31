@@ -209,6 +209,25 @@
     ORDER BY w.id
   </select>
 
+  <select id="findWorkspaceIdsPage" resultType="int">
+    SELECT w.id
+    FROM workspace w
+    JOIN organization o ON o.id = w.org_id
+    WHERE w.lifecycle_state = 'active'
+      AND o.lifecycle_state = 'active'
+      AND w.id &gt; #{afterId}
+    ORDER BY w.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findWorkspaceIdsLifecyclePage" resultType="int">
+    SELECT id
+    FROM workspace
+    WHERE id &gt; #{afterId}
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
   <select id="findByOrgId" resultType="Workspace">
     SELECT w.id, w.org_id, w.name, w.slug, w.created_at, w.updated_at
     FROM workspace w

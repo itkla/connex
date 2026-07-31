@@ -179,7 +179,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             startMs: ms,
             allDay: false,
             dayKey: dayKeyFromMs(ms),
-            href: '/activity/all',
+            href: `/activity/activities/${activity.id}`,
             draggable: false,
             raw: activity,
         });

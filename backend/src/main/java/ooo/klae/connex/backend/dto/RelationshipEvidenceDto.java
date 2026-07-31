@@ -96,6 +96,7 @@ public record RelationshipEvidenceDto(
      * @param occurredAt source timestamp
      * @param baseWeight model weight before decay
      * @param decayedContribution contribution at {@code asOf}
+     * @param captureEvidence immutable provider provenance when the source was captured
      */
     public record Contributor(
         SourceType sourceType,
@@ -103,7 +104,8 @@ public record RelationshipEvidenceDto(
         String interactionType,
         Instant occurredAt,
         double baseWeight,
-        double decayedContribution
+        double decayedContribution,
+        CaptureEvidenceDto captureEvidence
     ) {}
 
     /**

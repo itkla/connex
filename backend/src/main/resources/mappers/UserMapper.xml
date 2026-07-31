@@ -63,6 +63,56 @@
     SELECT id FROM app_user WHERE id = #{id} FOR SHARE
   </select>
 
+  <select id="isAccountDeletionReserved" resultType="boolean">
+    SELECT COALESCE(
+      account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),
+      FALSE
+    )
+    FROM app_user
+    WHERE id = #{id}
+  </select>
+
+  <select id="isAccountDeletionReservationOwner" resultType="boolean">
+    SELECT COALESCE(
+      account_deletion_reservation_owner = #{owner}
+        AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),
+      FALSE
+    )
+    FROM app_user
+    WHERE id = #{id}
+  </select>
+
+  <update id="reserveAccountDeletion">
+    UPDATE app_user
+    SET account_deletion_reserved_at = UTC_TIMESTAMP(6),
+        account_deletion_reservation_owner = #{owner},
+        account_deletion_reservation_until =
+          DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR)
+    WHERE id = #{id}
+      AND (
+        account_deletion_reservation_until IS NULL
+        OR account_deletion_reservation_until &lt;= UTC_TIMESTAMP(6)
+      )
+  </update>
+
+  <update id="renewAccountDeletionReservation">
+    UPDATE app_user
+    SET account_deletion_reservation_until =
+          DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR)
+    WHERE id = #{id}
+      AND account_deletion_reservation_owner = #{owner}
+      AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6)
+  </update>
+
+  <update id="clearAccountDeletionReservation">
+    UPDATE app_user
+    SET account_deletion_reserved_at = NULL,
+        account_deletion_reservation_owner = NULL,
+        account_deletion_reservation_until = NULL
+    WHERE id = #{id}
+      AND account_deletion_reservation_owner = #{owner}
+  </update>
+
   <select id="getUserByUsername" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user WHERE username = #{username}

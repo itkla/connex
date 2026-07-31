@@ -66,6 +66,8 @@
         JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
     AND p.archived_at IS NULL
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
   </sql>
 
   <sql id="visiblePipelineJoin">

@@ -44,6 +44,7 @@ class DuplicateDecisionLockServiceTest {
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
         order.verify(userMapper).lockByIdForShare(9);
+        order.verify(userMapper).isAccountDeletionReserved(9);
         order.verify(workspaceMapper).lockActiveWorkspaceForShare(5);
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 9);
         order.verify(organizationMapper).lockActiveByIdForShare(3);
@@ -64,6 +65,20 @@ class DuplicateDecisionLockServiceTest {
         assertThrows(ForbiddenException.class, service::lockCurrentOrganization);
 
         verify(organizationMapper, never()).lockActiveByIdForShare(3);
+    }
+
+    @Test
+    void currentRequestRejectsAccountDeletionReservationBeforeWorkspaceLock() {
+        DuplicateDecisionLockService service = service();
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        when(workspaceService.getCurrentOrgId()).thenReturn(3);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(userMapper.isAccountDeletionReserved(9)).thenReturn(true);
+
+        assertThrows(ForbiddenException.class, service::lockCurrentOrganization);
+
+        verify(workspaceMapper, never()).lockActiveWorkspaceForShare(5);
     }
 
     @Test
@@ -117,6 +132,7 @@ class DuplicateDecisionLockServiceTest {
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
         order.verify(userMapper).lockByIdForShare(9);
+        order.verify(userMapper).isAccountDeletionReserved(9);
         order.verify(workspaceMapper).lockActiveWorkspaceForShare(5);
         order.verify(workspaceMapper).lockActiveWorkspaceForShare(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 9);
@@ -168,6 +184,19 @@ class DuplicateDecisionLockServiceTest {
             () -> service.lockBackgroundOrganization(5));
 
         verify(organizationMapper, never()).lockActiveByIdForShare(3);
+    }
+
+    @Test
+    void backgroundMemberWorkRejectsAccountDeletionReservationBeforeWorkspaceLock() {
+        DuplicateDecisionLockService service = service();
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(userMapper.isAccountDeletionReserved(9)).thenReturn(true);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> service.lockBackgroundMemberOrganization(5, 9));
+
+        verify(workspaceMapper, never()).lockActiveWorkspaceForShare(5);
     }
 
     private DuplicateDecisionLockService service() {

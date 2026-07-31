@@ -274,6 +274,19 @@ connex:
             enabled: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_ENABLED:false}
             client-id: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_SECRET:}
+    connected-capture:
+        scheduling-enabled: ${CONNEX_CONNECTED_CAPTURE_SCHEDULING_ENABLED:false}
+        google:
+            enabled: ${CONNEX_CONNECTED_CAPTURE_GOOGLE_ENABLED:false}
+        microsoft:
+            enabled: ${CONNEX_CONNECTED_CAPTURE_MICROSOFT_ENABLED:false}
+        page-size: ${CONNEX_CONNECTED_CAPTURE_PAGE_SIZE:100}
+        scheduler-batch-size: ${CONNEX_CONNECTED_CAPTURE_SCHEDULER_BATCH_SIZE:50}
+        lease-duration: ${CONNEX_CONNECTED_CAPTURE_LEASE_DURATION:2m}
+        request-timeout: ${CONNEX_CONNECTED_CAPTURE_REQUEST_TIMEOUT:20s}
+        sync-interval: ${CONNEX_CONNECTED_CAPTURE_SYNC_INTERVAL:15m}
+        retry-base: ${CONNEX_CONNECTED_CAPTURE_RETRY_BASE:1m}
+        intervention-failure-count: ${CONNEX_CONNECTED_CAPTURE_INTERVENTION_FAILURE_COUNT:8}
     ai:
         # Instance-level switch for AI features (#94/#386). Defaults false pending live public/APPI
         # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,

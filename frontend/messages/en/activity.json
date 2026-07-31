@@ -434,5 +434,21 @@
     "deal": "Deal",
     "loggedBy": "Logged by",
     "when": "When"
+  },
+  "CapturedEvidence": {
+    "title": "Provider capture evidence",
+    "description": "This read-only activity was projected from provider data admitted by the effective capture policy.",
+    "capturedBy": "Captured from {provider}",
+    "provider": "Provider",
+    "stream": "Source stream",
+    "streamValue": {
+      "calendar": "Calendar",
+      "mail_inbox": "Received mail",
+      "mail_sent": "Sent mail"
+    },
+    "sourceId": "Provider source ID",
+    "capturedAt": "Captured",
+    "captureAsOf": "Evidence as of",
+    "readOnly": "Provider projections cannot be edited or deleted in Connex."
   }
 }

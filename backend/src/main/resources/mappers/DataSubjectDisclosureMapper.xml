@@ -91,6 +91,53 @@
     ORDER BY a.timestamp DESC, a.id DESC
   </select>
 
+  <select id="findProviderCaptureEvidence"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ProviderCaptureEvidenceDto">
+    SELECT interaction.id AS interaction_id,
+           interaction.workspace_id,
+           interaction.provider,
+           interaction.stream,
+           interaction.provider_source_id,
+           interaction.provider_conversation_id,
+           interaction.interaction_type,
+           interaction.subject,
+           interaction.body,
+           interaction.occurred_at,
+           interaction.ended_at,
+           interaction.visibility,
+           interaction.admission_status,
+           interaction.admitted_fields_json,
+           interaction.material_exclusions_json,
+           interaction.captured_at,
+           participant.id AS participant_id,
+           participant.participant_role,
+           participant.display_name AS participant_display_name,
+           participant.email AS participant_email,
+           participant.match_state AS participant_match_state,
+           participant.held_reason AS participant_held_reason
+    FROM person p
+    JOIN provider_captured_participant participant
+      ON participant.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+      AND (
+        participant.person_id = p.id
+        OR participant.normalized_email IN (
+          SELECT identity.normalized_value
+          FROM person_identity identity
+          WHERE identity.workspace_id = p.workspace_id
+            AND identity.person_id = p.id
+            AND identity.kind = 'email'
+        )
+      )
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = participant.workspace_id
+      AND interaction.id = participant.interaction_id
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY interaction.occurred_at DESC, interaction.id DESC, participant.id
+  </select>
+
   <select id="findNotes"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$NoteDto">
     SELECT n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id,

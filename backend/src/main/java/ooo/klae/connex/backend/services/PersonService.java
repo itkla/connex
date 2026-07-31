@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -73,6 +74,7 @@ public class PersonService {
     private final IdentityIntakeService identityIntakeService;
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final ProviderCaptureMapper providerCaptureMapper;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -437,6 +439,9 @@ public class PersonService {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
         personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
+        if (suspended || provisionCeased) {
+            withdrawProviderCapture(workspaceId, id);
+        }
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = suspended || provisionCeased
             ? aiOutputCacheMapper.deleteForPerson(workspaceId, id)
@@ -446,6 +451,7 @@ public class PersonService {
             identityIntakeService.recordPerson(
                 workspaceId, id, after.getEmail(), after.getPhone(),
                 IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
+            providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {
@@ -525,6 +531,7 @@ public class PersonService {
         if (personMapper.archive(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
+        withdrawProviderCapture(workspaceId, id);
         Person after = requireArchivedPerson(workspaceId, id);
         auditService.record("person.archive", "person", id, before.getName(),
             "Archived person " + before.getName(),
@@ -557,6 +564,7 @@ public class PersonService {
         identityIntakeService.recordPerson(
             workspaceId, id, after.getEmail(), after.getPhone(),
             IdentityAcquisitionSource.BACKFILL, null);
+        providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
         auditService.record("person.restore", "person", id, after.getName(),
             "Restored person " + after.getName(),
             auditService.singleChange("archivedAt", before.getArchivedAt(), null));
@@ -571,6 +579,12 @@ public class PersonService {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
         return person;
+    }
+
+    private void withdrawProviderCapture(int workspaceId, int personId) {
+        providerCaptureMapper.withdrawRestrictedProjections(workspaceId, personId);
+        providerCaptureMapper.holdRestrictedInteractions(workspaceId, personId);
+        providerCaptureMapper.unmatchRestrictedParticipants(workspaceId, personId);
     }
 
     /**

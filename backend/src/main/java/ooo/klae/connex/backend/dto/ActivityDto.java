@@ -52,6 +52,9 @@ public class ActivityDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private List<ReferenceDto> references;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private CaptureEvidenceDto captureEvidence;
+
     public static ActivityDto from(Activity a) {
         if (a == null) return null;
         ActivityDto dto = new ActivityDto();
@@ -68,6 +71,15 @@ public class ActivityDto {
         dto.references = a.getReferences() == null
             ? List.of()
             : a.getReferences().stream().map(ReferenceDto::from).toList();
+        dto.captureEvidence = CaptureEvidenceDto.from(
+            a.getProviderName(),
+            a.getProviderStream(),
+            a.getProviderSourceId(),
+            a.getProviderCapturedAt(),
+            a.getProviderCapturedAt(),
+            a.getProviderVisibility(),
+            a.getProviderAdmittedFieldsJson(),
+            a.getProviderMaterialExclusionsJson());
         return dto;
     }
 

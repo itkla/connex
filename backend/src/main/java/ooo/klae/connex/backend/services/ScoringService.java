@@ -926,7 +926,8 @@ public class ScoringService {
                 row.interactionType(),
                 requiredInstant(row.occurredAt()),
                 row.baseWeight(),
-                row.decayedContribution()
+                row.decayedContribution(),
+                row.captureEvidence()
             ))
             .toList();
         double returnedContribution = contributors.stream()

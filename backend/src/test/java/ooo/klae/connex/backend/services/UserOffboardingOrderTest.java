@@ -4,6 +4,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.util.List;
 
@@ -15,6 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
+import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
@@ -38,6 +41,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class UserOffboardingOrderTest {
@@ -63,6 +67,7 @@ class UserOffboardingOrderTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private NotificationStateVersionService stateVersionService;
     @Mock private WorkflowOffboardingService workflowOffboardingService;
+    @Mock private ProviderCapturePurgeService providerCapturePurgeService;
 
     @InjectMocks private UserOffboardingService service;
 
@@ -73,9 +78,12 @@ class UserOffboardingOrderTest {
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
-            workspaceMapper, savedViewPreferenceMapper, savedViewMapper,
+            workspaceMapper, providerCapturePurgeService,
+            savedViewPreferenceMapper, savedViewMapper,
             notificationMapper, dealMapper);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(providerCapturePurgeService).purge(7, 9, "google");
+        order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
@@ -90,8 +98,11 @@ class UserOffboardingOrderTest {
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
-            notificationMapper, savedViewPreferenceMapper, savedViewMapper,
+            providerCapturePurgeService, notificationMapper,
+            savedViewPreferenceMapper, savedViewMapper,
             taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
+        order.verify(providerCapturePurgeService).purge(7, 9, "google");
+        order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUser(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
@@ -155,19 +166,37 @@ class UserOffboardingOrderTest {
         OrgMemberService orgMemberService = mock(OrgMemberService.class);
         NotificationChangePublisher notificationChanges = mock(NotificationChangePublisher.class);
         ReferenceService referenceService = mock(ReferenceService.class);
-        UserOffboardingService offboardingService = mock(UserOffboardingService.class);
-        UserOffboardingService.AccountNotificationLocks locks =
-            new UserOffboardingService.AccountNotificationLocks(List.of(3, 11));
+        ProviderAccountOffboardingService providerOffboardingService =
+            mock(ProviderAccountOffboardingService.class);
+        UserAccountCatalogOffboardingService catalogOffboardingService =
+            mock(UserAccountCatalogOffboardingService.class);
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         User user = new User();
         user.setId(9);
         user.setUsername("target");
         when(workspaceService.discoverOwnedWorkspaceIds(9)).thenReturn(List.of(7));
         when(userMapper.lockById(9)).thenReturn(9);
-        when(offboardingService.snapshotAccountNotificationRecipients(9)).thenReturn(locks);
-        when(offboardingService.workflowWorkspaceIds(locks)).thenReturn(List.of());
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(workspaceService.isMember(7, 9)).thenReturn(true);
+        when(userMapper.reserveAccountDeletion(
+                eq(9), org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(1);
+        when(userMapper.renewAccountDeletionReservation(
+                eq(9), org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(1);
+        when(userMapper.isAccountDeletionReservationOwner(
+                eq(9), org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(true);
         when(userMapper.getUserById(9)).thenReturn(user);
+        UserDeletionTransaction deletionTransaction = new UserDeletionTransaction(
+            userMapper,
+            workspaceService,
+            orgMemberService,
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            auditService
+        );
+        when(tenantWorkScope.unrouted(
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
+            .thenAnswer(invocation -> invocation
+                .<java.util.function.Supplier<Object>>getArgument(0).get());
         UserService userService = new UserService(
             userMapper,
             activityMapper,
@@ -175,29 +204,35 @@ class UserOffboardingOrderTest {
             taskMapper,
             auditService,
             workspaceService,
-            orgMemberService,
             notificationChanges,
             referenceService,
-            offboardingService,
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             mock(UserProfilePictureTransaction.class),
-            mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class)
+            tenantWorkScope,
+            providerOffboardingService,
+            catalogOffboardingService,
+            deletionTransaction
         );
 
         userService.delete(9);
 
-        InOrder order = inOrder(workspaceService, offboardingService, orgMemberService, userMapper);
+        InOrder order = inOrder(
+            workspaceService, providerOffboardingService,
+            catalogOffboardingService, orgMemberService, userMapper);
         order.verify(workspaceService).requireSelf(9);
         order.verify(userMapper).lockById(9);
-        order.verify(offboardingService).snapshotAccountNotificationRecipients(9);
         order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
-        order.verify(offboardingService).workflowWorkspaceIds(locks);
         order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
-        order.verify(offboardingService).lockAccountNotificationRecipientMemberships(9, locks);
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
-        order.verify(offboardingService).assertNoAuthoredContent(9);
-        order.verify(offboardingService).eraseOrgDataReferences(9, locks);
+        order.verify(catalogOffboardingService).assertNoAuthoredContent(9);
+        order.verify(providerOffboardingService).purgeBeforeAccountDeletion(9);
+        order.verify(catalogOffboardingService).eraseReferences(9);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
+        order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
+        order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
+        order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
         order.verify(userMapper).delete(9);
     }
 }

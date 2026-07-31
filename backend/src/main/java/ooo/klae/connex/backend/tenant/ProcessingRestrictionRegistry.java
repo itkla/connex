@@ -33,6 +33,7 @@ public final class ProcessingRestrictionRegistry {
     public enum RestrictionStrategy {
         EXCLUDE_SUSPENDED,
         EXCLUDE_PROVISION_CEASED,
+        EXCLUDE_RESTRICTED,
         DETECT_RESTRICTED,
         INCLUDE_RESTRICTED_FOR_DISCLOSURE,
         PROJECT_RESTRICTION_STATE
@@ -56,8 +57,8 @@ public final class ProcessingRestrictionRegistry {
         Map<String, RestrictionEnrollment> entries = new LinkedHashMap<>();
         enroll(entries, "CompanyMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Company person projections exclude suspended people.");
-        enroll(entries, "DealMapper", RestrictionStrategy.PROJECT_RESTRICTION_STATE,
-            "Deal projections expose restriction state for caller handling; predicate enforcement debt is tracked by #869.");
+        enroll(entries, "DealMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Deal person projections exclude both suspended and provision-ceased people.");
         enroll(entries, "ReportMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Report person projections exclude suspended people.");
         enroll(entries, "PersonMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
@@ -73,14 +74,18 @@ public final class ProcessingRestrictionRegistry {
             "Campaign validation deliberately detects both restriction states before excluding audience members.");
         enroll(entries, "PersonEdgeMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Relationship graph reads exclude suspended endpoints.");
-        enroll(entries, "IdentityMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
+        enroll(entries, "IdentityMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
             "Backfill candidate reads and identity writes exclude both suspended and provision-ceased people.");
-        enroll(entries, "IdentityCollisionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
+        enroll(entries, "IdentityCollisionMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
             "Collision group reads exclude both suspended and provision-ceased people at read time.");
         enroll(entries, "NotificationMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Notification person projections exclude suspended people.");
         enroll(entries, "IntroductionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Introduction person projections exclude suspended people.");
+        enroll(entries, "PersonEmploymentMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Recent employment moves exclude both suspended and provision-ceased people.");
+        enroll(entries, "ProviderCaptureMapper", RestrictionStrategy.DETECT_RESTRICTED,
+            "Provider participant matching detects both restriction states before projection.");
         return Map.copyOf(entries);
     }
 
@@ -94,8 +99,6 @@ public final class ProcessingRestrictionRegistry {
             "Offline storage reconciliation must include restricted owners so binaries are not stranded.");
         entries.put(MAPPERS + "NoteMapper",
             "Retained note associations remain reachable for compliance and erasure operations.");
-        entries.put(MAPPERS + "PersonEmploymentMapper",
-            "Recent-moves restriction filtering remains tracked compliance debt under #869.");
         entries.put(MAPPERS + "TagMapper",
             "Tag lookup is auxiliary to an already restriction-assessed person result.");
         entries.put(MAPPERS + "TaskMapper",

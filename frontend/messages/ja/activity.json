@@ -434,5 +434,21 @@
     "deal": "取引",
     "loggedBy": "記録者",
     "when": "日時"
+  },
+  "CapturedEvidence": {
+    "title": "プロバイダー取り込みの根拠",
+    "description": "この読み取り専用アクティビティは、実際の取り込みポリシーで許可されたプロバイダーデータから作成されました。",
+    "capturedBy": "{provider} から取り込み",
+    "provider": "プロバイダー",
+    "stream": "取り込み元",
+    "streamValue": {
+      "calendar": "カレンダー",
+      "mail_inbox": "受信メール",
+      "mail_sent": "送信メール"
+    },
+    "sourceId": "プロバイダーのソースID",
+    "capturedAt": "取り込み日時",
+    "captureAsOf": "根拠の基準日時",
+    "readOnly": "プロバイダーから作成されたアクティビティは Connex で編集・削除できません。"
   }
 }

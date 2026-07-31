@@ -56,12 +56,19 @@
            cur.company_name     AS to_company_name,
            cur.started_at       AS moved_at
     FROM person_employment cur
-    JOIN person p ON p.id = cur.person_id AND p.archived_at IS NULL
-    JOIN person_employment prev ON prev.person_id = cur.person_id
+    JOIN person p ON p.workspace_id = cur.workspace_id
+         AND p.id = cur.person_id
+         AND p.archived_at IS NULL
+         AND p.suspended_at IS NULL
+         AND p.provision_ceased_at IS NULL
+    JOIN person_employment prev ON prev.workspace_id = cur.workspace_id
+         AND prev.person_id = cur.person_id
          AND prev.ended_at IS NOT NULL
          AND prev.ended_at = (
              SELECT MAX(pe.ended_at) FROM person_employment pe
-             WHERE pe.person_id = cur.person_id AND pe.ended_at IS NOT NULL
+             WHERE pe.workspace_id = cur.workspace_id
+               AND pe.person_id = cur.person_id
+               AND pe.ended_at IS NOT NULL
          )
     WHERE cur.workspace_id = #{workspaceId}
       AND cur.ended_at IS NULL

@@ -26,6 +26,8 @@ const EMPTY_COUNTS: ActivationCounts = {
     stages: 0,
     members: 1,
     connectedAccounts: 0,
+    connectedCaptureReady: 0,
+    connectedCaptureAvailable: false,
     connectedAccountsAvailable: false,
     canImportContacts: true,
     canImportCompanies: true,
@@ -44,6 +46,8 @@ const FULL_COUNTS: ActivationCounts = {
     stages: 5,
     members: 2,
     connectedAccounts: 0,
+    connectedCaptureReady: 0,
+    connectedCaptureAvailable: false,
     connectedAccountsAvailable: false,
     canImportContacts: true,
     canImportCompanies: true,
@@ -255,6 +259,26 @@ describe("buildActivationSteps", () => {
             connectedAccounts: 1,
         });
         expect(steps.find((step) => step.id === "connections")?.done).toBe(true);
+    });
+
+    it("requires capture readiness instead of OAuth custody when capture is available", () => {
+        const connectedOnly = buildActivationSteps({
+            ...FULL_COUNTS,
+            connectedAccountsAvailable: true,
+            connectedAccounts: 1,
+            connectedCaptureAvailable: true,
+            connectedCaptureReady: 0,
+        });
+        expect(connectedOnly.find((step) => step.id === "connections")?.done).toBe(false);
+
+        const captureReady = buildActivationSteps({
+            ...FULL_COUNTS,
+            connectedAccountsAvailable: true,
+            connectedAccounts: 1,
+            connectedCaptureAvailable: true,
+            connectedCaptureReady: 1,
+        });
+        expect(captureReady.find((step) => step.id === "connections")?.done).toBe(true);
     });
 });
 

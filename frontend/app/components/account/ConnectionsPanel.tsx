@@ -1,50 +1,58 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import {
-    ArrowPathIcon,
-    EllipsisHorizontalIcon,
-    LinkIcon,
-    PauseIcon,
-    PlayIcon,
-    TrashIcon,
-} from "@heroicons/react/24/outline";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
-import type { ConnectedAccountProvider, InstanceCapabilities, ProviderConnection, ProviderConnectionStatus } from "@/app/lib/types";
+import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
+import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
+import CapturePurgeDialog, {
+    type CaptureLifecycleMode,
+} from "@/app/components/account/connected-capture/CapturePurgeDialog";
+import CaptureReviewQueue from "@/app/components/account/connected-capture/CaptureReviewQueue";
+import WorkspaceCapturePolicyDialog from "@/app/components/account/connected-capture/WorkspaceCapturePolicyDialog";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import {
+    approveCapturedItem,
     beginProviderConnection,
+    decideCaptureReview,
+    deleteCapturedProviderData,
     disconnectProviderConnection,
+    getCaptureOverview,
+    getCaptureReviews,
     getProviderConnections,
     pauseProviderConnection,
+    preflightPersonDuplicates,
     resumeProviderConnection,
+    syncProviderCapture,
+    updateProviderCapturePolicy,
+    updateWorkspaceCapturePolicy,
 } from "@/app/lib/api";
-import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
-import { toastError, toastSuccess } from "@/app/lib/toast";
-import { formatRelativeTime } from "@/app/lib/utils";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+    captureConnectionsHref,
+    connectionsHrefWithoutOAuthCallback,
+    isCaptureOperationActive,
+    parseCaptureRouteState,
+    providerCaptureEnabled,
+} from "@/app/lib/connectedCapture";
+import { toastError, toastSuccess } from "@/app/lib/toast";
+import type {
+    CaptureOverview,
+    CaptureReviewDecision,
+    CaptureReviewItem,
+    CaptureReviewPage,
+    ConnectedAccountProvider,
+    InstanceCapabilities,
+    ProviderCaptureOverview,
+    ProviderCapturePolicy,
+    ProviderConnection,
+    WorkspaceCapturePolicy,
+} from "@/app/lib/types";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
-import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 const PROVIDERS: ConnectedAccountProvider[] = ["google", "microsoft"];
-
-const STATUS_CLASS: Record<ProviderConnectionStatus, string> = {
-    connected: "bg-brand text-brand-foreground ring-brand",
-    paused: "bg-risk-medium/15 text-risk-medium ring-risk-medium/30",
-    error: "bg-destructive/15 text-destructive ring-destructive/30",
-    revoked: "bg-muted text-muted-foreground/70 ring-border",
-};
 
 function GoogleMark() {
     return (
@@ -68,228 +76,539 @@ function MicrosoftMark() {
     );
 }
 
-type Props = {
-    capabilities: InstanceCapabilities;
+function providerOverview(
+    overview: CaptureOverview | null,
+    provider: ConnectedAccountProvider,
+): ProviderCaptureOverview | null {
+    return overview?.providers.find((entry) => entry.provider === provider) ?? null;
+}
+
+function replaceProviderOverview(
+    current: CaptureOverview | null,
+    updated: ProviderCaptureOverview,
+): CaptureOverview {
+    const providers = current?.providers.filter((entry) => entry.provider !== updated.provider) ?? [];
+    return { providers: [...providers, updated] };
+}
+
+type LifecycleTarget = {
+    provider: ConnectedAccountProvider;
+    mode: CaptureLifecycleMode;
 };
 
 /**
- * Per-user connected accounts (mail/calendar providers). Connections are self-owned: the panel
- * lists the current user's Google/Microsoft links with status and lifecycle actions. Connecting
- * navigates the browser to the provider consent URL minted by the backend; the OAuth callback
- * redirects back here with `?connected=` or `?error=`, which this panel surfaces as toasts.
+ * Manages self-owned provider connections and the active workspace's explicit capture policy.
  */
-export default function ConnectionsPanel({ capabilities }: Props) {
+export default function ConnectionsPanel({
+    capabilities,
+    effectivePermissions,
+}: {
+    capabilities: InstanceCapabilities;
+    effectivePermissions: string[];
+}) {
     const t = useTranslations("AccountConnections");
-    const locale = useLocale();
+    const tPolicy = useTranslations("AccountCapturePolicy");
+    const tWorkspacePolicy = useTranslations("AccountWorkspaceCapturePolicy");
+    const tCapture = useTranslations("AccountCaptureProvider");
+    const tReviews = useTranslations("AccountCaptureReviews");
+    const tLifecycle = useTranslations("AccountCaptureLifecycle");
     const router = useRouter();
     const searchParams = useSearchParams();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const currentSearchParams = useMemo(
+        () => new URLSearchParams(searchParams.toString()),
+        [searchParams],
+    );
+    const routeState = useMemo(
+        () => parseCaptureRouteState(currentSearchParams),
+        [currentSearchParams],
+    );
+    const anyCaptureEnabled = PROVIDERS.some((provider) =>
+        providerCaptureEnabled(capabilities, provider));
+    const canManageWorkspacePolicy = effectivePermissions.includes("WORKSPACE_SETTINGS");
+    const canCreatePeople = effectivePermissions.includes("PERSON_CREATE");
+
     const [connections, setConnections] = useState<ProviderConnection[] | null>(null);
-    const [error, setError] = useState(false);
-    const [busy, setBusy] = useState(false);
-    const [reloadKey, setReloadKey] = useState(0);
-    const [disconnectTarget, setDisconnectTarget] = useState<ConnectedAccountProvider | null>(null);
-    const [isDisconnecting, setIsDisconnecting] = useState(false);
+    const [connectionsError, setConnectionsError] = useState(false);
+    const [connectionsReloadKey, setConnectionsReloadKey] = useState(0);
+    const [captureOverview, setCaptureOverview] = useState<CaptureOverview | null>(
+        anyCaptureEnabled ? null : { providers: [] },
+    );
+    const [captureLoading, setCaptureLoading] = useState(anyCaptureEnabled);
+    const [captureError, setCaptureError] = useState(false);
+    const [captureReloadKey, setCaptureReloadKey] = useState(0);
+    const [reviewPage, setReviewPage] = useState<CaptureReviewPage | null>(null);
+    const [reviewsError, setReviewsError] = useState(false);
+    const [reviewsReloadKey, setReviewsReloadKey] = useState(0);
+    const [busyProvider, setBusyProvider] = useState<ConnectedAccountProvider | null>(null);
+    const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
+    const callbackAnnounced = useRef(false);
+
+    const replaceRouteState = useCallback((next: Partial<typeof routeState>) => {
+        router.replace(captureConnectionsHref(currentSearchParams, next), { scroll: false });
+    }, [currentSearchParams, router]);
 
     useEffect(() => {
         let cancelled = false;
-        getProviderConnections()
-            .then((all) => { if (!cancelled) { setConnections(all); setError(false); } })
-            .catch(() => { if (!cancelled) { setConnections([]); setError(true); } });
-        return () => { cancelled = true; };
-    }, [reloadKey]);
+        const controller = new AbortController();
+        getProviderConnections({ signal: controller.signal })
+            .then((all) => {
+                if (!cancelled) {
+                    setConnections(all);
+                    setConnectionsError(false);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setConnections([]);
+                    setConnectionsError(true);
+                }
+            });
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [connectionsReloadKey]);
 
-    const callbackAnnounced = useRef(false);
+    useEffect(() => {
+        if (!anyCaptureEnabled) return;
+        let cancelled = false;
+        const controller = new AbortController();
+        getCaptureOverview({ signal: controller.signal })
+            .then((overview) => {
+                if (!cancelled) {
+                    setCaptureOverview(overview);
+                    setCaptureError(false);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setCaptureError(true);
+            })
+            .finally(() => {
+                if (!cancelled) setCaptureLoading(false);
+            });
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [anyCaptureEnabled, captureReloadKey]);
+
+    const activeCaptureOperation = captureOverview?.providers.some(
+        (provider) =>
+            provider.streams.some((stream) => isCaptureOperationActive(stream.status))
+            || provider.purge.active,
+    ) ?? false;
+
+    useEffect(() => {
+        if (!anyCaptureEnabled || !activeCaptureOperation) return;
+        const timeout = window.setTimeout(
+            () => setCaptureReloadKey((current) => current + 1),
+            4000,
+        );
+        return () => window.clearTimeout(timeout);
+    }, [activeCaptureOperation, anyCaptureEnabled, captureOverview]);
 
     useEffect(() => {
         const connected = searchParams.get("connected");
         const callbackError = searchParams.get("error");
         if ((!connected && !callbackError) || callbackAnnounced.current) return;
         callbackAnnounced.current = true;
-        const announce = () => {
+        const timeout = window.setTimeout(() => {
             if (connected === "google" || connected === "microsoft") {
                 toastSuccess(t("connectedToast", { provider: t(`provider_${connected}`) }));
+                setConnectionsReloadKey((current) => current + 1);
+                if (providerCaptureEnabled(capabilities, connected)) {
+                    setCaptureReloadKey((current) => current + 1);
+                }
             } else if (callbackError) {
                 const known = ["state", "denied", "exchange", "no_offline_access"].includes(callbackError);
                 toastError(t(known ? `error_${callbackError}` : "error_exchange"));
             }
+            router.replace(connectionsHrefWithoutOAuthCallback(currentSearchParams), {
+                scroll: false,
+            });
+        }, 50);
+        return () => window.clearTimeout(timeout);
+    }, [capabilities, currentSearchParams, router, searchParams, t]);
+
+    useEffect(() => {
+        if (
+            routeState.panel !== "reviews"
+            || !routeState.provider
+            || !providerCaptureEnabled(capabilities, routeState.provider)
+        ) {
+            return;
+        }
+        let cancelled = false;
+        const controller = new AbortController();
+        getCaptureReviews(routeState.provider, routeState.page, 20, {
+            signal: controller.signal,
+        })
+            .then((page) => {
+                if (!cancelled) {
+                    setReviewPage(page);
+                    setReviewsError(false);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setReviewPage(null);
+                    setReviewsError(true);
+                }
+            })
+        return () => {
+            cancelled = true;
+            controller.abort();
         };
-        setTimeout(announce, 50);
-        router.replace("/account/connections");
-    }, [searchParams, router, t]);
+    }, [
+        capabilities,
+        reviewsReloadKey,
+        routeState.page,
+        routeState.panel,
+        routeState.provider,
+    ]);
 
-    const enabled = (provider: ConnectedAccountProvider) =>
-        provider === "google" ? capabilities.connectedAccounts.google : capabilities.connectedAccounts.microsoft;
-
+    const connectionEnabled = (provider: ConnectedAccountProvider) =>
+        capabilities.connectedAccounts[provider];
     const connectionOf = (provider: ConnectedAccountProvider) =>
-        connections?.find((c) => c.provider === provider) ?? null;
+        connections?.find((connection) => connection.provider === provider) ?? null;
+    const overviewOf = (provider: ConnectedAccountProvider) =>
+        providerOverview(captureOverview, provider);
+
+    const runProviderMutation = async <T,>(
+        provider: ConnectedAccountProvider,
+        request: () => Promise<T>,
+        success: (result: T) => void,
+        successMessage?: string,
+    ): Promise<boolean> => {
+        setBusyProvider(provider);
+        try {
+            const result = await request();
+            success(result);
+            if (successMessage) toastSuccess(successMessage);
+            return true;
+        } catch (error) {
+            if (!handlePasskeyStepUpError(error)) {
+                toastError(error instanceof Error ? error.message : t("actionFailed"));
+            }
+            return false;
+        } finally {
+            setBusyProvider(null);
+        }
+    };
 
     const connect = async (provider: ConnectedAccountProvider) => {
-        setBusy(true);
+        setBusyProvider(provider);
         try {
             const { url } = await beginProviderConnection(provider);
             window.location.assign(url);
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("actionFailed"));
+        } catch (error) {
+            if (!handlePasskeyStepUpError(error)) {
+                toastError(error instanceof Error ? error.message : t("actionFailed"));
             }
-            setBusy(false);
+            setBusyProvider(null);
         }
     };
 
     const togglePause = async (connection: ProviderConnection) => {
-        setBusy(true);
-        try {
-            const updated = connection.status === "paused"
-                ? await resumeProviderConnection(connection.provider)
-                : await pauseProviderConnection(connection.provider);
-            setConnections((prev) => prev?.map((c) => (c.provider === updated.provider ? updated : c)) ?? [updated]);
-            toastSuccess(updated.status === "paused" ? t("pausedToast") : t("resumedToast"));
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t("actionFailed"));
-        } finally {
-            setBusy(false);
-        }
+        await runProviderMutation(
+            connection.provider,
+            () => connection.status === "paused"
+                ? resumeProviderConnection(connection.provider)
+                : pauseProviderConnection(connection.provider),
+            (updated) => setConnections((current) =>
+                current?.map((entry) =>
+                    entry.provider === updated.provider ? updated : entry) ?? [updated]),
+            connection.status === "paused" ? t("resumedToast") : t("pausedToast"),
+        );
     };
 
-    const confirmDisconnect = async () => {
-        if (!disconnectTarget) return;
-        setIsDisconnecting(true);
-        try {
-            await disconnectProviderConnection(disconnectTarget);
-            setConnections((prev) => prev?.filter((c) => c.provider !== disconnectTarget) ?? []);
-            toastSuccess(t("disconnectedToast"));
-            setDisconnectTarget(null);
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("actionFailed"));
-            }
-        } finally {
-            setIsDisconnecting(false);
-        }
+    const savePolicy = async (
+        provider: ConnectedAccountProvider,
+        policy: ProviderCapturePolicy,
+    ) => runProviderMutation(
+        provider,
+        () => updateProviderCapturePolicy(provider, policy),
+        (updated) => setCaptureOverview((current) => replaceProviderOverview(current, updated)),
+        tPolicy("saved"),
+    );
+
+    const saveWorkspacePolicy = async (
+        provider: ConnectedAccountProvider,
+        policy: WorkspaceCapturePolicy,
+    ) => runProviderMutation(
+        provider,
+        () => updateWorkspaceCapturePolicy(provider, policy),
+        (updated) => setCaptureOverview((current) => replaceProviderOverview(current, updated)),
+        tWorkspacePolicy("saved"),
+    );
+
+    const sync = async (provider: ConnectedAccountProvider) => {
+        await runProviderMutation(
+            provider,
+            () => syncProviderCapture(provider),
+            (updated) => setCaptureOverview((current) => replaceProviderOverview(current, updated)),
+            tCapture("syncStarted"),
+        );
     };
 
-    const anyProviderAvailable = PROVIDERS.some((provider) => enabled(provider) || connectionOf(provider) !== null);
+    const decideReview = async (
+        review: CaptureReviewItem,
+        decision: CaptureReviewDecision,
+    ) => runProviderMutation(
+        review.provider,
+        () => decideCaptureReview(review.provider, review.id, decision),
+        (updated) => {
+            setCaptureOverview((current) => replaceProviderOverview(current, updated));
+            setReviewPage(null);
+            setReviewsReloadKey((current) => current + 1);
+        },
+        tReviews("resolved"),
+    );
+
+    const approveReview = async (review: CaptureReviewItem) => runProviderMutation(
+        review.provider,
+        () => approveCapturedItem(
+            review.provider,
+            review.interactionId,
+            review.interactionVersion,
+        ),
+        (updated) => {
+            setCaptureOverview((current) => replaceProviderOverview(current, updated));
+            setReviewPage(null);
+            setReviewsReloadKey((current) => current + 1);
+        },
+        tReviews("approved"),
+    );
+
+    const confirmLifecycle = async (target: LifecycleTarget): Promise<boolean> => {
+        if (target.mode === "purge") {
+            return runProviderMutation(
+                target.provider,
+                () => deleteCapturedProviderData(target.provider),
+                () => setCaptureReloadKey((current) => current + 1),
+                tLifecycle("purgeStarted"),
+            );
+        }
+        return runProviderMutation(
+            target.provider,
+            () => disconnectProviderConnection(target.provider),
+            () => {
+                setConnections((current) =>
+                    current?.filter((entry) => entry.provider !== target.provider) ?? []);
+                setCaptureOverview((current) => ({
+                    providers: current?.providers.filter(
+                        (entry) => entry.provider !== target.provider,
+                    ) ?? [],
+                }));
+            },
+            t("disconnectedToast"),
+        );
+    };
+
+    const routeOverview = routeState.provider ? overviewOf(routeState.provider) : null;
+    const selectedReview = routeState.reviewId
+        ? reviewPage?.items.find((review) => review.id === routeState.reviewId) ?? null
+        : null;
+    const purgeTarget = routeState.panel === "purge" && routeState.provider
+        ? { provider: routeState.provider, mode: "purge" as const }
+        : null;
+    const activeLifecycleTarget = lifecycleTarget ?? purgeTarget;
+    const providersToShow = PROVIDERS.filter(
+        (provider) =>
+            connectionEnabled(provider)
+            || providerCaptureEnabled(capabilities, provider)
+            || connectionOf(provider) != null,
+    );
 
     return (
-        <Rise className="space-y-3">
+        <div className="space-y-4">
             <div className="space-y-1">
                 <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
+                <p className="max-w-2xl px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
             </div>
 
             {connections === null ? (
-                <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
-                    <Skeleton className="h-14 w-full" />
-                    <Skeleton className="h-14 w-full" />
+                <div className="grid gap-3">
+                    <Skeleton className="h-28 w-full rounded-2xl" />
+                    <Skeleton className="h-28 w-full rounded-2xl" />
                 </div>
-            ) : error ? (
+            ) : connectionsError ? (
                 <div className="rounded-2xl border border-border bg-card px-4 py-8 text-center">
-                    <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+                    <p className="text-sm text-muted-foreground" role="alert">{t("loadFailed")}</p>
                     <Button
                         variant="outline"
                         size="sm"
                         className="mt-3"
                         onClick={() => {
                             setConnections(null);
-                            setReloadKey((k) => k + 1);
+                            setConnectionsReloadKey((current) => current + 1);
                         }}
                     >
                         {t("retry")}
                     </Button>
                 </div>
-            ) : !anyProviderAvailable ? (
+            ) : providersToShow.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
                     <p className="text-sm font-medium text-foreground">{t("unavailableTitle")}</p>
-                    <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{t("unavailableBody")}</p>
+                    <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                        {t("unavailableBody")}
+                    </p>
                 </div>
             ) : (
-                <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                    {PROVIDERS.filter((provider) => enabled(provider) || connectionOf(provider) !== null).map((provider) => {
+                <div className="grid gap-3">
+                    {providersToShow.map((provider) => {
                         const connection = connectionOf(provider);
+                        const captureEnabled = providerCaptureEnabled(capabilities, provider);
+                        const capture = overviewOf(provider);
                         return (
-                            <li key={provider} className="group flex items-center gap-3 px-4 py-3.5">
-                                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted ring-1 ring-border">
-                                    {provider === "google" ? <GoogleMark /> : <MicrosoftMark />}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-sm font-medium text-foreground">{t(`provider_${provider}`)}</p>
-                                        {connection && (
-                                            <span className={cn(
-                                                "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                                                STATUS_CLASS[connection.status],
-                                            )}>
-                                                {t(`status_${connection.status}`)}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="truncate text-xs text-muted-foreground">
-                                        {connection
-                                            ? connection.providerAccountEmail
-                                                ? t("connectedAs", { email: connection.providerAccountEmail })
-                                                : t("connectedNoEmail")
-                                            : t("notConnected")}
-                                        {connection && (
-                                            <span>
-                                                {" · "}
-                                                {connection.lastSyncAt
-                                                    ? t("lastSync", { time: formatRelativeTime(connection.lastSyncAt, locale) })
-                                                    : t("neverSynced")}
-                                            </span>
-                                        )}
-                                    </p>
-                                </div>
-                                {connection ? (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon-xs" aria-label={t("actions")} disabled={busy}>
-                                                <EllipsisHorizontalIcon className="size-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            {(connection.status === "connected" || connection.status === "paused") && (
-                                                <DropdownMenuItem onSelect={() => togglePause(connection)}>
-                                                    {connection.status === "paused"
-                                                        ? <><PlayIcon className="size-4" />{t("resume")}</>
-                                                        : <><PauseIcon className="size-4" />{t("pause")}</>}
-                                                </DropdownMenuItem>
-                                            )}
-                                            {enabled(provider) && (
-                                                <DropdownMenuItem onSelect={() => connect(provider)}>
-                                                    <ArrowPathIcon className="size-4" />{t("reconnect")}
-                                                </DropdownMenuItem>
-                                            )}
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem variant="destructive" onSelect={() => setDisconnectTarget(provider)}>
-                                                <TrashIcon className="size-4" />{t("disconnect")}
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                ) : (
-                                    <Button variant="outline" size="sm" onClick={() => connect(provider)} disabled={busy}>
-                                        <LinkIcon className="size-4" />
-                                        {t("connect")}
-                                    </Button>
-                                )}
-                            </li>
+                            <CaptureProviderCard
+                                key={provider}
+                                provider={provider}
+                                providerIcon={provider === "google" ? <GoogleMark /> : <MicrosoftMark />}
+                                connection={connection}
+                                connectionEnabled={
+                                    connectionEnabled(provider) || captureEnabled
+                                }
+                                captureEnabled={captureEnabled}
+                                capture={capture}
+                                captureLoading={captureEnabled && captureLoading}
+                                captureLoadError={captureEnabled && captureError}
+                                canManageWorkspacePolicy={canManageWorkspacePolicy}
+                                busy={busyProvider === provider}
+                                onConnect={() => connect(provider)}
+                                onTogglePause={() => {
+                                    if (connection) togglePause(connection);
+                                }}
+                                onConfigure={() => replaceRouteState({
+                                    provider,
+                                    panel: "policy",
+                                    reviewId: null,
+                                    page: 1,
+                                })}
+                                onWorkspacePolicy={() => replaceRouteState({
+                                    provider,
+                                    panel: "workspace-policy",
+                                    reviewId: null,
+                                    page: 1,
+                                })}
+                                onSync={() => sync(provider)}
+                                onReviews={() => {
+                                    setReviewPage(null);
+                                    setReviewsError(false);
+                                    replaceRouteState({
+                                        provider,
+                                        panel: "reviews",
+                                        reviewId: null,
+                                        page: 1,
+                                    });
+                                }}
+                                onPurge={() => replaceRouteState({
+                                    provider,
+                                    panel: "purge",
+                                    reviewId: null,
+                                    page: 1,
+                                })}
+                                onDisconnect={() => setLifecycleTarget({
+                                    provider,
+                                    mode: "disconnect",
+                                })}
+                                onRetryCapture={() =>
+                                    setCaptureReloadKey((current) => current + 1)}
+                            />
                         );
                     })}
-                </ul>
+                </div>
             )}
 
-            <p className="max-w-prose px-6 text-xs text-muted-foreground">{t("privacyNote")}</p>
+            <p className="max-w-2xl px-6 text-xs text-muted-foreground">{t("privacyNote")}</p>
 
-            <DeleteRecordDialog
-                open={disconnectTarget !== null}
-                onOpenChange={(next) => { if (!next) setDisconnectTarget(null); }}
-                selectedIds={disconnectTarget ? new Set([disconnectTarget]) : new Set()}
-                selectedItems={disconnectTarget ? [disconnectTarget] : []}
-                entityLabel={t("entityLabel")}
-                getDisplayName={(provider) => t(`provider_${provider}`)}
-                isDeleting={isDisconnecting}
-                confirmDelete={confirmDisconnect}
-            />
-        </Rise>
+            {routeOverview && routeState.panel === "policy" ? (
+                <CapturePolicyDialog
+                    key={`${routeOverview.provider}-${routeOverview.userPolicy.version}`}
+                    overview={routeOverview}
+                    open
+                    saving={busyProvider === routeOverview.provider}
+                    onOpenChange={(open) => {
+                        if (!open) replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                    }}
+                    onSave={(policy) => savePolicy(routeOverview.provider, policy)}
+                />
+            ) : null}
+
+            {routeOverview
+                && routeState.panel === "workspace-policy"
+                && canManageWorkspacePolicy ? (
+                    <WorkspaceCapturePolicyDialog
+                        key={`${routeOverview.provider}-${routeOverview.workspacePolicy.version}`}
+                        overview={routeOverview}
+                        open
+                        saving={busyProvider === routeOverview.provider}
+                        onOpenChange={(open) => {
+                            if (!open) replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                        }}
+                        onSave={(policy) =>
+                            saveWorkspacePolicy(routeOverview.provider, policy)}
+                    />
+                ) : null}
+
+            {routeOverview && routeState.panel === "reviews" ? (
+                <CaptureReviewQueue
+                    overview={routeOverview}
+                    page={reviewPage}
+                    selected={selectedReview}
+                    open
+                    loading={!reviewPage && !reviewsError}
+                    error={reviewsError}
+                    busy={busyProvider === routeOverview.provider}
+                    canCreatePeople={canCreatePeople}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setReviewPage(null);
+                            setReviewsError(false);
+                            replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                        }
+                    }}
+                    onPageChange={(page) => {
+                        setReviewPage(null);
+                        setReviewsError(false);
+                        replaceRouteState({ page, reviewId: null });
+                    }}
+                    onSelect={(review) => replaceRouteState({
+                        reviewId: review?.id ?? null,
+                    })}
+                    onRetry={() => {
+                        setReviewPage(null);
+                        setReviewsError(false);
+                        setReviewsReloadKey((current) => current + 1);
+                    }}
+                    onDecide={decideReview}
+                    onApprove={approveReview}
+                    onPreflight={(request) => preflightPersonDuplicates(request)}
+                />
+            ) : null}
+
+            {activeLifecycleTarget ? (
+                <CapturePurgeDialog
+                    key={`${activeLifecycleTarget.provider}-${activeLifecycleTarget.mode}`}
+                    mode={activeLifecycleTarget.mode}
+                    providerName={t(`provider_${activeLifecycleTarget.provider}`)}
+                    captureEnabled={providerCaptureEnabled(
+                        capabilities,
+                        activeLifecycleTarget.provider,
+                    )}
+                    open
+                    busy={busyProvider === activeLifecycleTarget.provider}
+                    onOpenChange={(open) => {
+                        if (open) return;
+                        if (activeLifecycleTarget.mode === "purge") {
+                            replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                        }
+                        setLifecycleTarget(null);
+                    }}
+                    onConfirm={() => confirmLifecycle(activeLifecycleTarget)}
+                />
+            ) : null}
+        </div>
     );
 }

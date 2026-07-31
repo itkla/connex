@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -18,6 +19,8 @@ import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
+import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
+import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
@@ -136,16 +139,30 @@ export default function TimelineRow({
         }
     } else if (entry.kind === 'activity') {
         const { activity } = entry;
-        title = <p className="text-sm text-foreground">{activity.subject}</p>;
+        title = isProviderOwnedActivity(activity) ? (
+            <Link
+                href={`/activity/activities/${activity.id}`}
+                className="text-sm text-foreground underline-offset-2 hover:underline"
+            >
+                {activity.subject}
+            </Link>
+        ) : (
+            <p className="text-sm text-foreground">{activity.subject}</p>
+        );
         subtitle = (
-            <div className="mt-0.5 flex min-w-0 items-center gap-2">
-                <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    {activity.type}
-                </span>
-                {activity.notes ? (
-                    <span className="truncate text-xs text-muted-foreground">
-                        · <NoteContent content={activity.notes} references={activity.references} />
+            <div>
+                <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                    <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                        {activity.type}
                     </span>
+                    {activity.notes ? (
+                        <span className="truncate text-xs text-muted-foreground">
+                            · <NoteContent content={activity.notes} references={activity.references} />
+                        </span>
+                    ) : null}
+                </div>
+                {activity.captureEvidence ? (
+                    <ProviderCaptureEvidence evidence={activity.captureEvidence} compact />
                 ) : null}
             </div>
         );
@@ -189,24 +206,26 @@ export default function TimelineRow({
                 </div>
                 {subtitle}
             </div>
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('actionsAria')}>
-                        <EllipsisVerticalIcon className="size-3 text-muted-foreground" />
-                    </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                        <PencilIcon className="size-4 text-muted-foreground" />
-                        {t('edit')}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={handleDelete}>
-                        <TrashIcon className="size-4" />
-                        {t('delete')}
-                    </DropdownMenuItem>
-                </DropdownMenuContent>
-            </DropdownMenu>
+            {entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity) ? (
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('actionsAria')}>
+                            <EllipsisVerticalIcon className="size-3 text-muted-foreground" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                            <PencilIcon className="size-4 text-muted-foreground" />
+                            {t('edit')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onClick={handleDelete}>
+                            <TrashIcon className="size-4" />
+                            {t('delete')}
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            ) : null}
 
             {entry.kind === 'task' && (
                 <EditTaskSheet
@@ -218,7 +237,7 @@ export default function TimelineRow({
                     deals={deals}
                 />
             )}
-            {entry.kind === 'activity' && (
+            {entry.kind === 'activity' && !isProviderOwnedActivity(entry.activity) && (
                 <EditActivitySheet
                     key={entry.activity.id}
                     activity={entry.activity}

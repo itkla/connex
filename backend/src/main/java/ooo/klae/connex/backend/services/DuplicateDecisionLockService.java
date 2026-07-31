@@ -59,9 +59,7 @@ public class DuplicateDecisionLockService {
         int actorId = workspaceService.getCurrentUserId();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = workspaceService.getCurrentOrgId();
-        if (userMapper.lockByIdForShare(actorId) == null) {
-            throw new ForbiddenException("Authenticated user is unavailable");
-        }
+        lockAvailableAccount(actorId, "Authenticated user is unavailable");
         TreeSet<Integer> workspaceIds = new TreeSet<>();
         workspaceIds.add(workspaceId);
         if (additionalWorkspaceId != null) {
@@ -89,6 +87,33 @@ public class DuplicateDecisionLockService {
      */
     public int lockBackgroundOrganization(int workspaceId) {
         return lockActiveOrganization(lockActiveWorkspace(workspaceId));
+    }
+
+    /**
+     * Locks one background capture owner, workspace membership, and organization in lifecycle
+     * order so identity and permission decisions remain valid through the tenant transaction.
+     *
+     * @param workspaceId workspace receiving captured evidence
+     * @param userId connected-account owner
+     * @return locked organization id
+     */
+    public int lockBackgroundMemberOrganization(int workspaceId, int userId) {
+        lockAvailableAccount(userId, "Connected-account owner is unavailable");
+        int orgId = lockActiveWorkspace(workspaceId);
+        WorkspaceMember membership =
+            workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
+        if (membership == null || !"active".equals(membership.getStatus())) {
+            throw new ForbiddenException(
+                "Connected-account owner is not an active workspace member");
+        }
+        return lockActiveOrganization(orgId);
+    }
+
+    private void lockAvailableAccount(int userId, String unavailableMessage) {
+        if (userMapper.lockByIdForShare(userId) == null
+                || userMapper.isAccountDeletionReserved(userId)) {
+            throw new ForbiddenException(unavailableMessage);
+        }
     }
 
     private int lockActiveWorkspace(int workspaceId) {

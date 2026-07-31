@@ -331,6 +331,9 @@ public class WorkspaceService {
         if (systemActor.is(userId)) {
             return systemActor.permissions();
         }
+        if (userMapper.isAccountDeletionReserved(userId)) {
+            return EnumSet.noneOf(Permission.class);
+        }
         Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
         if (roleId != null) {
             return parsePermissions(roleMapper.findPermissions(workspaceId, roleId));

@@ -340,7 +340,17 @@
            aged.base_weight,
            aged.base_weight
              * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
-             AS decayed_contribution
+             AS decayed_contribution,
+           provider_activity.provider_name,
+           provider_activity.provider_stream,
+           provider_activity.provider_source_id,
+           DATE_FORMAT(provider_activity.provider_captured_at, '%Y-%m-%d %H:%i:%s')
+             AS provider_captured_at,
+           CASE WHEN provider_activity.provider_owned
+             THEN DATE_FORMAT(#{reference}, '%Y-%m-%d %H:%i:%s') END AS capture_as_of,
+           provider_activity.provider_visibility,
+           provider_activity.provider_admitted_fields_json,
+           provider_activity.provider_material_exclusions_json
     FROM (
       SELECT source.source_type,
              source.source_id,
@@ -352,6 +362,10 @@
                  / #{model.microsecondsPerDay}) AS age_days
       <include refid="personEvidenceScope"/>
     ) aged
+    LEFT JOIN activity provider_activity
+      ON aged.source_type = 'activity'
+      AND provider_activity.workspace_id = #{workspaceId}
+      AND provider_activity.id = aged.source_id
     ORDER BY decayed_contribution DESC,
              aged.touched_at DESC,
              aged.source_type,

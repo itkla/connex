@@ -1108,6 +1108,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
     connectedAccounts: { google: false, microsoft: false },
+    connectedCapture: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
     businessCardImport: false,
@@ -1138,6 +1139,136 @@ export function resumeProviderConnection(provider: Types.ConnectedAccountProvide
 
 export function disconnectProviderConnection(provider: Types.ConnectedAccountProvider, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
+}
+
+export function getCaptureOverview(init: RequestInit = {}) {
+    return getJson<Types.CaptureOverview>("/api/account/connections/capture", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getCaptureOverviewResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.CaptureOverview>((init) => getCaptureOverview(init), cookie);
+}
+
+export function updateProviderCapturePolicy(
+    provider: Types.ConnectedAccountProvider,
+    policy: Types.ProviderCapturePolicy,
+    init: RequestInit = {},
+) {
+    return putJson<Types.ProviderCaptureOverview>(
+        `/api/account/connections/${provider}/capture-policy`,
+        {
+            enabled: policy.enabled,
+            calendar: policy.calendar,
+            mailInbox: policy.mailInbox,
+            mailSent: policy.mailSent,
+            backfillDays: policy.backfillDays,
+            includeBodies: policy.includeBodies,
+            admissionMode: policy.admissionMode,
+            excludedPeople: policy.excludedPeople,
+            excludedConversations: policy.excludedConversations,
+            version: policy.version,
+        },
+        init,
+    );
+}
+
+export function updateWorkspaceCapturePolicy(
+    provider: Types.ConnectedAccountProvider,
+    policy: Types.WorkspaceCapturePolicy,
+    init: RequestInit = {},
+) {
+    return putJson<Types.ProviderCaptureOverview>(
+        `/api/account/connections/${provider}/workspace-policy`,
+        {
+            allowed: policy.allowed,
+            calendar: policy.calendar,
+            mailInbox: policy.mailInbox,
+            mailSent: policy.mailSent,
+            maxBackfillDays: policy.maxBackfillDays,
+            bodyCaptureAllowed: policy.bodyCaptureAllowed,
+            reviewRequired: policy.reviewRequired,
+            excludePrivateEvents: policy.excludePrivateEvents,
+            excludeInternalOnly: policy.excludeInternalOnly,
+            excludedDomains: policy.excludedDomains,
+            version: policy.version,
+        },
+        init,
+    );
+}
+
+export function syncProviderCapture(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return postJson<Types.ProviderCaptureOverview>(
+        `/api/account/connections/${provider}/sync`,
+        {},
+        init,
+    );
+}
+
+export function getCaptureReviews(
+    provider: Types.ConnectedAccountProvider,
+    page = 1,
+    size = 20,
+    init: RequestInit = {},
+) {
+    const params = new URLSearchParams({
+        page: String(page),
+        size: String(size),
+    });
+    return getJson<Types.CaptureReviewPage>(
+        `/api/account/connections/${provider}/reviews?${params}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export function decideCaptureReview(
+    provider: Types.ConnectedAccountProvider,
+    reviewId: number,
+    decision: Types.CaptureReviewDecision,
+    init: RequestInit = {},
+) {
+    const body = decision.action === "create"
+        ? {
+            action: decision.action,
+            version: decision.version,
+            rememberExact: decision.rememberExact,
+            contact: decision.contact,
+            duplicateReviewToken: decision.duplicateReviewToken,
+        }
+        : decision;
+    return postJson<Types.ProviderCaptureOverview>(
+        `/api/account/connections/${provider}/reviews/${reviewId}`,
+        body,
+        init,
+    );
+}
+
+export function approveCapturedItem(
+    provider: Types.ConnectedAccountProvider,
+    capturedItemId: number,
+    version: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.ProviderCaptureOverview>(
+        `/api/account/connections/${provider}/captured/${capturedItemId}/approve`,
+        { version },
+        init,
+    );
+}
+
+export function deleteCapturedProviderData(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return deleteJson<Types.CapturePurgeState>(
+        `/api/account/connections/${provider}/captured-data`,
+        init,
+    );
 }
 
 export function discoverSso(email: string, init: RequestInit = {}) {

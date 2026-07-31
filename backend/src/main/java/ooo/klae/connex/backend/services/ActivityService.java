@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -208,6 +209,7 @@ public class ActivityService {
                     "Could not update activity because it was not found", null);
             throw new ResourceNotFoundException("Activity not found with id: " + id);
         }
+        requireEditable(before);
         User actor = authService.getCurrentUser();
         activity.setId(id);
         activity.setWorkspaceId(workspaceId);
@@ -236,6 +238,7 @@ public class ActivityService {
                     "Could not delete activity because it was not found", null);
             throw new ResourceNotFoundException("Activity not found with id: " + id);
         }
+        requireEditable(before);
         activityMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_ACTIVITY, id);
         auditService.record("activity.delete", "activity", id, before.getSubject(),
@@ -245,6 +248,13 @@ public class ActivityService {
 
     private Activity hydrate(int workspaceId, Activity activity) {
         return referenceService.hydrateActivities(workspaceId, List.of(activity)).get(0);
+    }
+
+    private static void requireEditable(Activity activity) {
+        if (activity.isProviderOwned()) {
+            throw new ConflictException(
+                "Captured provider evidence is read-only; change its capture decision instead");
+        }
     }
 
     private void requireDealExists(int workspaceId, Integer dealId) {

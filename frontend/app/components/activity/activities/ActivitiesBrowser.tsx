@@ -33,10 +33,12 @@ import {
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
+import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { deleteActivity, getActivityById } from '@/app/lib/api';
+import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import { useUrlSync } from '@/app/hooks/useUrlSync';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -143,7 +145,13 @@ export default function ActivitiesBrowser({
     useEffect(() => {
         const activityId = searchParams.get('activity');
         if (activityId && /^\d+$/.test(activityId)) {
-            getActivityById(Number(activityId)).then(setEditing).catch(() => {});
+            getActivityById(Number(activityId))
+                .then((activity) => {
+                    if (!isProviderOwnedActivity(activity)) {
+                        setEditing(activity);
+                    }
+                })
+                .catch(() => {});
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -494,7 +502,13 @@ export default function ActivitiesBrowser({
                                                     typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
                                                     planned={isPlanned(activity, now)}
                                                     plannedLabel={t('planned')}
-                                                    onOpen={() => setEditing(activity)}
+                                                    onOpen={() => {
+                                                        if (isProviderOwnedActivity(activity)) {
+                                                            router.push(`/activity/activities/${activity.id}`);
+                                                        } else {
+                                                            setEditing(activity);
+                                                        }
+                                                    }}
                                                     onEdit={() => setEditing(activity)}
                                                     onDelete={() => setDeleting(activity)}
                                                     editLabel={t('edit')}
@@ -675,6 +689,7 @@ function TimelineRow({
     const meta = TYPE_META[normalizeType(activity.type)];
     const Icon = meta.Icon;
     const creatorName = creator?.displayName || creator?.username || '';
+    const providerOwned = isProviderOwnedActivity(activity);
 
     return (
         <motion.li
@@ -706,12 +721,13 @@ function TimelineRow({
             </div>
 
             <div className="pb-6">
-                <div
-                    className="group cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-muted"
-                    onClick={onOpen}
-                >
+                <div className="group rounded-xl px-3 py-2 transition-colors hover:bg-muted">
                 <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
+                    <button
+                        type="button"
+                        className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        onClick={onOpen}
+                    >
                         <p className="truncate text-sm font-medium text-foreground">{activity.subject}</p>
                         <div className="mt-0.5 flex items-center gap-1.5">
                             <span className="text-xs text-muted-foreground">{typeLabel}</span>
@@ -722,48 +738,54 @@ function TimelineRow({
                                 </span>
                             )}
                         </div>
-                    </div>
+                    </button>
                     <div className="flex shrink-0 items-center gap-0.5">
                         <span className="text-xs tabular-nums text-muted-foreground">{time}</span>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <button
-                                    type="button"
-                                    aria-label={actionsAria}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 data-[state=open]:opacity-100"
-                                >
-                                    <EllipsisHorizontalIcon className="size-4" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" side="bottom" className="w-40" onClick={(e) => e.stopPropagation()}>
-                                <DropdownMenuItem
-                                    onSelect={(e) => {
-                                        e.preventDefault();
-                                        onEdit();
-                                    }}
-                                >
-                                    <PencilIcon className="size-4 text-muted-foreground" />
-                                    {editLabel}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                    className="text-destructive hover:bg-destructive/10"
-                                    onSelect={(e) => {
-                                        e.preventDefault();
-                                        onDelete();
-                                    }}
-                                >
-                                    <TrashIcon className="size-4 text-destructive" />
-                                    {deleteLabel}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        {!providerOwned ? (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label={actionsAria}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 data-[state=open]:opacity-100"
+                                    >
+                                        <EllipsisHorizontalIcon className="size-4" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" side="bottom" className="w-40" onClick={(e) => e.stopPropagation()}>
+                                    <DropdownMenuItem
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            onEdit();
+                                        }}
+                                    >
+                                        <PencilIcon className="size-4 text-muted-foreground" />
+                                        {editLabel}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                        className="text-destructive hover:bg-destructive/10"
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            onDelete();
+                                        }}
+                                    >
+                                        <TrashIcon className="size-4 text-destructive" />
+                                        {deleteLabel}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        ) : null}
                     </div>
                 </div>
 
                 {activity.notes ? (
                     <p className="mt-1 line-clamp-2 text-sm text-muted-foreground"><NoteContent content={activity.notes} references={activity.references} /></p>
+                ) : null}
+
+                {activity.captureEvidence ? (
+                    <ProviderCaptureEvidence evidence={activity.captureEvidence} compact />
                 ) : null}
 
                 {(person || deal || creator) && (

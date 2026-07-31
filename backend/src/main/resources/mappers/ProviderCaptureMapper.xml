@@ -1,0 +1,1228 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ProviderCaptureMapper">
+
+  <resultMap id="WorkspacePolicyResult" type="ProviderCaptureWorkspacePolicy">
+    <id property="workspaceId" column="workspace_id"/>
+    <id property="provider" column="provider"/>
+    <result property="allowed" column="allowed"/>
+    <result property="calendarAllowed" column="calendar_allowed"/>
+    <result property="mailInboxAllowed" column="mail_inbox_allowed"/>
+    <result property="mailSentAllowed" column="mail_sent_allowed"/>
+    <result property="maxBackfillDays" column="max_backfill_days"/>
+    <result property="bodyCaptureAllowed" column="body_capture_allowed"/>
+    <result property="reviewRequired" column="review_required"/>
+    <result property="excludePrivateEvents" column="exclude_private_events"/>
+    <result property="excludeInternalOnly" column="exclude_internal_only"/>
+    <result property="excludedDomainsJson" column="excluded_domains_json"/>
+    <result property="version" column="version"/>
+    <result property="updatedByUserId" column="updated_by_user_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="UserPolicyResult" type="ProviderCaptureUserPolicy">
+    <id property="workspaceId" column="workspace_id"/>
+    <id property="userId" column="user_id"/>
+    <id property="provider" column="provider"/>
+    <result property="enabled" column="enabled"/>
+    <result property="calendarEnabled" column="calendar_enabled"/>
+    <result property="mailInboxEnabled" column="mail_inbox_enabled"/>
+    <result property="mailSentEnabled" column="mail_sent_enabled"/>
+    <result property="backfillDays" column="backfill_days"/>
+    <result property="includeBodies" column="include_bodies"/>
+    <result property="admissionMode" column="admission_mode"/>
+    <result property="excludedPeopleJson" column="excluded_people_json"/>
+    <result property="excludedConversationsJson" column="excluded_conversations_json"/>
+    <result property="version" column="version"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="SyncStateResult" type="ProviderCaptureSyncState">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="userId" column="user_id"/>
+    <result property="provider" column="provider"/>
+    <result property="stream" column="stream"/>
+    <result property="credentialGeneration" column="credential_generation"/>
+    <result property="status" column="status"/>
+    <result property="initialSyncCompleted" column="initial_sync_completed"/>
+    <result property="stableCursor" column="stable_cursor"/>
+    <result property="pageCursor" column="page_cursor"/>
+    <result property="leaseOwner" column="lease_owner"/>
+    <result property="leaseUntil" column="lease_until"/>
+    <result property="reconciliationMarker" column="reconciliation_marker"/>
+    <result property="backfillStartedAt" column="backfill_started_at"/>
+    <result property="lastAttemptAt" column="last_attempt_at"/>
+    <result property="lastSuccessAt" column="last_success_at"/>
+    <result property="nextAttemptAt" column="next_attempt_at"/>
+    <result property="processedItems" column="processed_items"/>
+    <result property="estimatedItems" column="estimated_items"/>
+    <result property="consecutiveFailures" column="consecutive_failures"/>
+    <result property="errorCode" column="error_code"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="InteractionResult" type="ProviderCapturedInteraction">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="userId" column="user_id"/>
+    <result property="provider" column="provider"/>
+    <result property="stream" column="stream"/>
+    <result property="providerSourceId" column="provider_source_id"/>
+    <result property="providerConversationId" column="provider_conversation_id"/>
+    <result property="sourceKeyHash" column="source_key_hash"/>
+    <result property="sourceVersion" column="source_version"/>
+    <result property="payloadHash" column="payload_hash"/>
+    <result property="interactionType" column="interaction_type"/>
+    <result property="subject" column="subject"/>
+    <result property="body" column="body"/>
+    <result property="occurredAt" column="occurred_at"/>
+    <result property="endedAt" column="ended_at"/>
+    <result property="visibility" column="visibility"/>
+    <result property="admissionStatus" column="admission_status"/>
+    <result property="admittedFieldsJson" column="admitted_fields_json"/>
+    <result property="materialExclusionsJson" column="material_exclusions_json"/>
+    <result property="policyVersion" column="policy_version"/>
+    <result property="version" column="version"/>
+    <result property="lastSeenReconciliationMarker"
+            column="last_seen_reconciliation_marker"/>
+    <result property="tombstonedAt" column="tombstoned_at"/>
+    <result property="capturedAt" column="captured_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="ParticipantResult" type="ProviderCapturedParticipant">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="interactionId" column="interaction_id"/>
+    <result property="participantRole" column="participant_role"/>
+    <result property="displayName" column="display_name"/>
+    <result property="email" column="email"/>
+    <result property="normalizedEmail" column="normalized_email"/>
+    <result property="personId" column="person_id"/>
+    <result property="matchState" column="match_state"/>
+    <result property="heldReason" column="held_reason"/>
+    <result property="version" column="version"/>
+    <result property="provider" column="provider"/>
+    <result property="stream" column="stream"/>
+    <result property="interactionType" column="interaction_type"/>
+    <result property="subject" column="subject"/>
+    <result property="occurredAt" column="occurred_at"/>
+    <result property="interactionVersion" column="interaction_version"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="getWorkspacePolicy" resultMap="WorkspacePolicyResult">
+    SELECT workspace_id, provider, allowed, calendar_allowed, mail_inbox_allowed,
+           mail_sent_allowed, max_backfill_days, body_capture_allowed, review_required,
+           exclude_private_events, exclude_internal_only, excluded_domains_json, version,
+           updated_by_user_id, created_at, updated_at
+    FROM provider_capture_workspace_policy
+    WHERE workspace_id = #{workspaceId} AND provider = #{provider}
+  </select>
+
+  <insert id="insertWorkspacePolicy">
+    INSERT INTO provider_capture_workspace_policy (
+      workspace_id, provider, allowed, calendar_allowed, mail_inbox_allowed,
+      mail_sent_allowed, max_backfill_days, body_capture_allowed, review_required,
+      exclude_private_events, exclude_internal_only, excluded_domains_json,
+      version, updated_by_user_id
+    ) VALUES (
+      #{workspaceId}, #{provider}, #{allowed}, #{calendarAllowed}, #{mailInboxAllowed},
+      #{mailSentAllowed}, #{maxBackfillDays}, #{bodyCaptureAllowed}, #{reviewRequired},
+      #{excludePrivateEvents}, #{excludeInternalOnly}, #{excludedDomainsJson}, 1,
+      #{updatedByUserId}
+    )
+  </insert>
+
+  <update id="updateWorkspacePolicy">
+    UPDATE provider_capture_workspace_policy
+    SET allowed = #{policy.allowed},
+        calendar_allowed = #{policy.calendarAllowed},
+        mail_inbox_allowed = #{policy.mailInboxAllowed},
+        mail_sent_allowed = #{policy.mailSentAllowed},
+        max_backfill_days = #{policy.maxBackfillDays},
+        body_capture_allowed = #{policy.bodyCaptureAllowed},
+        review_required = #{policy.reviewRequired},
+        exclude_private_events = #{policy.excludePrivateEvents},
+        exclude_internal_only = #{policy.excludeInternalOnly},
+        excluded_domains_json = #{policy.excludedDomainsJson},
+        updated_by_user_id = #{policy.updatedByUserId},
+        version = version + 1
+    WHERE workspace_id = #{policy.workspaceId}
+      AND provider = #{policy.provider}
+      AND version = #{expectedVersion}
+  </update>
+
+  <select id="getUserPolicy" resultMap="UserPolicyResult">
+    SELECT workspace_id, user_id, provider, enabled, calendar_enabled,
+           mail_inbox_enabled, mail_sent_enabled, backfill_days, include_bodies,
+           admission_mode, excluded_people_json, excluded_conversations_json,
+           version, created_at, updated_at
+    FROM provider_capture_user_policy
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+  </select>
+
+  <select id="getEnabledUserPolicyUserIds" resultType="int">
+    SELECT user_id
+    FROM provider_capture_user_policy
+    WHERE workspace_id = #{workspaceId}
+      AND provider = #{provider}
+      AND enabled = TRUE
+    ORDER BY user_id
+  </select>
+
+  <insert id="insertUserPolicy">
+    INSERT INTO provider_capture_user_policy (
+      workspace_id, user_id, provider, enabled, calendar_enabled, mail_inbox_enabled,
+      mail_sent_enabled, backfill_days, include_bodies, admission_mode,
+      excluded_people_json, excluded_conversations_json, version
+    ) VALUES (
+      #{workspaceId}, #{userId}, #{provider}, #{enabled}, #{calendarEnabled},
+      #{mailInboxEnabled}, #{mailSentEnabled}, #{backfillDays}, #{includeBodies},
+      #{admissionMode}, #{excludedPeopleJson}, #{excludedConversationsJson}, 1
+    )
+  </insert>
+
+  <update id="updateUserPolicy">
+    UPDATE provider_capture_user_policy
+    SET enabled = #{policy.enabled},
+        calendar_enabled = #{policy.calendarEnabled},
+        mail_inbox_enabled = #{policy.mailInboxEnabled},
+        mail_sent_enabled = #{policy.mailSentEnabled},
+        backfill_days = #{policy.backfillDays},
+        include_bodies = #{policy.includeBodies},
+        admission_mode = #{policy.admissionMode},
+        excluded_people_json = #{policy.excludedPeopleJson},
+        excluded_conversations_json = #{policy.excludedConversationsJson},
+        version = version + 1
+    WHERE workspace_id = #{policy.workspaceId}
+      AND user_id = #{policy.userId}
+      AND provider = #{policy.provider}
+      AND version = #{expectedVersion}
+  </update>
+
+  <insert id="ensureSyncState">
+    INSERT IGNORE INTO provider_capture_sync_state (
+      workspace_id, user_id, provider, stream, credential_generation, status,
+      next_attempt_at
+    ) VALUES (
+      #{workspaceId}, #{userId}, #{provider}, #{stream}, #{credentialGeneration},
+      'idle', UTC_TIMESTAMP(6)
+    )
+  </insert>
+
+  <select id="getSyncStates" resultMap="SyncStateResult">
+    SELECT id, workspace_id, user_id, provider, stream, credential_generation, status,
+           initial_sync_completed,
+           stable_cursor, page_cursor, lease_owner, lease_until,
+           reconciliation_marker, backfill_started_at,
+           last_attempt_at, last_success_at, next_attempt_at, processed_items,
+           estimated_items, consecutive_failures, error_code, created_at, updated_at
+    FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+    ORDER BY stream
+  </select>
+
+  <select id="findDueSyncRefs" resultType="ooo.klae.connex.backend.dto.ProviderCaptureSyncRef">
+    SELECT workspace_id, id AS sync_state_id
+    FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId}
+      AND status IN ('queued', 'retrying', 'idle', 'backfilling', 'syncing')
+      AND next_attempt_at &lt;= #{now}
+      AND (lease_until IS NULL OR lease_until &lt; #{now})
+    ORDER BY (last_attempt_at IS NULL) DESC,
+             COALESCE(last_attempt_at, created_at),
+             COALESCE(next_attempt_at, created_at),
+             id
+    LIMIT #{limit}
+  </select>
+
+  <update id="queueSync">
+    UPDATE provider_capture_sync_state
+    SET status = 'queued', next_attempt_at = UTC_TIMESTAMP(6), error_code = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND status NOT IN ('backfilling', 'syncing', 'purging')
+  </update>
+
+  <update id="pauseUserSync">
+    UPDATE provider_capture_sync_state
+    SET status = 'paused',
+        next_attempt_at = NULL,
+        error_code = 'policy_disabled',
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+  </update>
+
+  <update id="waitManualSync">
+    UPDATE provider_capture_sync_state
+    SET status = 'idle',
+        next_attempt_at = NULL,
+        error_code = NULL,
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND status NOT IN ('backfilling', 'syncing', 'purging')
+  </update>
+
+  <update id="pauseWorkspaceSync">
+    UPDATE provider_capture_sync_state
+    SET status = 'paused',
+        next_attempt_at = NULL,
+        error_code = 'workspace_disabled',
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND provider = #{provider}
+  </update>
+
+  <update id="resumeWorkspaceSync">
+    UPDATE provider_capture_sync_state state
+    JOIN provider_capture_user_policy policy
+      ON policy.workspace_id = state.workspace_id
+      AND policy.user_id = state.user_id
+      AND policy.provider = state.provider
+    SET state.status = 'queued',
+        state.next_attempt_at = UTC_TIMESTAMP(6),
+        state.error_code = NULL
+    WHERE state.workspace_id = #{workspaceId}
+      AND state.provider = #{provider}
+      AND state.status = 'paused'
+      AND policy.enabled = TRUE
+      AND policy.admission_mode &lt;&gt; 'manual'
+  </update>
+
+  <update id="resetSyncGeneration">
+    UPDATE provider_capture_sync_state
+    SET credential_generation = #{credentialGeneration},
+        status = 'queued',
+        initial_sync_completed = FALSE,
+        stable_cursor = NULL,
+        page_cursor = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        reconciliation_marker = NULL,
+        backfill_started_at = NULL,
+        next_attempt_at = UTC_TIMESTAMP(6),
+        processed_items = 0,
+        estimated_items = NULL,
+        consecutive_failures = 0,
+        error_code = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND credential_generation &lt;&gt; #{credentialGeneration}
+  </update>
+
+  <update id="claimSync">
+    UPDATE provider_capture_sync_state
+    SET lease_owner = #{owner},
+        lease_until = #{until},
+        last_attempt_at = #{now},
+        reconciliation_marker = CASE
+          WHEN page_cursor IS NULL
+            AND (
+              stable_cursor IS NULL
+              OR (
+                provider = 'microsoft'
+                AND stream = 'calendar'
+                AND stable_cursor = 'microsoft-calendar-full-scan:v1'
+              )
+            )
+          THEN UUID()
+          ELSE reconciliation_marker
+        END,
+        backfill_started_at = CASE
+          WHEN page_cursor IS NULL
+            AND (
+              stable_cursor IS NULL
+              OR (
+                provider = 'microsoft'
+                AND stream = 'calendar'
+                AND stable_cursor = 'microsoft-calendar-full-scan:v1'
+              )
+            )
+          THEN #{now}
+          ELSE backfill_started_at
+        END,
+        status = CASE
+          WHEN initial_sync_completed = FALSE THEN 'backfilling'
+          ELSE 'syncing'
+        END
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('queued', 'retrying', 'idle', 'backfilling', 'syncing')
+      AND next_attempt_at IS NOT NULL
+      AND next_attempt_at &lt;= #{now}
+      AND (lease_until IS NULL OR lease_until &lt; #{now})
+  </update>
+
+  <update id="renewSyncLease">
+    UPDATE provider_capture_sync_state
+    SET lease_until = #{until}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND lease_owner = #{owner}
+      AND lease_until &gt;= #{now}
+  </update>
+
+  <select id="getSyncStateForUpdate" resultMap="SyncStateResult">
+    SELECT id, workspace_id, user_id, provider, stream, credential_generation, status,
+           initial_sync_completed,
+           stable_cursor, page_cursor, lease_owner, lease_until,
+           reconciliation_marker, backfill_started_at,
+           last_attempt_at, last_success_at, next_attempt_at, processed_items,
+           estimated_items, consecutive_failures, error_code, created_at, updated_at
+    FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getSyncState" resultMap="SyncStateResult">
+    SELECT id, workspace_id, user_id, provider, stream, credential_generation, status,
+           initial_sync_completed,
+           stable_cursor, page_cursor, lease_owner, lease_until,
+           reconciliation_marker, backfill_started_at,
+           last_attempt_at, last_success_at, next_attempt_at, processed_items,
+           estimated_items, consecutive_failures, error_code, created_at, updated_at
+    FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <update id="saveSyncSuccess">
+    UPDATE provider_capture_sync_state
+    SET stable_cursor = #{stableCursor},
+        page_cursor = #{pageCursor},
+        status = #{status},
+        initial_sync_completed = CASE
+          WHEN #{pageCursor} IS NULL THEN TRUE
+          ELSE initial_sync_completed
+        END,
+        processed_items = #{processedItems},
+        estimated_items = #{estimatedItems},
+        last_success_at = #{lastSuccessAt},
+        next_attempt_at = #{nextAttemptAt},
+        consecutive_failures = 0,
+        error_code = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        reconciliation_marker = CASE
+          WHEN #{pageCursor} IS NULL THEN NULL
+          ELSE reconciliation_marker
+        END,
+        backfill_started_at = CASE
+          WHEN #{pageCursor} IS NULL THEN NULL
+          ELSE backfill_started_at
+        END
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND lease_owner = #{owner}
+  </update>
+
+  <update id="saveSyncFailure">
+    UPDATE provider_capture_sync_state
+    SET status = #{status},
+        error_code = #{errorCode},
+        next_attempt_at = #{nextAttemptAt},
+        consecutive_failures = consecutive_failures + 1,
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND lease_owner = #{owner}
+  </update>
+
+  <update id="resetSyncCursorFailure">
+    UPDATE provider_capture_sync_state
+    SET stable_cursor = NULL,
+        page_cursor = NULL,
+        reconciliation_marker = NULL,
+        backfill_started_at = NULL,
+        status = 'retrying',
+        error_code = #{errorCode},
+        next_attempt_at = #{nextAttemptAt},
+        consecutive_failures = consecutive_failures + 1,
+        processed_items = 0,
+        estimated_items = NULL,
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND lease_owner = #{owner}
+  </update>
+
+  <update id="pauseClaimedSync">
+    UPDATE provider_capture_sync_state
+    SET status = 'paused',
+        error_code = #{errorCode},
+        next_attempt_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND lease_owner = #{owner}
+  </update>
+
+  <select id="getInteractionBySourceHash" resultMap="InteractionResult">
+    SELECT id, workspace_id, user_id, provider, stream, provider_source_id,
+           provider_conversation_id,
+           source_key_hash, source_version, payload_hash, interaction_type, subject,
+           body, occurred_at, ended_at, visibility, admission_status,
+           admitted_fields_json, material_exclusions_json, policy_version, version,
+           last_seen_reconciliation_marker, tombstoned_at, captured_at, updated_at
+    FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND source_key_hash = #{sourceKeyHash}
+  </select>
+
+  <select id="getInteractionForUpdate" resultMap="InteractionResult">
+    SELECT id, workspace_id, user_id, provider, stream, provider_source_id,
+           provider_conversation_id,
+           source_key_hash, source_version, payload_hash, interaction_type, subject,
+           body, occurred_at, ended_at, visibility, admission_status,
+           admitted_fields_json, material_exclusions_json, policy_version, version,
+           last_seen_reconciliation_marker, tombstoned_at, captured_at, updated_at
+    FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertInteraction" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO provider_captured_interaction (
+      workspace_id, user_id, provider, stream, provider_source_id,
+      provider_conversation_id, source_key_hash,
+      source_version, payload_hash, interaction_type, subject, body, occurred_at,
+      ended_at, visibility, admission_status, admitted_fields_json,
+      material_exclusions_json, policy_version, version,
+      last_seen_reconciliation_marker, tombstoned_at
+    ) VALUES (
+      #{workspaceId}, #{userId}, #{provider}, #{stream}, #{providerSourceId},
+      #{providerConversationId}, #{sourceKeyHash}, #{sourceVersion}, #{payloadHash},
+      #{interactionType}, #{subject},
+      #{body}, #{occurredAt}, #{endedAt}, #{visibility}, #{admissionStatus},
+      #{admittedFieldsJson}, #{materialExclusionsJson}, #{policyVersion}, 1,
+      #{lastSeenReconciliationMarker}, #{tombstonedAt}
+    )
+  </insert>
+
+  <update id="updateInteraction">
+    UPDATE provider_captured_interaction
+    SET source_version = #{sourceVersion},
+        provider_conversation_id = #{providerConversationId},
+        payload_hash = #{payloadHash},
+        subject = #{subject},
+        body = #{body},
+        occurred_at = #{occurredAt},
+        ended_at = #{endedAt},
+        visibility = #{visibility},
+        admission_status = #{admissionStatus},
+        admitted_fields_json = #{admittedFieldsJson},
+        material_exclusions_json = #{materialExclusionsJson},
+        policy_version = #{policyVersion},
+        version = version + 1,
+        last_seen_reconciliation_marker = #{lastSeenReconciliationMarker},
+        tombstoned_at = #{tombstonedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND (
+        payload_hash &lt;&gt; #{payloadHash}
+        OR admission_status &lt;&gt; #{admissionStatus}
+        OR NOT (
+          last_seen_reconciliation_marker
+          &lt;=&gt; #{lastSeenReconciliationMarker}
+        )
+      )
+  </update>
+
+  <update id="touchInteractionReconciliationMarker">
+    UPDATE provider_captured_interaction
+    SET last_seen_reconciliation_marker = #{marker},
+        source_version = #{sourceVersion},
+        captured_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </update>
+
+  <update id="touchInteractionActivitiesCapturedAt">
+    UPDATE activity
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = activity.workspace_id
+      AND projection.activity_id = activity.id
+    SET activity.provider_captured_at = UTC_TIMESTAMP(6)
+    WHERE projection.workspace_id = #{workspaceId}
+      AND projection.interaction_id = #{interactionId}
+      AND activity.provider_owned = TRUE
+  </update>
+
+  <delete id="deleteMissingReconciliationActivities">
+    DELETE activity
+    FROM activity
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = activity.workspace_id
+      AND projection.activity_id = activity.id
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = projection.workspace_id
+      AND interaction.id = projection.interaction_id
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+      AND interaction.stream = #{stream}
+      AND NOT (
+        interaction.last_seen_reconciliation_marker &lt;=&gt; #{marker}
+      )
+  </delete>
+
+  <delete id="deleteMissingReconciliationParticipants">
+    DELETE participant
+    FROM provider_captured_participant participant
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = participant.workspace_id
+      AND interaction.id = participant.interaction_id
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+      AND interaction.stream = #{stream}
+      AND NOT (
+        interaction.last_seen_reconciliation_marker &lt;=&gt; #{marker}
+      )
+  </delete>
+
+  <update id="withdrawMissingReconciliationItems">
+    UPDATE provider_captured_interaction
+    SET subject = NULL,
+        body = NULL,
+        admission_status = 'withdrawn',
+        admitted_fields_json = JSON_ARRAY(),
+        material_exclusions_json = JSON_ARRAY('source_absent'),
+        tombstoned_at = UTC_TIMESTAMP(6),
+        version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND stream = #{stream}
+      AND admission_status &lt;&gt; 'withdrawn'
+      AND NOT (
+        last_seen_reconciliation_marker &lt;=&gt; #{marker}
+      )
+  </update>
+
+  <delete id="deleteParticipants">
+    DELETE FROM provider_captured_participant
+    WHERE workspace_id = #{workspaceId} AND interaction_id = #{interactionId}
+  </delete>
+
+  <insert id="insertParticipant" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO provider_captured_participant (
+      workspace_id, interaction_id, participant_role, display_name, email,
+      normalized_email, person_id, match_state, held_reason, version
+    ) VALUES (
+      #{workspaceId}, #{interactionId}, #{participantRole}, #{displayName}, #{email},
+      #{normalizedEmail}, #{personId}, #{matchState}, #{heldReason}, 1
+    )
+  </insert>
+
+  <select id="getParticipants" resultMap="ParticipantResult">
+    SELECT id, workspace_id, interaction_id, participant_role, display_name, email,
+           normalized_email, person_id, match_state, held_reason, version,
+           created_at, updated_at
+    FROM provider_captured_participant
+    WHERE workspace_id = #{workspaceId} AND interaction_id = #{interactionId}
+    ORDER BY id
+  </select>
+
+  <select id="getReconciledPersonIds" resultType="int">
+    SELECT DISTINCT participant.person_id
+    FROM provider_captured_interaction interaction
+    JOIN provider_captured_participant participant
+      ON participant.workspace_id = interaction.workspace_id
+      AND participant.interaction_id = interaction.id
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+      AND interaction.stream = #{stream}
+      AND interaction.last_seen_reconciliation_marker = #{marker}
+      AND participant.match_state = 'matched'
+      AND participant.person_id IS NOT NULL
+    ORDER BY participant.person_id
+  </select>
+
+  <select id="getReconciledActivityIds" resultType="int">
+    SELECT DISTINCT projection.activity_id
+    FROM provider_captured_interaction interaction
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = interaction.workspace_id
+      AND projection.interaction_id = interaction.id
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+      AND interaction.stream = #{stream}
+      AND interaction.last_seen_reconciliation_marker = #{marker}
+    ORDER BY projection.activity_id
+  </select>
+
+  <select id="getPersonIdsForInteractions" resultType="int">
+    SELECT DISTINCT person_id
+    FROM provider_captured_participant
+    WHERE workspace_id = #{workspaceId}
+      AND interaction_id IN
+      <foreach collection="interactionIds" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+      AND match_state = 'matched'
+      AND person_id IS NOT NULL
+    ORDER BY person_id
+  </select>
+
+  <select id="getActivityIdsForInteractions" resultType="int">
+    SELECT DISTINCT activity_id
+    FROM provider_activity_projection
+    WHERE workspace_id = #{workspaceId}
+      AND interaction_id IN
+      <foreach collection="interactionIds" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    ORDER BY activity_id
+  </select>
+
+  <select id="getMissingReconciliationInteractionIds" resultType="long">
+    SELECT id
+    FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND stream = #{stream}
+      AND (
+        last_seen_reconciliation_marker IS NULL
+        OR last_seen_reconciliation_marker &lt;&gt; #{marker}
+      )
+      AND admission_status &lt;&gt; 'withdrawn'
+    ORDER BY id
+  </select>
+
+  <select id="getReviewPage" resultMap="ParticipantResult">
+    SELECT review_rows.*
+    FROM (
+      SELECT p.id, p.workspace_id, p.interaction_id, p.participant_role,
+             p.display_name, p.email, p.normalized_email, p.person_id,
+             p.match_state, p.held_reason, p.version, p.created_at, p.updated_at,
+             i.provider, i.stream, i.interaction_type, i.subject, i.occurred_at,
+             i.version AS interaction_version
+      FROM provider_captured_participant p
+      JOIN provider_captured_interaction i
+        ON i.workspace_id = p.workspace_id AND i.id = p.interaction_id
+      WHERE p.workspace_id = #{workspaceId}
+        AND i.user_id = #{userId}
+        AND i.provider = #{provider}
+        AND i.admission_status IN ('held', 'admitted')
+        AND p.match_state IN ('unmatched', 'ambiguous')
+      UNION ALL
+      SELECT p.id, p.workspace_id, p.interaction_id, p.participant_role,
+             p.display_name, p.email, p.normalized_email, p.person_id,
+             p.match_state, 'approval_required' AS held_reason, p.version,
+             p.created_at, p.updated_at, i.provider, i.stream,
+             i.interaction_type, i.subject, i.occurred_at,
+             i.version AS interaction_version
+      FROM provider_captured_interaction i
+      JOIN provider_captured_participant p
+        ON p.workspace_id = i.workspace_id
+        AND p.interaction_id = i.id
+        AND p.match_state = 'matched'
+        AND p.id = (
+          SELECT MIN(selected.id)
+          FROM provider_captured_participant selected
+          WHERE selected.workspace_id = i.workspace_id
+            AND selected.interaction_id = i.id
+            AND selected.match_state = 'matched'
+        )
+      WHERE i.workspace_id = #{workspaceId}
+        AND i.user_id = #{userId}
+        AND i.provider = #{provider}
+        AND i.admission_status = 'held'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM provider_captured_participant unresolved
+          WHERE unresolved.workspace_id = i.workspace_id
+            AND unresolved.interaction_id = i.id
+            AND unresolved.match_state IN ('unmatched', 'ambiguous')
+        )
+    ) review_rows
+    ORDER BY review_rows.occurred_at DESC, review_rows.id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countReviews" resultType="long">
+    SELECT COUNT(*)
+    FROM provider_captured_participant p
+    JOIN provider_captured_interaction i
+      ON i.workspace_id = p.workspace_id AND i.id = p.interaction_id
+    WHERE p.workspace_id = #{workspaceId}
+      AND i.user_id = #{userId}
+      AND i.provider = #{provider}
+      AND i.admission_status IN ('held', 'admitted')
+      AND p.match_state IN ('unmatched', 'ambiguous')
+  </select>
+
+  <select id="countPendingApprovals" resultType="long">
+    SELECT COUNT(*)
+    FROM provider_captured_interaction i
+    WHERE i.workspace_id = #{workspaceId}
+      AND i.user_id = #{userId}
+      AND i.provider = #{provider}
+      AND i.admission_status = 'held'
+      AND EXISTS (
+        SELECT 1
+        FROM provider_captured_participant p
+        WHERE p.workspace_id = i.workspace_id
+          AND p.interaction_id = i.id
+          AND p.match_state = 'matched'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM provider_captured_participant p
+        WHERE p.workspace_id = i.workspace_id
+          AND p.interaction_id = i.id
+          AND p.match_state IN ('unmatched', 'ambiguous')
+      )
+  </select>
+
+  <select id="getParticipantForUpdate" resultMap="ParticipantResult">
+    SELECT p.id, p.workspace_id, p.interaction_id, p.participant_role, p.display_name,
+           p.email, p.normalized_email, p.person_id, p.match_state, p.held_reason,
+           p.version, p.created_at, p.updated_at, i.provider, i.stream,
+           i.interaction_type, i.subject, i.occurred_at, i.version AS interaction_version
+    FROM provider_captured_participant p
+    JOIN provider_captured_interaction i
+      ON i.workspace_id = p.workspace_id AND i.id = p.interaction_id
+    WHERE p.workspace_id = #{workspaceId}
+      AND i.user_id = #{userId}
+      AND i.provider = #{provider}
+      AND p.id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getParticipant" resultMap="ParticipantResult">
+    SELECT p.id, p.workspace_id, p.interaction_id, p.participant_role, p.display_name,
+           p.email, p.normalized_email, p.person_id, p.match_state, p.held_reason,
+           p.version, p.created_at, p.updated_at, i.provider, i.stream,
+           i.interaction_type, i.subject, i.occurred_at,
+           i.version AS interaction_version
+    FROM provider_captured_participant p
+    JOIN provider_captured_interaction i
+      ON i.workspace_id = p.workspace_id AND i.id = p.interaction_id
+    WHERE p.workspace_id = #{workspaceId}
+      AND i.user_id = #{userId}
+      AND i.provider = #{provider}
+      AND i.admission_status IN ('held', 'admitted')
+      AND p.id = #{id}
+  </select>
+
+  <update id="resolveParticipant">
+    UPDATE provider_captured_participant
+    SET match_state = #{matchState},
+        person_id = #{personId},
+        held_reason = NULL,
+        version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND version = #{expectedVersion}
+      AND match_state IN ('unmatched', 'ambiguous')
+  </update>
+
+  <insert id="upsertDecision">
+    INSERT INTO provider_participant_decision (
+      workspace_id, user_id, provider, normalized_email, decision, person_id
+    ) VALUES (
+      #{workspaceId}, #{userId}, #{provider}, #{normalizedEmail}, #{decision}, #{personId}
+    )
+    ON DUPLICATE KEY UPDATE decision = VALUES(decision), person_id = VALUES(person_id)
+  </insert>
+
+  <select id="getRememberedPersonId" resultType="int">
+    SELECT d.person_id
+    FROM provider_participant_decision d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.user_id = #{userId}
+      AND d.provider = #{provider}
+      AND d.normalized_email = #{normalizedEmail}
+      AND d.decision = 'attach'
+  </select>
+
+  <select id="isRememberedIgnore" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM provider_participant_decision
+      WHERE workspace_id = #{workspaceId}
+        AND user_id = #{userId}
+        AND provider = #{provider}
+        AND normalized_email = #{normalizedEmail}
+        AND decision = 'ignore'
+    )
+  </select>
+
+  <select id="isPersonProcessingRestricted" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM person
+      WHERE workspace_id = #{workspaceId}
+        AND id = #{personId}
+        AND (suspended_at IS NOT NULL OR provision_ceased_at IS NOT NULL)
+    )
+  </select>
+
+  <insert id="insertProviderActivity">
+    INSERT IGNORE INTO activity (
+      workspace_id, type, subject, notes, person_id, deal_id, created_by_id, timestamp,
+      provider_owned, provider_name, provider_stream, provider_source_id,
+      provider_captured_at, provider_visibility, provider_admitted_fields_json,
+      provider_material_exclusions_json, provider_projection_key
+    ) VALUES (
+      #{workspaceId}, #{interaction.interactionType},
+      COALESCE(#{interaction.subject}, CASE
+        WHEN #{interaction.interactionType} = 'meeting' THEN 'Captured meeting'
+        ELSE 'Captured email'
+      END),
+      #{interaction.body}, #{participant.personId}, NULL, #{actorId}, #{interaction.occurredAt},
+      TRUE, #{interaction.provider}, #{interaction.stream}, #{interaction.providerSourceId},
+      #{interaction.capturedAt}, #{interaction.visibility}, #{interaction.admittedFieldsJson},
+      #{interaction.materialExclusionsJson}, #{projectionKey}
+    )
+  </insert>
+
+  <update id="updateProviderActivity">
+    UPDATE activity
+    SET type = #{interaction.interactionType},
+        subject = COALESCE(#{interaction.subject}, CASE
+          WHEN #{interaction.interactionType} = 'meeting' THEN 'Captured meeting'
+          ELSE 'Captured email'
+        END),
+        notes = #{interaction.body},
+        person_id = #{participant.personId},
+        timestamp = #{interaction.occurredAt},
+        provider_source_id = #{interaction.providerSourceId},
+        provider_captured_at = #{interaction.capturedAt},
+        provider_visibility = #{interaction.visibility},
+        provider_admitted_fields_json = #{interaction.admittedFieldsJson},
+        provider_material_exclusions_json = #{interaction.materialExclusionsJson}
+    WHERE workspace_id = #{workspaceId}
+      AND provider_projection_key = #{projectionKey}
+      AND provider_owned = TRUE
+  </update>
+
+  <delete id="deleteInteractionActivitiesExceptPeople">
+    DELETE activity
+    FROM activity
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = activity.workspace_id
+      AND projection.activity_id = activity.id
+    JOIN provider_captured_participant participant
+      ON participant.workspace_id = projection.workspace_id
+      AND participant.id = projection.participant_id
+    WHERE projection.workspace_id = #{workspaceId}
+      AND projection.interaction_id = #{interactionId}
+      <choose>
+        <when test="personIds != null and !personIds.isEmpty()">
+          AND participant.person_id NOT IN
+          <foreach collection="personIds" item="personId" open="(" separator="," close=")">
+            #{personId}
+          </foreach>
+        </when>
+        <otherwise>
+          AND TRUE
+        </otherwise>
+      </choose>
+  </delete>
+
+  <delete id="deleteInteractionActivities">
+    DELETE a
+    FROM activity a
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = a.workspace_id
+      AND projection.activity_id = a.id
+    WHERE a.workspace_id = #{workspaceId}
+      AND projection.interaction_id = #{interactionId}
+  </delete>
+
+  <delete id="deleteExpiredProviderActivities">
+    DELETE activity
+    FROM activity
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = activity.workspace_id
+      AND projection.activity_id = activity.id
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = projection.workspace_id
+      AND interaction.id = projection.interaction_id
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+      AND interaction.stream = #{stream}
+      AND (
+        (
+          interaction.interaction_type = 'meeting'
+          AND COALESCE(interaction.ended_at, interaction.occurred_at) &lt;= #{before}
+        )
+        OR (
+          interaction.interaction_type = 'email'
+          AND interaction.occurred_at &lt; #{before}
+        )
+      )
+  </delete>
+
+  <delete id="deleteExpiredInteractions">
+    DELETE FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+      AND provider = #{provider}
+      AND stream = #{stream}
+      AND (
+        (
+          interaction_type = 'meeting'
+          AND COALESCE(ended_at, occurred_at) &lt;= #{before}
+        )
+        OR (
+          interaction_type = 'email'
+          AND occurred_at &lt; #{before}
+        )
+      )
+  </delete>
+
+  <select id="getActivityIdByProjectionKey" resultType="int">
+    SELECT id FROM activity
+    WHERE workspace_id = #{workspaceId} AND provider_projection_key = #{projectionKey}
+  </select>
+
+  <insert id="insertProjection">
+    INSERT IGNORE INTO provider_activity_projection (
+      workspace_id, interaction_id, participant_id, activity_id
+    ) VALUES (
+      #{workspaceId}, #{interactionId}, #{participantId}, #{activityId}
+    )
+  </insert>
+
+  <update id="markInteractionAdmitted">
+    UPDATE provider_captured_interaction
+    SET admission_status = 'admitted', version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND version = #{expectedVersion}
+      AND admission_status = 'held'
+  </update>
+
+  <update id="markInteractionIgnored">
+    UPDATE provider_captured_interaction
+    SET admission_status = 'ignored', version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND version = #{expectedVersion}
+      AND admission_status = 'held'
+  </update>
+
+  <delete id="withdrawRestrictedProjections">
+    DELETE a
+    FROM activity a
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = a.workspace_id AND projection.activity_id = a.id
+    JOIN provider_captured_participant restricted_participant
+      ON restricted_participant.workspace_id = projection.workspace_id
+      AND restricted_participant.id = projection.participant_id
+    WHERE a.workspace_id = #{workspaceId}
+      AND restricted_participant.person_id = #{personId}
+  </delete>
+
+  <update id="holdRestrictedInteractions">
+    UPDATE provider_captured_interaction interaction
+    JOIN provider_captured_participant participant
+      ON participant.workspace_id = interaction.workspace_id
+      AND participant.interaction_id = interaction.id
+    SET interaction.admission_status = 'held',
+        interaction.version = interaction.version + 1
+    WHERE interaction.workspace_id = #{workspaceId}
+      AND participant.person_id = #{personId}
+      AND interaction.admission_status = 'admitted'
+  </update>
+
+  <update id="unmatchRestrictedParticipants">
+    UPDATE provider_captured_participant
+    SET person_id = NULL,
+        match_state = 'unmatched',
+        held_reason = 'restricted_person',
+        version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND person_id = #{personId}
+  </update>
+
+  <update id="releaseRestoredParticipantReviews">
+    UPDATE provider_captured_participant participant
+    JOIN person_identity identity
+      ON identity.workspace_id = participant.workspace_id
+      AND identity.kind = 'email'
+      AND identity.normalized_value = participant.normalized_email
+      AND identity.person_id = #{personId}
+      AND identity.superseded_at IS NULL
+    SET participant.held_reason = 'no_match',
+        participant.version = participant.version + 1
+    WHERE participant.workspace_id = #{workspaceId}
+      AND participant.held_reason = 'restricted_person'
+  </update>
+
+  <update id="clearWorkspacePolicyUpdater">
+    UPDATE provider_capture_workspace_policy
+    SET updated_by_user_id = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND updated_by_user_id = #{userId}
+  </update>
+
+  <update id="clearWorkspacePolicyUpdaterAnywhere">
+    UPDATE provider_capture_workspace_policy
+    SET updated_by_user_id = NULL
+    WHERE updated_by_user_id = #{userId}
+  </update>
+
+  <delete id="deleteProviderActivities">
+    DELETE a
+    FROM activity a
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = a.workspace_id AND projection.activity_id = a.id
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = projection.workspace_id
+      AND interaction.id = projection.interaction_id
+    WHERE a.workspace_id = #{workspaceId}
+      AND interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+  </delete>
+
+  <delete id="deleteProviderActivitiesAnywhere">
+    DELETE a
+    FROM activity a
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = a.workspace_id AND projection.activity_id = a.id
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = projection.workspace_id
+      AND interaction.id = projection.interaction_id
+    WHERE interaction.user_id = #{userId}
+      AND interaction.provider = #{provider}
+  </delete>
+
+  <delete id="deleteWorkspaceProviderActivities">
+    DELETE a
+    FROM activity a
+    JOIN provider_activity_projection projection
+      ON projection.workspace_id = a.workspace_id AND projection.activity_id = a.id
+    JOIN provider_captured_interaction interaction
+      ON interaction.workspace_id = projection.workspace_id
+      AND interaction.id = projection.interaction_id
+    WHERE a.workspace_id = #{workspaceId}
+      AND interaction.provider = #{provider}
+  </delete>
+
+  <delete id="deleteInteractions">
+    DELETE FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteInteractionsAnywhere">
+    DELETE FROM provider_captured_interaction
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteWorkspaceProviderInteractions">
+    DELETE FROM provider_captured_interaction
+    WHERE workspace_id = #{workspaceId} AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteSyncStates">
+    DELETE FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteSyncStatesAnywhere">
+    DELETE FROM provider_capture_sync_state
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteWorkspaceProviderSyncStates">
+    DELETE FROM provider_capture_sync_state
+    WHERE workspace_id = #{workspaceId} AND provider = #{provider}
+  </delete>
+
+  <update id="resetWorkspaceProviderSyncStates">
+    UPDATE provider_capture_sync_state state
+    JOIN provider_capture_user_policy policy
+      ON policy.workspace_id = state.workspace_id
+      AND policy.user_id = state.user_id
+      AND policy.provider = state.provider
+    SET state.status = CASE
+          WHEN policy.enabled = FALSE THEN 'paused'
+          WHEN policy.admission_mode = 'manual' THEN 'idle'
+          ELSE 'queued'
+        END,
+        state.stable_cursor = NULL,
+        state.page_cursor = NULL,
+        state.lease_owner = NULL,
+        state.lease_until = NULL,
+        state.reconciliation_marker = NULL,
+        state.backfill_started_at = NULL,
+        state.next_attempt_at = CASE
+          WHEN policy.enabled = TRUE
+            AND policy.admission_mode &lt;&gt; 'manual'
+          THEN UTC_TIMESTAMP(6)
+          ELSE NULL
+        END,
+        state.processed_items = 0,
+        state.estimated_items = NULL,
+        state.consecutive_failures = 0,
+        state.error_code = CASE
+          WHEN policy.enabled = FALSE THEN 'policy_disabled'
+          ELSE NULL
+        END
+    WHERE state.workspace_id = #{workspaceId}
+      AND state.provider = #{provider}
+  </update>
+
+  <delete id="deleteUserPolicy">
+    DELETE FROM provider_capture_user_policy
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteUserPolicyAnywhere">
+    DELETE FROM provider_capture_user_policy
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteDecisions">
+    DELETE FROM provider_participant_decision
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider}
+  </delete>
+
+  <delete id="deleteDecisionsAnywhere">
+    DELETE FROM provider_participant_decision
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+  </delete>
+
+  <select id="countUserProviderResiduals" resultType="long">
+    SELECT
+      (SELECT COUNT(*) FROM provider_captured_interaction
+       WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider})
+      + (SELECT COUNT(*) FROM provider_capture_sync_state
+         WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider})
+      + (SELECT COUNT(*) FROM provider_capture_user_policy
+         WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider})
+      + (SELECT COUNT(*) FROM provider_participant_decision
+         WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND provider = #{provider})
+  </select>
+</mapper>

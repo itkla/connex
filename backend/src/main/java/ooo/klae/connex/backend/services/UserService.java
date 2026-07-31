@@ -5,6 +5,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -21,11 +22,13 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -46,13 +49,14 @@ public class UserService implements UserDetailsService {
     private final TaskMapper taskMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
-    private final OrgMemberService orgMemberService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
-    private final UserOffboardingService userOffboardingService;
     private final ManagedObjectService managedObjectService;
     private final UserProfilePictureTransaction profilePictureTransaction;
     private final TenantWorkScope tenantWorkScope;
+    private final ProviderAccountOffboardingService providerAccountOffboardingService;
+    private final UserAccountCatalogOffboardingService catalogOffboardingService;
+    private final UserDeletionTransaction userDeletionTransaction;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -158,29 +162,38 @@ public class UserService implements UserDetailsService {
      * after the delete violated the actor foreign key inside the transaction
      * and the event was silently swallowed, leaving account erasure unaudited.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void delete(int id) {
         workspaceService.requireSelf(id);
-        if (userMapper.lockById(id) == null) {
-            throw new ResourceNotFoundException("User not found with id: " + id);
+        String reservationOwner = UUID.randomUUID().toString();
+        tenantWorkScope.unrouted(() -> {
+            userDeletionTransaction.reserve(id, reservationOwner);
+            return null;
+        });
+        try {
+            catalogOffboardingService.assertNoAuthoredContent(id);
+            tenantWorkScope.unrouted(() -> {
+                userDeletionTransaction.renew(id, reservationOwner);
+                return null;
+            });
+            providerAccountOffboardingService.purgeBeforeAccountDeletion(id);
+            tenantWorkScope.unrouted(() -> {
+                userDeletionTransaction.renew(id, reservationOwner);
+                return null;
+            });
+            catalogOffboardingService.eraseReferences(id);
+            tenantWorkScope.unrouted(() -> {
+                userDeletionTransaction.renew(id, reservationOwner);
+                userDeletionTransaction.delete(id, reservationOwner);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            tenantWorkScope.unrouted(() -> {
+                userDeletionTransaction.release(id, reservationOwner);
+                return null;
+            });
+            throw exception;
         }
-        UserOffboardingService.AccountNotificationLocks notificationLocks =
-            userOffboardingService.snapshotAccountNotificationRecipients(id);
-        List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
-        workspaceService.lockAccountWorkspaceRoots(
-            ownedWorkspaceIds,
-            userOffboardingService.workflowWorkspaceIds(notificationLocks));
-        userOffboardingService.lockAccountNotificationRecipientMemberships(id, notificationLocks);
-        workspaceService.assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
-        orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
-        userOffboardingService.assertNoAuthoredContent(id);
-        User before = getUserById(id);
-        managedObjectService.deleteUserImageAfterCommit(id, before.getProfilePictureUrl());
-        userOffboardingService.eraseOrgDataReferences(id, notificationLocks);
-        auditService.record("user.delete", "user", id, before.getUsername(),
-            "Deleted user " + before.getUsername(),
-            auditService.diff(before, null, AUDIT_FIELDS));
-        userMapper.delete(id);
     }
 
     /**

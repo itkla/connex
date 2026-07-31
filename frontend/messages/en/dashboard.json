@@ -24,6 +24,11 @@
     "recentNotes": "Recent notes",
     "notifications": "Notifications",
     "quickActions": "Quick actions",
+    "captureAttention": {
+      "title": "Connected capture needs attention",
+      "description": "Resolve high-priority identity reviews or provider interventions to keep relationship evidence current.",
+      "action": "{provider}: {reviews} reviews · {interventions} interventions"
+    },
     "analyticsKpis": "Key metrics",
     "revenueTrend": "Revenue trend",
     "winRate": "Win rate",

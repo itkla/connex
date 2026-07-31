@@ -85,9 +85,9 @@ class AppiComplianceArchTest {
                 violations.add("blank allowlist rationale " + exception.getKey());
             }
         }
-        assertEquals(13, enrollments.size(),
-            "The APPI restriction sweep must retain every reviewed namespace: the historical 11 "
-                + "plus IdentityMapper and IdentityCollisionMapper.");
+        assertEquals(15, enrollments.size(),
+            "The APPI restriction sweep must retain every reviewed namespace, including "
+                + "identity collision and employment projection readers.");
         assertTrue(violations.isEmpty(),
             "Person-reading mappers must be either strategy-enrolled or explicitly allowlisted "
                 + "with one-line justification: " + violations);
@@ -108,16 +108,7 @@ class AppiComplianceArchTest {
                 violations.add(enrollment.mapperNamespace() + " is missing SQL evidence for "
                     + enrollment.strategy());
             }
-            if (enrollment.strategy() == RestrictionStrategy.PROJECT_RESTRICTION_STATE
-                    && !enrollment.rationale().contains("#869")) {
-                violations.add(enrollment.mapperNamespace()
-                    + " projected-state debt must reference #869");
-            }
         }
-        String employmentRationale = ProcessingRestrictionRegistry.personReaderAllowlist().get(
-            "ooo.klae.connex.backend.mappers.PersonEmploymentMapper");
-        assertTrue(employmentRationale != null && employmentRationale.contains("#869"),
-            "PersonEmploymentMapper's reviewed exception must reference tracking issue #869.");
         assertTrue(violations.isEmpty(),
             "Restriction enrollment must describe and prove existing mapper behavior honestly: "
                 + violations);
@@ -143,6 +134,8 @@ class AppiComplianceArchTest {
         return switch (strategy) {
             case EXCLUDE_SUSPENDED -> SUSPENDED_NULL.matcher(xml).find();
             case EXCLUDE_PROVISION_CEASED -> CEASED_NULL.matcher(xml).find();
+            case EXCLUDE_RESTRICTED -> SUSPENDED_NULL.matcher(xml).find()
+                && CEASED_NULL.matcher(xml).find();
             case DETECT_RESTRICTED -> SUSPENDED_NOT_NULL.matcher(xml).find()
                 && CEASED_NOT_NULL.matcher(xml).find();
             case INCLUDE_RESTRICTED_FOR_DISCLOSURE, PROJECT_RESTRICTION_STATE ->
