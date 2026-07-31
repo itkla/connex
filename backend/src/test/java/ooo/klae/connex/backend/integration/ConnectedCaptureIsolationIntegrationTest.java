@@ -22,6 +22,8 @@ import jakarta.servlet.Filter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -63,6 +65,8 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
+    private static final Logger log =
+        LoggerFactory.getLogger(ConnectedCaptureIsolationIntegrationTest.class);
     private static final String PASSWORD = "Capture-Isolation-Pw1!";
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -165,6 +169,13 @@ class ConnectedCaptureIsolationIntegrationTest {
             .andDo(print())
             .andReturn();
         String purgeBody = purgeResult.getResponse().getContentAsString();
+        if (purgeResult.getResponse().getStatus() != HttpStatus.OK.value()) {
+            log.error(
+                "Capture purge diagnostic status={} exception={} body={}",
+                purgeResult.getResponse().getStatus(),
+                purgeResult.getResolvedException(),
+                purgeBody);
+        }
         assertEquals(
             HttpStatus.OK.value(),
             purgeResult.getResponse().getStatus(),
