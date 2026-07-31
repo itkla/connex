@@ -7,6 +7,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
     types: [checks_requested]
+  workflow_dispatch:
   schedule:
     - cron: '23 19 * * 0'
 
